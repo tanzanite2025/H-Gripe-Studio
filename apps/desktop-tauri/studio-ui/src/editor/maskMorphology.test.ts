@@ -12,6 +12,7 @@ import {
   PREVIEWABLE_OP_IDS,
   smooth,
   stampDisc,
+  stampSoftDisc,
   type ProxyMask,
 } from "./maskMorphology";
 import { normalizeEditPaths } from "./maskEdit";
@@ -46,6 +47,27 @@ describe("maskMorphology preview primitives", () => {
     expect(mask.data[10 * 20 + 10]).toBe(255); // centre set
     expect(mask.data[10 * 20 + 19]).toBe(0); // far corner untouched
     expect(area(mask)).toBeGreaterThan(0);
+  });
+
+  it("stampSoftDisc grades coverage from the hard core to the rim", () => {
+    const mask = createProxyMask(40, 40);
+    stampSoftDisc(mask, 20, 20, 10, 0.5, 1, false);
+    expect(mask.data[20 * 40 + 20]).toBe(255); // hard core fully on
+    const nearRim = mask.data[20 * 40 + 28]; // d=8 ∈ (hard=5, r=10)
+    expect(nearRim).toBeGreaterThan(0);
+    expect(nearRim).toBeLessThan(255);
+    expect(mask.data[20 * 40 + 35]).toBe(0); // outside untouched
+  });
+
+  it("stampSoftDisc caps coverage at flow and subtract scales down", () => {
+    const mask = createProxyMask(20, 20);
+    stampSoftDisc(mask, 10, 10, 5, 1, 0.5, false);
+    expect(mask.data[10 * 20 + 10]).toBe(128); // flow-capped
+    const sub = createProxyMask(20, 20);
+    sub.data.fill(255);
+    stampSoftDisc(sub, 10, 10, 5, 1, 0.5, true);
+    expect(sub.data[10 * 20 + 10]).toBe(128); // 255 * (1 - 0.5)
+    expect(sub.data[0]).toBe(255); // outside untouched
   });
 
   it("dilate grows and erode shrinks the mask area", () => {
@@ -109,6 +131,16 @@ describe("maskMorphology preview primitives", () => {
 });
 
 describe("buildProxyMask", () => {
+  it("rasterises a soft brush stroke with a graded edge", () => {
+    const edits = doc([
+      { type: "brush", id: "s1", mode: "add", radius: 60, points: [[480, 320]], hardness: 0.3, flow: 1, spacing: 0.25 },
+    ]);
+    const { mask } = buildProxyMask(edits, { w: 960, h: 640 }, { proxyWidth: 320 });
+    const hasSoftEdge = Array.from(mask.data).some((v) => v > 0 && v < 255);
+    expect(hasSoftEdge).toBe(true);
+    expect(area(mask)).toBeGreaterThan(0);
+  });
+
   it("rasterises a brush stroke into a downscaled proxy", () => {
     const edits = doc([{ type: "brush", id: "s1", mode: "add", radius: 40, points: [[480, 320]] }]);
     const { mask, scale } = buildProxyMask(edits, { w: 960, h: 640 }, { proxyWidth: 320 });

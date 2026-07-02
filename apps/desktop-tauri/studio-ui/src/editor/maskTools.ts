@@ -9,6 +9,14 @@ import type { ExecLane } from "./execLanes";
 
 export type ToolStatus = "ready" | "planned";
 
+/**
+ * What a paint tool's strokes are recorded onto (M4 tool/target decoupling):
+ * the active mask layer's edit stack, or the document-level trimap matting
+ * band. The same brush can therefore paint either target without switching
+ * to a dedicated tool.
+ */
+export type PaintTarget = "layer" | "matte";
+
 /** How a tool behaves on the canvas, which drives pointer handling. */
 export type ToolKind =
   // Freehand paint that records a `brush_strokes` entry.
@@ -47,12 +55,18 @@ export interface MaskTool {
   lane: ExecLane;
   /** One-line tooltip describing the Phase 1 behaviour. */
   hint: string;
+  /**
+   * Targets this tool can act on (paint tools only). Absent ⇒ the tool is
+   * bound to its single implicit target (`layer` for paint/marquee/path,
+   * `matte` for the matting band tool).
+   */
+  targets?: readonly PaintTarget[];
 }
 
 // Order here is the toolbar order. Keep `ready` tools first, `planned` last,
 // matching the contract table.
 export const MASK_TOOLS: readonly MaskTool[] = [
-  { id: "brush", label: "Brush", status: "ready", kind: "paint", mode: "add", lane: "interactive", hint: "Paint mask in." },
+  { id: "brush", label: "Brush", status: "ready", kind: "paint", mode: "add", lane: "interactive", hint: "Paint mask in.", targets: ["layer", "matte"] },
   { id: "eraser", label: "Eraser", status: "ready", kind: "paint", mode: "subtract", lane: "interactive", hint: "Paint mask out." },
   { id: "point", label: "Point (SAM 2)", status: "ready", kind: "point", lane: "render", hint: "Left-click the subject to include, right-click to exclude — SAM 2 segments from your points (auto modes)." },
   { id: "wand", label: "Wand", status: "ready", kind: "click", lane: "render", hint: "Flood-fill a region by colour similarity (wand_tolerance)." },
@@ -74,6 +88,12 @@ export const PLANNED_TOOLS = MASK_TOOLS.filter((t) => t.status === "planned");
 
 export function maskTool(id: string): MaskTool | undefined {
   return MASK_TOOLS.find((t) => t.id === id);
+}
+
+/** The paint targets a tool can act on (defaults to its implicit target). */
+export function toolTargets(tool: MaskTool): readonly PaintTarget[] {
+  if (tool.targets) return tool.targets;
+  return tool.kind === "matte" ? ["matte"] : ["layer"];
 }
 
 /** First selectable (ready) tool — the modal's default. */

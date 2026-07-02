@@ -41,8 +41,8 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   tool_hand: { hint: "抓手 / 平移工具（规划中）。" },
   tool_rotate_view: { hint: "旋转视图工具（规划中）。" },
   tool_zoom: { hint: "缩放工具（规划中）。" },
-  default_colors: { hint: "重置为默认加/减模式（对应 PS 默认前后景色）（规划中）。" },
-  quick_mask: { hint: "快速蒙版预览切换（规划中）。" },
+  default_colors: { hint: "重置为默认画笔 / 添加模式（对应 PS 默认前后景色）。" },
+  quick_mask: { hint: "切换当前选区的快速蒙版（宝石红）叠加。" },
   screen_mode: { hint: "循环切换屏幕模式（规划中）。" },
   select_all: { hint: "全选（规划中）。" },
   reselect: { hint: "重新选择（规划中）。" },
@@ -57,8 +57,8 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   zoom_out: { hint: "缩小（规划中）。" },
   zoom_fit: { hint: "适应屏幕（规划中）。" },
   zoom_100: { hint: "100% 缩放（规划中）。" },
-  brush_softer: { hint: "降低笔刷硬度（规划中；目前为硬边笔刷）。" },
-  brush_harder: { hint: "提高笔刷硬度（规划中）。" },
+  brush_softer: { hint: "降低笔刷硬度（边缘更软）。" },
+  brush_harder: { hint: "提高笔刷硬度（边缘更硬）。" },
 };
 
 /** Return the binding's `hint` translated into `lang` (English fallback). */

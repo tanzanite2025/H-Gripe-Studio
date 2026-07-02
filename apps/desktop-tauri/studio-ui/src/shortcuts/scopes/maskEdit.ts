@@ -53,8 +53,8 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_hand", combo: "h", status: "planned", hint: "Hand / pan tool (planned)." },
   { id: "tool_rotate_view", combo: "r", status: "planned", hint: "Rotate-view tool (planned)." },
   { id: "tool_zoom", combo: "z", status: "planned", hint: "Zoom tool (planned)." },
-  { id: "default_colors", combo: "d", status: "planned", hint: "Reset to default add/subtract (PS default colours) (planned)." },
-  { id: "quick_mask", combo: "q", status: "planned", hint: "Quick-mask preview toggle (planned)." },
+  { id: "default_colors", combo: "d", status: "ready", hint: "Reset to the default brush / add mode (PS default colours)." },
+  { id: "quick_mask", combo: "q", status: "ready", hint: "Toggle the quick-mask (ruby) overlay of the current selection." },
   { id: "screen_mode", combo: "f", status: "planned", hint: "Cycle screen modes (planned)." },
   // Commands.
   { id: "select_all", combo: "ctrl+a", status: "planned", hint: "Select all (planned)." },
@@ -70,8 +70,8 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "zoom_out", combo: "ctrl+-", status: "planned", hint: "Zoom out (planned)." },
   { id: "zoom_fit", combo: "ctrl+0", status: "planned", hint: "Fit on screen (planned)." },
   { id: "zoom_100", combo: "ctrl+1", status: "planned", hint: "100% zoom (planned)." },
-  { id: "brush_softer", combo: "shift+[", status: "planned", hint: "Decrease brush hardness (planned; brush is hard-edged today)." },
-  { id: "brush_harder", combo: "shift+]", status: "planned", hint: "Increase brush hardness (planned)." },
+  { id: "brush_softer", combo: "shift+[", status: "ready", hint: "Decrease brush hardness (softer edge)." },
+  { id: "brush_harder", combo: "shift+]", status: "ready", hint: "Increase brush hardness (harder edge)." },
 ] as const;
 
 /** The combo a toolbar tool is bound to (for tooltips), if any. */

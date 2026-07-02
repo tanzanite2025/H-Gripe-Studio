@@ -3,8 +3,10 @@ import { generateThumbnail } from "../bridge/tauri";
 import {
   MASK_TOOLS,
   maskTool,
+  toolTargets,
   DEFAULT_TOOL_ID,
   type MaskTool,
+  type PaintTarget,
 } from "./maskTools";
 import { localizeTool } from "./maskToolsI18n";
 import { useShortcutScope, comboLabel, type ShortcutHandlers } from "../shortcuts";
@@ -139,9 +141,20 @@ export function MaskEditModal({
   const [state, dispatch] = useReducer(reducer, initial, initEditState);
   const [toolId, setToolId] = useState<string>(DEFAULT_TOOL_ID);
   const [brushSize, setBrushSize] = useState(24);
+  // Soft-brush parameters (M4): hardness / flow are 0..1 (1 = the legacy hard
+  // stamp), spacing is the stamp interval as a fraction of the diameter.
+  const [brushHardness, setBrushHardness] = useState(1);
+  const [brushFlow, setBrushFlow] = useState(1);
+  const [brushSpacing, setBrushSpacing] = useState(0.25);
+  // What paint strokes are recorded onto (M4 tool/target decoupling): the
+  // active mask layer, or the trimap matting band.
+  const [paintTarget, setPaintTarget] = useState<PaintTarget>("layer");
   const [amount, setAmount] = useState(4);
   const [tolerance, setTolerance] = useState(wandTolerance);
   const [overlayOnly, setOverlayOnly] = useState(false);
+  // Quick-mask (Q): PS-style ruby overlay of the unselected area.
+  const [quickMask, setQuickMask] = useState(false);
+  const [quickProxy, setQuickProxy] = useState<ProxyMask | null>(null);
   // Boolean mode the next committed pen / lasso path combines with.
   const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
 
@@ -259,6 +272,15 @@ export function MaskEditModal({
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
     brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
     brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),
+    brush_softer: () => setBrushHardness((h) => Math.max(0, Math.round((h - 0.25) * 100) / 100)),
+    brush_harder: () => setBrushHardness((h) => Math.min(1, Math.round((h + 0.25) * 100) / 100)),
+    default_colors: () => {
+      // PS `D` (default colours): back to the default brush / add semantics.
+      selectTool(DEFAULT_TOOL_ID);
+      setPathMode("add");
+      setPaintTarget("layer");
+    },
+    quick_mask: () => setQuickMask((v) => !v),
     swap_mode: () => {
       if (toolId === "brush") setToolId("eraser");
       else if (toolId === "eraser") setToolId("brush");
@@ -323,7 +345,7 @@ export function MaskEditModal({
     }
 
     const paintStroke = (
-      s: { mode: string; radius: number; points: [number, number][] },
+      s: { mode: string; radius: number; points: [number, number][]; hardness?: number; flow?: number },
       kind: "paint" | "matte" = "paint",
     ) => {
       ctx.strokeStyle =
@@ -336,16 +358,25 @@ export function MaskEditModal({
       ctx.lineWidth = s.radius * 2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
+      // Soft strokes read as a blurred, flow-capped band (advisory overlay;
+      // the proxy / backend stamps are the authoritative soft rasterisation).
+      const hardness = s.hardness ?? 1;
+      const flow = s.flow ?? 1;
+      ctx.save();
+      if (hardness < 1) ctx.filter = `blur(${((1 - hardness) * s.radius) / 2}px)`;
+      if (flow < 1) ctx.globalAlpha = Math.max(0.15, flow);
       if (s.points.length === 1) {
         const [x, y] = s.points[0];
         ctx.beginPath();
         ctx.arc(x, y, s.radius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
         return;
       }
       ctx.beginPath();
       s.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
       ctx.stroke();
+      ctx.restore();
     };
 
     // Committed pen / lasso vector paths: translucent fill + outline (bezier
@@ -404,9 +435,10 @@ export function MaskEditModal({
         ctx.stroke();
         ctx.setLineDash([]);
       } else {
+        const liveMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
         paintStroke(
-          { mode: tool.mode ?? "add", radius: brushSize, points: live.points },
-          tool.kind === "matte" ? "matte" : "paint",
+          { mode: tool.mode ?? "add", radius: brushSize, points: live.points, hardness: brushHardness, flow: brushFlow },
+          liveMatte ? "matte" : "paint",
         );
       }
     }
@@ -489,6 +521,27 @@ export function MaskEditModal({
       }
     }
 
+    // Quick mask (Q): PS-style ruby overlay — tint the *unselected* area red
+    // so the selection reads as the clear region.
+    if (quickMask && quickProxy) {
+      const tmp = document.createElement("canvas");
+      tmp.width = quickProxy.w;
+      tmp.height = quickProxy.h;
+      const tctx = tmp.getContext("2d");
+      if (tctx) {
+        const img = tctx.createImageData(quickProxy.w, quickProxy.h);
+        for (let i = 0; i < quickProxy.data.length; i++) {
+          img.data[i * 4] = 224;
+          img.data[i * 4 + 1] = 32;
+          img.data[i * 4 + 2] = 32;
+          img.data[i * 4 + 3] = Math.round((255 - quickProxy.data[i]) * 0.5);
+        }
+        tctx.putImageData(img, 0, 0);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(tmp, 0, 0, dims.w, dims.h);
+      }
+    }
+
     const mq = marquee.current;
     if (mq) {
       const [x1, y1] = mq.start;
@@ -505,7 +558,7 @@ export function MaskEditModal({
       }
       ctx.setLineDash([]);
     }
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, editingPath, anchorDraft, previewing, preview]);
+  }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy]);
 
   useEffect(() => {
     redraw();
@@ -535,6 +588,16 @@ export function MaskEditModal({
       disposed = true;
     };
   }, [toolId, amount, state.current, dims]);
+
+  // Rebuild the quick-mask proxy whenever the overlay is on and the document
+  // changes (cheap: a downscaled rasterisation, and only on committed edits).
+  useEffect(() => {
+    if (!quickMask) {
+      setQuickProxy(null);
+      return;
+    }
+    setQuickProxy(buildProxyMask(state.current, dims).mask);
+  }, [quickMask, state.current, dims]);
 
   // Commit a closed pen / lasso path (straight anchors; no handles from the UI).
   const commitPath = (toolName: "pen" | "lasso", pts: [number, number][]) => {
@@ -645,8 +708,14 @@ export function MaskEditModal({
         mode: tool.mode ?? "add",
         radius: brushSize,
         points: pts,
+        // Soft-brush fields are recorded only for soft strokes so hard
+        // strokes keep the legacy shape (and byte-identical replay).
+        ...(brushHardness < 1 || brushFlow < 1
+          ? { hardness: brushHardness, flow: brushFlow, spacing: brushSpacing }
+          : null),
       };
-      dispatch({ type: tool.kind === "matte" ? "matte_stroke" : "stroke", stroke });
+      const toMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
+      dispatch({ type: toMatte ? "matte_stroke" : "stroke", stroke });
     } else if (marquee.current) {
       const { start, end } = marquee.current;
       marquee.current = null;
@@ -723,6 +792,9 @@ export function MaskEditModal({
             <button className={overlayOnly ? "active" : ""} onClick={() => setOverlayOnly((v) => !v)} title={t("mask.togglePreviewTitle")}>
               {overlayOnly ? t("mask.showImage") : t("mask.maskOnly")}
             </button>
+            <button className={quickMask ? "active" : ""} onClick={() => setQuickMask((v) => !v)} title={t("mask.quickMaskTitle")}>
+              {t("mask.quickMask")}
+            </button>
             <button className="primary" onClick={() => { onCommit(state.current); onClose(); }} title={t("mask.applyTitle")}>
               {t("mask.apply")}
             </button>
@@ -774,6 +846,61 @@ export function MaskEditModal({
                 <output>{brushSize}</output>
               </span>
             </label>
+            {tool.kind === "paint" || tool.kind === "matte" ? (
+              <>
+                <label className="field">
+                  <span>{t("mask.brushHardness")}</span>
+                  <span className="slider-row">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round(brushHardness * 100)}
+                      onChange={(e) => setBrushHardness(Number(e.target.value) / 100)}
+                    />
+                    <output>{Math.round(brushHardness * 100)}</output>
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{t("mask.brushFlow")}</span>
+                  <span className="slider-row">
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      value={Math.round(brushFlow * 100)}
+                      onChange={(e) => setBrushFlow(Number(e.target.value) / 100)}
+                    />
+                    <output>{Math.round(brushFlow * 100)}</output>
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{t("mask.brushSpacing")}</span>
+                  <span className="slider-row">
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      value={Math.round(brushSpacing * 100)}
+                      onChange={(e) => setBrushSpacing(Number(e.target.value) / 100)}
+                    />
+                    <output>{Math.round(brushSpacing * 100)}</output>
+                  </span>
+                </label>
+              </>
+            ) : null}
+            {toolTargets(tool).length > 1 ? (
+              <div className="field">
+                <span>{t("mask.paintTarget")}</span>
+                <span className="slider-row">
+                  {toolTargets(tool).map((tg) => (
+                    <button key={tg} className={paintTarget === tg ? "active" : ""} onClick={() => setPaintTarget(tg)}>
+                      {t(tg === "layer" ? "mask.targetLayer" : "mask.targetMatte")}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            ) : null}
             {showAmount ? (
               <label className="field">
                 <span>{t("mask.amount")}</span>

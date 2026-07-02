@@ -167,7 +167,13 @@ export interface EditPath {
   points: EditPathPoint[];
 }
 
-/** A freehand brush/eraser stroke (applied by the Rust backend on run). */
+/**
+ * A freehand brush/eraser stroke (applied by the Rust backend on run).
+ *
+ * The optional soft-brush fields (M4) are recorded only when the stroke is
+ * soft (`hardness < 1` or `flow < 1`); a stroke without them replays through
+ * the legacy hard-edged stamp, byte-identical to the pre-M4 flow.
+ */
 export interface BrushStroke {
   id: string;
   /** `add` (brush) | `subtract` (eraser). */
@@ -176,6 +182,13 @@ export interface BrushStroke {
   radius: number;
   /** Polyline of `[x, y]` points the stroke passes through. */
   points: [number, number][];
+  /** 0..1 — fraction of the radius that is fully opaque; the coverage falls
+   *  linearly to 0 at the rim. Absent ⇒ 1 (hard edge). */
+  hardness?: number;
+  /** 0..1 — caps the stroke's coverage (PS Flow, max-composited). Absent ⇒ 1. */
+  flow?: number;
+  /** Stamp interval as a fraction of the brush diameter. Absent ⇒ 0.25. */
+  spacing?: number;
 }
 
 /**

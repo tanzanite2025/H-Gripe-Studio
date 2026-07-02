@@ -33,6 +33,13 @@ describe("combo parsing / matching", () => {
     expect(comboMatchesEvent(combo, key({ key: "z", ctrlKey: true, shiftKey: true }))).toBe(false);
   });
 
+  it("matches shifted punctuation keys (Shift+[ reports '{')", () => {
+    expect(comboMatchesEvent(parseCombo("shift+["), key({ key: "{", shiftKey: true }))).toBe(true);
+    expect(comboMatchesEvent(parseCombo("shift+]"), key({ key: "}", shiftKey: true }))).toBe(true);
+    expect(comboMatchesEvent(parseCombo("shift+["), key({ key: "[" }))).toBe(false);
+    expect(comboMatchesEvent(parseCombo("["), key({ key: "[" }))).toBe(true);
+  });
+
   it("renders human-readable labels", () => {
     expect(comboLabel("ctrl+shift+i")).toBe("Ctrl+Shift+I");
     expect(comboLabel("[")).toBe("[");
@@ -62,6 +69,15 @@ describe("mask-edit shortcut table", () => {
     const ids = new Set(MASK_EDIT_SHORTCUTS.map((b) => b.id));
     for (const id of Object.keys(MASK_SHORTCUT_ZH)) {
       expect(ids.has(id), `MASK_SHORTCUT_ZH["${id}"] has no matching binding`).toBe(true);
+    }
+  });
+});
+
+describe("mask-edit M4 bindings", () => {
+  it("flips the brush / quick-mask / default-colours combos to ready", () => {
+    for (const id of ["brush_softer", "brush_harder", "quick_mask", "default_colors", "swap_mode"]) {
+      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      expect(b?.status, id).toBe("ready");
     }
   });
 });

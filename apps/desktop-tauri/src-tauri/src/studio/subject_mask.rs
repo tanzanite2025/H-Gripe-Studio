@@ -477,16 +477,37 @@ fn replay_ops(
                 if points.is_empty() {
                     continue;
                 }
-                stamp_stroke(
-                    mask,
-                    &points,
-                    radius,
-                    if subtract { MASK_OFF } else { MASK_ON },
-                );
-                operations.push(json!({
-                    "type": if subtract { "brush_subtract" } else { "brush_add" },
-                    "radius": radius,
-                }));
+                let field = |key: &str, default: f64| {
+                    op.get(key)
+                        .and_then(Value::as_f64)
+                        .unwrap_or(default)
+                        .clamp(0.0, 1.0) as f32
+                };
+                let hardness = field("hardness", 1.0);
+                let flow = field("flow", 1.0);
+                if hardness < 1.0 || flow < 1.0 {
+                    // Soft brush (M4): graded coverage stamps. Legacy hard
+                    // strokes take the byte-identical fast path below.
+                    let spacing = field("spacing", 0.25).max(0.01);
+                    stamp_stroke_soft(mask, &points, radius, hardness, flow, spacing, subtract);
+                    operations.push(json!({
+                        "type": if subtract { "brush_subtract" } else { "brush_add" },
+                        "radius": radius,
+                        "hardness": hardness,
+                        "flow": flow,
+                    }));
+                } else {
+                    stamp_stroke(
+                        mask,
+                        &points,
+                        radius,
+                        if subtract { MASK_OFF } else { MASK_ON },
+                    );
+                    operations.push(json!({
+                        "type": if subtract { "brush_subtract" } else { "brush_add" },
+                        "radius": radius,
+                    }));
+                }
             }
             Some(_) => apply_queued_operation(image, mask, op, default_tolerance, operations),
             None => {}
@@ -676,6 +697,92 @@ fn stamp_disc(mask: &mut GrayImage, cx: f32, cy: f32, radius: u32, value: u8) {
             if x >= 0 && y >= 0 && (x as u32) < width && (y as u32) < height {
                 mask.put_pixel(x as u32, y as u32, Luma([value]));
             }
+        }
+    }
+}
+
+/// Stamp soft discs along a polyline at `spacing * diameter` intervals
+/// (resampling between the recorded points so sparse polylines still read as
+/// a continuous band).
+fn stamp_stroke_soft(
+    mask: &mut GrayImage,
+    points: &[(f32, f32)],
+    radius: u32,
+    hardness: f32,
+    flow: f32,
+    spacing: f32,
+    subtract: bool,
+) {
+    let step = (spacing * 2.0 * radius.max(1) as f32).max(1.0);
+    if points.len() == 1 {
+        stamp_disc_soft(
+            mask,
+            points[0].0,
+            points[0].1,
+            radius,
+            hardness,
+            flow,
+            subtract,
+        );
+        return;
+    }
+    for pair in points.windows(2) {
+        let (x0, y0) = pair[0];
+        let (x1, y1) = pair[1];
+        let dist = (x1 - x0).hypot(y1 - y0);
+        let steps = (dist / step).ceil().max(1.0) as u32;
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let x = x0 + (x1 - x0) * t;
+            let y = y0 + (y1 - y0) * t;
+            stamp_disc_soft(mask, x, y, radius, hardness, flow, subtract);
+        }
+    }
+}
+
+/// Stamp one soft disc: full coverage inside `hardness * r` falling linearly
+/// to 0 at the rim, capped by `flow`. Add max-composites the coverage up;
+/// subtract multiplies the mask down — so overlapping stamps don't build
+/// past the flow cap (mirrors the proxy stamp in `maskMorphology.ts`).
+fn stamp_disc_soft(
+    mask: &mut GrayImage,
+    cx: f32,
+    cy: f32,
+    radius: u32,
+    hardness: f32,
+    flow: f32,
+    subtract: bool,
+) {
+    let (width, height) = mask.dimensions();
+    let r = (radius.max(1)) as f32;
+    let hard = hardness.clamp(0.0, 1.0) * r;
+    let ri = r.ceil() as i32;
+    let cxi = cx.round() as i32;
+    let cyi = cy.round() as i32;
+    for dy in -ri..=ri {
+        for dx in -ri..=ri {
+            let d = ((dx * dx + dy * dy) as f32).sqrt();
+            if d > r {
+                continue;
+            }
+            let x = cxi + dx;
+            let y = cyi + dy;
+            if x < 0 || y < 0 || x as u32 >= width || y as u32 >= height {
+                continue;
+            }
+            let falloff = if d <= hard {
+                1.0
+            } else {
+                (r - d) / (r - hard).max(1e-6)
+            };
+            let cov = (flow.clamp(0.0, 1.0) * falloff).clamp(0.0, 1.0);
+            let p = mask.get_pixel_mut(x as u32, y as u32);
+            let v = f32::from(p.0[0]);
+            p.0[0] = if subtract {
+                (v * (1.0 - cov)).round().clamp(0.0, 255.0) as u8
+            } else {
+                v.max((cov * 255.0).round()) as u8
+            };
         }
     }
 }
@@ -1334,6 +1441,56 @@ mod tests {
         assert_eq!(mask.get_pixel(4, 4).0[0], MASK_ON);
         stamp_stroke(&mut mask, &[(4.0, 4.0)], 2, MASK_OFF);
         assert_eq!(mask.get_pixel(4, 4).0[0], MASK_OFF);
+    }
+
+    #[test]
+    fn soft_disc_grades_coverage_and_caps_at_flow() {
+        // Hardness 0.5: full coverage inside r/2, linear falloff to the rim.
+        let mut mask = solid(41, 41, MASK_OFF);
+        stamp_disc_soft(&mut mask, 20.0, 20.0, 10, 0.5, 1.0, false);
+        assert_eq!(mask.get_pixel(20, 20).0[0], MASK_ON);
+        let near_rim = mask.get_pixel(28, 20).0[0]; // d=8 between hard=5 and r=10
+        assert!(
+            near_rim > 0 && near_rim < MASK_ON,
+            "graded edge, got {near_rim}"
+        );
+        assert_eq!(mask.get_pixel(35, 20).0[0], MASK_OFF);
+
+        // Flow 0.5 caps the add at ~128; soft subtract scales down by 1-cov.
+        let mut mask = solid(21, 21, MASK_OFF);
+        stamp_disc_soft(&mut mask, 10.0, 10.0, 5, 1.0, 0.5, false);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 128);
+        let mut sub = solid(21, 21, MASK_ON);
+        stamp_disc_soft(&mut sub, 10.0, 10.0, 5, 1.0, 0.5, true);
+        assert_eq!(sub.get_pixel(10, 10).0[0], 128);
+        assert_eq!(sub.get_pixel(0, 0).0[0], MASK_ON);
+    }
+
+    #[test]
+    fn soft_brush_op_replays_with_graded_edge_and_hard_stays_binary() {
+        let image = RgbaImage::from_pixel(41, 41, Rgba([0, 0, 0, 255]));
+        let soft = json!({
+            "version": 2,
+            "ops": [{ "type": "brush", "mode": "add", "radius": 10,
+                       "points": [[20, 20]], "hardness": 0.3, "flow": 1.0, "spacing": 0.25 }]
+        });
+        let mut mask = solid(41, 41, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&soft), 24, &mut operations);
+        assert!(
+            mask.as_raw().iter().any(|&v| v > 0 && v < MASK_ON),
+            "soft edge expected"
+        );
+        assert!((operations[0]["hardness"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+
+        // Without the soft fields the legacy binary stamp path is taken.
+        let hard = json!({
+            "version": 2,
+            "ops": [{ "type": "brush", "mode": "add", "radius": 10, "points": [[20, 20]] }]
+        });
+        let mut mask = solid(41, 41, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&hard), 24, &mut Vec::new());
+        assert!(mask.as_raw().iter().all(|&v| v == MASK_OFF || v == MASK_ON));
     }
 
     #[test]
