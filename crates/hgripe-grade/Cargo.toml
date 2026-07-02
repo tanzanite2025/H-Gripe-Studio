@@ -1,0 +1,15 @@
+[package]
+name = "hgripe-grade"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone f32 colour-grading kernel (see docs/design/grade-kernel.md)"
+publish = false
+
+# The kernel core is deliberately dependency-free f32 array code. serde only
+# exists so the op graph / golden vectors are serialisable; nothing else is
+# allowed in without updating docs/design/grade-kernel.md.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
