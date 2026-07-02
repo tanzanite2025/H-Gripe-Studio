@@ -106,6 +106,7 @@ function normalizeLayer(value: unknown): MaskLayer | null {
     opacity?: unknown;
     visible?: unknown;
     locked?: unknown;
+    linked?: unknown;
     ops?: unknown;
     adjustment?: unknown;
   };
@@ -120,6 +121,7 @@ function normalizeLayer(value: unknown): MaskLayer | null {
     opacity: typeof v.opacity === "number" ? Math.min(Math.max(v.opacity, 0), 1) : 1,
     visible: v.visible !== false,
     ...(v.locked === true ? { locked: true } : null),
+    ...(v.linked === true ? { linked: true } : null),
     ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
     ...(isAdjustment ? { adjustment } : null),
   };
@@ -208,7 +210,18 @@ export function addPath(state: EditState, path: EditPath): EditState {
 
 export function addOperation(state: EditState, op: MaskOperation): EditState {
   if (activeLayerLocked(state.current)) return state;
-  return commit(state, withActiveOps(state.current, [...activeOps(state.current), op]));
+  const doc = withActiveOps(state.current, [...activeOps(state.current), op]);
+  // PS layer link: a transform recorded on a linked layer mirrors onto every
+  // other linked, unlocked mask layer (one undo step for the whole move).
+  if (op.type === "transform" && activeLayer(state.current).linked) {
+    return commit(state, {
+      ...doc,
+      layers: doc.layers.map((l, i) =>
+        i !== doc.active && l.linked && l.kind === "mask" && !l.locked ? { ...l, ops: [...l.ops, { ...op }] } : l,
+      ),
+    });
+  }
+  return commit(state, doc);
 }
 
 // --- history-panel step revision (M2: every recorded step stays revisable) ---
@@ -310,6 +323,13 @@ function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): 
     ...state.current,
     layers: state.current.layers.map((l, i) => (i === index ? { ...l, ...patch } : l)),
   });
+}
+
+/** Toggle a layer's PS link flag (undoable). Transforms mirror across linked layers. */
+export function toggleLayerLink(state: EditState, index: number): EditState {
+  const layer = state.current.layers[index];
+  if (!layer) return state;
+  return withLayer(state, index, layer.linked ? { linked: undefined } : { linked: true });
 }
 
 /** Toggle a layer's PS "lock all" flag (undoable). Locked layers reject new edits and deletion. */

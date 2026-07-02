@@ -368,6 +368,8 @@ export interface MaskLayer {
   visible: boolean;
   /** PS "lock all": a locked layer rejects new edits and deletion. */
   locked?: boolean;
+  /** PS layer link: transforms recorded on one linked layer mirror to all. */
+  linked?: boolean;
   /** The layer's ordered edit stack, replayed in recorded order. */
   ops: EditOp[];
   /** The tone map an `"adjustment"` layer applies (revisable at any time). */

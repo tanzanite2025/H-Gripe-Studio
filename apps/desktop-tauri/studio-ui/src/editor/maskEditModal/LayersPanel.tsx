@@ -1,10 +1,11 @@
 // Right rail — "Layers" panel block (M3): the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
-import { useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useT } from "../../i18n";
 import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
+import { buildLayerThumb } from "../maskMorphology";
 import type { MaskEditDispatch } from "./actions";
 
 const LAYER_MIME = "application/x-hgripe-layer";
@@ -12,12 +13,38 @@ const LAYER_MIME = "application/x-hgripe-layer";
 interface LayersPanelProps {
   layers: readonly MaskLayer[];
   active: number;
+  /** Image size (px); the thumbnail replay space. */
+  dims: { w: number; h: number };
   dispatch: MaskEditDispatch;
   /** Called before any layer switch/removal to drop an in-flight anchor edit. */
   onBeforeLayerChange: () => void;
 }
 
-export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: LayersPanelProps) {
+// A real mask thumbnail (PS layer panel): the layer's own ops replayed into a
+// tiny grayscale surface, redrawn only when the layer's ops change.
+function LayerThumb({ layer, dims }: { layer: MaskLayer; dims: { w: number; h: number } }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const thumb = useMemo(() => buildLayerThumb(layer, dims), [layer.ops, dims]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    canvas.width = thumb.w;
+    canvas.height = thumb.h;
+    const img = ctx.createImageData(thumb.w, thumb.h);
+    for (let i = 0; i < thumb.data.length; i++) {
+      const v = thumb.data[i];
+      img.data[i * 4] = v;
+      img.data[i * 4 + 1] = v;
+      img.data[i * 4 + 2] = v;
+      img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }, [thumb]);
+  return <canvas ref={canvasRef} className="mask-layer-thumb-canvas" aria-hidden="true" />;
+}
+
+export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   // PS double-click rename: the stack index being renamed + the draft text.
@@ -107,7 +134,7 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
                 {layer.visible ? "👁" : ""}
               </button>
               <span className="mask-layer-thumb" aria-hidden="true">
-                {layer.kind === "adjustment" ? "◐" : ""}
+                {layer.kind === "adjustment" ? "◐" : <LayerThumb layer={layer} dims={dims} />}
               </span>
               {renaming === i ? (
                 <input
@@ -136,6 +163,11 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
                   {layer.name}
                 </span>
               )}
+              {layer.linked ? (
+                <span className="mask-layer-linked" title={t("mask.layerLinked")} aria-hidden="true">
+                  🔗
+                </span>
+              ) : null}
               {layer.locked ? (
                 <span className="mask-layer-locked" title={t("mask.layerLocked")} aria-hidden="true">
                   🔒
@@ -159,6 +191,14 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
       </div>
       {/* PS bottom action bar: icon buttons on the right edge of the panel. */}
       <div className="mask-layer-actions">
+        <button
+          className={`mask-layer-action${activeLayer?.linked ? " on" : ""}`}
+          title={activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
+          disabled={!activeLayer}
+          onClick={() => dispatch({ type: "layer_link", index: active })}
+        >
+          🔗
+        </button>
         <select
           className="mask-layer-adjustment-add"
           value=""

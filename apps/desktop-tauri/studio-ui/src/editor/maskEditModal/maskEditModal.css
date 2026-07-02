@@ -314,6 +314,13 @@
   border-right: 1px solid var(--ps-dock-border) !important;
   border-radius: 0 !important;
 }
+/* The real mask preview inside the thumb slot (nearest-neighbour scaled). */
+.mask-layer-thumb-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
 .mask-layer-thumb {
   width: 26px;
   height: 26px;
@@ -373,6 +380,7 @@
 }
 .mask-layer-action:hover:not(:disabled) { background: var(--ps-hover); color: var(--text); }
 .mask-layer-action:disabled { opacity: 0.4; cursor: default; }
+.mask-layer-action.on { background: var(--ps-active-overlay); color: var(--text); }
 /* The ◐ adjustment picker rendered as one more icon slot. */
 .mask-layer-adjustment-add {
   width: 30px;
@@ -429,8 +437,9 @@
   background: var(--ps-active-overlay);
   border-color: var(--ps-dock-border);
 }
-/* Row-edge lock badge on locked layers (PS shows a padlock on the row). */
-.mask-layer-locked {
+/* Row-edge lock / link badges (PS shows a padlock / chain on the row). */
+.mask-layer-locked,
+.mask-layer-linked {
   font-size: 10px;
   padding: 0 4px;
   color: var(--muted);

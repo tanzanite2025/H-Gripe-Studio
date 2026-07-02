@@ -24,6 +24,7 @@ import {
   setActiveLayer,
   setLayerBlend,
   setLayerOpacity,
+  toggleLayerLink,
   toggleLayerLock,
   toggleLayerVisible,
   toggleOp,
@@ -284,6 +285,29 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers[1].locked).toBeFalsy();
     s = addBrushStroke(s, stroke("s1"));
     expect(editCount(s.current)).toBe(1);
+  });
+
+  it("mirrors transform ops across linked, unlocked mask layers as one undo step", () => {
+    let s = initEditState();
+    s = addLayer(s, "B");
+    s = addLayer(s, "C");
+    s = addLayer(s, "D"); // stack: [Background, B, C, D], active = 3 (D)
+    s = toggleLayerLink(s, 1); // B linked
+    s = toggleLayerLink(s, 3); // D linked (active)
+    s = toggleLayerLock(s, 1); // ...but B is locked, so it must be skipped
+    const move = { type: "transform" as const, dx: 5, dy: -3 };
+    const before = s;
+    s = addOperation(s, move);
+    expect(s.current.layers[3].ops).toEqual([move]);
+    expect(s.current.layers[1].ops).toEqual([]); // linked but locked
+    expect(s.current.layers[2].ops).toEqual([]); // not linked
+    expect(s.current.layers[0].ops).toEqual([]);
+    s = undo(s);
+    expect(s.current).toEqual(before.current);
+    // Non-transform ops never mirror.
+    s = addOperation(s, { type: "invert" });
+    expect(s.current.layers[3].ops).toEqual([{ type: "invert" }]);
+    expect(s.current.layers[1].ops).toEqual([]);
   });
 
   it("normalizes the extended blend set and the locked flag from storage", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   adjustmentLut,
   applyOp,
+  buildLayerThumb,
   buildProxyMask,
   cloneStroke,
   createProxyMask,
@@ -451,6 +452,17 @@ describe("buildProxyMask", () => {
     const withWand = buildProxyMask(doc([brush, { type: "wand", amount: 30, region: [10, 10] }]), { w: 960, h: 640 });
     const withoutWand = buildProxyMask(doc([brush]), { w: 960, h: 640 });
     expect(area(withWand.mask)).toBe(area(withoutWand.mask));
+  });
+
+  it("buildLayerThumb replays a layer's own ops into a tiny surface at aspect", () => {
+    const dims = { w: 320, h: 240 };
+    const layer = doc([{ type: "invert" }]).layers[0];
+    const thumb = buildLayerThumb(layer, dims);
+    expect(thumb.w).toBe(48);
+    expect(thumb.h).toBe(36); // 48 * 240/320
+    expect(thumb.data.every((v) => v === 255)).toBe(true); // invert from empty ⇒ all on
+    const empty = buildLayerThumb({ ...layer, ops: [] }, dims);
+    expect(empty.data.every((v) => v === 0)).toBe(true);
   });
 
   it("composites upper layers per blend mode and opacity", () => {

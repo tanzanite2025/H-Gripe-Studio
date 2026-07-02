@@ -1014,6 +1014,7 @@ export function MaskEditModal({
             <LayersPanel
               layers={layers}
               active={state.current.active}
+              dims={dims}
               dispatch={dispatch}
               onBeforeLayerChange={() => {
                 if (editingPath != null) cancelPathEdit();

@@ -525,6 +525,9 @@ export const messages = {
   "mask.layerLock": { en: "Lock the active layer", zh: "锁定当前图层" },
   "mask.layerUnlock": { en: "Unlock the active layer", zh: "解锁当前图层" },
   "mask.layerLocked": { en: "Locked", zh: "已锁定" },
+  "mask.layerLink": { en: "Link the active layer (linked layers move together)", zh: "链接当前图层（链接的图层一起移动）" },
+  "mask.layerUnlink": { en: "Unlink the active layer", zh: "取消链接当前图层" },
+  "mask.layerLinked": { en: "Linked", zh: "已链接" },
   "mask.adjustmentBadge": { en: "adjustment", zh: "调整" },
   "mask.adjustmentAdd": { en: "Adjustment", zh: "调整图层" },
   "mask.adjustmentAddTitle": {
