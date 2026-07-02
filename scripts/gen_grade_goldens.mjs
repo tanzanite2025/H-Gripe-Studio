@@ -256,17 +256,28 @@ function hslToRgb(h, s, l) {
   return [r + m, g + m, b + m];
 }
 
+// Tetrahedral sampling — the design doc's single LUT-sampling definition.
 function lut3dSample(size, table, rgb) {
   const nMax = size - 1;
   const pos = rgb.map((v) => v * nMax);
   const i0 = pos.map((p) => Math.min(Math.floor(p), size - 2));
-  const f = pos.map((p, c) => p - i0[c]);
-  const out = [0, 0, 0];
-  for (let corner = 0; corner < 8; corner++) {
-    const dr = corner & 1, dg = (corner >> 1) & 1, db = (corner >> 2) & 1;
-    const w = (dr ? f[0] : 1 - f[0]) * (dg ? f[1] : 1 - f[1]) * (db ? f[2] : 1 - f[2]);
+  const [fr, fg, fb] = pos.map((p, c) => p - i0[c]);
+  const v = (dr, dg, db) => {
     const e = (((i0[2] + db) * size + (i0[1] + dg)) * size + (i0[0] + dr)) * 3;
-    for (let c = 0; c < 3; c++) out[c] += w * table[e + c];
+    return [table[e], table[e + 1], table[e + 2]];
+  };
+  let w1, e1, w2, e2, w3, e3;
+  if (fr > fg) {
+    if (fg > fb) [w1, e1, w2, e2, w3, e3] = [fr, v(1, 0, 0), fg, v(1, 1, 0), fb, v(1, 1, 1)];
+    else if (fr > fb) [w1, e1, w2, e2, w3, e3] = [fr, v(1, 0, 0), fb, v(1, 0, 1), fg, v(1, 1, 1)];
+    else [w1, e1, w2, e2, w3, e3] = [fb, v(0, 0, 1), fr, v(1, 0, 1), fg, v(1, 1, 1)];
+  } else if (fb > fg) [w1, e1, w2, e2, w3, e3] = [fb, v(0, 0, 1), fg, v(0, 1, 1), fr, v(1, 1, 1)];
+  else if (fb > fr) [w1, e1, w2, e2, w3, e3] = [fg, v(0, 1, 0), fb, v(0, 1, 1), fr, v(1, 1, 1)];
+  else [w1, e1, w2, e2, w3, e3] = [fg, v(0, 1, 0), fr, v(1, 1, 0), fb, v(1, 1, 1)];
+  const e0 = v(0, 0, 0);
+  const out = [0, 0, 0];
+  for (let c = 0; c < 3; c++) {
+    out[c] = e0[c] + w1 * (e1[c] - e0[c]) + w2 * (e2[c] - e1[c]) + w3 * (e3[c] - e2[c]);
   }
   return out;
 }

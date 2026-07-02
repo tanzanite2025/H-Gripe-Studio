@@ -62,7 +62,8 @@ pub enum GradeOp {
     /// Hue/Saturation master): hue rotates in degrees, saturation and
     /// lightness scale by `1 + amount` in HSL space.
     HslAdjust { hue: f32, saturation: f32, lightness: f32 },
-    /// 3D LUT on encoded values with trilinear interpolation. `table` is
+    /// 3D LUT on encoded values with tetrahedral interpolation (the same
+    /// sampling the ICC engine uses). `table` is
     /// `size³ × 3` RGB triples with red varying fastest (the `.cube`
     /// convention); build one from a file with [`parse_cube`].
     Lut3d { size: u32, table: Vec<f32> },
@@ -239,21 +240,41 @@ impl<'a> Lut3d<'a> {
         [self.table[i], self.table[i + 1], self.table[i + 2]]
     }
 
+    // Tetrahedral interpolation — the design doc's single LUT-sampling
+    // definition (same choice as the ICC engine): pick one of six
+    // tetrahedra by the ordering of the fractional offsets, blend its
+    // four vertices.
     fn sample(&self, rgb: [f32; 3]) -> [f32; 3] {
         let n = (self.size - 1) as f32;
         let pos = [rgb[0] * n, rgb[1] * n, rgb[2] * n];
-        let i0: Vec<usize> = pos.iter().map(|&p| (p as usize).min(self.size - 2)).collect();
+        let i0 = [
+            (pos[0] as usize).min(self.size - 2),
+            (pos[1] as usize).min(self.size - 2),
+            (pos[2] as usize).min(self.size - 2),
+        ];
         let f = [pos[0] - i0[0] as f32, pos[1] - i0[1] as f32, pos[2] - i0[2] as f32];
-        let mut out = [0.0f32; 3];
-        for corner in 0..8 {
-            let (dr, dg, db) = (corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
-            let w = (if dr == 1 { f[0] } else { 1.0 - f[0] })
-                * (if dg == 1 { f[1] } else { 1.0 - f[1] })
-                * (if db == 1 { f[2] } else { 1.0 - f[2] });
-            let e = self.entry(i0[0] + dr, i0[1] + dg, i0[2] + db);
-            for c in 0..3 {
-                out[c] += w * e[c];
+        let v = |dr: usize, dg: usize, db: usize| self.entry(i0[0] + dr, i0[1] + dg, i0[2] + db);
+        let (fr, fg, fb) = (f[0], f[1], f[2]);
+        // (w1, vertex1), (w2, vertex2), (w3, vertex3) between c000 and c111.
+        let (w1, e1, w2, e2, w3, e3) = if fr > fg {
+            if fg > fb {
+                (fr, v(1, 0, 0), fg, v(1, 1, 0), fb, v(1, 1, 1))
+            } else if fr > fb {
+                (fr, v(1, 0, 0), fb, v(1, 0, 1), fg, v(1, 1, 1))
+            } else {
+                (fb, v(0, 0, 1), fr, v(1, 0, 1), fg, v(1, 1, 1))
             }
+        } else if fb > fg {
+            (fb, v(0, 0, 1), fg, v(0, 1, 1), fr, v(1, 1, 1))
+        } else if fb > fr {
+            (fg, v(0, 1, 0), fb, v(0, 1, 1), fr, v(1, 1, 1))
+        } else {
+            (fg, v(0, 1, 0), fr, v(1, 1, 0), fb, v(1, 1, 1))
+        };
+        let e0 = v(0, 0, 0);
+        let mut out = [0.0f32; 3];
+        for c in 0..3 {
+            out[c] = e0[c] + w1 * (e1[c] - e0[c]) + w2 * (e2[c] - e1[c]) + w3 * (e3[c] - e2[c]);
         }
         out
     }
