@@ -40,6 +40,15 @@ describe("mask tool registry", () => {
     expect(point?.kind).toBe("point");
   });
 
+  it("ships move / crop as ready M5 tools", () => {
+    const move = maskTool("move");
+    expect(move?.status).toBe("ready");
+    expect(move?.kind).toBe("transform");
+    const crop = maskTool("crop");
+    expect(crop?.status).toBe("ready");
+    expect(crop?.kind).toBe("marquee");
+  });
+
   it("partitions ready vs planned and orders ready first", () => {
     expect(READY_TOOLS.every((t) => t.status === "ready")).toBe(true);
     expect(PLANNED_TOOLS.every((t) => t.status === "planned")).toBe(true);
@@ -82,7 +91,7 @@ describe("mask tool registry", () => {
   });
 
   it("routes geometry / morphology tools to the preview lane", () => {
-    for (const id of ["invert", "fill_holes", "smooth", "grow", "shrink", "feather"]) {
+    for (const id of ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "move", "crop"]) {
       expect(maskTool(id)?.lane, id).toBe("preview");
     }
   });

@@ -210,6 +210,23 @@ export function updateOpAmount(state: EditState, index: number, amount: number):
   return commit(state, withActiveOps(state.current, ops.map((o, i) => (i === index ? { ...o, amount } : o))));
 }
 
+/** Free-transform params (identity when a field is absent on the op). */
+export interface TransformParams {
+  dx: number;
+  dy: number;
+  scale: number;
+  rotate: number;
+}
+
+/** Revise a committed `transform` step's params (undoable; M5 re-transform). */
+export function updateOpTransform(state: EditState, index: number, params: TransformParams): EditState {
+  const ops = activeOps(state.current);
+  const op = ops[index];
+  if (!op || !isMaskOperation(op) || op.type !== "transform") return state;
+  const next: EditOp = { ...op, dx: params.dx, dy: params.dy, scale: params.scale, rotate: params.rotate };
+  return commit(state, withActiveOps(state.current, ops.map((o, i) => (i === index ? next : o))));
+}
+
 /** Replace a committed path step's anchors (undoable; anchor re-editing). */
 export function updatePathAnchors(state: EditState, index: number, points: EditPathPoint[]): EditState {
   const ops = activeOps(state.current);

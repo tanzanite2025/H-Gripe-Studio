@@ -13,6 +13,7 @@ import {
   smooth,
   stampDisc,
   stampSoftDisc,
+  transformMask,
   type ProxyMask,
 } from "./maskMorphology";
 import { normalizeEditPaths } from "./maskEdit";
@@ -122,6 +123,34 @@ describe("maskMorphology preview primitives", () => {
     expect(area(applyOp(base, "wand", 4))).toBe(area(base)); // pixels needed → identity
   });
 
+  it("transformMask translates the mask by dx/dy", () => {
+    const mask = createProxyMask(9, 9);
+    mask.data[2 * 9 + 2] = 255;
+    const moved = transformMask(mask, 3, 1, 1, 0);
+    expect(moved.data[3 * 9 + 5]).toBe(255);
+    expect(moved.data[2 * 9 + 2]).toBe(0);
+  });
+
+  it("transformMask rotates 90° about the centre", () => {
+    const mask = createProxyMask(9, 9);
+    mask.data[4 * 9 + 2] = 255; // (x=2, y=4)
+    const rotated = transformMask(mask, 0, 0, 1, 90);
+    expect(rotated.data[2 * 9 + 4]).toBe(255); // → (x=4, y=2)
+    expect(rotated.data[4 * 9 + 2]).toBe(0);
+  });
+
+  it("transformMask with identity params is a no-op", () => {
+    const base = filledSquare(12, 3);
+    const same = transformMask(base, 0, 0, 1, 0);
+    expect(Array.from(same.data)).toEqual(Array.from(base.data));
+  });
+
+  it("transformMask scale grows the mask about the centre", () => {
+    const base = filledSquare(20, 7); // 6x6 block
+    const scaled = transformMask(base, 0, 0, 2, 0);
+    expect(area(scaled)).toBeGreaterThan(area(base));
+  });
+
   it("exposes the amount-taking morphology ops as previewable", () => {
     expect([...PREVIEWABLE_OP_IDS]).toEqual(["grow", "shrink", "feather", "smooth"]);
     expect(isPreviewableOp("grow")).toBe(true);
@@ -196,6 +225,32 @@ describe("buildProxyMask", () => {
     const atInter = (x: number, y: number) => inter.mask.data[Math.round(y * inter.scale) * inter.mask.w + Math.round(x * inter.scale)];
     expect(atInter(200, 200)).toBe(255); // inside both
     expect(atInter(700, 450)).toBe(0); // inside add only
+  });
+
+  it("replays crop ops: the mask is cleared outside the region", () => {
+    const cropped = buildProxyMask(
+      doc([{ type: "invert" }, { type: "crop", region: [240, 160, 720, 480] }]),
+      { w: 960, h: 640 },
+      { proxyWidth: 320 },
+    );
+    const at = (x: number, y: number) =>
+      cropped.mask.data[Math.round(y * cropped.scale) * cropped.mask.w + Math.round(x * cropped.scale)];
+    expect(at(480, 320)).toBe(255); // inside the crop box
+    expect(at(60, 60)).toBe(0); // outside cleared
+    expect(at(900, 600)).toBe(0);
+  });
+
+  it("replays transform ops in proxy space (dx/dy scaled)", () => {
+    const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[240, 160]] as [number, number][] };
+    const moved = buildProxyMask(
+      doc([stroke, { type: "transform", dx: 300, dy: 200 }]),
+      { w: 960, h: 640 },
+      { proxyWidth: 320 },
+    );
+    const at = (x: number, y: number) =>
+      moved.mask.data[Math.round(y * moved.scale) * moved.mask.w + Math.round(x * moved.scale)];
+    expect(at(540, 360)).toBe(255); // blob moved to the new centre
+    expect(at(240, 160)).toBe(0); // old position vacated
   });
 
   it("skips wand ops (no source pixels on the proxy)", () => {
