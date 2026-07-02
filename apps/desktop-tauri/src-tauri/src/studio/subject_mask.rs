@@ -1685,6 +1685,11 @@ fn normalise_layer(layer: Value) -> Value {
             out["locked"] = json!(true);
         }
     }
+    if let Some(linked) = layer.get("linked").and_then(Value::as_bool) {
+        if linked {
+            out["linked"] = json!(true);
+        }
+    }
     if let Some(opacity) = layer.get("opacity").and_then(Value::as_f64) {
         out["opacity"] = json!(opacity.clamp(0.0, 1.0));
     }

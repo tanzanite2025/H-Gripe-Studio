@@ -14,7 +14,15 @@
 // modal wraps a proxy build + `applyOp` in `PreviewLane` for latest-wins drags
 // and does the canvas rasterisation of the result overlay separately.
 
-import type { BrushStroke, EditOp, EditPath, LayerAdjustment, MaskDocument, MaskOperation } from "../types/production";
+import type {
+  BrushStroke,
+  EditOp,
+  EditPath,
+  LayerAdjustment,
+  MaskDocument,
+  MaskLayer,
+  MaskOperation,
+} from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
@@ -734,6 +742,19 @@ function blendInto(dst: ProxyMask, src: ProxyMask, blend: string, opacity: numbe
     const d = dst.data[i];
     dst.data[i] = Math.round(d + (blendValue(d, src.data[i], blend) - d) * a);
   }
+}
+
+/**
+ * Rasterise one layer's own ops into a tiny thumbnail surface (PS layer-panel
+ * thumbnail). Every layer replays from an empty surface — the thumbnail shows
+ * the layer's own content, not the composite. `wand` ops are skipped as in
+ * the proxy build.
+ */
+export function buildLayerThumb(layer: MaskLayer, dims: { w: number; h: number }, thumbWidth = 48): ProxyMask {
+  const w = Math.max(1, Math.min(thumbWidth, dims.w || thumbWidth));
+  const scale = w / Math.max(1, dims.w || w);
+  const h = Math.max(1, Math.round((dims.h || w) * scale));
+  return replayOps(createProxyMask(w, h), layer.ops, scale);
 }
 
 /**
