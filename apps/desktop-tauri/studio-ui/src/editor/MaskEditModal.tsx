@@ -113,6 +113,9 @@ export function MaskEditModal({
   // Clone-stamp source point (image-space), picked by Alt+click; null until
   // picked — painting without a source is inert (PS behaviour).
   const cloneSource = useRef<[number, number] | null>(null);
+  // Dodge / burn direction of the in-progress stroke (Alt at pointer-down
+  // burns — darkens — instead of dodging).
+  const dodgeBurnMode = useRef<"dodge" | "burn">("dodge");
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
@@ -314,6 +317,7 @@ export function MaskEditModal({
     tool_healing: () => selectTool("heal"),
     tool_clone: () => selectTool("clone"),
     tool_history_brush: () => selectTool("history_brush"),
+    tool_dodge_burn: () => selectTool("dodge_burn"),
     tool_hand: () => selectTool("hand"),
     tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
@@ -498,12 +502,21 @@ export function MaskEditModal({
         live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
         ctx.stroke();
         ctx.setLineDash([]);
-      } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history") {
+      } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
         // Live retouch band: a translucent band marking the painted region
         // (green: rebuilt from its surroundings; violet: cloned from the
-        // source offset; amber: restored to the layer's initial state).
+        // source offset; amber: restored to the layer's initial state;
+        // white / black: dodged lighter / burned darker).
         const band =
-          tool.kind === "heal" ? "rgba(120,220,140,0.45)" : tool.kind === "clone" ? "rgba(190,140,255,0.45)" : "rgba(255,196,90,0.45)";
+          tool.kind === "heal"
+            ? "rgba(120,220,140,0.45)"
+            : tool.kind === "clone"
+              ? "rgba(190,140,255,0.45)"
+              : tool.kind === "history"
+                ? "rgba(255,196,90,0.45)"
+                : dodgeBurnMode.current === "burn"
+                  ? "rgba(30,30,40,0.45)"
+                  : "rgba(255,255,255,0.45)";
         ctx.strokeStyle = band;
         ctx.fillStyle = band;
         ctx.lineWidth = brushSize * 2;
@@ -818,7 +831,8 @@ export function MaskEditModal({
       if (!cloneSource.current) return;
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
-    } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal" || tool.kind === "history") {
+    } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal" || tool.kind === "history" || tool.kind === "dodge") {
+      if (tool.kind === "dodge") dodgeBurnMode.current = e.altKey ? "burn" : "dodge";
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "transform") {
@@ -901,6 +915,13 @@ export function MaskEditModal({
         // Spot-heal (M13): the stroke records a `heal` op — the painted
         // region is rebuilt from its surroundings on replay.
         dispatch({ type: "op", op: { type: "heal", amount: brushSize, points: pts } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.kind === "dodge") {
+        // Dodge / burn (M13): the stroke records a `dodge_burn` op — Alt at
+        // pointer-down burns (darkens), otherwise dodges (lightens).
+        dispatch({ type: "op", op: { type: "dodge_burn", amount: brushSize, points: pts, mode: dodgeBurnMode.current } });
         forceRedraw((n) => n + 1);
         return;
       }
