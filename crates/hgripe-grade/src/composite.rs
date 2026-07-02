@@ -14,7 +14,13 @@ use crate::surface::GradeSurface;
 /// (`0..=1`); `mask`, when present, is a per-pixel grayscale gate
 /// (`w * h` f32s, `0..=1`) scaling the source alpha — the layer-mask model
 /// from the design doc. Surfaces must share dimensions and space.
-pub fn composite_over(dst: &mut GradeSurface, src: &GradeSurface, mode: BlendMode, opacity: f32, mask: Option<&[f32]>) {
+pub fn composite_over(
+    dst: &mut GradeSurface,
+    src: &GradeSurface,
+    mode: BlendMode,
+    opacity: f32,
+    mask: Option<&[f32]>,
+) {
     assert_eq!((dst.w, dst.h), (src.w, src.h), "surface dimensions");
     assert_eq!(dst.space, src.space, "surface space");
     if let Some(m) = mask {
@@ -26,7 +32,8 @@ pub fn composite_over(dst: &mut GradeSurface, src: &GradeSurface, mode: BlendMod
     // non-linearly) passes values through unclamped so HDR headroom and
     // negatives survive across layers; every other mode still works on
     // the clamped display window.
-    let unbounded = dst.space == crate::surface::GradeSpace::LinearRec709 && mode == BlendMode::Normal;
+    let unbounded =
+        dst.space == crate::surface::GradeSpace::LinearRec709 && mode == BlendMode::Normal;
 
     for px in 0..(dst.w as usize) * (dst.h as usize) {
         let i = px * 4;
@@ -35,14 +42,23 @@ pub fn composite_over(dst: &mut GradeSurface, src: &GradeSurface, mode: BlendMod
         let ba = dst.data[i + 3].clamp(0.0, 1.0);
         let oa = sa + ba * (1.0 - sa);
         let load = |v: f32| if unbounded { v } else { v.clamp(0.0, 1.0) };
-        let cb = [load(dst.data[i]), load(dst.data[i + 1]), load(dst.data[i + 2])];
-        let cs = [load(src.data[i]), load(src.data[i + 1]), load(src.data[i + 2])];
+        let cb = [
+            load(dst.data[i]),
+            load(dst.data[i + 1]),
+            load(dst.data[i + 2]),
+        ];
+        let cs = [
+            load(src.data[i]),
+            load(src.data[i + 1]),
+            load(src.data[i + 2]),
+        ];
         let blended = blend_rgb(mode, cb, cs);
         for c in 0..3 {
             dst.data[i + c] = if oa == 0.0 {
                 0.0
             } else {
-                let mixed = sa * (1.0 - ba) * cs[c] + sa * ba * blended[c] + (1.0 - sa) * ba * cb[c];
+                let mixed =
+                    sa * (1.0 - ba) * cs[c] + sa * ba * blended[c] + (1.0 - sa) * ba * cb[c];
                 mixed / oa
             };
         }

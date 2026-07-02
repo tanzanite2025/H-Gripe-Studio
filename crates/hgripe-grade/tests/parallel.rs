@@ -6,7 +6,10 @@
 
 #![cfg(feature = "parallel")]
 
-use hgripe_grade::{apply, apply_parallel, BlendMode, CurveChannel, GradeDoc, GradeLayer, GradeOp, GradeSpace, GradeSurface, HslQualifier};
+use hgripe_grade::{
+    apply, apply_parallel, BlendMode, CurveChannel, GradeDoc, GradeLayer, GradeOp, GradeSpace,
+    GradeSurface, HslQualifier,
+};
 
 fn test_surface(w: u32, h: u32) -> GradeSurface {
     let n = (w as usize) * (h as usize);
@@ -15,7 +18,12 @@ fn test_surface(w: u32, h: u32) -> GradeSurface {
         let t = px as f32 / n as f32;
         data.extend([t, (t * 7.3).fract(), 1.0 - t, (t * 3.1).fract()]);
     }
-    GradeSurface { w, h, data, space: GradeSpace::Srgb }
+    GradeSurface {
+        w,
+        h,
+        data,
+        space: GradeSpace::Srgb,
+    }
 }
 
 fn test_doc(n_px: usize) -> GradeDoc {
@@ -60,7 +68,11 @@ fn test_doc(n_px: usize) -> GradeDoc {
                         gamma: [1.1, 1.0, 0.9],
                         gain: [1.05, 1.0, 0.95],
                     },
-                    GradeOp::HslAdjust { hue: 30.0, saturation: 0.2, lightness: -0.1 },
+                    GradeOp::HslAdjust {
+                        hue: 30.0,
+                        saturation: 0.2,
+                        lightness: -0.1,
+                    },
                 ],
             },
             GradeLayer {
@@ -70,10 +82,17 @@ fn test_doc(n_px: usize) -> GradeDoc {
                 mask: None,
                 qualifier: None,
                 ops: vec![
-                    GradeOp::Lut3d { size: 2, table: identity_lut },
+                    GradeOp::Lut3d {
+                        size: 2,
+                        table: identity_lut,
+                    },
                     GradeOp::Saturation { amount: 0.4 },
-                    GradeOp::HueVsHue { points: vec![[0.0, 10.0], [180.0, -10.0]] },
-                    GradeOp::LumVsSat { points: vec![[0.0, 0.3], [1.0, 1.0]] },
+                    GradeOp::HueVsHue {
+                        points: vec![[0.0, 10.0], [180.0, -10.0]],
+                    },
+                    GradeOp::LumVsSat {
+                        points: vec![[0.0, 0.3], [1.0, 1.0]],
+                    },
                     GradeOp::LogWheels {
                         shadows: [-0.03, 0.0, 0.03],
                         midtones: [0.01, 0.0, 0.0],
@@ -81,7 +100,10 @@ fn test_doc(n_px: usize) -> GradeDoc {
                         low_pivot: 0.33,
                         high_pivot: 0.55,
                     },
-                    GradeOp::Contrast { amount: 1.2, pivot: 0.435 },
+                    GradeOp::Contrast {
+                        amount: 1.2,
+                        pivot: 0.435,
+                    },
                 ],
             },
         ],

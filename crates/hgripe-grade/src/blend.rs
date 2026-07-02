@@ -36,7 +36,10 @@ impl BlendMode {
     /// Non-separable modes blend the whole RGB triple; separable ones work
     /// per channel.
     pub fn is_separable(self) -> bool {
-        !matches!(self, BlendMode::Hue | BlendMode::Saturation | BlendMode::Color | BlendMode::Luminosity)
+        !matches!(
+            self,
+            BlendMode::Hue | BlendMode::Saturation | BlendMode::Color | BlendMode::Luminosity
+        )
     }
 }
 

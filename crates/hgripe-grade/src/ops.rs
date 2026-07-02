@@ -46,7 +46,10 @@ pub enum GradeOp {
     /// Tone curve on encoded values: control points (sorted by x, `0..=1`)
     /// interpolated with the Fritsch–Carlson monotone cubic — no overshoot,
     /// flat extrapolation outside the endpoints.
-    Curves { channel: CurveChannel, points: Vec<[f32; 2]> },
+    Curves {
+        channel: CurveChannel,
+        points: Vec<[f32; 2]>,
+    },
     /// Saturation about the Rec.709 luma axis in linear light:
     /// `c = luma + (c − luma) × (1 + amount)`; `amount = −1` is grayscale.
     Saturation { amount: f32 },
@@ -61,7 +64,11 @@ pub enum GradeOp {
     /// Global hue/saturation/lightness shift on encoded values (like PS
     /// Hue/Saturation master): hue rotates in degrees, saturation and
     /// lightness scale by `1 + amount` in HSL space.
-    HslAdjust { hue: f32, saturation: f32, lightness: f32 },
+    HslAdjust {
+        hue: f32,
+        saturation: f32,
+        lightness: f32,
+    },
     /// 3D LUT on encoded values with tetrahedral interpolation (the same
     /// sampling the ICC engine uses). `table` is
     /// `size³ × 3` RGB triples with red varying fastest (the `.cube`
@@ -179,7 +186,8 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
             for px in 0..n {
                 let i = px * 4;
                 for c in 0..3 {
-                    let v = ((surface.data[i + c].clamp(0.0, 1.0) - in_black) / span).clamp(0.0, 1.0);
+                    let v =
+                        ((surface.data[i + c].clamp(0.0, 1.0) - in_black) / span).clamp(0.0, 1.0);
                     surface.data[i + c] = out_black + (out_white - out_black) * v.powf(inv_gamma);
                 }
             }
@@ -246,19 +254,27 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
         }
         GradeOp::HueVsHue { points } => {
             let curve = PeriodicSpline::new(points, 0.0);
-            for_each_hsl(surface, n, |h, s, l| ((h + curve.eval(h)).rem_euclid(360.0), s, l));
+            for_each_hsl(surface, n, |h, s, l| {
+                ((h + curve.eval(h)).rem_euclid(360.0), s, l)
+            });
         }
         GradeOp::HueVsSat { points } => {
             let curve = PeriodicSpline::new(points, 1.0);
-            for_each_hsl(surface, n, |h, s, l| (h, (s * curve.eval(h)).clamp(0.0, 1.0), l));
+            for_each_hsl(surface, n, |h, s, l| {
+                (h, (s * curve.eval(h)).clamp(0.0, 1.0), l)
+            });
         }
         GradeOp::LumVsSat { points } => {
             let curve = MultiplierSpline::new(points);
-            for_each_hsl(surface, n, |h, s, l| (h, (s * curve.eval(l)).clamp(0.0, 1.0), l));
+            for_each_hsl(surface, n, |h, s, l| {
+                (h, (s * curve.eval(l)).clamp(0.0, 1.0), l)
+            });
         }
         GradeOp::SatVsSat { points } => {
             let curve = MultiplierSpline::new(points);
-            for_each_hsl(surface, n, |h, s, l| (h, (s * curve.eval(s)).clamp(0.0, 1.0), l));
+            for_each_hsl(surface, n, |h, s, l| {
+                (h, (s * curve.eval(s)).clamp(0.0, 1.0), l)
+            });
         }
         GradeOp::LogWheels {
             shadows,
@@ -277,7 +293,8 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                     let w_h = smoothstep((v - high_pivot) / high_span);
                     let w_m = (1.0 - w_s - w_h).max(0.0);
                     surface.data[i + c] =
-                        (v + w_s * shadows[c] + w_m * midtones[c] + w_h * highlights[c]).clamp(0.0, 1.0);
+                        (v + w_s * shadows[c] + w_m * midtones[c] + w_h * highlights[c])
+                            .clamp(0.0, 1.0);
                 }
             }
         }
@@ -290,7 +307,10 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 }
             }
         }
-        GradeOp::SoftClip { high_start, low_start } => {
+        GradeOp::SoftClip {
+            high_start,
+            low_start,
+        } => {
             let hs = high_start.clamp(0.0, 1.0 - 1e-4);
             let ls = low_start.clamp(0.0, hs);
             for_each_rgb_linear(surface, n, |rgb| {
@@ -331,9 +351,16 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 .iter()
                 .copied()
                 .filter(|p| {
-                    [p.hue, p.sat, p.hue_shift, p.sat_scale, p.hue_radius, p.sat_radius]
-                        .iter()
-                        .all(|v| v.is_finite())
+                    [
+                        p.hue,
+                        p.sat,
+                        p.hue_shift,
+                        p.sat_scale,
+                        p.hue_radius,
+                        p.sat_radius,
+                    ]
+                    .iter()
+                    .all(|v| v.is_finite())
                 })
                 .collect();
             for_each_hsl(surface, n, |h, s, l| {
@@ -413,7 +440,8 @@ pub(crate) fn planckian_gains(temp_k: f32, tint: f32) -> [f32; 3] {
         target[1] / reference[1],
         target[2] / reference[2],
     ];
-    let luma = f64::from(LUMA[0]) * raw[0] + f64::from(LUMA[1]) * raw[1] + f64::from(LUMA[2]) * raw[2];
+    let luma =
+        f64::from(LUMA[0]) * raw[0] + f64::from(LUMA[1]) * raw[1] + f64::from(LUMA[2]) * raw[2];
     [
         (raw[0] / luma) as f32,
         (raw[1] / luma) as f32,
@@ -422,7 +450,11 @@ pub(crate) fn planckian_gains(temp_k: f32, tint: f32) -> [f32; 3] {
 }
 
 fn planckian_rgb(temp_k: f64, tint: f64) -> [f64; 3] {
-    let t = if temp_k.is_finite() { temp_k.clamp(1667.0, 25000.0) } else { 6504.0 };
+    let t = if temp_k.is_finite() {
+        temp_k.clamp(1667.0, 25000.0)
+    } else {
+        6504.0
+    };
     // Kim et al. cubic fit of the Planckian locus.
     let x = if t <= 4000.0 {
         -0.2661239e9 / (t * t * t) - 0.2343589e6 / (t * t) + 0.8776956e3 / t + 0.179910
@@ -436,7 +468,11 @@ fn planckian_rgb(temp_k: f64, tint: f64) -> [f64; 3] {
     } else {
         ((3.0817580 * x - 5.87338670) * x + 3.75112997) * x - 0.37001483
     };
-    let tint = if tint.is_finite() { tint.clamp(-1.0, 1.0) } else { 0.0 };
+    let tint = if tint.is_finite() {
+        tint.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
     let y = (y_locus + 0.05 * tint).max(1e-4);
     // xyY (Y = 1) → XYZ → linear Rec.709.
     let big_x = x / y;
@@ -453,7 +489,11 @@ fn smoothstep(t: f32) -> f32 {
 }
 
 // Convert each pixel to HSL, map it, convert back (alpha untouched).
-fn for_each_hsl(surface: &mut GradeSurface, n: usize, f: impl Fn(f32, f32, f32) -> (f32, f32, f32)) {
+fn for_each_hsl(
+    surface: &mut GradeSurface,
+    n: usize,
+    f: impl Fn(f32, f32, f32) -> (f32, f32, f32),
+) {
     for px in 0..n {
         let i = px * 4;
         let (h, s, l) = rgb_to_hsl([
@@ -480,7 +520,10 @@ struct PeriodicSpline {
 
 impl PeriodicSpline {
     fn new(points: &[[f32; 2]], neutral: f32) -> Self {
-        let mut base: Vec<[f32; 2]> = points.iter().map(|p| [p[0].rem_euclid(360.0), p[1]]).collect();
+        let mut base: Vec<[f32; 2]> = points
+            .iter()
+            .map(|p| [p[0].rem_euclid(360.0), p[1]])
+            .collect();
         base.sort_by(|a, b| a[0].total_cmp(&b[0]));
         let mut wrapped: Vec<[f32; 2]> = Vec::with_capacity(base.len() * 3);
         for shift in [-360.0, 0.0, 360.0] {
@@ -533,7 +576,11 @@ pub(crate) fn rgb_to_hsl(rgb: [f32; 3]) -> (f32, f32, f32) {
     if d <= 0.0 {
         return (0.0, 0.0, l);
     }
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if max == rgb[0] {
         60.0 * ((rgb[1] - rgb[2]) / d).rem_euclid(6.0)
     } else if max == rgb[1] {
@@ -618,7 +665,11 @@ impl<'a> Lut3d<'a> {
             (pos[1] as usize).min(self.size - 2),
             (pos[2] as usize).min(self.size - 2),
         ];
-        let f = [pos[0] - i0[0] as f32, pos[1] - i0[1] as f32, pos[2] - i0[2] as f32];
+        let f = [
+            pos[0] - i0[0] as f32,
+            pos[1] - i0[1] as f32,
+            pos[2] - i0[2] as f32,
+        ];
         let v = |dr: usize, dg: usize, db: usize| self.entry(i0[0] + dr, i0[1] + dg, i0[2] + db);
         let (fr, fg, fb) = (f[0], f[1], f[2]);
         // (w1, vertex1), (w2, vertex2), (w3, vertex3) between c000 and c111.
@@ -684,7 +735,10 @@ pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
                         .parse()
                         .map_err(|e| format!("line {}: bad {head}: {e}", lineno + 1))?;
                     if v != want {
-                        return Err(format!("line {}: only the standard 0..1 domain is supported", lineno + 1));
+                        return Err(format!(
+                            "line {}: only the standard 0..1 domain is supported",
+                            lineno + 1
+                        ));
                     }
                 }
             }
@@ -717,18 +771,26 @@ pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
         }
     }
     match (size, size_1d) {
-        (Some(_), Some(_)) => Err("both LUT_3D_SIZE and LUT_1D_SIZE present; split the shaper into its own file".into()),
+        (Some(_), Some(_)) => Err(
+            "both LUT_3D_SIZE and LUT_1D_SIZE present; split the shaper into its own file".into(),
+        ),
         (Some(size), None) => {
             let expect = (size as usize).pow(3) * 3;
             if table.len() != expect {
-                return Err(format!("expected {expect} table values, got {}", table.len()));
+                return Err(format!(
+                    "expected {expect} table values, got {}",
+                    table.len()
+                ));
             }
             Ok(GradeOp::Lut3d { size, table })
         }
         (None, Some(size)) => {
             let expect = size as usize * 3;
             if table.len() != expect {
-                return Err(format!("expected {expect} table values, got {}", table.len()));
+                return Err(format!(
+                    "expected {expect} table values, got {}",
+                    table.len()
+                ));
             }
             Ok(GradeOp::Lut1d { size, table })
         }
@@ -782,7 +844,11 @@ impl MonotoneSpline {
             tangents[0] = d[0];
             tangents[n - 1] = d[n - 2];
             for i in 1..n - 1 {
-                tangents[i] = if d[i - 1] * d[i] <= 0.0 { 0.0 } else { (d[i - 1] + d[i]) / 2.0 };
+                tangents[i] = if d[i - 1] * d[i] <= 0.0 {
+                    0.0
+                } else {
+                    (d[i - 1] + d[i]) / 2.0
+                };
             }
             for i in 0..n - 1 {
                 if d[i] == 0.0 {
@@ -809,7 +875,11 @@ impl MonotoneSpline {
             return x; // identity when no points are set
         }
         if n == 1 || x <= self.xs[0] {
-            return if x <= self.xs[0] { self.ys[0] } else { self.ys[n - 1] };
+            return if x <= self.xs[0] {
+                self.ys[0]
+            } else {
+                self.ys[n - 1]
+            };
         }
         if x >= self.xs[n - 1] {
             return self.ys[n - 1];
@@ -826,7 +896,10 @@ impl MonotoneSpline {
         let h10 = t3 - 2.0 * t2 + t;
         let h01 = -2.0 * t3 + 3.0 * t2;
         let h11 = t3 - t2;
-        h00 * self.ys[i] + h10 * h * self.tangents[i] + h01 * self.ys[i + 1] + h11 * h * self.tangents[i + 1]
+        h00 * self.ys[i]
+            + h10 * h * self.tangents[i]
+            + h01 * self.ys[i + 1]
+            + h11 * h * self.tangents[i + 1]
     }
 }
 
@@ -908,12 +981,33 @@ mod tests {
     fn hsl_zero_shift_is_a_no_op_and_hue_180_twice_returns() {
         let mut s = one_px([0.7, 0.2, 0.4]);
         let before = s.data.clone();
-        apply_op(&mut s, &GradeOp::HslAdjust { hue: 0.0, saturation: 0.0, lightness: 0.0 });
+        apply_op(
+            &mut s,
+            &GradeOp::HslAdjust {
+                hue: 0.0,
+                saturation: 0.0,
+                lightness: 0.0,
+            },
+        );
         for (got, want) in s.data.iter().zip(&before) {
             assert!((got - want).abs() < 1e-5);
         }
-        apply_op(&mut s, &GradeOp::HslAdjust { hue: 180.0, saturation: 0.0, lightness: 0.0 });
-        apply_op(&mut s, &GradeOp::HslAdjust { hue: 180.0, saturation: 0.0, lightness: 0.0 });
+        apply_op(
+            &mut s,
+            &GradeOp::HslAdjust {
+                hue: 180.0,
+                saturation: 0.0,
+                lightness: 0.0,
+            },
+        );
+        apply_op(
+            &mut s,
+            &GradeOp::HslAdjust {
+                hue: 180.0,
+                saturation: 0.0,
+                lightness: 0.0,
+            },
+        );
         for (got, want) in s.data.iter().zip(&before) {
             assert!((got - want).abs() < 1e-4);
         }
