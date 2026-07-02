@@ -109,6 +109,15 @@ fn all_ops() -> Vec<GradeOp> {
             blue: [0.0, 0.0, 1.0],
             monochrome: true,
         },
+        // Degenerate 1D LUTs: minimal size, inverted/out-of-range entries.
+        GradeOp::Lut1d {
+            size: 2,
+            table: vec![1.0, -2.0, 10.0, 0.0, 5.0, -10.0],
+        },
+        GradeOp::Lut1d {
+            size: 3,
+            table: vec![0.0; 9],
+        },
     ]
 }
 

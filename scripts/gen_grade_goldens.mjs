@@ -227,6 +227,15 @@ function applyOp(surface, op) {
       }
       break;
     }
+    case "lut1d": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          surface.data[i + c] = lut1dSample(op.size, op.table, c, clamp01(surface.data[i + c]));
+        }
+      }
+      break;
+    }
     case "lut3d": {
       for (let px = 0; px < n; px++) {
         const i = px * 4;
@@ -397,6 +406,16 @@ function hslToRgb(h, s, l) {
   const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][seg];
   const m = l - c / 2;
   return [r + m, g + m, b + m];
+}
+
+// Per-channel linear 1D-LUT sample (.cube LUT_1D_SIZE layout).
+function lut1dSample(size, table, channel, v) {
+  const pos = v * (size - 1);
+  const i0 = Math.min(Math.floor(pos), size - 2);
+  const f = pos - i0;
+  const a = table[i0 * 3 + channel];
+  const b = table[(i0 + 1) * 3 + channel];
+  return a + (b - a) * f;
 }
 
 // Tetrahedral sampling — the design doc's single LUT-sampling definition.
@@ -786,3 +805,38 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: mixerCases }, null, 2) + "\n",
 );
 console.log(`wrote ${mixerCases.length} mixer cases`);
+
+// ---- 1D LUT cases (wave 3) ----
+
+// An S-curve-ish 1D LUT with per-channel bias: 5 rows, red lifted, blue dropped.
+const tone1d = {
+  type: "lut1d",
+  size: 5,
+  table: [
+    0.02, 0.0, 0.0,
+    0.3, 0.22, 0.18,
+    0.55, 0.5, 0.45,
+    0.8, 0.78, 0.72,
+    1.0, 1.0, 0.95,
+  ],
+};
+const identity1d = { type: "lut1d", size: 3, table: [0, 0, 0, 0.5, 0.5, 0.5, 1, 1, 1] };
+
+const lut1dCases = [
+  docCase("lut1d: identity ramp is a no-op", { layers: [layer([identity1d])] }, opsInput),
+  docCase("lut1d: warm tone LUT", { layers: [layer([tone1d])] }, opsInput),
+  docCase("lut1d: pro_photo space", { layers: [layer([tone1d])] }, opsInputPro),
+  docCase("lut1d: shaper before a 3D LUT", { layers: [layer([tone1d, warmLut])] }, opsInput),
+  docCase("lut1d: stacked under multiply with mask", {
+    layers: [layer([tone1d], { blend: "multiply", opacity: 0.6, mask: [1, 0.5, 0, 1, 0.25, 0.75] })],
+  }, opsInput),
+  docCase("lut1d: clamps scene-referred input to the table domain", {
+    layers: [layer([tone1d])],
+  }, hdrInput, 5e-4),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_lut1d.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: lut1dCases }, null, 2) + "\n",
+);
+console.log(`wrote ${lut1dCases.length} lut1d cases`);
