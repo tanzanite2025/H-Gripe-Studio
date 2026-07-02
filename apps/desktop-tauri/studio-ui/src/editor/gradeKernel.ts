@@ -155,13 +155,43 @@ export type GradeOp =
   | { type: "saturation"; amount: number }
   | { type: "lift_gamma_gain"; lift: [number, number, number]; gamma: [number, number, number]; gain: [number, number, number] }
   | { type: "hsl_adjust"; hue: number; saturation: number; lightness: number }
-  | { type: "lut3d"; size: number; table: number[] };
+  | { type: "lut3d"; size: number; table: number[] }
+  | { type: "hue_vs_hue"; points: [number, number][] }
+  | { type: "hue_vs_sat"; points: [number, number][] }
+  | { type: "lum_vs_sat"; points: [number, number][] }
+  | { type: "sat_vs_sat"; points: [number, number][] }
+  | {
+      type: "log_wheels";
+      shadows: [number, number, number];
+      midtones: [number, number, number];
+      highlights: [number, number, number];
+      low_pivot: number;
+      high_pivot: number;
+    }
+  | { type: "contrast"; amount: number; pivot: number };
+
+/**
+ * HSL qualifier: a per-pixel gate computed from the layer's input (hue band
+ * with circular falloff, sat/lum bands with falloff), multiplied with the
+ * static mask — the secondary-grading model (mirrors Rust `HslQualifier`).
+ */
+export interface HslQualifier {
+  hue_center: number;
+  hue_range: number;
+  hue_soft: number;
+  sat_range: [number, number];
+  sat_soft: number;
+  lum_range: [number, number];
+  lum_soft: number;
+  invert?: boolean;
+}
 
 export interface GradeLayer {
   blend: GradeBlendMode;
   opacity: number;
   visible: boolean;
   mask: number[] | null;
+  qualifier?: HslQualifier | null;
   ops: GradeOp[];
 }
 
@@ -314,6 +344,52 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       }
       break;
     }
+    case "hue_vs_hue": {
+      const curve = periodicSpline(op.points, 0);
+      forEachHsl(surface, (h, s, l) => [(((h + curve(h)) % 360) + 360) % 360, s, l]);
+      break;
+    }
+    case "hue_vs_sat": {
+      const curve = periodicSpline(op.points, 1);
+      forEachHsl(surface, (h, s, l) => [h, clamp01(s * curve(h)), l]);
+      break;
+    }
+    case "lum_vs_sat": {
+      const curve = multiplierSpline(op.points);
+      forEachHsl(surface, (h, s, l) => [h, clamp01(s * curve(l)), l]);
+      break;
+    }
+    case "sat_vs_sat": {
+      const curve = multiplierSpline(op.points);
+      forEachHsl(surface, (h, s, l) => [h, clamp01(s * curve(s)), l]);
+      break;
+    }
+    case "log_wheels": {
+      const low = Math.max(op.low_pivot, 1e-6);
+      const highSpan = Math.max(1 - op.high_pivot, 1e-6);
+      const zones = [op.shadows, op.midtones, op.highlights];
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          const v = clamp01(surface.data[i + c]);
+          const ws = 1 - smoothstep(v / low);
+          const wh = smoothstep((v - op.high_pivot) / highSpan);
+          const wm = Math.max(1 - ws - wh, 0);
+          surface.data[i + c] = clamp01(v + ws * zones[0][c] + wm * zones[1][c] + wh * zones[2][c]);
+        }
+      }
+      break;
+    }
+    case "contrast": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          const v = clamp01(surface.data[i + c]);
+          surface.data[i + c] = clamp01(op.pivot + (v - op.pivot) * op.amount);
+        }
+      }
+      break;
+    }
     case "lut3d": {
       for (let px = 0; px < n; px++) {
         const i = px * 4;
@@ -329,6 +405,46 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       break;
     }
   }
+}
+
+const smoothstep = (t: number) => {
+  const c = clamp01(t);
+  return c * c * (3 - 2 * c);
+};
+
+// Convert each pixel to HSL, map it, convert back (alpha untouched).
+function forEachHsl(surface: GradeSurface, f: (h: number, s: number, l: number) => [number, number, number]): void {
+  const n = surface.w * surface.h;
+  for (let px = 0; px < n; px++) {
+    const i = px * 4;
+    const [h, s, l] = rgbToHsl([clamp01(surface.data[i]), clamp01(surface.data[i + 1]), clamp01(surface.data[i + 2])]);
+    const out = hslToRgb(...f(h, s, l));
+    surface.data[i] = out[0];
+    surface.data[i + 1] = out[1];
+    surface.data[i + 2] = out[2];
+  }
+}
+
+// A hue-domain curve (period 360): points replicated one period below and
+// above before building the spline so evaluation wraps seamlessly; no
+// points evaluates to `neutral` (mirrors Rust `PeriodicSpline`).
+function periodicSpline(points: [number, number][], neutral: number): (hue: number) => number {
+  if (points.length === 0) return () => neutral;
+  const base = points
+    .map(([x, y]): [number, number] => [((x % 360) + 360) % 360, y])
+    .sort((a, b) => a[0] - b[0]);
+  const wrapped: [number, number][] = [-360, 0, 360].flatMap((shift) =>
+    base.map(([x, y]): [number, number] => [x + shift, y]),
+  );
+  const spline = monotoneSpline(wrapped);
+  return (hue) => spline(((hue % 360) + 360) % 360);
+}
+
+// A 0..=1-domain multiplier curve: no points is the identity multiplier 1
+// (mirrors Rust `MultiplierSpline`).
+function multiplierSpline(points: [number, number][]): (x: number) => number {
+  if (points.length === 0) return () => 1;
+  return monotoneSpline(points);
 }
 
 /** RGB (`0..=1`) → HSL with hue in degrees (mirrors Rust `rgb_to_hsl`). */
@@ -441,10 +557,40 @@ export function parseCube(text: string): GradeOp {
 export function applyDoc(doc: GradeDoc, surface: GradeSurface): void {
   for (const layer of doc.layers) {
     if (!layer.visible) continue;
+    let mask = layer.mask ? Float32Array.from(layer.mask) : null;
+    if (layer.qualifier) {
+      const gate = qualifierGate(layer.qualifier, surface);
+      if (mask) for (let px = 0; px < gate.length; px++) gate[px] *= clamp01(mask[px]);
+      mask = gate;
+    }
     const graded: GradeSurface = { ...surface, data: surface.data.slice() };
     for (const op of layer.ops) applyOp(graded, op);
-    compositeOver(surface, graded, layer.blend, layer.opacity, layer.mask ? Float32Array.from(layer.mask) : null);
+    compositeOver(surface, graded, layer.blend, layer.opacity, mask);
   }
+}
+
+// 1 inside [lo, hi], smoothstep falloff over `soft` outside, 0 beyond.
+function bandWeight(v: number, lo: number, hi: number, soft: number): number {
+  if (v >= lo && v <= hi) return 1;
+  if (soft <= 0) return 0;
+  const d = v < lo ? lo - v : v - hi;
+  return 1 - smoothstep(d / soft);
+}
+
+/** The qualifier's per-pixel gate over a surface (mirrors Rust `HslQualifier::gate`). */
+export function qualifierGate(q: HslQualifier, surface: GradeSurface): Float32Array {
+  const n = surface.w * surface.h;
+  const gate = new Float32Array(n);
+  for (let px = 0; px < n; px++) {
+    const i = px * 4;
+    const [h, s, l] = rgbToHsl([clamp01(surface.data[i]), clamp01(surface.data[i + 1]), clamp01(surface.data[i + 2])]);
+    let d = (((h - q.hue_center) % 360) + 360) % 360;
+    d = Math.min(d, 360 - d);
+    const hueW = d <= q.hue_range ? 1 : q.hue_soft <= 0 ? 0 : 1 - smoothstep((d - q.hue_range) / q.hue_soft);
+    const w = hueW * bandWeight(s, q.sat_range[0], q.sat_range[1], q.sat_soft) * bandWeight(l, q.lum_range[0], q.lum_range[1], q.lum_soft);
+    gate[px] = q.invert ? 1 - w : w;
+  }
+  return gate;
 }
 
 /**
