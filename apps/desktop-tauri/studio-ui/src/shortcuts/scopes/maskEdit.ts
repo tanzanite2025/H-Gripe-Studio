@@ -1,12 +1,12 @@
 // Photoshop-aligned shortcut bindings for the Mask-Edit modal scope
-// (see `shortcuts.ts` for the scope-stack system these register into).
+// (see `../core.ts` for the scope-stack system these register into).
 //
 // Combos follow Photoshop where the tool exists here; combos for tools we do
 // not have yet are reserved as `planned` (documented, never dispatched) so
 // future work lands on the PS key without a migration. This is the frozen
 // scope table for `scope: "mask-edit"`.
 
-import type { ShortcutBinding } from "./shortcuts";
+import type { ShortcutBinding } from "../core";
 
 export const MASK_EDIT_SCOPE = "mask-edit";
 

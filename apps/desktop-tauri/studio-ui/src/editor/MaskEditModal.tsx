@@ -7,8 +7,8 @@ import {
   type MaskTool,
 } from "./maskTools";
 import { localizeTool } from "./maskToolsI18n";
-import { useShortcutScope, comboLabel, type ShortcutHandlers } from "./shortcuts";
-import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "./maskShortcuts";
+import { useShortcutScope, comboLabel, type ShortcutHandlers } from "../shortcuts";
+import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
 import { LangContext, useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, type ProxyMask } from "./maskMorphology";
@@ -147,7 +147,7 @@ export function MaskEditModal({
   const penPendingRef = useRef(false);
   penPendingRef.current = penAnchors.length > 0;
 
-  // PS-aligned shortcuts, registered into the mask-edit scope (shortcuts.ts):
+  // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
   // active only while this modal is mounted, shadowing the canvas shortcuts.
   const selectTool = (id: string) => {
     if (id !== "pen") setPenAnchors([]);
