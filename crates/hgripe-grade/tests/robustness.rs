@@ -5,7 +5,8 @@
 // this pins graceful degradation.
 
 use hgripe_grade::{
-    apply_op, composite_over, BlendMode, CurveChannel, GradeOp, GradeSpace, GradeSurface, HslQualifier, WarpPoint,
+    apply_op, composite_over, histogram, vectorscope, waveform, BlendMode, CurveChannel, GradeOp, GradeSpace,
+    GradeSurface, HslQualifier, WarpPoint,
 };
 
 fn hostile_surface(space: GradeSpace) -> GradeSurface {
@@ -195,6 +196,41 @@ fn qualifier_survives_hostile_inputs_and_stays_in_range() {
             assert!(w.is_finite() && (0.0..=1.0).contains(&w), "gate weight {w}");
         }
     }
+}
+
+#[test]
+fn scopes_survive_hostile_inputs_and_count_every_pixel() {
+    let mut s = hostile_surface(GradeSpace::Srgb);
+    // Non-finite samples must read as 0, never panic or skew totals.
+    s.data[0] = f32::NAN;
+    s.data[5] = f32::INFINITY;
+    s.data[10] = f32::NEG_INFINITY;
+    let n = (s.w * s.h) as u32;
+
+    let h = histogram(&s, 0); // degenerate bin count floors at 1
+    assert_eq!(h.bins, 1);
+    for plane in [&h.r, &h.g, &h.b, &h.luma] {
+        assert_eq!(plane.iter().sum::<u32>(), n);
+    }
+
+    let wf = waveform(&s, 4, 0);
+    assert_eq!((wf.cols, wf.rows), (4, 1));
+    for plane in [&wf.r, &wf.g, &wf.b] {
+        assert_eq!(plane.iter().sum::<u32>(), n);
+    }
+
+    let v = vectorscope(&s, 8);
+    assert_eq!(v.counts.iter().sum::<u32>(), n);
+
+    let empty = GradeSurface {
+        w: 0,
+        h: 0,
+        data: vec![],
+        space: GradeSpace::Srgb,
+    };
+    assert_eq!(histogram(&empty, 4).r.iter().sum::<u32>(), 0);
+    assert_eq!(waveform(&empty, 4, 4).r.iter().sum::<u32>(), 0);
+    assert_eq!(vectorscope(&empty, 4).counts.iter().sum::<u32>(), 0);
 }
 
 #[test]
