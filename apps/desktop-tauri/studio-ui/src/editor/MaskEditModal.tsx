@@ -4,8 +4,10 @@ import {
   MASK_TOOLS,
   maskTool,
   DEFAULT_TOOL_ID,
+  shapeVertices,
   type MaskTool,
   type PaintTarget,
+  type ShapeKind,
 } from "./maskTools";
 import { useShortcutScope, type ShortcutHandlers } from "../shortcuts";
 import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEdit";
@@ -105,6 +107,11 @@ export function MaskEditModal({
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // In-progress shape drag (image-space bounding box); committed on release
+  // as an ordinary vector path step built from the chosen shape's vertices.
+  const shapeDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("polygon");
+  const [shapeSides, setShapeSides] = useState(5);
   // In-progress move-tool drag (image-space): committed as a `transform` op.
   const moveDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   // In-progress gradient drag (M10): the start → end ramp vector; Alt at
@@ -322,6 +329,7 @@ export function MaskEditModal({
     tool_history_brush: () => selectTool("history_brush"),
     tool_dodge_burn: () => selectTool("dodge_burn"),
     tool_eyedropper: () => selectTool("eyedropper"),
+    tool_shape: () => selectTool("shape"),
     tool_hand: () => selectTool("hand"),
     tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
@@ -708,6 +716,21 @@ export function MaskEditModal({
       ctx.fill();
     }
 
+    const sd = shapeDrag.current;
+    if (sd) {
+      const pts = shapeVertices(shapeKind, [sd.start[0], sd.start[1], sd.end[0], sd.end[1]], shapeSides, brushSize);
+      if (pts.length >= 3) {
+        ctx.strokeStyle = "rgba(86,168,255,0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     const mq = marquee.current;
     if (mq) {
       const [x1, y1] = mq.start;
@@ -724,7 +747,7 @@ export function MaskEditModal({
       }
       ctx.setLineDash([]);
     }
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy]);
+  }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
 
   useEffect(() => {
     redraw();
@@ -872,6 +895,9 @@ export function MaskEditModal({
     } else if (tool.kind === "marquee") {
       marquee.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
+    } else if (tool.kind === "shape") {
+      shapeDrag.current = { start: pt, end: pt };
+      forceRedraw((n) => n + 1);
     } else if (tool.kind === "click") {
       // Magic-wand: record a seeded flood-fill op for the backend.
       dispatch({ type: "op", op: { type: "wand", amount: tolerance, region: pt } });
@@ -917,6 +943,9 @@ export function MaskEditModal({
       redraw();
     } else if (marquee.current) {
       marquee.current.end = toImage(e);
+      redraw();
+    } else if (shapeDrag.current) {
+      shapeDrag.current.end = toImage(e);
       redraw();
     }
   };
@@ -1013,6 +1042,23 @@ export function MaskEditModal({
       const region = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
       if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
         dispatch({ type: "op", op: { type: tool.id, region } });
+      }
+      forceRedraw((n) => n + 1);
+    } else if (shapeDrag.current) {
+      const { start, end } = shapeDrag.current;
+      shapeDrag.current = null;
+      const pts = shapeVertices(shapeKind, [start[0], start[1], end[0], end[1]], shapeSides, brushSize);
+      if (pts.length >= 3) {
+        dispatch({
+          type: "path",
+          path: {
+            id: nextId("path"),
+            mode: pathMode,
+            tool: "shape",
+            closed: true,
+            points: pts.map(([x, y]) => ({ x, y })),
+          },
+        });
       }
       forceRedraw((n) => n + 1);
     }
@@ -1144,6 +1190,10 @@ export function MaskEditModal({
               setBrushFlow={setBrushFlow}
               brushSpacing={brushSpacing}
               sampledColor={sampledColor}
+              shapeKind={shapeKind}
+              setShapeKind={setShapeKind}
+              shapeSides={shapeSides}
+              setShapeSides={setShapeSides}
               setBrushSpacing={setBrushSpacing}
               paintTarget={paintTarget}
               setPaintTarget={setPaintTarget}

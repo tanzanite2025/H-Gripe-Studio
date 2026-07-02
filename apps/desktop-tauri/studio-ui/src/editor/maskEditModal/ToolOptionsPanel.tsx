@@ -2,7 +2,7 @@
 // contextual drafts (morphology preview, pen path, fill / transform / anchor).
 
 import { useContext, type Dispatch, type SetStateAction } from "react";
-import { toolTargets, type MaskTool, type PaintTarget } from "../maskTools";
+import { toolTargets, type MaskTool, type PaintTarget, type ShapeKind } from "../maskTools";
 import { localizeTool } from "../maskToolsI18n";
 import { LangContext, useT } from "../../i18n";
 import { isPreviewableOp } from "../maskMorphology";
@@ -27,6 +27,10 @@ interface ToolOptionsPanelProps {
   setPaintTarget: (t: PaintTarget) => void;
   /** Eyedropper sample (`#rrggbb`); null until a colour has been picked. */
   sampledColor: string | null;
+  shapeKind: ShapeKind;
+  setShapeKind: (k: ShapeKind) => void;
+  shapeSides: number;
+  setShapeSides: (n: number) => void;
   showAmount: boolean;
   amount: number;
   setAmount: (n: number) => void;
@@ -65,6 +69,10 @@ export function ToolOptionsPanel({
   paintTarget,
   setPaintTarget,
   sampledColor,
+  shapeKind,
+  setShapeKind,
+  shapeSides,
+  setShapeSides,
   showAmount,
   amount,
   setAmount,
@@ -178,7 +186,34 @@ export function ToolOptionsPanel({
           <small className="muted">{t("mask.previewHint")}</small>
         </div>
       ) : null}
-      {tool.kind === "path" ? (
+      {tool.kind === "shape" ? (
+        <div className="field">
+          <span>{t("mask.shapeKind")}</span>
+          <span className="slider-row">
+            {(["triangle", "polygon", "star", "line"] as const).map((k) => (
+              <button key={k} className={shapeKind === k ? "active" : ""} onClick={() => setShapeKind(k)}>
+                {t(
+                  k === "triangle"
+                    ? "mask.shapeTriangle"
+                    : k === "polygon"
+                      ? "mask.shapePolygon"
+                      : k === "star"
+                        ? "mask.shapeStar"
+                        : "mask.shapeLine",
+                )}
+              </button>
+            ))}
+          </span>
+          {shapeKind === "polygon" || shapeKind === "star" ? (
+            <label className="slider-row">
+              <span>{t("mask.shapeSides")}</span>
+              <input type="range" min={3} max={12} value={shapeSides} onChange={(e) => setShapeSides(Number(e.target.value))} />
+              <output>{shapeSides}</output>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+      {tool.kind === "path" || tool.kind === "shape" ? (
         <div className="field">
           <span>{t("mask.pathMode")}</span>
           <span className="slider-row">

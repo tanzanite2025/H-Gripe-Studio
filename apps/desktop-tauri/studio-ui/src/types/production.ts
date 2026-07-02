@@ -161,7 +161,7 @@ export interface EditPath {
   id: string;
   /** `add` | `subtract` | `intersect`. */
   mode: string;
-  /** `pen` | `lasso`. */
+  /** `pen` | `lasso` | `shape`. */
   tool: string;
   closed: boolean;
   points: EditPathPoint[];

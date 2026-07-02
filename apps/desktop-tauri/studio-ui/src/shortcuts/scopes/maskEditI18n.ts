@@ -37,7 +37,7 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   tool_dodge_burn: { hint: "减淡 / 加深工具（涂抹提亮蒙版，按住 Alt 拖拽为压暗）。" },
   tool_type: { hint: "文字工具（规划中）。" },
   tool_path_select: { hint: "路径 / 直接选择工具（规划中；重编辑已提交的钢笔锚点需要它）。" },
-  tool_shape: { hint: "形状工具（规划中）。" },
+  tool_shape: { hint: "形状工具（拖出一个框；三角/多边形/星形/直线作为路径步骤提交）。" },
   tool_hand: { hint: "抓手工具（拖拽平移放大后的视图；任意工具下按住 Space 也可平移）。" },
   tool_rotate_view: { hint: "旋转视图工具（拖拽旋转视图；Esc 复位）。" },
   tool_zoom: { hint: "缩放工具（点击放大，Alt+点击缩小）。" },
