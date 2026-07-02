@@ -3,6 +3,7 @@ import {
   adjustmentLut,
   applyOp,
   buildProxyMask,
+  cloneStroke,
   createProxyMask,
   dilate,
   erode,
@@ -61,6 +62,24 @@ describe("maskMorphology preview primitives", () => {
     // An empty stroke is a no-op.
     const before = new Uint8Array(mask.data);
     healStroke(mask, { type: "heal", amount: 6, points: [] }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("cloneStroke copies the mask from the source offset", () => {
+    // An empty mask with an on-square at the top-left: cloning with the
+    // source offset pointing into the square copies it under the stroke.
+    const mask = createProxyMask(31, 31);
+    for (let y = 2; y <= 8; y++) for (let x = 2; x <= 8; x++) mask.data[y * 31 + x] = 255;
+    cloneStroke(mask, { type: "clone", amount: 3, points: [[20, 20]], dx: -15, dy: -15 }, 1);
+    expect(mask.data[20 * 31 + 20]).toBe(255); // sampled from (5, 5)
+    expect(mask.data[28 * 31 + 28]).toBe(0); // outside the stroke untouched
+    // An out-of-bounds source reads as empty and clears the covered pixels.
+    mask.data[29 * 31 + 29] = 255;
+    cloneStroke(mask, { type: "clone", amount: 1, points: [[29, 29]], dx: 15, dy: 15 }, 1);
+    expect(mask.data[29 * 31 + 29]).toBe(0);
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    cloneStroke(mask, { type: "clone", amount: 3, points: [], dx: 1, dy: 1 }, 1);
     expect(mask.data).toEqual(before);
   });
 

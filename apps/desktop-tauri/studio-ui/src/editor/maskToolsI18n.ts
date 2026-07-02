@@ -43,7 +43,7 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   zoom: { label: "缩放", hint: "点击处放大，Alt+点击缩小（Ctrl+0 适应屏幕，Ctrl+1 100%）。" },
   eyedropper: { label: "吸管", hint: "取样光标下的图像颜色（规划中）。" },
   heal: { label: "污点修复", hint: "污点修复画笔：涂抹瑕疵区域，由周围蒙版平滑重建（可随时改参的一步）。" },
-  clone: { label: "仿制图章", hint: "仿制图章：从 Alt+点击的源点取样涂抹（规划中）。" },
+  clone: { label: "仿制图章", hint: "仿制图章：Alt+点击设定源点，涂抹时按源点偏移复制蒙版（可随时改参的一步）。" },
   history_brush: { label: "历史画笔", hint: "把区域涂抹回更早的历史状态（规划中）。" },
   dodge_burn: { label: "减淡/加深", hint: "局部提亮（减淡）或压暗（加深）蒙版（规划中）。" },
 };

@@ -861,6 +861,24 @@ fn apply_queued_operation(
             heal_region(mask, &coverage);
             operations.push(json!({ "type": "heal", "radius": radius }));
         }
+        Some("clone") => {
+            // Clone stamp (M13): copy the mask into the stroke coverage from
+            // the `dx`/`dy` source offset. `amount` is the brush radius;
+            // `points` the stroke polyline.
+            let radius = amount.unwrap_or(8.0).max(1.0) as u32;
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let field =
+                |key: &str| op.get(key).and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+            let (dx, dy) = (field("dx"), field("dy"));
+            let (w, h) = mask.dimensions();
+            let mut coverage = GrayImage::new(w, h);
+            stamp_stroke(&mut coverage, &points, radius, MASK_ON);
+            clone_region(mask, &coverage, dx, dy);
+            operations.push(json!({ "type": "clone", "radius": radius, "dx": dx, "dy": dy }));
+        }
         Some("grow") => {
             let px = amount.unwrap_or(0.0).max(0.0) as u32;
             if px > 0 {
@@ -1137,6 +1155,30 @@ fn heal_region(mask: &mut GrayImage, coverage: &GrayImage) {
             if coverage.get_pixel(x, y).0[0] != 0 {
                 mask.put_pixel(x, y, Luma([buf[idx(x, y)].round().clamp(0.0, 255.0) as u8]));
             }
+        }
+    }
+}
+
+/// Clone stamp (PS S on a mask): copy the mask inside `coverage` from the
+/// `dx`/`dy` source offset — each covered pixel `p` reads the pre-op mask at
+/// `p + [dx, dy]` (out-of-bounds reads as empty). Mirrors the proxy
+/// `cloneStroke` in `maskMorphology.ts`.
+fn clone_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy: i64) {
+    let (w, h) = mask.dimensions();
+    let base = mask.clone();
+    for y in 0..h {
+        for x in 0..w {
+            if coverage.get_pixel(x, y).0[0] == 0 {
+                continue;
+            }
+            let sx = x as i64 + dx;
+            let sy = y as i64 + dy;
+            let v = if sx >= 0 && sx < w as i64 && sy >= 0 && sy < h as i64 {
+                base.get_pixel(sx as u32, sy as u32).0[0]
+            } else {
+                0
+            };
+            mask.put_pixel(x, y, Luma([v]));
         }
     }
 }
@@ -2094,6 +2136,29 @@ mod tests {
         let mut mask = solid(5, 5, MASK_OFF);
         fill_holes(&mut mask);
         assert_eq!(mask_coverage(&mask), 0.0);
+    }
+
+    #[test]
+    fn clone_region_copies_from_source_offset() {
+        // An empty mask with an on-square at the top-left: cloning with the
+        // source offset pointing into the square copies it under the stroke;
+        // an out-of-bounds source reads as empty.
+        let mut mask = solid(31, 31, MASK_OFF);
+        for y in 2..=8 {
+            for x in 2..=8 {
+                mask.put_pixel(x, y, Luma([MASK_ON]));
+            }
+        }
+        let mut coverage = GrayImage::new(31, 31);
+        stamp_stroke(&mut coverage, &[(20.0, 20.0)], 3, MASK_ON);
+        clone_region(&mut mask, &coverage, -15, -15);
+        assert_eq!(mask.get_pixel(20, 20).0[0], MASK_ON); // sampled from (5, 5)
+        assert_eq!(mask.get_pixel(28, 28).0[0], MASK_OFF); // outside the stroke
+        let mut oob = GrayImage::new(31, 31);
+        stamp_stroke(&mut oob, &[(29.0, 29.0)], 1, MASK_ON);
+        mask.put_pixel(29, 29, Luma([MASK_ON]));
+        clone_region(&mut mask, &oob, 15, 15);
+        assert_eq!(mask.get_pixel(29, 29).0[0], MASK_OFF);
     }
 
     #[test]
