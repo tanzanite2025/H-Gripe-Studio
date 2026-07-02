@@ -61,6 +61,7 @@ mod ffmpeg_native;
 mod frame_cache;
 mod generate;
 mod graph;
+pub(crate) mod heif_decode;
 mod history;
 pub(crate) mod image_buffer;
 mod image_enhance;

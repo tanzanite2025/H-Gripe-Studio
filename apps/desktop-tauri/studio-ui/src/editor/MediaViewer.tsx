@@ -3,7 +3,7 @@ import { generateThumbnail } from "../bridge/tauri";
 
 // Large image extensions we know how to display. Anything else falls back to a
 // "open externally" hint rather than trying to decode it in the webview.
-const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
+const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
 function basename(p: string): string {
   const parts = p.split(/[/\\]/);

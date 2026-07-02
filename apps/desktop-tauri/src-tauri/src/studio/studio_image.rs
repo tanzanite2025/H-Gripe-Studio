@@ -243,6 +243,12 @@ fn prophoto_working_from_dynamic(image: &DynamicImage) -> Option<WorkingImage> {
 /// decodes exactly as before (no orientation handling, mirroring the previous
 /// `image::load_from_memory`).
 pub(crate) fn decode_display_from_memory(bytes: &[u8]) -> Result<DynamicImage, String> {
+    // HEIF-family stills (HEIC/AVIF) decode through the vendored libav
+    // libraries; the `image` crate has no decoder for them.
+    if super::heif_decode::heif_kind(bytes).is_some() {
+        let image = super::heif_decode::decode_rgba_from_bytes(bytes, DEFAULT_MAX_DECODE_PIXELS)?;
+        return Ok(DynamicImage::ImageRgba8(image));
+    }
     let reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|err| format!("failed to read image: {err}"))?;
@@ -439,6 +445,14 @@ fn tiff_icc_from_reader<R: std::io::BufRead + std::io::Seek>(reader: R) -> Optio
         .filter(|bytes| !bytes.is_empty())
 }
 
+/// Sniff a HEIF container (HEIC/AVIF) from a file's leading bytes.
+fn sniff_heif(path: &Path) -> Option<super::heif_decode::HeifKind> {
+    let mut header = [0u8; 64];
+    let mut file = std::fs::File::open(path).ok()?;
+    let read = std::io::Read::read(&mut file, &mut header).ok()?;
+    super::heif_decode::heif_kind(&header[..read])
+}
+
 /// [`tiff_icc_from_reader`] for a file path, guarded to TIFF sources.
 fn tiff_icc_fallback(path: &Path, format: Option<ImageFormat>) -> Option<Vec<u8>> {
     if format != Some(ImageFormat::Tiff) {
@@ -458,6 +472,17 @@ pub(crate) fn load_dynamic(
     path: &Path,
     max_pixels: u64,
 ) -> Result<(DynamicImage, LoadMeta, Option<Vec<u8>>), String> {
+    if let Some(kind) = sniff_heif(path) {
+        let image = super::heif_decode::decode_rgba_from_path(path, max_pixels)?;
+        return Ok((
+            DynamicImage::ImageRgba8(image),
+            LoadMeta {
+                source_mode: kind.label().to_string(),
+                exif_transposed: false,
+            },
+            None,
+        ));
+    }
     let reader = ImageReader::open(path)
         .map_err(|err| format!("failed to open {}: {err}", path.display()))?
         .with_guessed_format()

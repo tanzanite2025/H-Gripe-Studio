@@ -67,7 +67,7 @@ path's extension routes it:
 
 | Extension (case-insensitive) | Card |
 | --- | --- |
-| `png` `jpg` `jpeg` `webp` `gif` `bmp` `tif` `tiff` | **Image** card (`imageSource`, extended) |
+| `png` `jpg` `jpeg` `webp` `gif` `bmp` `tif` `tiff` `heic` `heif` `avif` | **Image** card (`imageSource`, extended) |
 | `mp4` `mov` `mkv` `webm` `avi` `m4v` | **Video** card (`videoSource`, new) |
 | anything else | rejected with a status-bar note |
 

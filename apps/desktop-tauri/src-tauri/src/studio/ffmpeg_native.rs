@@ -35,6 +35,36 @@ const AV_NOPTS_VALUE: i64 = i64::MIN;
 /// the requested timestamp, so a pathological stream can't spin forever.
 const MAX_FRAMES_TO_TARGET: u32 = 600;
 
+/// Decode the first (primary) frame of a still-image container to RGBA. This
+/// is the decode half of HEIC/AVIF support (`super::heif_decode`): libav's
+/// `mov` demuxer reads HEIF containers and the vendored HEVC / AV1 decoders
+/// handle the primary image. `max_pixels == 0` disables the size guard.
+pub(crate) fn decode_still_rgba(path: &Path, max_pixels: u64) -> Result<image::RgbaImage, String> {
+    let mut decoder = Decoder::open(path)?;
+    let meta = decoder.probe()?;
+    if max_pixels > 0 && u64::from(meta.width) * u64::from(meta.height) > max_pixels {
+        return Err(format!(
+            "input image too large to decode safely: {} {}x{} exceeds the {} px budget",
+            path.display(),
+            meta.width,
+            meta.height,
+            max_pixels
+        ));
+    }
+    decoder.decode_first_frame_rgba()
+}
+
+/// `width x height` of a still-image container's primary image, from the
+/// header only (no pixel decode).
+pub(crate) fn probe_still_dims(path: &Path) -> Result<(u32, u32), String> {
+    let decoder = Decoder::open(path)?;
+    let meta = decoder.probe()?;
+    if meta.width == 0 || meta.height == 0 {
+        return Err(format!("no image dimensions in {}", path.display()));
+    }
+    Ok((meta.width, meta.height))
+}
+
 /// Native libav-backed [`FrameSource`]. Zero-sized: all state is per-call.
 pub(crate) struct NativeFfmpegFrameSource;
 
@@ -201,6 +231,57 @@ impl Decoder {
         }
     }
 
+    /// Decode the container's first frame and return it as RGBA (the
+    /// still-image path: no seek, no timestamp walk).
+    fn decode_first_frame_rgba(&mut self) -> Result<image::RgbaImage, String> {
+        unsafe {
+            let packet = ffi::av_packet_alloc();
+            let frame = ffi::av_frame_alloc();
+            if packet.is_null() || frame.is_null() {
+                if !packet.is_null() {
+                    let mut p = packet;
+                    ffi::av_packet_free(&mut p);
+                }
+                if !frame.is_null() {
+                    let mut f = frame;
+                    ffi::av_frame_free(&mut f);
+                }
+                return Err("failed to allocate libav packet/frame".to_string());
+            }
+
+            let mut got = false;
+            while ffi::av_read_frame(self.fmt, packet) >= 0 {
+                if (*packet).stream_index == self.stream_index
+                    && ffi::avcodec_send_packet(self.codec_ctx, packet) >= 0
+                    && ffi::avcodec_receive_frame(self.codec_ctx, frame) >= 0
+                {
+                    got = true;
+                }
+                ffi::av_packet_unref(packet);
+                if got {
+                    break;
+                }
+            }
+            if !got {
+                // Flush: some codecs only emit after EOF.
+                ffi::avcodec_send_packet(self.codec_ctx, ptr::null());
+                got = ffi::avcodec_receive_frame(self.codec_ctx, frame) >= 0;
+            }
+
+            let result = if got {
+                self.frame_to_rgba(frame)
+            } else {
+                Err("no image frame decoded".to_string())
+            };
+
+            let mut p = packet;
+            ffi::av_packet_free(&mut p);
+            let mut f = frame;
+            ffi::av_frame_free(&mut f);
+            result
+        }
+    }
+
     fn decode_to_png(&mut self, timestamp_sec: f64, poster_out: &Path) -> Result<PathBuf, String> {
         unsafe {
             // Target timestamp in the stream's time base: ts / (num/den).
@@ -298,6 +379,15 @@ impl Decoder {
         frame: *mut ffi::AVFrame,
         poster_out: &Path,
     ) -> Result<PathBuf, String> {
+        let image = self.frame_to_rgba(frame)?;
+        image
+            .save(poster_out)
+            .map_err(|err| format!("failed to write poster {}: {err}", poster_out.display()))?;
+        Ok(poster_out.to_path_buf())
+    }
+
+    /// Convert a decoded frame to an RGBA surface via swscale.
+    unsafe fn frame_to_rgba(&self, frame: *mut ffi::AVFrame) -> Result<image::RgbaImage, String> {
         let width = (*frame).width;
         let height = (*frame).height;
         if width <= 0 || height <= 0 {
@@ -344,12 +434,8 @@ impl Decoder {
             return Err("sws_scale produced no output".to_string());
         }
 
-        let image = image::RgbaImage::from_raw(width as u32, height as u32, buffer)
-            .ok_or_else(|| "RGBA buffer did not match frame dimensions".to_string())?;
-        image
-            .save(poster_out)
-            .map_err(|err| format!("failed to write poster {}: {err}", poster_out.display()))?;
-        Ok(poster_out.to_path_buf())
+        image::RgbaImage::from_raw(width as u32, height as u32, buffer)
+            .ok_or_else(|| "RGBA buffer did not match frame dimensions".to_string())
     }
 }
 
