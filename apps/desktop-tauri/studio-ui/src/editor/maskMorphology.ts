@@ -377,6 +377,10 @@ export function applyOp(mask: ProxyMask, type: string, radius: number): ProxyMas
       return invert(mask);
     case "fill_holes":
       return fillHoles(mask);
+    case "select_all":
+      return { w: mask.w, h: mask.h, data: new Uint8Array(mask.w * mask.h).fill(255) };
+    case "delete":
+      return { w: mask.w, h: mask.h, data: new Uint8Array(mask.w * mask.h) };
     default:
       return cloneMask(mask); // wand / rect / ellipse handled elsewhere or need pixels
   }

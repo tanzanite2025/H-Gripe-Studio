@@ -799,6 +799,21 @@ fn apply_queued_operation(
             invert(mask);
             operations.push(json!({ "type": "invert" }));
         }
+        Some("select_all") => {
+            // PS Select All (M9): the whole canvas selected, as a history step.
+            for p in mask.pixels_mut() {
+                p.0[0] = MASK_ON;
+            }
+            operations.push(json!({ "type": "select_all" }));
+        }
+        Some("delete") => {
+            // PS Delete (M9): drop the selection, as a history step (unlike
+            // Ctrl+D clear, which wipes the edit stack itself).
+            for p in mask.pixels_mut() {
+                p.0[0] = MASK_OFF;
+            }
+            operations.push(json!({ "type": "delete" }));
+        }
         Some("fill_holes") => {
             fill_holes(mask);
             operations.push(json!({ "type": "fill_holes" }));
@@ -1958,6 +1973,32 @@ mod tests {
         let mut mask = solid(2, 2, MASK_OFF);
         invert(&mut mask);
         assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
+    }
+
+    #[test]
+    fn select_all_fills_and_delete_clears_as_history_steps() {
+        let image = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "select_all" }] }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_ON));
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("select_all")));
+
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "select_all" }, { "type": "delete" }] }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("delete")));
     }
 
     #[test]
