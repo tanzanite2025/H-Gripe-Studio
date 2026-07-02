@@ -315,6 +315,15 @@ function applyOp(surface, op) {
       });
       break;
     }
+    case "sharpen":
+      sharpen(surface, op.amount);
+      break;
+    case "denoise":
+      denoise(surface, op.amount);
+      break;
+    case "film_grain":
+      filmGrain(surface, op.amount, op.seed);
+      break;
     case "color_warper": {
       const points = op.points.filter((p) =>
         [p.hue, p.sat, p.hue_shift, p.sat_scale, p.hue_radius, p.sat_radius].every((v) => Number.isFinite(v)),
@@ -464,6 +473,99 @@ function lut3dSample(size, table, rgb) {
     out[c] = e0[c] + w1 * (e1[c] - e0[c]) + w2 * (e2[c] - e1[c]) + w3 * (e3[c] - e2[c]);
   }
   return out;
+}
+
+// ---- Spatial ops (wave 4): encoded-signal, full-frame neighbourhood maths ----
+
+// 3×3 neighbourhood of (x, y) with coordinates clamped to the frame edges.
+function taps3x3(x, y, w, h) {
+  const out = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      out.push(Math.min(Math.max(y + dy, 0), h - 1) * w + Math.min(Math.max(x + dx, 0), w - 1));
+    }
+  }
+  return out;
+}
+
+// Unsharp mask: out = v + amount × (v − blur3×3(v)), clamped to 0..=1.
+function sharpen(surface, amount) {
+  const a = Number.isFinite(amount) ? Math.min(Math.max(amount, 0), 10) : 0;
+  const { w, h } = surface;
+  if (w === 0 || h === 0) return;
+  const src = surface.data.map(clamp01);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const taps = taps3x3(x, y, w, h);
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (const t of taps) sum += src[t * 4 + c];
+        const v = src[i + c];
+        surface.data[i + c] = clamp01(v + a * (v - sum / 9));
+      }
+    }
+  }
+}
+
+// Binomial 3×3 spatial weights (1-2-1 ⊗ 1-2-1), row-major like taps3x3.
+const BILATERAL_SPATIAL = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+
+// Edge-preserving 3×3 bilateral: binomial spatial × Gaussian range (σ = 0.1),
+// blended with the original by amount (0..=1).
+function denoise(surface, amount) {
+  const a = Number.isFinite(amount) ? clamp01(amount) : 0;
+  const { w, h } = surface;
+  if (w === 0 || h === 0) return;
+  const SIGMA = 0.1;
+  const src = surface.data.map(clamp01);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const taps = taps3x3(x, y, w, h);
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const v = src[i + c];
+        let sum = 0;
+        let weight = 0;
+        for (let k = 0; k < 9; k++) {
+          const u = src[taps[k] * 4 + c];
+          const d = (u - v) / SIGMA;
+          const wgt = BILATERAL_SPATIAL[k] * Math.exp(-d * d);
+          sum += wgt * u;
+          weight += wgt;
+        }
+        surface.data[i + c] = clamp01(v + a * (sum / weight - v));
+      }
+    }
+  }
+}
+
+// lowbias32-style integer position hash — pure 32-bit maths, bit-identical
+// on both kernel ends.
+function grainHash(x, y, seed) {
+  let hsh = (Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca77) ^ Math.imul(seed, 0xc2b2ae3d)) >>> 0;
+  hsh = (hsh ^ (hsh >>> 16)) >>> 0;
+  hsh = Math.imul(hsh, 0x7feb352d) >>> 0;
+  hsh = (hsh ^ (hsh >>> 15)) >>> 0;
+  hsh = Math.imul(hsh, 0x846ca68b) >>> 0;
+  hsh = (hsh ^ (hsh >>> 16)) >>> 0;
+  return hsh;
+}
+
+// Monochrome film grain: deterministic per-pixel noise in [-1, 1) from
+// grainHash(x, y, seed), scaled by amount and added to all three channels.
+function filmGrain(surface, amount, seed) {
+  const a = Number.isFinite(amount) ? clamp01(amount) : 0;
+  const { w, h } = surface;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const noise = (grainHash(x, y, seed) / 4294967296) * 2 - 1;
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        surface.data[i + c] = clamp01(clamp01(surface.data[i + c]) + a * noise);
+      }
+    }
+  }
 }
 
 // 1 inside [lo, hi], smoothstep falloff over `soft` outside, 0 beyond.
@@ -907,6 +1009,48 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: warperCases }, null, 2) + "\n",
 );
 console.log(`wrote ${warperCases.length} warper cases`);
+
+// ---- Spatial cases (wave 4): sharpen, denoise, film grain ----
+
+// A 4x3 surface with a vertical step edge and a bright speck: exercises the
+// 3×3 neighbourhoods, edge-clamped taps and the bilateral's range weight.
+const spatialInput = {
+  w: 4, h: 3, space: "srgb",
+  data: [
+    0.2, 0.2, 0.2, 1.0,   0.2, 0.25, 0.2, 1.0,   0.8, 0.75, 0.8, 1.0,   0.8, 0.8, 0.8, 1.0,
+    0.2, 0.2, 0.2, 1.0,   0.9, 0.25, 0.2, 0.5,   0.8, 0.8, 0.8, 1.0,   0.8, 0.8, 0.8, 0.8,
+    0.25, 0.2, 0.2, 1.0,  0.2, 0.2, 0.25, 1.0,   0.75, 0.8, 0.8, 1.0,   0.8, 0.8, 0.75, 1.0,
+  ],
+};
+
+const spatialCases = [
+  docCase("sharpen: amount 0 is a no-op", { layers: [layer([{ type: "sharpen", amount: 0 }])] }, spatialInput),
+  docCase("sharpen: unsharp mask at 1.0", { layers: [layer([{ type: "sharpen", amount: 1.0 }])] }, spatialInput),
+  docCase("sharpen: strong amount clamps into range", { layers: [layer([{ type: "sharpen", amount: 5.0 }])] }, spatialInput),
+  docCase("denoise: amount 0 is a no-op", { layers: [layer([{ type: "denoise", amount: 0 }])] }, spatialInput),
+  docCase("denoise: bilateral at 1.0 keeps the edge", { layers: [layer([{ type: "denoise", amount: 1.0 }])] }, spatialInput),
+  docCase("film_grain: deterministic per seed", { layers: [layer([{ type: "film_grain", amount: 0.2, seed: 42 }])] }, spatialInput),
+  docCase("film_grain: another seed, another field", { layers: [layer([{ type: "film_grain", amount: 0.2, seed: 43 }])] }, spatialInput),
+  docCase("spatial chain: denoise, sharpen, grain under opacity", {
+    layers: [layer([
+      { type: "denoise", amount: 0.6 },
+      { type: "sharpen", amount: 0.8 },
+      { type: "film_grain", amount: 0.1, seed: 7 },
+    ], { opacity: 0.85 })],
+  }, spatialInput),
+  docCase("spatial after per-pixel ops in one layer", {
+    layers: [layer([
+      { type: "exposure", ev: 0.5 },
+      { type: "sharpen", amount: 1.2 },
+    ])],
+  }, spatialInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_spatial.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: spatialCases }, null, 2) + "\n",
+);
+console.log(`wrote ${spatialCases.length} spatial cases`);
 
 // ---- Scope cases (wave 3): read-only analysers over a surface ----
 // Scope maths is f64 on both ends (Rust widens to f64), so the integer

@@ -1,19 +1,38 @@
-// The grading operations (G2 core set + G3 video set). Each op declares
-// whether its maths runs on gamma-encoded or linear-light values;
-// `apply_op` decodes/re-encodes
-// around linear ops using the surface's TRC (`trc.rs`). Alpha never passes
-// through an op — coverage is already linear and grading is colour-only.
+// The grading operations (G2 core set + G3 video set + G4 spatial set),
+// split by family: `spline` (curve primitives), `hsl` (colour model),
+// `lut` (LUT sampling + `.cube` parsing), `wb` (Planckian white balance),
+// `spatial` (neighbourhood / position ops). Each op declares whether its
+// maths runs on gamma-encoded or linear-light values; `apply_op`
+// decodes/re-encodes around linear ops using the surface's TRC (`trc.rs`).
+// Alpha never passes through an op — coverage is already linear and grading
+// is colour-only.
 //
-// Behaviour is pinned by `goldens/ops_core.json`, executed by both this
-// crate's tests and the studio-ui mirror.
+// Behaviour is pinned by `goldens/*.json`, executed by both this crate's
+// tests and the studio-ui mirror.
+
+mod hsl;
+mod lut;
+mod spatial;
+mod spline;
+mod wb;
 
 use serde::{Deserialize, Serialize};
 
 use crate::surface::GradeSurface;
 use crate::trc::{trc_decode, trc_encode};
 
+pub use lut::parse_cube;
+pub use spline::MonotoneSpline;
+
+pub(crate) use hsl::rgb_to_hsl;
+pub(crate) use wb::planckian_gains;
+
+use hsl::hsl_to_rgb;
+use lut::{Lut1d, Lut3d};
+use spline::{MultiplierSpline, PeriodicSpline};
+
 /// Rec.709 luma weights (the design-doc choice for saturation).
-const LUMA: [f32; 3] = [0.2126, 0.7152, 0.0722];
+pub(crate) const LUMA: [f32; 3] = [0.2126, 0.7152, 0.0722];
 
 /// Which channels a curve drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +160,32 @@ pub enum GradeOp {
     /// points accumulate. No points is identity; non-finite points are
     /// skipped.
     ColorWarper { points: Vec<WarpPoint> },
+    /// Unsharp mask on encoded values: `v + amount × (v − blur3×3(v))`,
+    /// clamped. Spatial — see [`GradeOp::is_spatial`]. Neutral is
+    /// `amount = 0`.
+    Sharpen { amount: f32 },
+    /// Edge-preserving 3×3 bilateral denoise on encoded values, blended
+    /// with the original by `amount` (`0..=1`). Spatial — see
+    /// [`GradeOp::is_spatial`]. Neutral is `amount = 0`.
+    Denoise { amount: f32 },
+    /// Monochrome film grain on encoded values: deterministic per-pixel
+    /// noise in `[-1, 1)` from an integer hash of (x, y, `seed`), scaled by
+    /// `amount` (`0..=1`). Spatial (position-dependent) — see
+    /// [`GradeOp::is_spatial`]. Neutral is `amount = 0`.
+    FilmGrain { amount: f32, seed: u32 },
+}
+
+impl GradeOp {
+    /// Whether the op reads beyond the pixel being written — neighbouring
+    /// pixels (sharpen / denoise) or the pixel's frame position (film
+    /// grain). Spatial ops are only correct over a full frame, so
+    /// band-parallel scheduling must run their layer serially.
+    pub fn is_spatial(&self) -> bool {
+        matches!(
+            self,
+            GradeOp::Sharpen { .. } | GradeOp::Denoise { .. } | GradeOp::FilmGrain { .. }
+        )
+    }
 }
 
 /// One colour-warper control point (see [`GradeOp::ColorWarper`]).
@@ -409,6 +454,9 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 surface.data[i + 2] = out[2];
             }
         }
+        GradeOp::Sharpen { amount } => spatial::sharpen(surface, *amount),
+        GradeOp::Denoise { amount } => spatial::denoise(surface, *amount),
+        GradeOp::FilmGrain { amount, seed } => spatial::film_grain(surface, *amount, *seed),
     }
 }
 
@@ -425,62 +473,6 @@ fn soft_clip(v: f32, hs: f32, ls: f32) -> f32 {
     } else {
         v
     }
-}
-
-/// Rec.709 linear RGB channel gains for a Planckian white point at
-/// `temp_k` (+ `tint` Δy), relative to the 6504 K neutral, luma-normalised.
-/// CCT → xy uses the Kim et al. cubic approximation of the Planckian locus
-/// (the standard CIE fit, valid 1667..25000 K); xy → XYZ → Rec.709 uses the
-/// IEC/ITU matrix. All in f64 so both ends agree within f32 tolerance.
-pub(crate) fn planckian_gains(temp_k: f32, tint: f32) -> [f32; 3] {
-    let reference = planckian_rgb(6504.0, 0.0);
-    let target = planckian_rgb(f64::from(temp_k), f64::from(tint));
-    let raw = [
-        target[0] / reference[0],
-        target[1] / reference[1],
-        target[2] / reference[2],
-    ];
-    let luma =
-        f64::from(LUMA[0]) * raw[0] + f64::from(LUMA[1]) * raw[1] + f64::from(LUMA[2]) * raw[2];
-    [
-        (raw[0] / luma) as f32,
-        (raw[1] / luma) as f32,
-        (raw[2] / luma) as f32,
-    ]
-}
-
-fn planckian_rgb(temp_k: f64, tint: f64) -> [f64; 3] {
-    let t = if temp_k.is_finite() {
-        temp_k.clamp(1667.0, 25000.0)
-    } else {
-        6504.0
-    };
-    // Kim et al. cubic fit of the Planckian locus.
-    let x = if t <= 4000.0 {
-        -0.2661239e9 / (t * t * t) - 0.2343589e6 / (t * t) + 0.8776956e3 / t + 0.179910
-    } else {
-        -3.0258469e9 / (t * t * t) + 2.1070379e6 / (t * t) + 0.2226347e3 / t + 0.240390
-    };
-    let y_locus = if t <= 2222.0 {
-        ((-1.1063814 * x - 1.34811020) * x + 2.18555832) * x - 0.20219683
-    } else if t <= 4000.0 {
-        ((-0.9549476 * x - 1.37418593) * x + 2.09137015) * x - 0.16748867
-    } else {
-        ((3.0817580 * x - 5.87338670) * x + 3.75112997) * x - 0.37001483
-    };
-    let tint = if tint.is_finite() {
-        tint.clamp(-1.0, 1.0)
-    } else {
-        0.0
-    };
-    let y = (y_locus + 0.05 * tint).max(1e-4);
-    // xyY (Y = 1) → XYZ → linear Rec.709.
-    let big_x = x / y;
-    let big_z = (1.0 - x - y) / y;
-    let r = 3.2404542 * big_x - 1.5371385 - 0.4985314 * big_z;
-    let g = -0.9692660 * big_x + 1.8760108 + 0.0415560 * big_z;
-    let b = 0.0556434 * big_x - 0.2040259 + 1.0572252 * big_z;
-    [r.max(1e-4), g.max(1e-4), b.max(1e-4)]
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -509,295 +501,6 @@ fn for_each_hsl(
     }
 }
 
-/// A hue-domain curve (period 360): the control points are replicated one
-/// period below and above before building the spline, so evaluation wraps
-/// seamlessly. No points evaluates to `neutral` everywhere.
-struct PeriodicSpline {
-    spline: MonotoneSpline,
-    neutral: f32,
-    empty: bool,
-}
-
-impl PeriodicSpline {
-    fn new(points: &[[f32; 2]], neutral: f32) -> Self {
-        let mut base: Vec<[f32; 2]> = points
-            .iter()
-            .map(|p| [p[0].rem_euclid(360.0), p[1]])
-            .collect();
-        base.sort_by(|a, b| a[0].total_cmp(&b[0]));
-        let mut wrapped: Vec<[f32; 2]> = Vec::with_capacity(base.len() * 3);
-        for shift in [-360.0, 0.0, 360.0] {
-            wrapped.extend(base.iter().map(|p| [p[0] + shift, p[1]]));
-        }
-        Self {
-            spline: MonotoneSpline::new(&wrapped),
-            neutral,
-            empty: points.is_empty(),
-        }
-    }
-
-    fn eval(&self, hue: f32) -> f32 {
-        if self.empty {
-            return self.neutral;
-        }
-        self.spline.eval(hue.rem_euclid(360.0))
-    }
-}
-
-/// A `0..=1`-domain multiplier curve: no points is the identity
-/// multiplier 1; otherwise the monotone spline (flat outside endpoints).
-struct MultiplierSpline {
-    spline: MonotoneSpline,
-    empty: bool,
-}
-
-impl MultiplierSpline {
-    fn new(points: &[[f32; 2]]) -> Self {
-        Self {
-            spline: MonotoneSpline::new(points),
-            empty: points.is_empty(),
-        }
-    }
-
-    fn eval(&self, x: f32) -> f32 {
-        if self.empty {
-            return 1.0;
-        }
-        self.spline.eval(x)
-    }
-}
-
-/// RGB (`0..=1`) → HSL with hue in degrees (`0..360`).
-pub(crate) fn rgb_to_hsl(rgb: [f32; 3]) -> (f32, f32, f32) {
-    let max = rgb[0].max(rgb[1]).max(rgb[2]);
-    let min = rgb[0].min(rgb[1]).min(rgb[2]);
-    let l = (max + min) / 2.0;
-    let d = max - min;
-    if d <= 0.0 {
-        return (0.0, 0.0, l);
-    }
-    let s = if l > 0.5 {
-        d / (2.0 - max - min)
-    } else {
-        d / (max + min)
-    };
-    let h = if max == rgb[0] {
-        60.0 * ((rgb[1] - rgb[2]) / d).rem_euclid(6.0)
-    } else if max == rgb[1] {
-        60.0 * ((rgb[2] - rgb[0]) / d + 2.0)
-    } else {
-        60.0 * ((rgb[0] - rgb[1]) / d + 4.0)
-    };
-    (h, s, l)
-}
-
-/// HSL (hue in degrees) → RGB (`0..=1`).
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
-    let hp = h / 60.0;
-    let x = c * (1.0 - (hp.rem_euclid(2.0) - 1.0).abs());
-    let (r, g, b) = match hp as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = l - c / 2.0;
-    [r + m, g + m, b + m]
-}
-
-/// A 1D LUT view over a `.cube` `LUT_1D_SIZE` table (`size` RGB triples),
-/// sampled per channel with linear interpolation.
-struct Lut1d<'a> {
-    size: usize,
-    table: &'a [f32],
-}
-
-impl<'a> Lut1d<'a> {
-    fn new(size: u32, table: &'a [f32]) -> Self {
-        let size = size as usize;
-        assert!(size >= 2, "LUT size must be at least 2");
-        assert_eq!(table.len(), size * 3, "LUT table length");
-        Self { size, table }
-    }
-
-    fn sample(&self, channel: usize, v: f32) -> f32 {
-        let pos = v * (self.size - 1) as f32;
-        let i0 = (pos as usize).min(self.size - 2);
-        let f = pos - i0 as f32;
-        let a = self.table[i0 * 3 + channel];
-        let b = self.table[(i0 + 1) * 3 + channel];
-        a + (b - a) * f
-    }
-}
-
-/// A 3D LUT view over a `.cube`-layout table (red varies fastest), sampled
-/// with trilinear interpolation.
-struct Lut3d<'a> {
-    size: usize,
-    table: &'a [f32],
-}
-
-impl<'a> Lut3d<'a> {
-    fn new(size: u32, table: &'a [f32]) -> Self {
-        let size = size as usize;
-        assert!(size >= 2, "LUT size must be at least 2");
-        assert_eq!(table.len(), size * size * size * 3, "LUT table length");
-        Self { size, table }
-    }
-
-    fn entry(&self, r: usize, g: usize, b: usize) -> [f32; 3] {
-        let i = ((b * self.size + g) * self.size + r) * 3;
-        [self.table[i], self.table[i + 1], self.table[i + 2]]
-    }
-
-    // Tetrahedral interpolation — the design doc's single LUT-sampling
-    // definition (same choice as the ICC engine): pick one of six
-    // tetrahedra by the ordering of the fractional offsets, blend its
-    // four vertices.
-    fn sample(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let n = (self.size - 1) as f32;
-        let pos = [rgb[0] * n, rgb[1] * n, rgb[2] * n];
-        let i0 = [
-            (pos[0] as usize).min(self.size - 2),
-            (pos[1] as usize).min(self.size - 2),
-            (pos[2] as usize).min(self.size - 2),
-        ];
-        let f = [
-            pos[0] - i0[0] as f32,
-            pos[1] - i0[1] as f32,
-            pos[2] - i0[2] as f32,
-        ];
-        let v = |dr: usize, dg: usize, db: usize| self.entry(i0[0] + dr, i0[1] + dg, i0[2] + db);
-        let (fr, fg, fb) = (f[0], f[1], f[2]);
-        // (w1, vertex1), (w2, vertex2), (w3, vertex3) between c000 and c111.
-        let (w1, e1, w2, e2, w3, e3) = if fr > fg {
-            if fg > fb {
-                (fr, v(1, 0, 0), fg, v(1, 1, 0), fb, v(1, 1, 1))
-            } else if fr > fb {
-                (fr, v(1, 0, 0), fb, v(1, 0, 1), fg, v(1, 1, 1))
-            } else {
-                (fb, v(0, 0, 1), fr, v(1, 0, 1), fg, v(1, 1, 1))
-            }
-        } else if fb > fg {
-            (fb, v(0, 0, 1), fg, v(0, 1, 1), fr, v(1, 1, 1))
-        } else if fb > fr {
-            (fg, v(0, 1, 0), fb, v(0, 1, 1), fr, v(1, 1, 1))
-        } else {
-            (fg, v(0, 1, 0), fr, v(1, 1, 0), fb, v(1, 1, 1))
-        };
-        let e0 = v(0, 0, 0);
-        let mut out = [0.0f32; 3];
-        for c in 0..3 {
-            out[c] = e0[c] + w1 * (e1[c] - e0[c]) + w2 * (e2[c] - e1[c]) + w3 * (e3[c] - e2[c]);
-        }
-        out
-    }
-}
-
-/// Parse a `.cube` LUT (Adobe/Resolve format) into a [`GradeOp::Lut3d`]
-/// (`LUT_3D_SIZE`) or [`GradeOp::Lut1d`] (`LUT_1D_SIZE`). Supports `TITLE`,
-/// `DOMAIN_MIN`/`DOMAIN_MAX` (only the standard `0 0 0` / `1 1 1` domain is
-/// accepted), comments, and blank lines. Written in-crate per the design
-/// doc's dependency policy.
-pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
-    let mut size: Option<u32> = None;
-    let mut size_1d: Option<u32> = None;
-    let mut table: Vec<f32> = Vec::new();
-    for (lineno, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let head = parts.next().expect("non-empty line");
-        match head {
-            "TITLE" => {}
-            "LUT_3D_SIZE" => {
-                let v: u32 = parts
-                    .next()
-                    .ok_or_else(|| format!("line {}: LUT_3D_SIZE missing value", lineno + 1))?
-                    .parse()
-                    .map_err(|e| format!("line {}: bad LUT_3D_SIZE: {e}", lineno + 1))?;
-                if v < 2 {
-                    return Err(format!("line {}: LUT_3D_SIZE must be >= 2", lineno + 1));
-                }
-                size = Some(v);
-            }
-            "DOMAIN_MIN" | "DOMAIN_MAX" => {
-                let want = if head == "DOMAIN_MIN" { 0.0 } else { 1.0 };
-                for _ in 0..3 {
-                    let v: f32 = parts
-                        .next()
-                        .ok_or_else(|| format!("line {}: {head} missing values", lineno + 1))?
-                        .parse()
-                        .map_err(|e| format!("line {}: bad {head}: {e}", lineno + 1))?;
-                    if v != want {
-                        return Err(format!(
-                            "line {}: only the standard 0..1 domain is supported",
-                            lineno + 1
-                        ));
-                    }
-                }
-            }
-            "LUT_1D_SIZE" => {
-                let v: u32 = parts
-                    .next()
-                    .ok_or_else(|| format!("line {}: LUT_1D_SIZE missing value", lineno + 1))?
-                    .parse()
-                    .map_err(|e| format!("line {}: bad LUT_1D_SIZE: {e}", lineno + 1))?;
-                if v < 2 {
-                    return Err(format!("line {}: LUT_1D_SIZE must be >= 2", lineno + 1));
-                }
-                size_1d = Some(v);
-            }
-            _ => {
-                // A data row: three floats (red varies fastest).
-                let mut row = [0.0f32; 3];
-                row[0] = head
-                    .parse()
-                    .map_err(|e| format!("line {}: bad value: {e}", lineno + 1))?;
-                for slot in row.iter_mut().skip(1) {
-                    *slot = parts
-                        .next()
-                        .ok_or_else(|| format!("line {}: expected 3 values", lineno + 1))?
-                        .parse()
-                        .map_err(|e| format!("line {}: bad value: {e}", lineno + 1))?;
-                }
-                table.extend_from_slice(&row);
-            }
-        }
-    }
-    match (size, size_1d) {
-        (Some(_), Some(_)) => Err(
-            "both LUT_3D_SIZE and LUT_1D_SIZE present; split the shaper into its own file".into(),
-        ),
-        (Some(size), None) => {
-            let expect = (size as usize).pow(3) * 3;
-            if table.len() != expect {
-                return Err(format!(
-                    "expected {expect} table values, got {}",
-                    table.len()
-                ));
-            }
-            Ok(GradeOp::Lut3d { size, table })
-        }
-        (None, Some(size)) => {
-            let expect = size as usize * 3;
-            if table.len() != expect {
-                return Err(format!(
-                    "expected {expect} table values, got {}",
-                    table.len()
-                ));
-            }
-            Ok(GradeOp::Lut1d { size, table })
-        }
-        (None, None) => Err("missing LUT_3D_SIZE or LUT_1D_SIZE".into()),
-    }
-}
-
 // Decode RGB to linear light, run `f`, re-encode. The encode clamps to
 // `0..=1` (negative / >1 linear values have no encoded representation), which
 // is where linear-op headroom lands back in range — except the scene-referred
@@ -816,90 +519,6 @@ fn for_each_rgb_linear(surface: &mut GradeSurface, n: usize, mut f: impl FnMut(&
         px[0] = trc_encode(space, rgb[0]);
         px[1] = trc_encode(space, rgb[1]);
         px[2] = trc_encode(space, rgb[2]);
-    }
-}
-
-/// Fritsch–Carlson monotone piecewise-cubic interpolation: passes through
-/// every control point, never overshoots, and is flat outside the endpoints.
-/// Fewer than 2 points degenerate to identity / a constant.
-pub struct MonotoneSpline {
-    xs: Vec<f32>,
-    ys: Vec<f32>,
-    tangents: Vec<f32>,
-}
-
-impl MonotoneSpline {
-    pub fn new(points: &[[f32; 2]]) -> Self {
-        let mut pts: Vec<[f32; 2]> = points.to_vec();
-        pts.sort_by(|a, b| a[0].partial_cmp(&b[0]).expect("finite control points"));
-        let xs: Vec<f32> = pts.iter().map(|p| p[0]).collect();
-        let ys: Vec<f32> = pts.iter().map(|p| p[1]).collect();
-        let n = xs.len();
-        let mut tangents = vec![0.0f32; n];
-        if n >= 2 {
-            // Secant slopes, then Fritsch–Carlson tangent limiting.
-            let d: Vec<f32> = (0..n - 1)
-                .map(|i| (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]).max(1e-6))
-                .collect();
-            tangents[0] = d[0];
-            tangents[n - 1] = d[n - 2];
-            for i in 1..n - 1 {
-                tangents[i] = if d[i - 1] * d[i] <= 0.0 {
-                    0.0
-                } else {
-                    (d[i - 1] + d[i]) / 2.0
-                };
-            }
-            for i in 0..n - 1 {
-                if d[i] == 0.0 {
-                    tangents[i] = 0.0;
-                    tangents[i + 1] = 0.0;
-                } else {
-                    let a = tangents[i] / d[i];
-                    let b = tangents[i + 1] / d[i];
-                    let s = a * a + b * b;
-                    if s > 9.0 {
-                        let t = 3.0 / s.sqrt();
-                        tangents[i] = t * a * d[i];
-                        tangents[i + 1] = t * b * d[i];
-                    }
-                }
-            }
-        }
-        Self { xs, ys, tangents }
-    }
-
-    pub fn eval(&self, x: f32) -> f32 {
-        let n = self.xs.len();
-        if n == 0 {
-            return x; // identity when no points are set
-        }
-        if n == 1 || x <= self.xs[0] {
-            return if x <= self.xs[0] {
-                self.ys[0]
-            } else {
-                self.ys[n - 1]
-            };
-        }
-        if x >= self.xs[n - 1] {
-            return self.ys[n - 1];
-        }
-        // The segment with xs[i] <= x < xs[i+1].
-        let mut i = 0;
-        while i + 2 < n && x >= self.xs[i + 1] {
-            i += 1;
-        }
-        let h = (self.xs[i + 1] - self.xs[i]).max(1e-6);
-        let t = (x - self.xs[i]) / h;
-        let (t2, t3) = (t * t, t * t * t);
-        let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
-        let h10 = t3 - 2.0 * t2 + t;
-        let h01 = -2.0 * t3 + 3.0 * t2;
-        let h11 = t3 - t2;
-        h00 * self.ys[i]
-            + h10 * h * self.tangents[i]
-            + h01 * self.ys[i + 1]
-            + h11 * h * self.tangents[i + 1]
     }
 }
 
@@ -1075,21 +694,5 @@ mod tests {
         assert!(parse_cube("0 0 0\n").is_err()); // no size
         assert!(parse_cube("LUT_1D_SIZE 2\n0 0 0\n").is_err()); // short 1D table
         assert!(parse_cube("LUT_1D_SIZE 2\nLUT_3D_SIZE 2\n").is_err()); // both sizes
-    }
-
-    #[test]
-    fn monotone_spline_passes_through_points_and_never_overshoots() {
-        let pts = vec![[0.0, 0.0], [0.25, 0.6], [0.5, 0.65], [1.0, 1.0]];
-        let sp = MonotoneSpline::new(&pts);
-        for p in &pts {
-            assert!((sp.eval(p[0]) - p[1]).abs() < 1e-6);
-        }
-        let mut prev = -1.0;
-        for i in 0..=1000 {
-            let y = sp.eval(i as f32 / 1000.0);
-            assert!(y >= prev - 1e-6, "monotone");
-            assert!((0.0..=1.0).contains(&y), "no overshoot");
-            prev = y;
-        }
     }
 }
