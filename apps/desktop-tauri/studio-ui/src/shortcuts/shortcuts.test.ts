@@ -116,6 +116,15 @@ describe("mask-edit M10 bindings", () => {
   });
 });
 
+describe("mask-edit M11 bindings", () => {
+  it("flips the fill / feather dialog combos to ready", () => {
+    for (const id of ["fill_dialog", "feather_dialog"]) {
+      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      expect(b?.status, id).toBe("ready");
+    }
+  });
+});
+
 describe("scope stack dispatch", () => {
   const bindings = (id: string): ShortcutBinding[] => [
     { id, combo: "b", status: "ready", hint: "" },

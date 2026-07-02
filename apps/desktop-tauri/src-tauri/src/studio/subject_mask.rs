@@ -822,6 +822,26 @@ fn apply_queued_operation(
             }
             operations.push(json!({ "type": "delete" }));
         }
+        Some("fill") => {
+            // PS Fill dialog (M11): flood the layer at an opacity — `add`
+            // lerps toward on, `subtract` scales toward off. Mirrors the
+            // proxy `fillCoverage` in `maskMorphology.ts`.
+            let a = (amount.unwrap_or(100.0) / 100.0).clamp(0.0, 1.0);
+            let subtract = op.get("mode").and_then(Value::as_str) == Some("subtract");
+            for p in mask.pixels_mut() {
+                let v = f64::from(p.0[0]);
+                p.0[0] = if subtract {
+                    (v * (1.0 - a)).round() as u8
+                } else {
+                    (v + (255.0 - v) * a).round().clamp(0.0, 255.0) as u8
+                };
+            }
+            operations.push(json!({
+                "type": "fill",
+                "mode": if subtract { "subtract" } else { "add" },
+                "opacity": a,
+            }));
+        }
         Some("fill_holes") => {
             fill_holes(mask);
             operations.push(json!({ "type": "fill_holes" }));
@@ -2078,6 +2098,53 @@ mod tests {
         let mut none = solid(32, 32, MASK_OFF);
         apply_edit_paths(&image, &mut none, Some(&doc), 24, &mut Vec::new());
         assert!(none.as_raw().iter().all(|&px| px == MASK_OFF));
+    }
+
+    #[test]
+    fn fill_op_floods_at_an_opacity() {
+        let image = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        // 100% add fill ≡ select all.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "fill" }] }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_ON));
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("fill")));
+
+        // 50% add on an empty layer lands halfway (mirrors the proxy).
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "fill", "amount": 50 }] }
+        ]});
+        let mut half = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut half, Some(&doc), 24, &mut Vec::new());
+        assert!(half.as_raw().iter().all(|&px| px == 128));
+
+        // 50% subtract on a full mask scales it down to half.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [
+                { "type": "select_all" },
+                { "type": "fill", "mode": "subtract", "amount": 50 }
+            ] }
+        ]});
+        let mut sub = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut sub, Some(&doc), 24, &mut Vec::new());
+        assert!(sub.as_raw().iter().all(|&px| px == 128));
+
+        // 100% subtract ≡ delete; 0% is the identity.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [
+                { "type": "select_all" },
+                { "type": "fill", "mode": "subtract", "amount": 100 },
+                { "type": "fill", "amount": 0 }
+            ] }
+        ]});
+        let mut wiped = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut wiped, Some(&doc), 24, &mut Vec::new());
+        assert!(wiped.as_raw().iter().all(|&px| px == MASK_OFF));
     }
 
     #[test]

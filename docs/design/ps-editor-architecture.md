@@ -125,6 +125,15 @@ none at the end) into the mask — `add` unions it in, Alt-drag records
 `subtract` (cuts it away). A revisable history step, replayed identically by
 the proxy (`fillGradient`) and the Rust run (`fill_gradient`).
 
+**M11 — Remaining small PS commands.** `Shift+F5` fill dialog: a mode
+(add / subtract) + opacity panel that records a `fill` op — flooding the
+active layer at the opacity (100% add ≡ select all, 100% subtract ≡ delete,
+but as one revisable history step), replayed identically by the proxy
+(`fillCoverage`) and the Rust run. `Shift+F6` feather dialog: opens the
+feather preview lane (set the radius on the amount slider, preview, Apply)
+recording the existing revisable `feather` op. Both combos flip from
+`planned` to `ready`.
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product

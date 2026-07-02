@@ -150,6 +150,34 @@ describe("maskMorphology preview primitives", () => {
     expect(area(none)).toBe(0);
   });
 
+  it("fill op floods at an opacity: add lerps up, subtract scales down (M11)", () => {
+    const dims = { w: 32, h: 32 };
+    const at1 = { proxyWidth: 32 };
+    // 100% add fill ≡ select all.
+    const full = buildProxyMask(doc([{ type: "fill" }]), dims, at1).mask;
+    expect(area(full)).toBe(32 * 32);
+    // 50% add on an empty layer lands halfway.
+    const half = buildProxyMask(doc([{ type: "fill", amount: 50 }]), dims, at1).mask;
+    expect(half.data[0]).toBe(128);
+    // 50% subtract on a full mask scales it down to half.
+    const sub = buildProxyMask(
+      doc([{ type: "select_all" }, { type: "fill", mode: "subtract", amount: 50 }]),
+      dims,
+      at1,
+    ).mask;
+    expect(sub.data[0]).toBe(128);
+    // 100% subtract ≡ delete.
+    const wiped = buildProxyMask(
+      doc([{ type: "select_all" }, { type: "fill", mode: "subtract", amount: 100 }]),
+      dims,
+      at1,
+    ).mask;
+    expect(area(wiped)).toBe(0);
+    // 0% is the identity.
+    const noop = buildProxyMask(doc([{ type: "select_all" }, { type: "fill", amount: 0 }]), dims, at1).mask;
+    expect(area(noop)).toBe(32 * 32);
+  });
+
   it("applyOp select_all fills the canvas and delete clears it (M9)", () => {
     const base = filledSquare(30, 10);
     expect(area(applyOp(base, "select_all", 0))).toBe(30 * 30);
