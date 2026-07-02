@@ -63,8 +63,8 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "adjust_levels", combo: "ctrl+shift+l", status: "ready", hint: "Add a Levels adjustment layer (PS Levels is Ctrl+L; L is the lasso here)." },
   { id: "adjust_curve", combo: "ctrl+shift+m", status: "ready", hint: "Add a Curve adjustment layer (PS Curves is Ctrl+M; M is the marquee here)." },
   { id: "duplicate", combo: "ctrl+j", status: "ready", hint: "Duplicate the active layer via copy." },
-  { id: "fill_dialog", combo: "shift+f5", status: "planned", hint: "Fill dialog (planned)." },
-  { id: "feather_dialog", combo: "shift+f6", status: "planned", hint: "Feather dialog (planned; feather is a toolbar op today)." },
+  { id: "fill_dialog", combo: "shift+f5", status: "ready", hint: "Fill dialog: flood the layer at an opacity (add or subtract), as a revisable step (PS Fill)." },
+  { id: "feather_dialog", combo: "shift+f6", status: "ready", hint: "Feather dialog: set the radius, preview, then apply feather as a revisable step (PS Feather)." },
   { id: "delete_selection", combo: "delete", status: "ready", hint: "Delete the selection (as a history step)." },
   // View / navigation.
   { id: "pan_space", combo: "space", status: "ready", hint: "Hold Space to pan the zoomed view with any tool." },

@@ -189,6 +189,21 @@ function fillGradient(mask: ProxyMask, op: MaskOperation, scale: number): void {
   }
 }
 
+/**
+ * Flood the whole layer at an opacity (M11 fill dialog): `add` lerps every
+ * pixel toward 255 by `amount`% coverage, `subtract` scales it down by the
+ * same coverage. At 100% these are select-all / delete, but recorded as a
+ * revisable `fill` step. Mirrors the Rust `fill_coverage`.
+ */
+function fillCoverage(mask: ProxyMask, op: MaskOperation): void {
+  const a = clamp((op.amount ?? 100) / 100, 0, 1);
+  const subtract = op.mode === "subtract";
+  for (let i = 0; i < mask.data.length; i++) {
+    const v = mask.data[i];
+    mask.data[i] = subtract ? Math.round(v * (1 - a)) : Math.round(v + (255 - v) * a);
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -475,6 +490,9 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       fillMarquee(mask, op, scale);
     } else if (op.type === "gradient") {
       fillGradient(mask, op, scale);
+    } else if (op.type === "fill") {
+      // The amount is an opacity (%), not a px radius — no proxy scaling.
+      fillCoverage(mask, op);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {

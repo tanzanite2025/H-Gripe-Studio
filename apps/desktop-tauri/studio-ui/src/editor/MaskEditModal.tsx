@@ -195,6 +195,9 @@ export function MaskEditModal({
   // (null ⇒ Apply appends a new `transform` op).
   const [transformDraft, setTransformDraft] = useState<TransformParams | null>(null);
   const [editingTransform, setEditingTransform] = useState<number | null>(null);
+  // Fill dialog (M11, Shift+F5): a draft of mode + opacity; Apply records a
+  // revisable `fill` op.
+  const [fillDraft, setFillDraft] = useState<{ mode: "add" | "subtract"; opacity: number } | null>(null);
 
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
@@ -289,6 +292,8 @@ export function MaskEditModal({
   stateRef.current = state;
   const transformDraftRef = useRef<TransformParams | null>(null);
   transformDraftRef.current = transformDraft;
+  const fillDraftRef = useRef<{ mode: "add" | "subtract"; opacity: number } | null>(null);
+  fillDraftRef.current = fillDraft;
 
   const startPathEdit = (index: number) => {
     const op = activeOps(state.current)[index];
@@ -397,6 +402,12 @@ export function MaskEditModal({
     zoom_100: () => setView((v) => zoom100(v, dims.w, ...viewBase())),
     adjust_levels: () => dispatch({ type: "layer_add_adjustment", adjType: "levels" }),
     adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
+    fill_dialog: () => setFillDraft({ mode: "add", opacity: 100 }),
+    feather_dialog: () => {
+      // The feather "dialog" is the existing preview lane: pick the radius
+      // with the amount slider, then Apply commits a revisable `feather` op.
+      selectTool("feather");
+    },
     swap_mode: () => {
       if (toolId === "brush") setToolId("eraser");
       else if (toolId === "eraser") setToolId("brush");
@@ -415,6 +426,7 @@ export function MaskEditModal({
       // swallows the first Escape.
       if (editingPathRef.current != null) cancelPathEdit();
       else if (transformDraftRef.current) closeTransformPanel();
+      else if (fillDraftRef.current) setFillDraft(null);
       else if (penPendingRef.current) setPenAnchors([]);
       else onClose();
     },
@@ -1003,6 +1015,7 @@ export function MaskEditModal({
       const rotate = op.rotate ?? 0;
       return `transform Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}${scale !== 1 ? ` ×${scale}` : ""}${rotate !== 0 ? ` ∠${rotate}°` : ""}`;
     }
+    if (op.type === "fill") return `fill ${op.mode === "subtract" ? "subtract" : "add"} ${op.amount ?? 100}%`;
     return op.type;
   };
   const showAmount = useMemo(
@@ -1197,6 +1210,49 @@ export function MaskEditModal({
                   <output>{tolerance}</output>
                 </span>
               </label>
+            ) : null}
+
+            {fillDraft ? (
+              <div className="field mask-preview-actions">
+                <span>{t("mask.fillDialog")}</span>
+                <span className="slider-row">
+                  {(["add", "subtract"] as const).map((m) => (
+                    <button
+                      key={m}
+                      className={fillDraft.mode === m ? "active" : ""}
+                      onClick={() => setFillDraft((prev) => (prev ? { ...prev, mode: m } : prev))}
+                    >
+                      {t(m === "add" ? "mask.fillAdd" : "mask.fillSubtract")}
+                    </button>
+                  ))}
+                </span>
+                <label className="slider-row">
+                  <span>{t("mask.fillOpacity")}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={fillDraft.opacity}
+                    onChange={(e) =>
+                      setFillDraft((prev) => (prev ? { ...prev, opacity: Number(e.target.value) } : prev))
+                    }
+                  />
+                  <output>{fillDraft.opacity}</output>
+                </label>
+                <span className="slider-row">
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      dispatch({ type: "op", op: { type: "fill", mode: fillDraft.mode, amount: fillDraft.opacity } });
+                      setFillDraft(null);
+                    }}
+                  >
+                    {t("mask.fillApply")}
+                  </button>
+                  <button onClick={() => setFillDraft(null)}>{t("mask.fillCancel")}</button>
+                </span>
+                <small className="muted">{t("mask.fillHint")}</small>
+              </div>
             ) : null}
 
             {transformDraft ? (
