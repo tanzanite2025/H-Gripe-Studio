@@ -17,8 +17,8 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: auto 1fr 240px;
-  gap: 10px;
+  grid-template-columns: auto 1fr auto var(--mask-rail-w, 240px);
+  gap: 0 6px;
   padding: 10px;
 }
 /* PS toolbar rail: a flat dark column of borderless icon buttons. It never
@@ -140,7 +140,17 @@
   cursor: crosshair;
   display: block;
 }
+/* PS dock resize: the draggable gutter between the stage and the right rail. */
+.mask-rail-resize {
+  width: 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  border-radius: 3px;
+  touch-action: none;
+}
+.mask-rail-resize:hover { background: var(--ps-hover); }
 .mask-edit-controls {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -148,8 +158,10 @@
 }
 .mask-edit-controls .field { margin-top: 6px; }
 /* Screen-mode cycle (PS `F`): 1 hides the right panels, 2 leaves canvas only. */
-.mask-edit.mask-screen-1 .mask-edit-controls { display: none; }
+.mask-edit.mask-screen-1 .mask-edit-controls,
+.mask-edit.mask-screen-1 .mask-rail-resize { display: none; }
 .mask-edit.mask-screen-2 .mask-edit-controls,
+.mask-edit.mask-screen-2 .mask-rail-resize,
 .mask-edit.mask-screen-2 .mask-edit-tools { display: none; }
 /* PS-style right rail: two stacked tabbed panel groups, like PS's 属性 (top)
    and 图层 (bottom) docks — a dark tab strip on top of each group, one panel
@@ -178,6 +190,8 @@
   border-right: 1px solid var(--ps-dock-border);
   border-radius: 0;
   cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
 }
 .mask-panel-tabs button:hover { color: var(--text); }
 /* Active tab sits flush with the panel body, PS-style: same colour, no seam. */
@@ -187,32 +201,9 @@
   min-height: 0;
   overflow-y: auto;
 }
-/* Panels inside a tab group lose their own chrome — the group's tab strip
-   replaces the per-panel header. */
-.mask-panel-group .mask-panel {
-  border: none;
-  border-radius: 0;
-  background: transparent;
-}
-.mask-panel-group .mask-panel > header { display: none; }
-/* PS-style panel blocks on the right rail (tool options / layers / history / info). */
-.mask-panel {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-2);
-  padding: 0 8px 8px;
-}
-.mask-panel > header {
-  margin: 0 -8px 2px;
-  padding: 5px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text);
-  background: var(--ps-tab-strip);
-  border-bottom: 1px solid var(--border);
-  border-radius: 8px 8px 0 0;
-}
+/* A panel's tab-page body: headerless (the group's tab strip is the only
+   chrome); full-bleed lists inside offset the padding with -8px margins. */
+.mask-panel-body { padding: 0 8px 8px; }
 .mask-op-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .mask-op-chip {
   font-size: 11px;

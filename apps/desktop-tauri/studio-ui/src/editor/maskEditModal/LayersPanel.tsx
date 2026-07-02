@@ -1,10 +1,9 @@
-// Right rail — "Layers" panel block (M3): the layer stack (top first) plus
-// the active adjustment layer's properties.
+// Right rail — "Layers" panel block (M3): the layer stack (top first).
+// The active adjustment layer's parameters live in PropertiesPanel.
 
 import { useT } from "../../i18n";
-import type { AdjustmentType, LayerAdjustment, LayerBlend, MaskLayer } from "../../types/production";
+import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
-import { CurveEditor } from "./CurveEditor";
 
 interface LayersPanelProps {
   layers: readonly MaskLayer[];
@@ -12,23 +11,13 @@ interface LayersPanelProps {
   dispatch: MaskEditDispatch;
   /** Called before any layer switch/removal to drop an in-flight anchor edit. */
   onBeforeLayerChange: () => void;
-  activeAdjustment: LayerAdjustment | null;
-  patchAdjustment: (patch: Partial<LayerAdjustment>) => void;
 }
 
-export function LayersPanel({
-  layers,
-  active,
-  dispatch,
-  onBeforeLayerChange,
-  activeAdjustment,
-  patchAdjustment,
-}: LayersPanelProps) {
+export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   return (
-    <section className="mask-panel">
-      <header>{t("mask.layers", { count: layers.length })}</header>
+    <div className="mask-panel-body">
       {/* PS-style panel head: blend mode + opacity act on the active layer. */}
       <div className="mask-layer-head">
         <select
@@ -121,73 +110,6 @@ export function LayersPanel({
           <option value="brightness_contrast">{t("mask.adjBrightnessContrast")}</option>
         </select>
       </div>
-
-      {activeAdjustment ? (
-        <div className="field mask-preview-actions">
-          <span>
-            {t(
-              activeAdjustment.type === "levels"
-                ? "mask.adjLevels"
-                : activeAdjustment.type === "curve"
-                  ? "mask.adjCurve"
-                  : "mask.adjBrightnessContrast",
-            )}{" "}
-            <span className="muted">· {t("mask.adjustmentBadge")}</span>
-          </span>
-          {activeAdjustment.type === "levels" ? (
-            (
-              [
-                ["in_black", "mask.adjInBlack", 0, 255, 1, 0],
-                ["in_white", "mask.adjInWhite", 0, 255, 1, 255],
-                ["gamma", "mask.adjGamma", 0.1, 3, 0.05, 1],
-                ["out_black", "mask.adjOutBlack", 0, 255, 1, 0],
-                ["out_white", "mask.adjOutWhite", 0, 255, 1, 255],
-              ] as const
-            ).map(([key, label, min, max, step, dflt]) => (
-              <label key={key} className="slider-row">
-                <span>{t(label)}</span>
-                <input
-                  type="range"
-                  min={min}
-                  max={max}
-                  step={step}
-                  value={activeAdjustment[key] ?? dflt}
-                  onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
-                />
-                <output>{activeAdjustment[key] ?? dflt}</output>
-              </label>
-            ))
-          ) : activeAdjustment.type === "curve" ? (
-            <>
-              <CurveEditor
-                points={activeAdjustment.points}
-                onChange={(points) => patchAdjustment({ points })}
-              />
-              <small className="muted">{t("mask.curveHint")}</small>
-            </>
-          ) : (
-            (
-              [
-                ["brightness", "mask.adjBrightness"],
-                ["contrast", "mask.adjContrast"],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key} className="slider-row">
-                <span>{t(label)}</span>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={activeAdjustment[key] ?? 0}
-                  onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
-                />
-                <output>{activeAdjustment[key] ?? 0}</output>
-              </label>
-            ))
-          )}
-          <small className="muted">{t("mask.adjustmentHint")}</small>
-        </div>
-      ) : null}
-    </section>
+    </div>
   );
 }

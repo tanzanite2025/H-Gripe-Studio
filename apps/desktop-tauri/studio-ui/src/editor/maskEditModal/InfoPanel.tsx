@@ -13,8 +13,7 @@ interface InfoPanelProps {
 export function InfoPanel({ matteStrokes, points, count }: InfoPanelProps) {
   const t = useT();
   return (
-    <section className="mask-panel">
-      <header>{t("mask.panelInfo")}</header>
+    <div className="mask-panel-body">
       <div className="field">
         <span>{t("mask.mattingBand", { count: matteStrokes.length })}</span>
         <div className="mask-op-list">
@@ -50,6 +49,6 @@ export function InfoPanel({ matteStrokes, points, count }: InfoPanelProps) {
         <code>edit_paths</code>
         {t("mask.noteSuffix")}
       </small>
-    </section>
+    </div>
   );
 }

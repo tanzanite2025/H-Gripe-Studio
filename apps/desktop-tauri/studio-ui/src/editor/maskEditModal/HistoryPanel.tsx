@@ -35,8 +35,7 @@ interface HistoryPanelProps {
 export function HistoryPanel({ ops, dispatch, editingPath, startPathEdit, cancelPathEdit, editTransformStep }: HistoryPanelProps) {
   const t = useT();
   return (
-    <section className="mask-panel">
-      <header>{t("mask.history", { count: ops.length })}</header>
+    <div className="mask-panel-body">
       <div className="field">
         <div className="mask-history-list">
           {ops.length === 0 ? (
@@ -101,6 +100,6 @@ export function HistoryPanel({ ops, dispatch, editingPath, startPathEdit, cancel
           )}
         </div>
       </div>
-    </section>
+    </div>
   );
 }

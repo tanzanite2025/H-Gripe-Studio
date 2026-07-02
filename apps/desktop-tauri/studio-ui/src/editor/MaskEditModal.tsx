@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { generateThumbnail } from "../bridge/tauri";
 import {
   MASK_TOOLS,
@@ -47,7 +47,8 @@ import {
   paintStroke,
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
-import { PanelDock } from "./maskEditModal/PanelDock";
+import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
+import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
 import "./maskEditModal/maskEditModal.css";
 import { MaskToolbar } from "./maskEditModal/MaskToolbar";
 import { MaskStage } from "./maskEditModal/MaskStage";
@@ -55,6 +56,7 @@ import { ToolOptionsPanel } from "./maskEditModal/ToolOptionsPanel";
 import { LayersPanel } from "./maskEditModal/LayersPanel";
 import { HistoryPanel } from "./maskEditModal/HistoryPanel";
 import { InfoPanel } from "./maskEditModal/InfoPanel";
+import { PropertiesPanel } from "./maskEditModal/PropertiesPanel";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -78,6 +80,18 @@ interface MaskEditModalProps {
 
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
+
+// Default right-rail dock layout, mirroring PS: a 属性-style top group
+// (tool options / properties / info) over a growing 图层 group (layers /
+// history). Users re-dock tabs by dragging; the result persists.
+const DOCK_STORAGE_KEY = "hgripe.studio.maskDock.v1";
+const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
+  groups: [
+    { tabs: ["options", "properties", "info"], active: "options" },
+    { tabs: ["layers", "history"], active: "layers" },
+  ],
+  railWidth: 240,
+};
 
 export function MaskEditModal({
   title,
@@ -116,10 +130,9 @@ export function MaskEditModal({
   // Fill dialog (M11, Shift+F5): a draft of mode + opacity; Apply records a
   // revisable `fill` op.
   const [fillDraft, setFillDraft] = useState<FillDraft | null>(null);
-  // PS-style right rail: two stacked tabbed panel groups (top: properties /
-  // info, bottom: layers / history — mirroring PS's 属性 and 图层 groups).
-  const [topTab, setTopTab] = useState<"options" | "info">("options");
-  const [bottomTab, setBottomTab] = useState<"layers" | "history">("layers");
+  // PS-style right rail: tabbed dock groups driven by a persisted layout
+  // (drag a tab to re-dock it; drag the rail edge to resize).
+  const dock = useDockLayout(DOCK_STORAGE_KEY, DEFAULT_DOCK_LAYOUT);
 
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
@@ -912,7 +925,7 @@ export function MaskEditModal({
           </div>
         </div>
 
-        <div className="mask-edit-body">
+        <div className="mask-edit-body" style={{ "--mask-rail-w": `${dock.layout.railWidth}px` } as CSSProperties}>
           <MaskToolbar toolId={toolId} onToolClick={onToolClick} />
 
           <MaskStage
@@ -926,12 +939,18 @@ export function MaskEditModal({
             onPointerUp={onPointerUp}
           />
 
+          <div
+            className="mask-rail-resize"
+            role="separator"
+            aria-orientation="vertical"
+            title={t("mask.railResize")}
+            onPointerDown={dock.startRailResize}
+          />
+
           <div className="mask-edit-controls">
-            <PanelDock
-              active={topTab}
-              onSelect={setTopTab}
-              panels={[
-                {
+            {(() => {
+              const panelDefs: Record<string, DockPanel> = {
+                options: {
                   id: "options",
                   label: t("mask.panelOptions"),
                   content: (
@@ -978,20 +997,17 @@ export function MaskEditModal({
             />
                   ),
                 },
-                {
+                properties: {
+                  id: "properties",
+                  label: t("mask.panelProperties"),
+                  content: <PropertiesPanel adjustment={activeAdjustment} patchAdjustment={patchAdjustment} />,
+                },
+                info: {
                   id: "info",
                   label: t("mask.panelInfo"),
                   content: <InfoPanel matteStrokes={matteStrokes} points={points} count={count} />,
                 },
-              ]}
-            />
-
-            <PanelDock
-              grow
-              active={bottomTab}
-              onSelect={setBottomTab}
-              panels={[
-                {
+                layers: {
                   id: "layers",
                   label: t("mask.layers", { count: layers.length }),
                   content: (
@@ -1002,12 +1018,10 @@ export function MaskEditModal({
               onBeforeLayerChange={() => {
                 if (editingPath != null) cancelPathEdit();
               }}
-              activeAdjustment={activeAdjustment}
-              patchAdjustment={patchAdjustment}
             />
                   ),
                 },
-                {
+                history: {
                   id: "history",
                   label: t("mask.history", { count: ops.length }),
                   content: (
@@ -1025,8 +1039,18 @@ export function MaskEditModal({
             />
                   ),
                 },
-              ]}
-            />
+              };
+              return dock.layout.groups.map((group, gi) => (
+                <PanelDock
+                  key={gi}
+                  grow={gi === dock.layout.groups.length - 1}
+                  active={group.active}
+                  onSelect={dock.onSelect}
+                  onTabDrop={(id, index) => dock.onTabDrop(id, gi, index)}
+                  panels={group.tabs.flatMap((id) => panelDefs[id] ?? [])}
+                />
+              ));
+            })()}
           </div>
         </div>
       </div>
