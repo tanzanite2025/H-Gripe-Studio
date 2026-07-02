@@ -50,16 +50,23 @@ pub fn apply(doc: &GradeDoc, surface: &mut GradeSurface) {
 // One layer: grade a copy of the accumulated result, gate by
 // qualifier × mask, composite back.
 fn apply_layer(layer: &GradeLayer, surface: &mut GradeSurface) {
+    apply_layer_masked(layer, surface, layer.mask.as_deref());
+}
+
+// `apply_layer` with the layer mask supplied separately, so band-parallel
+// callers can pass a sub-slice of the full-frame mask without cloning the
+// layer (and its op tables).
+fn apply_layer_masked(layer: &GradeLayer, surface: &mut GradeSurface, layer_mask: Option<&[f32]>) {
     let gate = layer.qualifier.as_ref().map(|q| {
         let mut g = q.gate(surface);
-        if let Some(m) = layer.mask.as_deref() {
+        if let Some(m) = layer_mask {
             for (gv, mv) in g.iter_mut().zip(m) {
                 *gv *= mv.clamp(0.0, 1.0);
             }
         }
         g
     });
-    let mask = gate.as_deref().or(layer.mask.as_deref());
+    let mask = gate.as_deref().or(layer_mask);
     let mut graded = surface.clone();
     for op in &layer.ops {
         apply_op(&mut graded, op);
@@ -100,14 +107,11 @@ pub fn apply_parallel(doc: &GradeDoc, surface: &mut GradeSurface) {
                 if !layer.visible {
                     continue;
                 }
-                let band_layer = GradeLayer {
-                    mask: layer
-                        .mask
-                        .as_deref()
-                        .map(|m| m[start_px..start_px + rows * w].to_vec()),
-                    ..layer.clone()
-                };
-                apply_layer(&band_layer, &mut band_surface);
+                let band_mask = layer
+                    .mask
+                    .as_deref()
+                    .map(|m| &m[start_px..start_px + rows * w]);
+                apply_layer_masked(layer, &mut band_surface, band_mask);
             }
             chunk.copy_from_slice(&band_surface.data);
         });
