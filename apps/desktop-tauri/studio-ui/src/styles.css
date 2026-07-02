@@ -1053,7 +1053,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-edit-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   overflow-y: auto;
 }
 .mask-edit-controls .field { margin-top: 6px; }
@@ -1068,8 +1068,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid #0c0e13;
+  border-radius: 0;
   background: var(--panel-2);
   overflow: hidden;
 }
@@ -1077,21 +1077,20 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-panel-tabs {
   display: flex;
   background: #11131a;
-  border-bottom: 1px solid var(--border);
 }
 .mask-panel-tabs button {
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 400;
   background: transparent;
   color: var(--muted);
   border: none;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid #0c0e13;
   border-radius: 0;
   cursor: pointer;
 }
 .mask-panel-tabs button:hover { color: var(--text); }
+/* Active tab sits flush with the panel body, PS-style: same colour, no seam. */
 .mask-panel-tabs button.active { background: var(--panel-2); color: var(--text); }
 .mask-panel-group-body {
   flex: 1;
@@ -1142,26 +1141,22 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-history-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 220px;
-  overflow-y: auto;
+  margin: 0 -8px;
 }
 .mask-history-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(91, 140, 255, 0.08);
-  border: 1px solid rgba(91, 140, 255, 0.2);
-  color: var(--accent);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #0c0e13;
+  color: var(--text);
 }
 .mask-history-row.disabled { opacity: 0.45; }
-.mask-history-row.editing {
-  border-color: rgba(120, 230, 140, 0.6);
-  background: rgba(120, 230, 140, 0.1);
-}
+.mask-history-row.editing { background: rgba(255, 255, 255, 0.14); }
 .mask-history-label {
   flex: 1;
   min-width: 0;
@@ -1189,31 +1184,69 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: inherit;
 }
 
-/* Layers panel (M3): one row per document layer, top of the stack first. */
+/* Layers panel — PS-style: a blend/opacity head row, then full-bleed layer
+   rows (eye cell | thumbnail | name), grey highlight for the active row. */
+.mask-layer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #0c0e13;
+}
+.mask-layer-head .mask-layer-blend { flex: 1; min-width: 0; padding: 3px 4px; }
+.mask-layer-opacity-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .mask-layer-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 160px;
-  overflow-y: auto;
+  margin: 0 -8px;
 }
 .mask-layer-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(91, 140, 255, 0.08);
-  border: 1px solid rgba(91, 140, 255, 0.2);
-  color: var(--accent);
+  gap: 0;
+  font-size: 12px;
+  padding: 0 6px 0 0;
+  min-height: 34px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #0c0e13;
+  color: var(--text);
   cursor: pointer;
 }
-.mask-layer-row.active {
-  border-color: rgba(120, 230, 140, 0.6);
-  background: rgba(120, 230, 140, 0.1);
+.mask-layer-row.active { background: rgba(255, 255, 255, 0.14); }
+.mask-layer-row.hidden .mask-layer-name,
+.mask-layer-row.hidden .mask-layer-thumb { opacity: 0.45; }
+.mask-layer-visible {
+  width: 26px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #0c0e13 !important;
+  border-radius: 0 !important;
 }
-.mask-layer-row.hidden { opacity: 0.45; }
+.mask-layer-thumb {
+  width: 26px;
+  height: 26px;
+  margin: 4px 8px 4px 6px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+  background:
+    repeating-conic-gradient(#3a3d46 0% 25%, #23252d 0% 50%) 50% / 10px 10px;
+  border: 1px solid #4a4d57;
+}
 .mask-layer-name {
   flex: 1;
   min-width: 0;
@@ -1227,26 +1260,32 @@ button:disabled { opacity: 0.6; cursor: default; }
   line-height: 1.4;
   background: transparent;
   border: none;
-  color: inherit;
+  color: var(--muted);
   cursor: pointer;
 }
 .mask-layer-row button:hover:not(:disabled) { color: #fff; }
 .mask-layer-row button:disabled { opacity: 0.4; cursor: default; }
+.mask-layer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 0;
+}
 .mask-layer-blend {
   font-size: 11px;
   padding: 0 2px;
   background: #11131a;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 2px;
   color: inherit;
 }
 .mask-layer-opacity {
-  width: 40px;
+  width: 44px;
   font-size: 11px;
-  padding: 0 4px;
+  padding: 2px 4px;
   background: #11131a;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 2px;
   color: inherit;
 }
 
