@@ -27,6 +27,7 @@ use super::persist::studio_reject_unsafe_basename;
 use super::pixel_ops;
 use super::studio_image;
 use super::subject_matte;
+use super::subject_sam2::Sam2Variant;
 use super::subject_segment::{segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest};
 use super::working_image::WorkingImage;
 
@@ -117,7 +118,8 @@ pub(super) fn execute_studio_subject_mask(
             Some(auto) => {
                 let prompt = optional(studio_value_to_string(inputs.get("prompt")));
                 let points = parse_point_prompts(inputs.get("edit_paths"));
-                let segmenter = segmenter_for_mode(auto, &points);
+                let sam2_variant = Sam2Variant::from_param(&param_or(node, "sam2_variant", "tiny"));
+                let segmenter = segmenter_for_mode(auto, &points, sam2_variant);
                 let result = segmenter.segment(&SegmentRequest {
                     image: &image,
                     mode: auto,

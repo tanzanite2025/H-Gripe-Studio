@@ -60,7 +60,7 @@ concept), with the CPU path remaining the default and fallback.
 | Trimap hand-off to Refine Mask Edge | ✅ Landed | `trimap` output → Refine `trimap` input protects the soft-alpha band. |
 | **`auto_person` portrait-matting net** | 🟡 Partial | The **`u2net_human_seg`** human-segmentation net (Apache-2.0, ~168 MB, env `HGRIPE_PERSON_MODEL` / `scripts/fetch-person-model.*`) slots into `segmenter_for_mode` behind the same trait: `auto_person` leads with it (so the matte tracks people, not generic saliency), then falls through to BiRefNet → U²-Netp → `builtin-cpu`; other modes keep the generic priority. Still ⛔: bundling the weight in the installer (downloadable big tier today). |
 | **Pen / Lasso (bezier paths)** | ✅ Landed | Pen (click anchors, bezier-capable) / lasso (freehand) tools in the Mask-Edit modal; the backend flattens each closed path (cubic bezier where handles are present), rasterises it (even-odd scanline fill) and boolean-combines it with the mask (`add` / `subtract` / `intersect`). The proxy preview folds paths in too. |
-| **SAM 2 multi-variant XY compare (T/S/B/L)** | ⛔ Planned | Only `sam2 tiny` is fetched today; multi-weight comparison not wired. |
+| **SAM 2 multi-variant XY compare (T/S/B/L)** | ✅ Landed | The node's `sam2_variant` param selects **tiny / small / base_plus / large**; `scripts/fetch-sam2.*` take a variant list (`all` fetches every one, sha256-checked). A missing weight falls back to tiny, and `detected_subjects` records the `variant` actually used, so two nodes on the same prompts compare variants side by side (XY). |
 
 ## 4. Executor-split / management surfaces — [`design/executor-split-and-psd-chain-hardening.md`](design/executor-split-and-psd-chain-hardening.md)
 

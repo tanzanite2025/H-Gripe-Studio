@@ -298,21 +298,28 @@ model id in `matte_report`.
      always degrades to `builtin-cpu`, so the modes always work. `matte_report`
      carries `provider` and `detected_subjects` (`label` / `bbox` /
      `coverage`).
-   - *Interactive (SAM 2):* a two-stage **SAM 2 tiny** backend (encoder +
-     prompt decoder, Apache-2.0, ~154 MB combined) implements the same trait
-     (`provider: sam2`). `segmenter_for_mode(mode, points)` is point-aware: a
-     non-empty `edit_paths.points` routes to SAM 2, otherwise the salient
-     cascade runs. The frontend `Point (SAM 2)` tool records those clicks into
-     `edit_paths.points` (PR-4b), so the node's click-to-select drives the model.
+   - *Interactive (SAM 2):* a two-stage **SAM 2** backend (encoder + prompt
+     decoder, Apache-2.0; tiny is ~154 MB combined) implements the same trait
+     (`provider: sam2`). `segmenter_for_mode(mode, points, sam2_variant)` is
+     point-aware: a non-empty `edit_paths.points` routes to SAM 2, otherwise
+     the salient cascade runs. The frontend `Point (SAM 2)` tool records those
+     clicks into `edit_paths.points` (PR-4b), so the node's click-to-select
+     drives the model. The node's **`sam2_variant`** param picks the hiera
+     model size — `tiny` (default) / `small` / `base_plus` / `large`; a
+     variant whose weight is missing falls back to tiny, and
+     `detected_subjects` records the `variant` actually used, so two nodes on
+     the same prompts compare variants side by side (XY).
    - *Weight sourcing:* no `.onnx` is committed to git. **u2netp** (Apache-2.0,
      ~4.6 MB) is the *bundled default* — fetched at package time
      (`scripts/fetch-subject-model.*`) and shipped via `tauri.conf.json`
      `bundle.resources` under `<install>/resources/models/`. **BiRefNet lite**
      (MIT, ~224 MB), **U²-Net human-seg** (Apache-2.0, ~168 MB, `auto_person`),
-     **SAM 2 tiny** (Apache-2.0) and **ViTMatte small** (Apache-2.0, ~104 MB)
-     are the *downloadable big tier* — not bundled by default;
+     **SAM 2** (Apache-2.0, four hiera variants: tiny ~154 MB → large ~910 MB
+     combined) and **ViTMatte small** (Apache-2.0, ~104 MB) are the
+     *downloadable big tier* — not bundled by default;
      `scripts/fetch-birefnet.*` / `scripts/fetch-person-model.*` /
-     `scripts/fetch-sam2.*` / `scripts/fetch-vitmatte.*` place them in the same
+     `scripts/fetch-sam2.*` (takes a variant list, `all` for every one) /
+     `scripts/fetch-vitmatte.*` place them in the same
      dir to ship or test with. `HGRIPE_SUBJECT_MODEL` / `HGRIPE_BIREFNET_MODEL`
      / `HGRIPE_PERSON_MODEL` / `HGRIPE_SAM2_ENCODER` / `HGRIPE_SAM2_DECODER` /
      `HGRIPE_VITMATTE_MODEL` env vars override the paths for dev / tests.
