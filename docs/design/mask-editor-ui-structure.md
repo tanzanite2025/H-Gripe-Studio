@@ -25,6 +25,7 @@ src/editor/
     ToolOptionsPanel.tsx     ← per-tool options (top dock)
     InfoPanel.tsx            ← mask info (top dock)
     LayersPanel.tsx          ← PS-style layers panel (bottom dock)
+    CurveEditor.tsx          ← draggable tone-curve grid (curve adjustment)
     HistoryPanel.tsx         ← history steps (bottom dock)
     toolIcons.tsx            ← SVG tool icons
     maskEditModal.css        ← ALL mask-editor styles + PS design tokens

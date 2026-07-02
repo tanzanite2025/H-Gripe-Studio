@@ -873,22 +873,6 @@ export function MaskEditModal({
       adjustment: { ...activeAdjustment, ...patch },
     });
   };
-  // The curve panel exposes three fixed control points (shadows / midtones /
-  // highlights at x = 0 / 128 / 255); a stored point list is read best-effort.
-  const curveY = (slot: 0 | 1 | 2): number => {
-    const defaults = [0, 128, 255] as const;
-    const p = activeAdjustment?.points?.[slot];
-    return typeof p?.[1] === "number" ? Math.round(p[1]) : defaults[slot];
-  };
-  const setCurveY = (slot: 0 | 1 | 2, y: number) => {
-    const pts: [number, number][] = [
-      [0, curveY(0)],
-      [128, curveY(1)],
-      [255, curveY(2)],
-    ];
-    pts[slot] = [pts[slot][0], Math.min(Math.max(y, 0), 255)];
-    patchAdjustment({ points: pts });
-  };
 
   const showAmount = useMemo(
     () => tool.kind === "global" || ["grow", "shrink", "feather", "smooth"].includes(toolId),
@@ -1020,8 +1004,6 @@ export function MaskEditModal({
               }}
               activeAdjustment={activeAdjustment}
               patchAdjustment={patchAdjustment}
-              curveY={curveY}
-              setCurveY={setCurveY}
             />
                   ),
                 },

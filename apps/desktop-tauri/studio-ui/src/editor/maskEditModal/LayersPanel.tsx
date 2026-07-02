@@ -4,6 +4,7 @@
 import { useT } from "../../i18n";
 import type { AdjustmentType, LayerAdjustment, LayerBlend, MaskLayer } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
+import { CurveEditor } from "./CurveEditor";
 
 interface LayersPanelProps {
   layers: readonly MaskLayer[];
@@ -13,8 +14,6 @@ interface LayersPanelProps {
   onBeforeLayerChange: () => void;
   activeAdjustment: LayerAdjustment | null;
   patchAdjustment: (patch: Partial<LayerAdjustment>) => void;
-  curveY: (slot: 0 | 1 | 2) => number;
-  setCurveY: (slot: 0 | 1 | 2, y: number) => void;
 }
 
 export function LayersPanel({
@@ -24,8 +23,6 @@ export function LayersPanel({
   onBeforeLayerChange,
   activeAdjustment,
   patchAdjustment,
-  curveY,
-  setCurveY,
 }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
@@ -161,25 +158,13 @@ export function LayersPanel({
               </label>
             ))
           ) : activeAdjustment.type === "curve" ? (
-            (
-              [
-                [0, "mask.adjShadows"],
-                [1, "mask.adjMidtones"],
-                [2, "mask.adjHighlights"],
-              ] as const
-            ).map(([slot, label]) => (
-              <label key={slot} className="slider-row">
-                <span>{t(label)}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={255}
-                  value={curveY(slot)}
-                  onChange={(e) => setCurveY(slot, Number(e.target.value))}
-                />
-                <output>{curveY(slot)}</output>
-              </label>
-            ))
+            <>
+              <CurveEditor
+                points={activeAdjustment.points}
+                onChange={(points) => patchAdjustment({ points })}
+              />
+              <small className="muted">{t("mask.curveHint")}</small>
+            </>
           ) : (
             (
               [
