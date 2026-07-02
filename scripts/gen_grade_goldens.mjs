@@ -293,6 +293,19 @@ function applyOp(surface, op) {
       forEachRgbLinear(surface, (rgb) => { for (let c = 0; c < 3; c++) rgb[c] *= gains[c]; });
       break;
     }
+    case "rgb_mixer": {
+      const sane = (w) => w.map((v) => (Number.isFinite(v) ? v : 0));
+      const rows = op.monochrome
+        ? [sane(op.red), sane(op.red), sane(op.red)]
+        : [sane(op.red), sane(op.green), sane(op.blue)];
+      forEachRgbLinear(surface, (rgb) => {
+        const src = [rgb[0], rgb[1], rgb[2]];
+        for (let c = 0; c < 3; c++) {
+          rgb[c] = rows[c][0] * src[0] + rows[c][1] * src[1] + rows[c][2] * src[2];
+        }
+      });
+      break;
+    }
   }
 }
 
@@ -738,3 +751,38 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: hdrCases }, null, 2) + "\n",
 );
 console.log(`wrote ${hdrCases.length} hdr cases`);
+
+// ---- Mixer cases: RGB channel mixer (wave 3) ----
+
+const mixerCases = [
+  docCase("rgb_mixer: identity matrix is a no-op", {
+    layers: [layer([{ type: "rgb_mixer", red: [1, 0, 0], green: [0, 1, 0], blue: [0, 0, 1], monochrome: false }])],
+  }, opsInput),
+  docCase("rgb_mixer: swap red and blue", {
+    layers: [layer([{ type: "rgb_mixer", red: [0, 0, 1], green: [0, 1, 0], blue: [1, 0, 0], monochrome: false }])],
+  }, opsInput),
+  docCase("rgb_mixer: bleed green into red, boost blue", {
+    layers: [layer([{ type: "rgb_mixer", red: [0.8, 0.3, -0.1], green: [0, 1, 0], blue: [0, -0.2, 1.2], monochrome: false }])],
+  }, opsInput),
+  docCase("rgb_mixer: monochrome uses the red row as a B&W mix", {
+    layers: [layer([{ type: "rgb_mixer", red: [0.4, 0.5, 0.1], green: [0, 1, 0], blue: [0, 0, 1], monochrome: true }])],
+  }, opsInput),
+  docCase("rgb_mixer: pro_photo space", {
+    layers: [layer([{ type: "rgb_mixer", red: [1.1, -0.05, -0.05], green: [-0.05, 1.1, -0.05], blue: [-0.05, -0.05, 1.1], monochrome: false }])],
+  }, opsInputPro),
+  docCase("rgb_mixer: scene-referred linear keeps headroom", {
+    layers: [layer([{ type: "rgb_mixer", red: [0.9, 0.2, -0.1], green: [0.1, 0.8, 0.1], blue: [0, 0, 1], monochrome: false }])],
+  }, hdrInput, 5e-4),
+  docCase("rgb_mixer: stacked with exposure under color blend", {
+    layers: [layer([
+      { type: "exposure", ev: 0.4 },
+      { type: "rgb_mixer", red: [1, 0.15, 0], green: [0, 1, 0], blue: [0, 0.1, 0.9], monochrome: false },
+    ], { blend: "color", opacity: 0.7 })],
+  }, opsInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_mixer.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: mixerCases }, null, 2) + "\n",
+);
+console.log(`wrote ${mixerCases.length} mixer cases`);
