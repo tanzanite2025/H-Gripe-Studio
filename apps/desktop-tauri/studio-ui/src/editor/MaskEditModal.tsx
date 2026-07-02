@@ -14,6 +14,7 @@ import {
   addBrushStroke,
   addMatteStroke,
   addOperation,
+  addPath,
   addPoint,
   canRedo,
   canUndo,
@@ -24,7 +25,7 @@ import {
   undo,
   type EditState,
 } from "./maskEdit";
-import type { BrushStroke, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import type { BrushStroke, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -38,6 +39,7 @@ type Action =
   | { type: "matte_stroke"; stroke: BrushStroke }
   | { type: "op"; op: MaskOperation }
   | { type: "point"; point: PointPrompt }
+  | { type: "path"; path: EditPath }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "clear" };
@@ -52,6 +54,8 @@ function reducer(state: EditState, action: Action): EditState {
       return addOperation(state, action.op);
     case "point":
       return addPoint(state, action.point);
+    case "path":
+      return addPath(state, action.path);
     case "undo":
       return undo(state);
     case "redo":
@@ -94,6 +98,8 @@ export function MaskEditModal({
   const [amount, setAmount] = useState(4);
   const [tolerance, setTolerance] = useState(wandTolerance);
   const [overlayOnly, setOverlayOnly] = useState(false);
+  // Boolean mode the next committed pen / lasso path combines with.
+  const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
 
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
@@ -102,6 +108,8 @@ export function MaskEditModal({
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // Pending pen anchors (image-space) awaiting a close-path click.
+  const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   const [, forceRedraw] = useState(0);
 
   // Preview lane for morphology ops: a live, best-effort proxy render of
@@ -134,10 +142,16 @@ export function MaskEditModal({
     };
   }, [imagePath]);
 
+  const penPendingRef = useRef(false);
+  penPendingRef.current = penAnchors.length > 0;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      if (e.key === "Escape") {
+        // A pending pen path swallows the first Escape (cancel the path).
+        if (penPendingRef.current) setPenAnchors([]);
+        else onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "undo" });
       } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
@@ -215,17 +229,77 @@ export function MaskEditModal({
       ctx.stroke();
     };
 
+    // Committed pen / lasso vector paths: translucent fill + outline (bezier
+    // segments where control handles are recorded).
+    const paintPath = (p: EditPath) => {
+      if (p.points.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(p.points[0].x, p.points[0].y);
+      for (let i = 1; i <= p.points.length; i++) {
+        const prev = p.points[i - 1];
+        const next = p.points[i % p.points.length];
+        if (prev.out || next.in) {
+          const c1 = prev.out ?? [prev.x, prev.y];
+          const c2 = next.in ?? [next.x, next.y];
+          ctx.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], next.x, next.y);
+        } else {
+          ctx.lineTo(next.x, next.y);
+        }
+      }
+      ctx.closePath();
+      ctx.fillStyle =
+        p.mode === "subtract"
+          ? "rgba(244,98,98,0.3)"
+          : p.mode === "intersect"
+            ? "rgba(190,120,255,0.3)"
+            : "rgba(86,168,255,0.3)";
+      ctx.strokeStyle = p.mode === "subtract" ? "rgba(244,98,98,0.9)" : p.mode === "intersect" ? "rgba(190,120,255,0.9)" : "rgba(86,168,255,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.fill("evenodd");
+      ctx.stroke();
+    };
+
     // While previewing a morphology op, the proxy overlay already folds in the
     // brush strokes (transformed), so skip the raw stroke overlay to avoid a
     // confusing double-draw; matte strokes / points / marquee still render.
-    if (!previewing) state.current.brush_strokes.forEach((s) => paintStroke(s));
+    if (!previewing) {
+      state.current.brush_strokes.forEach((s) => paintStroke(s));
+      state.current.paths.forEach(paintPath);
+    }
     state.current.matte_strokes.forEach((s) => paintStroke(s, "matte"));
     const live = drawing.current;
     if (live) {
-      paintStroke(
-        { mode: tool.mode ?? "add", radius: brushSize, points: live.points },
-        tool.kind === "matte" ? "matte" : "paint",
-      );
+      if (tool.kind === "path") {
+        // Live lasso loop: thin dashed outline, not a brush band.
+        ctx.strokeStyle = "rgba(86,168,255,0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        paintStroke(
+          { mode: tool.mode ?? "add", radius: brushSize, points: live.points },
+          tool.kind === "matte" ? "matte" : "paint",
+        );
+      }
+    }
+
+    // Pending pen path: anchor squares + dashed polyline; the first anchor is
+    // highlighted (clicking it closes the path).
+    if (penAnchors.length > 0) {
+      ctx.strokeStyle = "rgba(86,168,255,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      penAnchors.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      penAnchors.forEach(([x, y], i) => {
+        ctx.fillStyle = i === 0 ? "rgba(120,230,140,0.95)" : "rgba(86,168,255,0.95)";
+        ctx.fillRect(x - 3, y - 3, 6, 6);
+      });
     }
 
     // SAM 2 point prompts: numbered crosshair markers. Positive (include)
@@ -289,7 +363,7 @@ export function MaskEditModal({
       }
       ctx.setLineDash([]);
     }
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.brush_strokes, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, previewing, preview]);
+  }, [dims.w, dims.h, underlay, overlayOnly, state.current.brush_strokes, state.current.matte_strokes, state.current.paths, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, previewing, preview]);
 
   useEffect(() => {
     redraw();
@@ -320,10 +394,46 @@ export function MaskEditModal({
     };
   }, [toolId, amount, state.current, dims]);
 
+  // Commit a closed pen / lasso path (straight anchors; no handles from the UI).
+  const commitPath = (toolName: "pen" | "lasso", pts: [number, number][]) => {
+    if (pts.length < 3) return;
+    dispatch({
+      type: "path",
+      path: {
+        id: nextId("path"),
+        mode: pathMode,
+        tool: toolName,
+        closed: true,
+        points: pts.map(([x, y]) => ({ x, y })),
+      },
+    });
+  };
+
+  const closePenPath = () => {
+    commitPath("pen", penAnchors);
+    setPenAnchors([]);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (tool.status !== "ready") return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const pt = toImage(e);
+    if (tool.kind === "path") {
+      if (tool.id === "lasso") {
+        drawing.current = { points: [pt] };
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      // Pen: clicking near the first anchor closes the path.
+      const closeRadius = Math.max(8, dims.w * 0.01);
+      const first = penAnchors[0];
+      if (penAnchors.length >= 3 && first && Math.hypot(pt[0] - first[0], pt[1] - first[1]) <= closeRadius) {
+        closePenPath();
+        return;
+      }
+      setPenAnchors((prev) => [...prev, pt]);
+      return;
+    }
     if (tool.kind === "paint" || tool.kind === "matte") {
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
@@ -353,13 +463,19 @@ export function MaskEditModal({
 
   const onPointerUp = () => {
     if (drawing.current) {
+      const pts = drawing.current.points;
+      drawing.current = null;
+      if (tool.id === "lasso") {
+        commitPath("lasso", pts);
+        forceRedraw((n) => n + 1);
+        return;
+      }
       const stroke: BrushStroke = {
         id: nextId("stroke"),
         mode: tool.mode ?? "add",
         radius: brushSize,
-        points: drawing.current.points,
+        points: pts,
       };
-      drawing.current = null;
       dispatch({ type: tool.kind === "matte" ? "matte_stroke" : "stroke", stroke });
     } else if (marquee.current) {
       const { start, end } = marquee.current;
@@ -373,9 +489,10 @@ export function MaskEditModal({
   };
 
   // Clicking a tool: `global` tools are immediate actions (no canvas mode);
-  // paint/click/marquee tools become the active mode; `planned` tools are inert.
+  // paint/click/marquee/path tools become the active mode; `planned` tools are inert.
   const onToolClick = (t: MaskTool) => {
     if (t.status !== "ready") return;
+    if (t.id !== "pen") setPenAnchors([]);
     if (t.kind === "global") {
       // Amount-taking morphology ops (grow/shrink/feather/smooth) enter a live
       // preview mode — the user tunes the amount and commits via Apply. The
@@ -401,6 +518,7 @@ export function MaskEditModal({
   const ops = state.current.operations;
   const points = state.current.points;
   const matteStrokes = state.current.matte_strokes;
+  const paths = state.current.paths;
   const showAmount = useMemo(
     () => tool.kind === "global" || ["grow", "shrink", "feather", "smooth"].includes(toolId),
     [tool.kind, toolId],
@@ -500,6 +618,26 @@ export function MaskEditModal({
                 <small className="muted">{t("mask.previewHint")}</small>
               </div>
             ) : null}
+            {tool.kind === "path" ? (
+              <div className="field">
+                <span>{t("mask.pathMode")}</span>
+                <span className="slider-row">
+                  {(["add", "subtract", "intersect"] as const).map((m) => (
+                    <button key={m} className={pathMode === m ? "active" : ""} onClick={() => setPathMode(m)}>
+                      {t(m === "add" ? "mask.pathAdd" : m === "subtract" ? "mask.pathSubtract" : "mask.pathIntersect")}
+                    </button>
+                  ))}
+                </span>
+                {tool.id === "pen" && penAnchors.length > 0 ? (
+                  <span className="slider-row">
+                    <button className="primary" disabled={penAnchors.length < 3} onClick={closePenPath}>
+                      {t("mask.closePath", { count: penAnchors.length })}
+                    </button>
+                    <button onClick={() => setPenAnchors([])}>{t("mask.cancelPath")}</button>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {tool.id === "wand" ? (
               <label className="field">
                 <span>{t("mask.wandTolerance")}</span>
@@ -520,6 +658,21 @@ export function MaskEditModal({
                     <span key={i} className="mask-op-chip">
                       {op.type}
                       {op.amount != null ? ` ${op.amount}` : ""}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="field">
+              <span>{t("mask.paths", { count: paths.length })}</span>
+              <div className="mask-op-list">
+                {paths.length === 0 ? (
+                  <small className="muted">{t("mask.pathsEmpty")}</small>
+                ) : (
+                  paths.map((p, i) => (
+                    <span key={p.id ?? i} className={`mask-op-chip${p.mode === "subtract" ? " negative" : ""}`}>
+                      {p.tool} {p.mode} ({p.points.length})
                     </span>
                   ))
                 )}

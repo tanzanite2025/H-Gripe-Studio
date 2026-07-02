@@ -143,10 +143,10 @@ export interface ExportedArtifacts {
 }
 
 /**
- * A single bezier/lasso path edit (Subject Mask). Phase 1 stores these but does
- * NOT rasterise them — the field is versioned so a workflow saved now stays
- * loadable once Phase 3 adds rasterisation. Mirrors the Rust `EditPaths` schema
- * in `docs/cards/subject-mask-matte.md`.
+ * A single bezier/lasso path edit (Subject Mask). The backend flattens the
+ * anchor loop (cubic bezier where control handles are present), rasterises the
+ * closed polygon and boolean-combines it with the mask per `mode`. Mirrors the
+ * Rust `EditPaths` schema in `docs/cards/subject-mask-matte.md`.
  */
 export interface EditPathPoint {
   x: number;

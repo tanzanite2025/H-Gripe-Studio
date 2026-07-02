@@ -108,12 +108,12 @@ without a frontend rewrite.
 | `smooth` | ready | Morphological open/close. |
 | `grow` / `shrink` | ready | Dilate / erode by N px. |
 | `feather` | ready | Gaussian-feather the mask edge. |
-| `pen` (bezier path) | **planned** | Phase 3 — path rasterised + boolean-combined with the mask. |
-| `lasso` | **planned** | Phase 3. |
+| `pen` (bezier path) | ready | Click to place anchors; clicking the first anchor (or *Close path*) closes it. Rasterised + boolean-combined with the mask (`add` / `subtract` / `intersect`). |
+| `lasso` | ready | Drag a freehand loop; released, it closes into a path selection with the same boolean modes. |
 | `matting` (continuous alpha) | ready | Cascade 3/4 — a **paint** tool: stroke the trimap *unknown band* over hair / fur / glass; the backend resolves it into continuous alpha via a trimap (ViTMatte, else a builtin **guided-filter** matte). Recorded as `matte_strokes`. |
 
-`planned` tools render greyed ("coming soon"); this is what lets Phase 1 ship with
-the morphology/brush set while pen/lasso stay stubbed.
+`planned` tools render greyed ("coming soon"); the registry lets a future tool
+ship stubbed before its backend lands.
 
 ## Inputs (ports)
 
@@ -217,8 +217,10 @@ is the no-points path).
 }
 ```
 
-In Phase 1 `paths` (pen / lasso) are **stored but not rasterised** — the field is
-versioned so a workflow saved now stays loadable once Phase 3 adds rasterisation.
+`paths` (pen / lasso) are **rasterised on run**: the backend flattens each
+closed anchor loop (cubic bezier segments where `in` / `out` control handles are
+present), fills it with an even-odd scanline rasteriser and boolean-combines it
+with the mask per `mode` (`add` / `subtract` / `intersect`).
 `brush_strokes` and the morphology `operations` are applied. `matte_strokes` are
 trimap *unknown-band* strokes painted by the **Matting** tool: the backend
 stamps them as the unknown level on top of the auto `matting_band_px` ring, and
@@ -318,6 +320,10 @@ model id in `matte_report`.
      (`u2net_human_seg`) slots into `segmenter_for_mode` behind the same trait,
      preferred only for that mode.
 3. **Pen paths** — bezier rasterise, path add/subtract/intersect, re-editable.
+   - *Landed:* pen / lasso tools in the Mask-Edit modal record closed `paths`;
+     the backend rasterises them (bezier flatten → even-odd scanline fill) and
+     boolean-combines per `mode`, and the proxy preview folds them in.
+     Re-editing committed anchors remains open.
 4. **Alpha matting** — continuous alpha (hair / glass / translucency), trimap,
    tighter `Refine Mask Edge` hand-off.
    - *Landed (cascade 3, backend):* the `alpha_matting` param derives a trimap

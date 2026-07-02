@@ -14,7 +14,7 @@
 // modal wraps a proxy build + `applyOp` in `PreviewLane` for latest-wins drags
 // and does the canvas rasterisation of the result overlay separately.
 
-import type { BrushStroke, EditPaths, MaskOperation } from "../types/production";
+import type { BrushStroke, EditPath, EditPaths, MaskOperation } from "../types/production";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
 export interface ProxyMask {
@@ -277,10 +277,46 @@ export interface ProxyBuildOptions {
 const DEFAULT_PROXY_WIDTH = 320;
 
 /**
- * Rasterise the committed edits (brush strokes + marquee regions + queued
- * morphology, in order) into a downscaled proxy mask. `wand` ops are skipped
- * (they need the source pixels). This is the base a pending previewed op is
- * then applied on top of.
+ * Rasterise one committed pen / lasso path onto the proxy: flatten the anchor
+ * loop to a straight-edged polygon (proxy resolution makes bezier flattening
+ * unnecessary), even-odd scanline fill, then boolean-combine per `mode`.
+ */
+function fillPath(mask: ProxyMask, path: EditPath, scale: number): void {
+  if (path.points.length < 3) return;
+  const poly = path.points.map((p) => [p.x * scale, p.y * scale] as const);
+  const { w, h } = mask;
+  for (let y = 0; y < h; y++) {
+    const scan = y + 0.5;
+    const crossings: number[] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const [x0, y0] = poly[i];
+      const [x1, y1] = poly[(i + 1) % poly.length];
+      if (y0 <= scan === y1 <= scan) continue;
+      crossings.push(x0 + ((scan - y0) / (y1 - y0)) * (x1 - x0));
+    }
+    crossings.sort((a, b) => a - b);
+    const inside = new Uint8Array(w);
+    for (let i = 0; i + 1 < crossings.length; i += 2) {
+      const start = Math.max(0, Math.round(crossings[i]));
+      const end = Math.min(w - 1, Math.round(crossings[i + 1]) - 1);
+      for (let x = start; x <= end; x++) inside[x] = 1;
+    }
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      if (path.mode === "intersect") {
+        if (!inside[x]) mask.data[idx] = 0;
+      } else if (inside[x]) {
+        mask.data[idx] = path.mode === "subtract" ? 0 : 255;
+      }
+    }
+  }
+}
+
+/**
+ * Rasterise the committed edits (vector paths + brush strokes + marquee
+ * regions + queued morphology, in order) into a downscaled proxy mask. `wand`
+ * ops are skipped (they need the source pixels). This is the base a pending
+ * previewed op is then applied on top of.
  */
 export function buildProxyMask(
   edits: EditPaths,
@@ -292,6 +328,7 @@ export function buildProxyMask(
   const w = Math.max(1, Math.round((dims.w || proxyWidth) * scale));
   const h = Math.max(1, Math.round((dims.h || proxyWidth) * scale));
   let mask = createProxyMask(w, h);
+  for (const path of edits.paths) fillPath(mask, path, scale);
   for (const stroke of edits.brush_strokes) stampStroke(mask, stroke, scale);
   for (const op of edits.operations) {
     if (op.type === "rect" || op.type === "ellipse") {
