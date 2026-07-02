@@ -1,0 +1,395 @@
+/* Mask-Edit modal — all mask-editor chrome lives here, imported by
+   MaskEditModal.tsx. Keep new mask-editor styles in this file (not the global
+   styles.css) and express PS design-language values through the tokens below. */
+
+:root {
+  /* PS design tokens: the dark dock language shared by the toolbar rail and
+     the right-rail panel groups. */
+  --ps-dock-border: #0c0e13; /* hairline borders / row dividers */
+  --ps-tab-strip: #11131a; /* inactive tab strip / input wells */
+  --ps-hover: #2a2f3d; /* hover wash on flat icon buttons */
+  --ps-active-overlay: rgba(255, 255, 255, 0.14); /* neutral grey active-row highlight */
+  --ps-row-h: 34px; /* layer-row height */
+}
+
+.media-viewer.mask-edit { width: min(1280px, 94vw); height: 88vh; }
+.mask-edit-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto 1fr 240px;
+  gap: 10px;
+  padding: 10px;
+}
+/* PS toolbar rail: a flat dark column of borderless icon buttons. It never
+   scrolls — when the modal is too short for one column, groups wrap into a
+   second column (PS's double-column mode). */
+.mask-edit-tools {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0 4px;
+  min-height: 0;
+  max-height: 100%;
+  overflow: visible;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 3px;
+}
+/* PS-style toolbar sections: selection / paint / vector / ops / navigation,
+   separated by a rule so tools sit where a PS user expects them. */
+.mask-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mask-tool-group:first-child { padding-top: 0; }
+.mask-tool-group:last-child { border-bottom: none; padding-bottom: 0; }
+/* One PS toolbar slot: an icon button; multi-variant slots anchor a flyout. */
+.mask-tool-slot { position: relative; }
+.mask-tool {
+  position: relative;
+  width: 28px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+}
+.mask-tool:hover:not(:disabled) { background: var(--ps-hover); }
+.mask-tool.active { background: #1f2c44; color: var(--accent); }
+.mask-tool-icon { display: block; }
+/* PS's tiny corner triangle marking a slot that hides more variants. */
+.mask-tool .flyout-corner {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-bottom: 4px solid currentColor;
+  opacity: 0.7;
+}
+/* Flyout card of a slot's tool variants (long-press / right-click). */
+.mask-flyout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+}
+.mask-flyout {
+  position: fixed;
+  z-index: 40;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.mask-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.mask-flyout-item:hover { background: var(--ps-hover); }
+.mask-flyout-item.active { border-color: var(--accent); color: var(--accent); }
+.mask-flyout-item .label { flex: 1; }
+.mask-flyout-item .combo {
+  font-style: normal;
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.8;
+}
+.mask-edit-stage {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-conic-gradient(#1a1d26 0% 25%, var(--ps-tab-strip) 0% 50%) 50% / 24px 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mask-edit-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+  display: block;
+}
+.mask-edit-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+.mask-edit-controls .field { margin-top: 6px; }
+/* Screen-mode cycle (PS `F`): 1 hides the right panels, 2 leaves canvas only. */
+.mask-edit.mask-screen-1 .mask-edit-controls { display: none; }
+.mask-edit.mask-screen-2 .mask-edit-controls,
+.mask-edit.mask-screen-2 .mask-edit-tools { display: none; }
+/* PS-style right rail: two stacked tabbed panel groups, like PS's 属性 (top)
+   and 图层 (bottom) docks — a dark tab strip on top of each group, one panel
+   visible at a time. Rendered by maskEditModal/PanelDock.tsx. */
+.mask-panel-group {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 0;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.mask-panel-group.grow { flex: 1; }
+.mask-panel-tabs {
+  display: flex;
+  background: var(--ps-tab-strip);
+}
+.mask-panel-tabs button {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 400;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-right: 1px solid var(--ps-dock-border);
+  border-radius: 0;
+  cursor: pointer;
+}
+.mask-panel-tabs button:hover { color: var(--text); }
+/* Active tab sits flush with the panel body, PS-style: same colour, no seam. */
+.mask-panel-tabs button.active { background: var(--panel-2); color: var(--text); }
+.mask-panel-group-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Panels inside a tab group lose their own chrome — the group's tab strip
+   replaces the per-panel header. */
+.mask-panel-group .mask-panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.mask-panel-group .mask-panel > header { display: none; }
+/* PS-style panel blocks on the right rail (tool options / layers / history / info). */
+.mask-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 0 8px 8px;
+}
+.mask-panel > header {
+  margin: 0 -8px 2px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background: var(--ps-tab-strip);
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+}
+.mask-op-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.mask-op-chip {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(91, 140, 255, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(91, 140, 255, 0.35);
+}
+.mask-op-chip.negative {
+  background: rgba(244, 98, 98, 0.15);
+  color: #f46262;
+  border-color: rgba(244, 98, 98, 0.4);
+}
+/* History panel (M2): one row per edit-stack step. */
+.mask-history-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+.mask-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ps-dock-border);
+  color: var(--text);
+}
+.mask-history-row.disabled { opacity: 0.45; }
+.mask-history-row.editing { background: var(--ps-active-overlay); }
+.mask-history-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-history-row button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.mask-history-row button:hover { color: #fff; }
+.mask-history-amount {
+  width: 44px;
+  font-size: 11px;
+  padding: 0 4px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+}
+
+/* Layers panel — PS-style: a blend/opacity head row, then full-bleed layer
+   rows (eye cell | thumbnail | name), grey highlight for the active row. */
+.mask-layer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ps-dock-border);
+}
+.mask-layer-head .mask-layer-blend { flex: 1; min-width: 0; padding: 3px 4px; }
+.mask-layer-opacity-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mask-layer-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+.mask-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-size: 12px;
+  padding: 0 6px 0 0;
+  min-height: var(--ps-row-h);
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ps-dock-border);
+  color: var(--text);
+  cursor: pointer;
+}
+.mask-layer-row.active { background: var(--ps-active-overlay); }
+.mask-layer-row.hidden .mask-layer-name,
+.mask-layer-row.hidden .mask-layer-thumb { opacity: 0.45; }
+.mask-layer-visible {
+  width: 26px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--ps-dock-border) !important;
+  border-radius: 0 !important;
+}
+.mask-layer-thumb {
+  width: 26px;
+  height: 26px;
+  margin: 4px 8px 4px 6px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+  background:
+    repeating-conic-gradient(#3a3d46 0% 25%, #23252d 0% 50%) 50% / 10px 10px;
+  border: 1px solid #4a4d57;
+}
+.mask-layer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-layer-row button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mask-layer-row button:hover:not(:disabled) { color: #fff; }
+.mask-layer-row button:disabled { opacity: 0.4; cursor: default; }
+.mask-layer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 0;
+}
+.mask-layer-blend {
+  font-size: 11px;
+  padding: 0 2px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: inherit;
+}
+.mask-layer-opacity {
+  width: 44px;
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: inherit;
+}
+
+.mask-preview-actions {
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(86, 168, 255, 0.08);
+  border: 1px solid rgba(86, 168, 255, 0.28);
+}
+.mask-preview-actions .slider-row { gap: 6px; }
+.mask-preview-actions small { display: block; margin-top: 6px; line-height: 1.4; }
+.mask-edit-note { line-height: 1.5; }
+.mask-edit-note code {
+  background: var(--ps-tab-strip);
+  padding: 0 4px;
+  border-radius: 4px;
+}
