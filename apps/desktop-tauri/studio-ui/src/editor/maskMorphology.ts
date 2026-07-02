@@ -14,7 +14,7 @@
 // modal wraps a proxy build + `applyOp` in `PreviewLane` for latest-wins drags
 // and does the canvas rasterisation of the result overlay separately.
 
-import type { BrushStroke, EditPath, EditPaths, MaskOperation } from "../types/production";
+import type { BrushStroke, EditOp, EditPath, MaskDocument, MaskOperation } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
@@ -313,23 +313,9 @@ function fillPath(mask: ProxyMask, path: EditPath, scale: number): void {
   }
 }
 
-/**
- * Rasterise the committed edits (vector paths + brush strokes + marquee
- * regions + queued morphology, in order) into a downscaled proxy mask. `wand`
- * ops are skipped (they need the source pixels). This is the base a pending
- * previewed op is then applied on top of.
- */
-export function buildProxyMask(
-  edits: EditPaths,
-  dims: { w: number; h: number },
-  options: ProxyBuildOptions = {},
-): { mask: ProxyMask; scale: number } {
-  const proxyWidth = Math.max(16, Math.min(options.proxyWidth ?? DEFAULT_PROXY_WIDTH, dims.w || DEFAULT_PROXY_WIDTH));
-  const scale = proxyWidth / Math.max(1, dims.w);
-  const w = Math.max(1, Math.round((dims.w || proxyWidth) * scale));
-  const h = Math.max(1, Math.round((dims.h || proxyWidth) * scale));
-  let mask = createProxyMask(w, h);
-  for (const op of edits.ops) {
+// Replay one layer's ordered edit stack onto (a copy of) `mask`.
+function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
+  for (const op of ops) {
     if (op.disabled) {
       // Disabled history steps stay recorded but are skipped on replay.
     } else if (isPathOp(op)) {
@@ -345,6 +331,50 @@ export function buildProxyMask(
       mask = applyOp(mask, op.type, radius);
     }
   }
+  return mask;
+}
+
+// Composite `src` onto `dst` in place per the layer's blend mode + opacity
+// (grayscale surfaces; mirrors the Rust compositor in `subject_mask.rs`).
+function blendInto(dst: ProxyMask, src: ProxyMask, blend: string, opacity: number): void {
+  const a = clamp(opacity, 0, 1);
+  for (let i = 0; i < dst.data.length; i++) {
+    const d = dst.data[i];
+    const s = src.data[i];
+    const blended =
+      blend === "multiply" ? (d * s) / 255 : blend === "screen" ? 255 - ((255 - d) * (255 - s)) / 255 : s;
+    dst.data[i] = Math.round(d + (blended - d) * a);
+  }
+}
+
+/**
+ * Rasterise the committed document (each layer's vector paths + brush strokes
+ * + marquee regions + queued morphology, in order) into a downscaled proxy
+ * mask. `wand` ops are skipped (they need the source pixels). The bottom
+ * layer replays directly onto the base surface; layers above rasterise from
+ * an empty surface and composite per blend + opacity — mirroring the Rust
+ * compositor. This is the base a pending previewed op is then applied on top
+ * of.
+ */
+export function buildProxyMask(
+  doc: MaskDocument,
+  dims: { w: number; h: number },
+  options: ProxyBuildOptions = {},
+): { mask: ProxyMask; scale: number } {
+  const proxyWidth = Math.max(16, Math.min(options.proxyWidth ?? DEFAULT_PROXY_WIDTH, dims.w || DEFAULT_PROXY_WIDTH));
+  const scale = proxyWidth / Math.max(1, dims.w);
+  const w = Math.max(1, Math.round((dims.w || proxyWidth) * scale));
+  const h = Math.max(1, Math.round((dims.h || proxyWidth) * scale));
+  let mask = createProxyMask(w, h);
+  doc.layers.forEach((layer, i) => {
+    if (!layer.visible) return;
+    if (i === 0) {
+      mask = replayOps(mask, layer.ops, scale);
+      return;
+    }
+    const surface = replayOps(createProxyMask(w, h), layer.ops, scale);
+    blendInto(mask, surface, layer.blend, layer.opacity);
+  });
   return { mask, scale };
 }
 

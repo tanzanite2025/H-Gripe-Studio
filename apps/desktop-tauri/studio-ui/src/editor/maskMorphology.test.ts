@@ -14,7 +14,15 @@ import {
   stampDisc,
   type ProxyMask,
 } from "./maskMorphology";
-import { emptyEditPaths, type EditPaths } from "../types/production";
+import { normalizeEditPaths } from "./maskEdit";
+import { emptyMaskDocument, type EditOp, type MaskDocument, type MaskLayer } from "../types/production";
+
+/** A single-layer v3 document whose background layer holds `ops`. */
+function doc(ops: EditOp[], layerPatch: Partial<MaskLayer> = {}): MaskDocument {
+  const d = emptyMaskDocument();
+  d.layers[0] = { ...d.layers[0], ...layerPatch, ops };
+  return d;
+}
 
 /** Count of set (>=128) pixels — a proxy for mask "area". */
 function area(mask: ProxyMask): number {
@@ -102,10 +110,7 @@ describe("maskMorphology preview primitives", () => {
 
 describe("buildProxyMask", () => {
   it("rasterises a brush stroke into a downscaled proxy", () => {
-    const edits: EditPaths = {
-      ...emptyEditPaths(),
-      ops: [{ type: "brush", id: "s1", mode: "add", radius: 40, points: [[480, 320]] }],
-    };
+    const edits = doc([{ type: "brush", id: "s1", mode: "add", radius: 40, points: [[480, 320]] }]);
     const { mask, scale } = buildProxyMask(edits, { w: 960, h: 640 }, { proxyWidth: 320 });
     expect(mask.w).toBe(320);
     expect(mask.h).toBe(213); // 640 * (320/960) rounded
@@ -115,21 +120,16 @@ describe("buildProxyMask", () => {
 
   it("skips disabled history steps on replay", () => {
     const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
-    const enabled: EditPaths = { ...emptyEditPaths(), ops: [stroke] };
-    const disabled: EditPaths = { ...emptyEditPaths(), ops: [{ ...stroke, disabled: true }] };
+    const enabled = doc([stroke]);
+    const disabled = doc([{ ...stroke, disabled: true }]);
     expect(area(buildProxyMask(enabled, { w: 960, h: 640 }).mask)).toBeGreaterThan(0);
     expect(area(buildProxyMask(disabled, { w: 960, h: 640 }).mask)).toBe(0);
   });
 
   it("applies queued morphology operations in order on top of strokes", () => {
     const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
-    const baseEdits: EditPaths = { ...emptyEditPaths(), ops: [stroke] };
-    const grownEdits: EditPaths = {
-      ...emptyEditPaths(),
-      ops: [stroke, { type: "grow", amount: 12 }],
-    };
-    const base = buildProxyMask(baseEdits, { w: 960, h: 640 });
-    const grown = buildProxyMask(grownEdits, { w: 960, h: 640 });
+    const base = buildProxyMask(doc([stroke]), { w: 960, h: 640 });
+    const grown = buildProxyMask(doc([stroke, { type: "grow", amount: 12 }]), { w: 960, h: 640 });
     expect(area(grown.mask)).toBeGreaterThan(area(base.mask));
   });
 
@@ -140,34 +140,26 @@ describe("buildProxyMask", () => {
       { x: x1, y: y1 },
       { x: x0, y: y1 },
     ];
-    const added: EditPaths = {
-      ...emptyEditPaths(),
-      ops: [{ type: "path", id: "p1", mode: "add", tool: "lasso", closed: true, points: square(120, 120, 840, 520) }],
-    };
+    const addOp: EditOp = { type: "path", id: "p1", mode: "add", tool: "lasso", closed: true, points: square(120, 120, 840, 520) };
+    const added = doc([addOp]);
     const { mask, scale } = buildProxyMask(added, { w: 960, h: 640 }, { proxyWidth: 320 });
     const at = (x: number, y: number) => mask.data[Math.round(y * scale) * mask.w + Math.round(x * scale)];
     expect(at(480, 320)).toBe(255); // interior on
     expect(at(30, 30)).toBe(0); // exterior off
 
-    const subtracted: EditPaths = {
-      ...added,
-      ops: [
-        ...added.ops,
-        { type: "path", id: "p2", mode: "subtract", tool: "pen", closed: true, points: square(400, 250, 560, 390) },
-      ],
-    };
+    const subtracted = doc([
+      addOp,
+      { type: "path", id: "p2", mode: "subtract", tool: "pen", closed: true, points: square(400, 250, 560, 390) },
+    ]);
     const sub = buildProxyMask(subtracted, { w: 960, h: 640 }, { proxyWidth: 320 });
     const atSub = (x: number, y: number) => sub.mask.data[Math.round(y * sub.scale) * sub.mask.w + Math.round(x * sub.scale)];
     expect(atSub(480, 320)).toBe(0); // carved out
     expect(atSub(200, 200)).toBe(255); // rest of the add survives
 
-    const intersected: EditPaths = {
-      ...added,
-      ops: [
-        ...added.ops,
-        { type: "path", id: "p3", mode: "intersect", tool: "lasso", closed: true, points: square(120, 120, 480, 320) },
-      ],
-    };
+    const intersected = doc([
+      addOp,
+      { type: "path", id: "p3", mode: "intersect", tool: "lasso", closed: true, points: square(120, 120, 480, 320) },
+    ]);
     const inter = buildProxyMask(intersected, { w: 960, h: 640 }, { proxyWidth: 320 });
     const atInter = (x: number, y: number) => inter.mask.data[Math.round(y * inter.scale) * inter.mask.w + Math.round(x * inter.scale)];
     expect(atInter(200, 200)).toBe(255); // inside both
@@ -176,15 +168,61 @@ describe("buildProxyMask", () => {
 
   it("skips wand ops (no source pixels on the proxy)", () => {
     const brush = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
-    const edits: EditPaths = {
-      ...emptyEditPaths(),
-      ops: [brush, { type: "wand", amount: 30, region: [10, 10] }],
-    };
-    const withWand = buildProxyMask(edits, { w: 960, h: 640 });
-    const withoutWand = buildProxyMask(
-      { ...edits, ops: [brush] },
-      { w: 960, h: 640 },
-    );
+    const withWand = buildProxyMask(doc([brush, { type: "wand", amount: 30, region: [10, 10] }]), { w: 960, h: 640 });
+    const withoutWand = buildProxyMask(doc([brush]), { w: 960, h: 640 });
     expect(area(withWand.mask)).toBe(area(withoutWand.mask));
+  });
+
+  it("composites upper layers per blend mode and opacity", () => {
+    const dims = { w: 320, h: 240 };
+    const layered = (top: Partial<MaskLayer>): MaskDocument => {
+      const d = doc([{ type: "invert" }]); // background: everything on
+      d.layers.push({
+        id: "l2",
+        name: "Layer 2",
+        kind: "mask",
+        blend: "normal",
+        opacity: 1,
+        visible: true,
+        ops: [],
+        ...top,
+      });
+      return d;
+    };
+
+    // normal @ 100%: the (empty) upper surface replaces the background.
+    const normal = buildProxyMask(layered({ blend: "normal" }), dims).mask;
+    expect(area(normal)).toBe(0);
+
+    // multiply with an empty (dark) upper surface knocks everything out.
+    const multiply = buildProxyMask(layered({ blend: "multiply" }), dims).mask;
+    expect(area(multiply)).toBe(0);
+
+    // screen with an empty upper surface leaves the background untouched.
+    const screen = buildProxyMask(layered({ blend: "screen" }), dims).mask;
+    expect(area(screen)).toBe(normal.data.length);
+
+    // normal @ 50%: half-way between on (255) and off (0).
+    const half = buildProxyMask(layered({ blend: "normal", opacity: 0.5 }), dims).mask;
+    expect(half.data[0]).toBe(128);
+
+    // hidden layers are skipped entirely.
+    const hidden = buildProxyMask(layered({ blend: "normal", visible: false }), dims).mask;
+    expect(area(hidden)).toBe(hidden.data.length);
+  });
+
+  it("a single-layer document rasterises identically to the pre-M3 flat replay", () => {
+    // M3 acceptance: no compositing side-effects for one layer.
+    const ops: EditOp[] = [
+      { type: "path", id: "p1", mode: "add", tool: "lasso", closed: true,
+        points: [{ x: 100, y: 100 }, { x: 800, y: 100 }, { x: 800, y: 500 }, { x: 100, y: 500 }] },
+      { type: "brush", id: "s1", mode: "subtract", radius: 40, points: [[480, 320]] },
+      { type: "invert" },
+    ];
+    const single = buildProxyMask(doc(ops), { w: 960, h: 640 }).mask;
+    // Reference: the same ops loaded through the v2 (flat stack) migration.
+    const migrated = normalizeEditPaths({ version: 2, ops, matte_strokes: [], points: [] });
+    const replayed = buildProxyMask(migrated, { w: 960, h: 640 }).mask;
+    expect(Array.from(single.data)).toEqual(Array.from(replayed.data));
   });
 });

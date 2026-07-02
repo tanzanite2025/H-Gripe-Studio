@@ -1,23 +1,34 @@
 // Pure edit-state model for the Mask-Edit modal.
 //
-// The modal owns an `EditState` (the current `EditPaths` plus an undo/redo
+// The modal owns an `EditState` (the current `MaskDocument` plus an undo/redo
 // stack) and mutates it only through these pure helpers. Keeping the model
 // renderer-agnostic and side-effect-free means it is unit-testable on its own
-// and the React component stays a thin view. The committed `EditPaths` is what
-// gets written back onto the node's `edit_paths` param; the Rust backend
-// replays its ordered `ops` stack on run (vector paths, brush strokes and
-// queued operations, in recorded order), plus the `matte_strokes` band.
+// and the React component stays a thin view. The committed `MaskDocument` is
+// what gets written back onto the node's `edit_paths` param; the Rust backend
+// replays each layer's ordered `ops` stack on run and composites the layers
+// (see `docs/design/ps-editor-architecture.md`, M3), plus the document-level
+// `matte_strokes` band.
 
-import type { BrushStroke, EditOp, EditPath, EditPathPoint, EditPaths, MaskOperation, PointPrompt } from "../types/production";
-import { emptyEditPaths, isMaskOperation, isPathOp } from "../types/production";
+import type {
+  BrushStroke,
+  EditOp,
+  EditPath,
+  EditPathPoint,
+  LayerBlend,
+  MaskDocument,
+  MaskLayer,
+  MaskOperation,
+  PointPrompt,
+} from "../types/production";
+import { activeLayer, emptyMaskDocument, emptyMaskLayer, isMaskOperation, isPathOp } from "../types/production";
 
 export interface EditState {
-  /** The committed edits. */
-  current: EditPaths;
+  /** The committed document. */
+  current: MaskDocument;
   /** Snapshots older than `current`, most-recent last. */
-  past: EditPaths[];
+  past: MaskDocument[];
   /** Snapshots undone from `current`, most-recent last. */
-  future: EditPaths[];
+  future: MaskDocument[];
 }
 
 const MAX_HISTORY = 100;
@@ -27,15 +38,18 @@ export function initEditState(initial?: unknown): EditState {
 }
 
 /**
- * Coerce an arbitrary stored value into a well-formed version-2 `EditPaths`.
- * A version-1 value (separate `paths` / `brush_strokes` / `operations`
- * arrays) migrates onto one ordered `ops` stack in the legacy replay order —
- * paths, then strokes, then operations — so old workflows rasterise
- * identically.
+ * Coerce an arbitrary stored `edit_paths` value into a well-formed version-3
+ * `MaskDocument`. A version-3 value loads directly; a version-2 value (one
+ * ordered `ops` stack) becomes the single background layer; a version-1 value
+ * (separate `paths` / `brush_strokes` / `operations` arrays) migrates onto one
+ * ordered stack in the legacy replay order — paths, then strokes, then
+ * operations — so old workflows rasterise identically.
  */
-export function normalizeEditPaths(value: unknown): EditPaths {
-  if (!value || typeof value !== "object") return emptyEditPaths();
+export function normalizeEditPaths(value: unknown): MaskDocument {
+  if (!value || typeof value !== "object") return emptyMaskDocument();
   const v = value as {
+    layers?: unknown;
+    active?: unknown;
     ops?: unknown;
     paths?: unknown;
     brush_strokes?: unknown;
@@ -43,6 +57,16 @@ export function normalizeEditPaths(value: unknown): EditPaths {
     operations?: unknown;
     points?: unknown;
   };
+  const matte_strokes = Array.isArray(v.matte_strokes) ? (v.matte_strokes as BrushStroke[]) : [];
+  const points = Array.isArray(v.points)
+    ? v.points.map(normalizePoint).filter((p): p is PointPrompt => p !== null)
+    : [];
+  if (Array.isArray(v.layers)) {
+    const layers = v.layers.map(normalizeLayer).filter((l): l is MaskLayer => l !== null);
+    if (layers.length === 0) layers.push(emptyMaskLayer());
+    const active = typeof v.active === "number" ? Math.min(Math.max(Math.trunc(v.active), 0), layers.length - 1) : 0;
+    return { version: 3, layers, active, matte_strokes, points };
+  }
   const ops: EditOp[] = Array.isArray(v.ops)
     ? v.ops.filter(isEditOp)
     : [
@@ -54,10 +78,33 @@ export function normalizeEditPaths(value: unknown): EditPaths {
         ...((Array.isArray(v.operations) ? v.operations : []) as MaskOperation[]),
       ];
   return {
-    version: 2,
-    ops,
-    matte_strokes: Array.isArray(v.matte_strokes) ? v.matte_strokes as BrushStroke[] : [],
-    points: Array.isArray(v.points) ? v.points.map(normalizePoint).filter((p): p is PointPrompt => p !== null) : [],
+    version: 3,
+    layers: [{ ...emptyMaskLayer(), ops }],
+    active: 0,
+    matte_strokes,
+    points,
+  };
+}
+
+function normalizeLayer(value: unknown): MaskLayer | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as {
+    id?: unknown;
+    name?: unknown;
+    blend?: unknown;
+    opacity?: unknown;
+    visible?: unknown;
+    ops?: unknown;
+  };
+  const blank = emptyMaskLayer();
+  return {
+    id: typeof v.id === "string" && v.id ? v.id : blank.id,
+    name: typeof v.name === "string" && v.name ? v.name : blank.name,
+    kind: "mask",
+    blend: v.blend === "multiply" || v.blend === "screen" ? v.blend : "normal",
+    opacity: typeof v.opacity === "number" ? Math.min(Math.max(v.opacity, 0), 1) : 1,
+    visible: v.visible !== false,
+    ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
   };
 }
 
@@ -88,18 +135,29 @@ function normalizePoint(value: unknown): PointPrompt | null {
 // Commit a new `current`, pushing the previous onto the undo stack and clearing
 // the redo stack. The history is capped so a long editing session cannot grow
 // unbounded in memory.
-function commit(state: EditState, next: EditPaths): EditState {
+function commit(state: EditState, next: MaskDocument): EditState {
   const past = [...state.past, state.current];
   if (past.length > MAX_HISTORY) past.shift();
   return { current: next, past, future: [] };
 }
 
+/** The active layer's ordered edit stack (what the history panel shows). */
+export function activeOps(doc: MaskDocument): EditOp[] {
+  return activeLayer(doc).ops;
+}
+
+// Replace the active layer's ops (all sequential edits target the active layer).
+function withActiveOps(doc: MaskDocument, ops: EditOp[]): MaskDocument {
+  const active = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
+  return {
+    ...doc,
+    layers: doc.layers.map((l, i) => (i === active ? { ...l, ops } : l)),
+  };
+}
+
 export function addBrushStroke(state: EditState, stroke: BrushStroke): EditState {
   if (stroke.points.length === 0) return state;
-  return commit(state, {
-    ...state.current,
-    ops: [...state.current.ops, { ...stroke, type: "brush" }],
-  });
+  return commit(state, withActiveOps(state.current, [...activeOps(state.current), { ...stroke, type: "brush" }]));
 }
 
 /** Append a trimap unknown-band stroke (resolved to soft alpha by the matter). */
@@ -114,28 +172,20 @@ export function addMatteStroke(state: EditState, stroke: BrushStroke): EditState
 /** Append a closed pen / lasso vector path (rasterised by the backend on run). */
 export function addPath(state: EditState, path: EditPath): EditState {
   if (path.points.length < 3) return state;
-  return commit(state, {
-    ...state.current,
-    ops: [...state.current.ops, { ...path, type: "path" }],
-  });
+  return commit(state, withActiveOps(state.current, [...activeOps(state.current), { ...path, type: "path" }]));
 }
 
 export function addOperation(state: EditState, op: MaskOperation): EditState {
-  return commit(state, {
-    ...state.current,
-    ops: [...state.current.ops, op],
-  });
+  return commit(state, withActiveOps(state.current, [...activeOps(state.current), op]));
 }
 
 // --- history-panel step revision (M2: every recorded step stays revisable) ---
 
-/** Delete one step from the edit stack (undoable). */
+/** Delete one step from the active layer's edit stack (undoable). */
 export function removeOp(state: EditState, index: number): EditState {
-  if (index < 0 || index >= state.current.ops.length) return state;
-  return commit(state, {
-    ...state.current,
-    ops: state.current.ops.filter((_, i) => i !== index),
-  });
+  const ops = activeOps(state.current);
+  if (index < 0 || index >= ops.length) return state;
+  return commit(state, withActiveOps(state.current, ops.filter((_, i) => i !== index)));
 }
 
 /**
@@ -143,35 +193,83 @@ export function removeOp(state: EditState, index: number): EditState {
  * and visible in the history panel but are skipped on replay.
  */
 export function toggleOp(state: EditState, index: number): EditState {
-  const op = state.current.ops[index];
+  const ops = activeOps(state.current);
+  const op = ops[index];
   if (!op) return state;
   const next: EditOp = { ...op, disabled: !op.disabled };
   if (!next.disabled) delete next.disabled;
-  return commit(state, {
-    ...state.current,
-    ops: state.current.ops.map((o, i) => (i === index ? next : o)),
-  });
+  return commit(state, withActiveOps(state.current, ops.map((o, i) => (i === index ? next : o))));
 }
 
 /** Revise the scalar parameter of a queued operation step (undoable). */
 export function updateOpAmount(state: EditState, index: number, amount: number): EditState {
-  const op = state.current.ops[index];
+  const ops = activeOps(state.current);
+  const op = ops[index];
   if (!op || !isMaskOperation(op)) return state;
   if (op.amount === amount) return state;
-  return commit(state, {
-    ...state.current,
-    ops: state.current.ops.map((o, i) => (i === index ? { ...o, amount } : o)),
-  });
+  return commit(state, withActiveOps(state.current, ops.map((o, i) => (i === index ? { ...o, amount } : o))));
 }
 
 /** Replace a committed path step's anchors (undoable; anchor re-editing). */
 export function updatePathAnchors(state: EditState, index: number, points: EditPathPoint[]): EditState {
-  const op = state.current.ops[index];
+  const ops = activeOps(state.current);
+  const op = ops[index];
   if (!op || !isPathOp(op) || points.length < 3) return state;
+  return commit(state, withActiveOps(state.current, ops.map((o, i) => (i === index ? { ...op, points } : o))));
+}
+
+// --- layer stack (M3: minimal document model) ---
+
+/** Append a new empty layer above the stack and make it active (undoable). */
+export function addLayer(state: EditState, name?: string): EditState {
+  const layers = [...state.current.layers, emptyMaskLayer(name ?? `Layer ${state.current.layers.length + 1}`)];
+  return commit(state, { ...state.current, layers, active: layers.length - 1 });
+}
+
+/** Delete one layer (undoable). The last remaining layer cannot be deleted. */
+export function removeLayer(state: EditState, index: number): EditState {
+  const { layers } = state.current;
+  if (layers.length <= 1 || index < 0 || index >= layers.length) return state;
+  const next = layers.filter((_, i) => i !== index);
+  const active = Math.min(state.current.active > index ? state.current.active - 1 : state.current.active, next.length - 1);
+  return commit(state, { ...state.current, layers: next, active });
+}
+
+/** Select the layer new edits are recorded onto. Not an undo step. */
+export function setActiveLayer(state: EditState, index: number): EditState {
+  if (index < 0 || index >= state.current.layers.length || index === state.current.active) return state;
+  return { ...state, current: { ...state.current, active: index } };
+}
+
+function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): EditState {
+  const layer = state.current.layers[index];
+  if (!layer) return state;
   return commit(state, {
     ...state.current,
-    ops: state.current.ops.map((o, i) => (i === index ? { ...op, points } : o)),
+    layers: state.current.layers.map((l, i) => (i === index ? { ...l, ...patch } : l)),
   });
+}
+
+/** Toggle a layer's visibility (undoable); hidden layers skip compositing. */
+export function toggleLayerVisible(state: EditState, index: number): EditState {
+  const layer = state.current.layers[index];
+  if (!layer) return state;
+  return withLayer(state, index, { visible: !layer.visible });
+}
+
+/** Set a layer's opacity, clamped to 0..1 (undoable). */
+export function setLayerOpacity(state: EditState, index: number, opacity: number): EditState {
+  const layer = state.current.layers[index];
+  const next = Math.min(Math.max(opacity, 0), 1);
+  if (!layer || layer.opacity === next) return state;
+  return withLayer(state, index, { opacity: next });
+}
+
+/** Set a layer's blend mode (undoable). */
+export function setLayerBlend(state: EditState, index: number, blend: LayerBlend): EditState {
+  const layer = state.current.layers[index];
+  if (!layer || layer.blend === blend) return state;
+  return withLayer(state, index, { blend });
 }
 
 /**
@@ -188,7 +286,7 @@ export function addPoint(state: EditState, point: PointPrompt): EditState {
 /** Drop every edit, recording the wipe as an undoable step. */
 export function clearEdits(state: EditState): EditState {
   if (isEmpty(state.current)) return state;
-  return commit(state, emptyEditPaths());
+  return commit(state, emptyMaskDocument());
 }
 
 export function undo(state: EditState): EditState {
@@ -208,11 +306,18 @@ export function redo(state: EditState): EditState {
 export const canUndo = (state: EditState): boolean => state.past.length > 0;
 export const canRedo = (state: EditState): boolean => state.future.length > 0;
 
-export function isEmpty(edits: EditPaths): boolean {
-  return edits.ops.length === 0 && edits.matte_strokes.length === 0 && edits.points.length === 0;
+export function isEmpty(doc: MaskDocument): boolean {
+  return (
+    doc.layers.length === 1 &&
+    doc.layers.every((l) => l.ops.length === 0) &&
+    doc.matte_strokes.length === 0 &&
+    doc.points.length === 0
+  );
 }
 
 /** Count of applied edits, for the modal's status line. */
-export function editCount(edits: EditPaths): number {
-  return edits.ops.length + edits.matte_strokes.length + edits.points.length;
+export function editCount(doc: MaskDocument): number {
+  return (
+    doc.layers.reduce((n, l) => n + l.ops.length, 0) + doc.matte_strokes.length + doc.points.length
+  );
 }

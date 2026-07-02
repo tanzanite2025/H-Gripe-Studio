@@ -2,7 +2,7 @@ import { useState } from "react";
 import { MaskEditModal } from "./MaskEditModal";
 import { CropEditModal, type CropCommit } from "./CropEditModal";
 import { useT } from "../i18n";
-import type { EditPaths } from "../types/production";
+import type { MaskDocument } from "../types/production";
 
 /**
  * The image card's single "Edit" entry. It hosts the manual (human-spatial)
@@ -18,7 +18,7 @@ interface MediaEditModalProps {
   title: string;
   imagePath?: string | null;
   initialGroup?: MediaEditGroup;
-  onCommitMask: (edits: EditPaths) => void;
+  onCommitMask: (edits: MaskDocument) => void;
   onCommitCrop: (commit: CropCommit) => void;
   onClose: () => void;
 }

@@ -226,7 +226,8 @@ export type EditOp = PathOp | BrushOp | (MaskOperation & EditOpBase);
  * order) instead of per-kind arrays. A version-1 value (separate `paths` /
  * `brush_strokes` / `operations` arrays) is migrated on load by
  * `normalizeEditPaths`, preserving the legacy replay order (paths, then
- * strokes, then operations).
+ * strokes, then operations). Version 3 (`MaskDocument`) wraps this in a layer
+ * stack; a v1/v2 value loads as a single-layer document.
  */
 export interface EditPaths {
   version: 2;
@@ -268,6 +269,65 @@ export interface PointPrompt {
 
 export function emptyEditPaths(): EditPaths {
   return { version: 2, ops: [], matte_strokes: [], points: [] };
+}
+
+/** Blend modes the M3 compositor supports (grayscale mask surfaces). */
+export type LayerBlend = "normal" | "multiply" | "screen";
+
+/**
+ * One layer of the mask document (see `docs/design/ps-editor-architecture.md`,
+ * M3). Each layer owns its own ordered edit stack. The bottom layer (index 0)
+ * is the background: its ops replay directly onto the node's base mask, so a
+ * single-layer document rasterises byte-identically to the pre-M3 flow.
+ * Layers above rasterise from an empty surface and composite onto the result
+ * per `blend` + `opacity`.
+ */
+export interface MaskLayer {
+  id: string;
+  name: string;
+  /** `"mask"` today; `"pixel"` is reserved by the document model (M4+). */
+  kind: "mask";
+  blend: LayerBlend;
+  /** 0..1 layer opacity. */
+  opacity: number;
+  visible: boolean;
+  /** The layer's ordered edit stack, replayed in recorded order. */
+  ops: EditOp[];
+}
+
+/**
+ * Version-3 `edit_paths` envelope: the mask document. `matte_strokes` and
+ * `points` stay document-level — they parameterise the matting pass / SAM 2
+ * prompt, not a per-layer sequential edit. Layers are bottom-up.
+ */
+export interface MaskDocument {
+  version: 3;
+  layers: MaskLayer[];
+  /** Index of the layer receiving new edits. */
+  active: number;
+  matte_strokes: BrushStroke[];
+  points: PointPrompt[];
+}
+
+export function emptyMaskLayer(name = "Background"): MaskLayer {
+  return {
+    id: `layer-${Math.random().toString(36).slice(2, 10)}`,
+    name,
+    kind: "mask",
+    blend: "normal",
+    opacity: 1,
+    visible: true,
+    ops: [],
+  };
+}
+
+export function emptyMaskDocument(): MaskDocument {
+  return { version: 3, layers: [emptyMaskLayer()], active: 0, matte_strokes: [], points: [] };
+}
+
+/** The layer new edits are recorded onto (always present, clamped). */
+export function activeLayer(doc: MaskDocument): MaskLayer {
+  return doc.layers[Math.min(Math.max(doc.active, 0), doc.layers.length - 1)];
 }
 
 export function isPathOp(op: EditOp): op is PathOp {

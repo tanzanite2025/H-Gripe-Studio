@@ -367,13 +367,14 @@ fn load_mask_sized(
 
 // --- pure mask operations (unit-tested without disk) -----------------------
 
-/// Apply the manual edits recorded in `edit_paths` by replaying the ordered
-/// `ops` stack (see `docs/design/ps-editor-architecture.md`, M1): pen / lasso
-/// vector paths (rasterised and boolean-combined), brush / eraser strokes, and
-/// the queued magic-wand / marquee / morphology operations, in recorded order.
-/// A version-1 value (separate per-kind arrays) is migrated first, preserving
-/// the legacy replay order, so old workflows rasterise identically. Unknown
-/// entries are ignored.
+/// Apply the manual edits recorded in `edit_paths` by compositing the
+/// document's layer stack (see `docs/design/ps-editor-architecture.md`, M3).
+/// The bottom layer's ordered `ops` stack replays directly onto the base mask
+/// — so a single-layer document rasterises byte-identically to the pre-M3
+/// flow — while layers above replay onto an empty surface and composite per
+/// blend mode + opacity. A version-1 / version-2 value is migrated to a
+/// single-layer document first, preserving the legacy replay order, so old
+/// workflows rasterise identically. Unknown entries are ignored.
 fn apply_edit_paths(
     image: &RgbaImage,
     mask: &mut GrayImage,
@@ -386,12 +387,69 @@ fn apply_edit_paths(
     };
     let value = migrate_edit_paths(value);
 
-    for op in value
-        .get("ops")
+    for (index, layer) in value
+        .get("layers")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .enumerate()
     {
+        if layer.get("visible").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        let ops = layer.get("ops");
+        if index == 0 {
+            replay_ops(image, mask, ops, default_tolerance, operations);
+        } else {
+            let mut surface = GrayImage::from_pixel(mask.width(), mask.height(), Luma([MASK_OFF]));
+            replay_ops(image, &mut surface, ops, default_tolerance, operations);
+            let blend = layer
+                .get("blend")
+                .and_then(Value::as_str)
+                .unwrap_or("normal");
+            let opacity = layer
+                .get("opacity")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
+            blend_layer(mask, &surface, blend, opacity);
+            operations.push(json!({
+                "type": "layer_composite",
+                "blend": blend,
+                "opacity": opacity,
+            }));
+        }
+    }
+}
+
+/// Composite the layer `surface` onto `dst` in place: `normal` replaces,
+/// `multiply` darkens, `screen` lightens, each lerped by the layer `opacity`.
+/// Grayscale surfaces (0..255); mirrors the proxy compositor in
+/// `maskMorphology.ts` so the preview cannot drift from the run.
+fn blend_layer(dst: &mut GrayImage, src: &GrayImage, blend: &str, opacity: f64) {
+    for (d, s) in dst.pixels_mut().zip(src.pixels()) {
+        let dv = f64::from(d.0[0]);
+        let sv = f64::from(s.0[0]);
+        let blended = match blend {
+            "multiply" => dv * sv / 255.0,
+            "screen" => 255.0 - (255.0 - dv) * (255.0 - sv) / 255.0,
+            _ => sv,
+        };
+        d.0[0] = (dv + (blended - dv) * opacity).round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// Replay one layer's ordered `ops` stack (see M1): pen / lasso vector paths
+/// (rasterised and boolean-combined), brush / eraser strokes, and the queued
+/// magic-wand / marquee / morphology operations, in recorded order.
+fn replay_ops(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    ops: Option<&Value>,
+    default_tolerance: i32,
+    operations: &mut Vec<Value>,
+) {
+    for op in ops.and_then(Value::as_array).into_iter().flatten() {
         // Disabled history steps stay recorded but are skipped on replay.
         if op.get("disabled").and_then(Value::as_bool) == Some(true) {
             continue;
@@ -793,18 +851,20 @@ fn parse_edit_paths(value: Option<&Value>) -> Option<Value> {
 }
 
 /// The object echoed onto the `edit_paths` output / written to disk: the parsed
-/// input migrated to the version-2 ordered-ops envelope, else an empty one.
+/// input migrated to the version-3 layered-document envelope, else an empty one.
 fn normalise_edit_paths(value: Option<&Value>) -> Value {
     migrate_edit_paths(parse_edit_paths(value).unwrap_or_else(|| json!({})))
 }
 
-/// Migrate an `edit_paths` value to the version-2 envelope: one ordered `ops`
-/// stack plus the non-sequential `matte_strokes` / `points`. A version-2 value
-/// passes through (missing arrays filled in). A version-1 value's per-kind
-/// arrays are folded onto `ops` in the legacy replay order — `paths`, then the
-/// legacy inline `ops` (wand / invert, rewritten to the queued-operation
-/// shape), then `brush_strokes`, then `operations` — so replaying the migrated
-/// stack rasterises identically to the version-1 semantics.
+/// Migrate an `edit_paths` value to the version-3 envelope: a `layers` stack
+/// (each layer one ordered `ops` list plus `blend` / `opacity` / `visible`)
+/// plus the non-sequential document-level `matte_strokes` / `points`. A
+/// version-3 value passes through (missing fields filled in); a version-2
+/// value's `ops` stack becomes the single background layer; a version-1
+/// value's per-kind arrays are folded onto `ops` in the legacy replay order —
+/// `paths`, then the legacy inline `ops` (wand / invert, rewritten to the
+/// queued-operation shape), then `brush_strokes`, then `operations` — so
+/// replaying the migrated document rasterises identically.
 fn migrate_edit_paths(value: Value) -> Value {
     let arr = |key: &str| -> Vec<Value> {
         value
@@ -814,6 +874,26 @@ fn migrate_edit_paths(value: Value) -> Value {
             .unwrap_or_default()
     };
     let version = value.get("version").and_then(Value::as_u64).unwrap_or(1);
+    if version >= 3 {
+        let layers: Vec<Value> = arr("layers").into_iter().map(normalise_layer).collect();
+        let layers = if layers.is_empty() {
+            vec![empty_layer()]
+        } else {
+            layers
+        };
+        let active = value
+            .get("active")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(layers.len() as u64 - 1);
+        return json!({
+            "version": 3,
+            "layers": layers,
+            "active": active,
+            "matte_strokes": arr("matte_strokes"),
+            "points": arr("points"),
+        });
+    }
     let ops: Vec<Value> = if version >= 2 {
         arr("ops")
     } else {
@@ -850,12 +930,52 @@ fn migrate_edit_paths(value: Value) -> Value {
         ops.extend(arr("operations"));
         ops
     };
+    let mut layer = empty_layer();
+    layer["ops"] = json!(ops);
     json!({
-        "version": 2,
-        "ops": ops,
+        "version": 3,
+        "layers": [layer],
+        "active": 0,
         "matte_strokes": arr("matte_strokes"),
         "points": arr("points"),
     })
+}
+
+fn empty_layer() -> Value {
+    json!({
+        "name": "Background",
+        "kind": "mask",
+        "blend": "normal",
+        "opacity": 1.0,
+        "visible": true,
+        "ops": [],
+    })
+}
+
+// Fill in a stored layer's missing / malformed fields with their defaults.
+fn normalise_layer(layer: Value) -> Value {
+    let mut out = empty_layer();
+    if let Some(id) = layer.get("id").and_then(Value::as_str) {
+        out["id"] = json!(id);
+    }
+    if let Some(name) = layer.get("name").and_then(Value::as_str) {
+        out["name"] = json!(name);
+    }
+    if let Some(blend @ ("normal" | "multiply" | "screen")) =
+        layer.get("blend").and_then(Value::as_str)
+    {
+        out["blend"] = json!(blend);
+    }
+    if let Some(opacity) = layer.get("opacity").and_then(Value::as_f64) {
+        out["opacity"] = json!(opacity.clamp(0.0, 1.0));
+    }
+    if let Some(visible) = layer.get("visible").and_then(Value::as_bool) {
+        out["visible"] = json!(visible);
+    }
+    if let Some(ops) = layer.get("ops").and_then(Value::as_array) {
+        out["ops"] = json!(ops);
+    }
+    out
 }
 
 /// Optional point prompts for the auto-subject segmenter, read from a top-level
@@ -1595,8 +1715,11 @@ mod tests {
     #[test]
     fn normalise_edit_paths_defaults_to_versioned_envelope() {
         let value = normalise_edit_paths(None);
-        assert_eq!(value.get("version").and_then(Value::as_i64), Some(2));
-        assert_eq!(value["ops"], json!([]));
+        assert_eq!(value.get("version").and_then(Value::as_i64), Some(3));
+        assert_eq!(value["layers"].as_array().unwrap().len(), 1);
+        assert_eq!(value["layers"][0]["ops"], json!([]));
+        assert_eq!(value["layers"][0]["blend"], json!("normal"));
+        assert_eq!(value["layers"][0]["visible"], json!(true));
         assert_eq!(value["matte_strokes"], json!([]));
         assert_eq!(value["points"], json!([]));
     }
@@ -1614,8 +1737,9 @@ mod tests {
             "points": [[10, 20]]
         });
         let migrated = migrate_edit_paths(legacy);
-        assert_eq!(migrated["version"], json!(2));
-        let kinds: Vec<&str> = migrated["ops"]
+        assert_eq!(migrated["version"], json!(3));
+        let ops = &migrated["layers"][0]["ops"];
+        let kinds: Vec<&str> = ops
             .as_array()
             .unwrap()
             .iter()
@@ -1623,8 +1747,8 @@ mod tests {
             .collect();
         assert_eq!(kinds, vec!["path", "wand", "invert", "brush", "feather"]);
         // The legacy inline wand is rewritten to the queued shape (clamped).
-        assert_eq!(migrated["ops"][1]["region"], json!([1, 2]));
-        assert_eq!(migrated["ops"][1]["amount"], json!(255));
+        assert_eq!(ops[1]["region"], json!([1, 2]));
+        assert_eq!(ops[1]["amount"], json!(255));
         // Non-sequential fields survive unchanged.
         assert_eq!(migrated["matte_strokes"].as_array().unwrap().len(), 1);
         assert_eq!(migrated["points"], json!([[10, 20]]));
@@ -1632,7 +1756,7 @@ mod tests {
 
     #[test]
     fn migrated_version1_replays_identically_to_legacy_semantics() {
-        // Golden: a v1 record and its migrated v2 form must rasterise the same.
+        // Golden: a v1 record and its migrated v3 form must rasterise the same.
         let legacy = json!({
             "version": 1,
             "paths": [{ "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
@@ -1692,6 +1816,93 @@ mod tests {
         let mut mask = solid(5, 5, MASK_OFF);
         let mut operations = Vec::new();
         apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
+        assert!(operations.is_empty());
+    }
+
+    #[test]
+    fn single_layer_document_replays_byte_identically_to_flat_ops() {
+        // M3 acceptance: a one-layer v3 document must rasterise exactly like
+        // the same ops as a flat v2 stack (no compositing side-effects).
+        let image = RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255]));
+        let ops = json!([
+            { "type": "path", "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
+              "points": [{ "x": 2, "y": 2 }, { "x": 8, "y": 2 }, { "x": 8, "y": 7 }, { "x": 2, "y": 7 }] },
+            { "type": "brush", "mode": "subtract", "radius": 1, "points": [[4, 4]] },
+            { "type": "invert" }
+        ]);
+        let flat = json!({ "version": 2, "ops": ops });
+        let mut flat_mask = solid(10, 10, MASK_OFF);
+        apply_edit_paths(&image, &mut flat_mask, Some(&flat), 24, &mut Vec::new());
+
+        let layered = json!({ "version": 3, "layers": [{ "ops": ops }], "active": 0 });
+        let mut layered_mask = solid(10, 10, MASK_OFF);
+        apply_edit_paths(
+            &image,
+            &mut layered_mask,
+            Some(&layered),
+            24,
+            &mut Vec::new(),
+        );
+        assert_eq!(flat_mask.as_raw(), layered_mask.as_raw());
+    }
+
+    #[test]
+    fn upper_layers_composite_per_blend_and_opacity() {
+        let image = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        let base = json!({ "type": "invert" }); // background: everything on
+        let dot = json!({ "type": "brush", "mode": "add", "radius": 0, "points": [[1, 1]] });
+
+        // normal @ 100%: the upper layer's surface replaces the background.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [base.clone()] },
+            { "ops": [dot.clone()], "blend": "normal", "opacity": 1.0 }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(1, 1).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_OFF);
+
+        // multiply: the dark upper surface knocks the background out except the dot.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [base.clone()] },
+            { "ops": [dot.clone()], "blend": "multiply", "opacity": 1.0 }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(1, 1).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_OFF);
+
+        // screen: union — the background stays on everywhere.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [base.clone()] },
+            { "ops": [dot.clone()], "blend": "screen", "opacity": 1.0 }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(1, 1).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
+
+        // normal @ 50%: half-way between background (on) and surface (off).
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [base] },
+            { "ops": [dot], "blend": "normal", "opacity": 0.5 }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(0, 0).0[0], 128);
+    }
+
+    #[test]
+    fn hidden_layers_are_skipped_by_the_compositor() {
+        let image = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [] },
+            { "ops": [{ "type": "invert" }], "visible": false }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
         assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
         assert!(operations.is_empty());
     }
