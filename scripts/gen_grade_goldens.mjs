@@ -65,6 +65,117 @@ function composite(backdrop, source, mode, opacity, mask) {
   return out;
 }
 
+// ---- G2 op maths (float64 spec mirrors of crates/hgripe-grade/src/ops.rs) ----
+
+const trcDecode = (space, c) =>
+  space === "srgb"
+    ? c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+    : c < 0.03125 ? c / 16 : Math.pow(c, 1.8);
+const trcEncode = (space, l) => {
+  const v = clamp01(l);
+  return space === "srgb"
+    ? v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055
+    : v < 0.001953125 ? 16 * v : Math.pow(v, 1 / 1.8);
+};
+
+const LUMA = [0.2126, 0.7152, 0.0722];
+
+function monotoneSpline(points) {
+  const pts = [...points].sort((a, b) => a[0] - b[0]);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const n = xs.length;
+  const tg = new Array(n).fill(0);
+  if (n >= 2) {
+    const d = xs.slice(0, -1).map((x, i) => (ys[i + 1] - ys[i]) / Math.max(xs[i + 1] - x, 1e-6));
+    tg[0] = d[0];
+    tg[n - 1] = d[n - 2];
+    for (let i = 1; i < n - 1; i++) tg[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+    for (let i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { tg[i] = 0; tg[i + 1] = 0; continue; }
+      const a = tg[i] / d[i], b = tg[i + 1] / d[i], s = a * a + b * b;
+      if (s > 9) { const t = 3 / Math.sqrt(s); tg[i] = t * a * d[i]; tg[i + 1] = t * b * d[i]; }
+    }
+  }
+  return (x) => {
+    if (n === 0) return x;
+    if (n === 1 || x <= xs[0]) return x <= xs[0] ? ys[0] : ys[n - 1];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0;
+    while (i + 2 < n && x >= xs[i + 1]) i++;
+    const h = Math.max(xs[i + 1] - xs[i], 1e-6);
+    const t = (x - xs[i]) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * tg[i]
+      + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * tg[i + 1];
+  };
+}
+
+function forEachRgbLinear(surface, f) {
+  for (let px = 0; px < surface.w * surface.h; px++) {
+    const i = px * 4;
+    const rgb = [0, 1, 2].map((c) => trcDecode(surface.space, clamp01(surface.data[i + c])));
+    f(rgb);
+    for (let c = 0; c < 3; c++) surface.data[i + c] = trcEncode(surface.space, rgb[c]);
+  }
+}
+
+function applyOp(surface, op) {
+  const n = surface.w * surface.h;
+  switch (op.type) {
+    case "exposure": {
+      const gain = Math.pow(2, op.ev);
+      forEachRgbLinear(surface, (rgb) => { for (let c = 0; c < 3; c++) rgb[c] *= gain; });
+      break;
+    }
+    case "white_balance": {
+      const gains = [Math.pow(2, op.temp), Math.pow(2, op.tint), Math.pow(2, -op.temp)];
+      forEachRgbLinear(surface, (rgb) => { for (let c = 0; c < 3; c++) rgb[c] *= gains[c]; });
+      break;
+    }
+    case "levels": {
+      const span = Math.max(op.in_white - op.in_black, 1e-6);
+      const invGamma = 1 / Math.max(op.gamma, 1e-6);
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          const v = clamp01((clamp01(surface.data[i + c]) - op.in_black) / span);
+          surface.data[i + c] = op.out_black + (op.out_white - op.out_black) * Math.pow(v, invGamma);
+        }
+      }
+      break;
+    }
+    case "curves": {
+      const spline = monotoneSpline(op.points);
+      const channels = op.channel === "master" ? [0, 1, 2] : [{ red: 0, green: 1, blue: 2 }[op.channel]];
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (const c of channels) surface.data[i + c] = spline(clamp01(surface.data[i + c]));
+      }
+      break;
+    }
+    case "saturation": {
+      const k = 1 + op.amount;
+      forEachRgbLinear(surface, (rgb) => {
+        const luma = LUMA[0] * rgb[0] + LUMA[1] * rgb[1] + LUMA[2] * rgb[2];
+        for (let c = 0; c < 3; c++) rgb[c] = luma + (rgb[c] - luma) * k;
+      });
+      break;
+    }
+  }
+}
+
+function applyDoc(doc, input) {
+  const surface = { ...input, data: input.data.slice() };
+  for (const layer of doc.layers) {
+    if (!layer.visible) continue;
+    const graded = { ...surface, data: surface.data.slice() };
+    for (const op of layer.ops) applyOp(graded, op);
+    const out = composite({ ...surface }, graded, layer.blend, layer.opacity, layer.mask);
+    surface.data = out;
+  }
+  return surface.data;
+}
+
 // A 3x2 pixel set exercising branch points: dodge/burn extremes, the
 // hard/soft-light cs=0.5 split, the soft-light cb<=0.25 polynomial branch,
 // partial alphas, and a fully transparent backdrop pixel.
@@ -122,6 +233,70 @@ cases.push({
 
 writeFileSync(
   new URL("../crates/hgripe-grade/goldens/blend_separable.json", import.meta.url),
-  JSON.stringify({ cases }, null, 2) + "\n",
+  JSON.stringify({ kind: "composite", cases }, null, 2) + "\n",
 );
-console.log(`wrote ${cases.length} cases`);
+console.log(`wrote ${cases.length} composite cases`);
+
+// ---- G2 doc/op cases: full GradeDoc applied to an input surface ----
+
+const opsInput = {
+  w: 3, h: 2, space: "srgb",
+  data: [
+    0.0, 0.25, 0.5, 1.0,
+    1.0, 0.75, 0.2, 1.0,
+    0.5, 0.5, 0.5, 0.5,
+    0.02, 0.001, 0.98, 0.8, // near the sRGB linear-toe threshold
+    0.6, 0.4, 0.0, 0.25,
+    0.3, 0.7, 0.15, 1.0,
+  ],
+};
+const opsInputPro = { ...opsInput, space: "pro_photo" };
+
+const layer = (ops, extra = {}) => ({ blend: "normal", opacity: 1.0, visible: true, mask: null, ops, ...extra });
+const docCase = (name, doc, input, tolerance = 2e-5) => ({
+  name, doc, input, expected: applyDoc(doc, input), tolerance,
+});
+
+const sCurve = [[0.0, 0.0], [0.25, 0.15], [0.75, 0.85], [1.0, 1.0]];
+
+const docCases = [
+  docCase("exposure +1 EV", { layers: [layer([{ type: "exposure", ev: 1.0 }])] }, opsInput),
+  docCase("exposure -1.5 EV in ProPhoto", { layers: [layer([{ type: "exposure", ev: -1.5 }])] }, opsInputPro),
+  docCase("white balance warm + green tint", { layers: [layer([{ type: "white_balance", temp: 0.3, tint: -0.2 }])] }, opsInput),
+  docCase("levels: crush + gamma + output range", {
+    layers: [layer([{ type: "levels", in_black: 0.1, in_white: 0.9, gamma: 1.2, out_black: 0.05, out_white: 0.95 }])],
+  }, opsInput),
+  docCase("curves: master S-curve", {
+    layers: [layer([{ type: "curves", channel: "master", points: sCurve }])],
+  }, opsInput),
+  docCase("curves: red channel only", {
+    layers: [layer([{ type: "curves", channel: "red", points: [[0.0, 0.1], [0.5, 0.4], [1.0, 0.9]] }])],
+  }, opsInput),
+  docCase("saturation -0.5", { layers: [layer([{ type: "saturation", amount: -0.5 }])] }, opsInput),
+  docCase("saturation -1 is grayscale", { layers: [layer([{ type: "saturation", amount: -1.0 }])] }, opsInput),
+  docCase("op chain in one layer: exposure then curves then saturation", {
+    layers: [layer([
+      { type: "exposure", ev: 0.5 },
+      { type: "curves", channel: "master", points: sCurve },
+      { type: "saturation", amount: 0.4 },
+    ])],
+  }, opsInput),
+  docCase("two layers: soft_light exposure at 0.7 with mask, then saturation", {
+    layers: [
+      layer([{ type: "exposure", ev: 1.0 }], { blend: "soft_light", opacity: 0.7, mask }),
+      layer([{ type: "saturation", amount: 0.25 }]),
+    ],
+  }, opsInput),
+  docCase("hidden layer is skipped", {
+    layers: [
+      layer([{ type: "exposure", ev: 3.0 }], { visible: false }),
+      layer([{ type: "levels", in_black: 0.0, in_white: 1.0, gamma: 0.8, out_black: 0.0, out_white: 1.0 }]),
+    ],
+  }, opsInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_core.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: docCases }, null, 2) + "\n",
+);
+console.log(`wrote ${docCases.length} doc cases`);

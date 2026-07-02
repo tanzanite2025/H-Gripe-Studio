@@ -6,7 +6,15 @@
 
 import { describe, expect, it } from "vitest";
 import blendSeparable from "../../../../../crates/hgripe-grade/goldens/blend_separable.json";
-import { compositeOver, type GradeBlendMode, type GradeSpace, type GradeSurface } from "./gradeKernel";
+import opsCore from "../../../../../crates/hgripe-grade/goldens/ops_core.json";
+import {
+  applyDoc,
+  compositeOver,
+  type GradeBlendMode,
+  type GradeDoc,
+  type GradeSpace,
+  type GradeSurface,
+} from "./gradeKernel";
 
 interface GoldenSurface {
   w: number;
@@ -15,7 +23,7 @@ interface GoldenSurface {
   data: number[];
 }
 
-interface GoldenCase {
+interface CompositeCase {
   name: string;
   mode: string;
   opacity: number;
@@ -26,9 +34,13 @@ interface GoldenCase {
   tolerance: number;
 }
 
-const GOLDEN_FILES: Record<string, { cases: GoldenCase[] }> = {
-  "blend_separable.json": blendSeparable,
-};
+interface DocCase {
+  name: string;
+  doc: unknown;
+  input: GoldenSurface;
+  expected: number[];
+  tolerance: number;
+}
 
 const surface = (g: GoldenSurface): GradeSurface => ({
   w: g.w,
@@ -37,23 +49,33 @@ const surface = (g: GoldenSurface): GradeSurface => ({
   space: g.space as GradeSpace,
 });
 
+function assertClose(got: Float32Array, want: number[], tolerance: number) {
+  expect(got.length).toBe(want.length);
+  for (let i = 0; i < want.length; i++) {
+    expect(Math.abs(got[i] - want[i]), `sample ${i}`).toBeLessThanOrEqual(tolerance);
+  }
+}
+
 describe("grade kernel golden vectors (shared with Rust)", () => {
-  for (const [file, { cases }] of Object.entries(GOLDEN_FILES)) {
-    for (const c of cases) {
-      it(`${file}: ${c.name}`, () => {
-        const dst = surface(c.backdrop);
-        compositeOver(
-          dst,
-          surface(c.source),
-          c.mode as GradeBlendMode,
-          c.opacity,
-          c.mask ? Float32Array.from(c.mask) : null,
-        );
-        expect(dst.data.length).toBe(c.expected.length);
-        for (let i = 0; i < c.expected.length; i++) {
-          expect(Math.abs(dst.data[i] - c.expected[i]), `sample ${i}`).toBeLessThanOrEqual(c.tolerance);
-        }
-      });
-    }
+  for (const c of (blendSeparable as { cases: CompositeCase[] }).cases) {
+    it(`blend_separable.json: ${c.name}`, () => {
+      const dst = surface(c.backdrop);
+      compositeOver(
+        dst,
+        surface(c.source),
+        c.mode as GradeBlendMode,
+        c.opacity,
+        c.mask ? Float32Array.from(c.mask) : null,
+      );
+      assertClose(dst.data, c.expected, c.tolerance);
+    });
+  }
+
+  for (const c of (opsCore as { cases: DocCase[] }).cases) {
+    it(`ops_core.json: ${c.name}`, () => {
+      const dst = surface(c.input);
+      applyDoc(c.doc as GradeDoc, dst);
+      assertClose(dst.data, c.expected, c.tolerance);
+    });
   }
 });
