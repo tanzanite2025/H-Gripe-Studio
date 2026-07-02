@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  adjustmentLut,
   applyOp,
   buildProxyMask,
   createProxyMask,
@@ -10,6 +11,7 @@ import {
   invert,
   isPreviewableOp,
   PREVIEWABLE_OP_IDS,
+  sharpen,
   smooth,
   stampDisc,
   stampSoftDisc,
@@ -151,11 +153,74 @@ describe("maskMorphology preview primitives", () => {
     expect(area(scaled)).toBeGreaterThan(area(base));
   });
 
-  it("exposes the amount-taking morphology ops as previewable", () => {
-    expect([...PREVIEWABLE_OP_IDS]).toEqual(["grow", "shrink", "feather", "smooth"]);
+  it("exposes the amount-taking morphology / filter ops as previewable", () => {
+    expect([...PREVIEWABLE_OP_IDS]).toEqual(["grow", "shrink", "feather", "smooth", "blur", "sharpen"]);
     expect(isPreviewableOp("grow")).toBe(true);
+    expect(isPreviewableOp("blur")).toBe(true);
+    expect(isPreviewableOp("sharpen")).toBe(true);
     expect(isPreviewableOp("invert")).toBe(false);
     expect(isPreviewableOp("wand")).toBe(false);
+  });
+
+  it("sharpen re-steepens a blurred edge", () => {
+    const blurred = feather(filledSquare(24, 8), 2);
+    const sharpened = sharpen(blurred, 2);
+    const mid = (m: ProxyMask) => Array.from(m.data).filter((v) => v > 32 && v < 224).length;
+    expect(mid(sharpened)).toBeLessThan(mid(blurred)); // fewer in-between greys
+    expect(sharpen(blurred, 0).data).toEqual(blurred.data); // radius 0 ⇒ no-op
+  });
+});
+
+describe("adjustmentLut", () => {
+  it("levels remaps the input range onto the output range with gamma", () => {
+    const lut = adjustmentLut({ type: "levels", in_black: 64, in_white: 192 });
+    expect(lut[0]).toBe(0);
+    expect(lut[64]).toBe(0);
+    expect(lut[128]).toBe(128); // midpoint of the input span
+    expect(lut[192]).toBe(255);
+    expect(lut[255]).toBe(255);
+    const bright = adjustmentLut({ type: "levels", gamma: 2 });
+    expect(bright[64]).toBeGreaterThan(64); // gamma > 1 lifts midtones
+    const identity = adjustmentLut({ type: "levels" });
+    expect(identity[100]).toBe(100);
+  });
+
+  it("curve interpolates piecewise-linearly between sorted control points", () => {
+    const lut = adjustmentLut({ type: "curve", points: [[0, 0], [128, 192], [255, 255]] });
+    expect(lut[0]).toBe(0);
+    expect(lut[64]).toBe(96); // halfway up the first segment
+    expect(lut[128]).toBe(192);
+    expect(lut[255]).toBe(255);
+    const identity = adjustmentLut({ type: "curve" }); // <2 points ⇒ identity
+    expect(identity[77]).toBe(77);
+  });
+
+  it("brightness_contrast scales about the midpoint then shifts", () => {
+    const lut = adjustmentLut({ type: "brightness_contrast", contrast: 100 });
+    expect(lut[64]).toBe(1); // (64-127.5)*2+127.5 = 0.5 → rounds to 1
+    expect(lut[192]).toBe(255); // clamped
+    const brighter = adjustmentLut({ type: "brightness_contrast", brightness: 20 });
+    expect(brighter[100]).toBe(151); // +51
+    const identity = adjustmentLut({ type: "brightness_contrast" });
+    expect(identity[100]).toBe(100);
+  });
+
+  it("buildProxyMask applies visible adjustment layers to the composite below", () => {
+    const d = doc([{ type: "brush", id: "s1", mode: "add", radius: 40, points: [[480, 320]] }]);
+    d.layers.push({
+      ...emptyMaskDocument().layers[0],
+      id: "adj",
+      kind: "adjustment",
+      adjustment: { type: "brightness_contrast", brightness: -100 },
+    });
+    const adjusted = buildProxyMask(d, { w: 960, h: 640 });
+    expect(area(adjusted.mask)).toBe(0); // −100 brightness crushes to black
+    d.layers[1].visible = false; // hidden ⇒ skipped
+    expect(area(buildProxyMask(d, { w: 960, h: 640 }).mask)).toBeGreaterThan(0);
+    d.layers[1].visible = true;
+    d.layers[1].opacity = 0.5; // half strength ⇒ mid grey survives
+    const half = buildProxyMask(d, { w: 960, h: 640 });
+    expect(Array.from(half.mask.data).some((v) => v > 0 && v < 255)).toBe(true);
   });
 });
 

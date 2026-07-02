@@ -300,6 +300,45 @@ export function emptyEditPaths(): EditPaths {
 export type LayerBlend = "normal" | "multiply" | "screen";
 
 /**
+ * Tone-mapping kinds an adjustment layer can carry (M6). The document is
+ * grayscale (mask surfaces), so the PS set maps to the greyscale tone curve:
+ * `levels` (input / gamma / output), a free `curve` (control points → LUT),
+ * and `brightness_contrast`. Hue/saturation has no greyscale meaning and is
+ * deliberately absent.
+ */
+export type AdjustmentType = "levels" | "curve" | "brightness_contrast";
+
+/**
+ * The revisable parameters of an adjustment layer (M6). Each field defaults
+ * to its identity when absent, so a freshly added adjustment layer is a
+ * no-op until tuned. Both the proxy preview (`maskMorphology.ts`) and the
+ * Rust compositor (`subject_mask.rs`) build the same 256-entry LUT from
+ * these params, so the preview cannot drift from the run.
+ */
+export interface LayerAdjustment {
+  type: AdjustmentType;
+  // --- levels -----------------------------------------------------------
+  /** Input black point, 0..255. Absent ⇒ 0. */
+  in_black?: number;
+  /** Input white point, 0..255. Absent ⇒ 255. */
+  in_white?: number;
+  /** Midtone gamma (>0; 1 = linear). Absent ⇒ 1. */
+  gamma?: number;
+  /** Output black point, 0..255. Absent ⇒ 0. */
+  out_black?: number;
+  /** Output white point, 0..255. Absent ⇒ 255. */
+  out_white?: number;
+  // --- curve --------------------------------------------------------------
+  /** Curve control points `[x, y]` (0..255), piecewise-linear. Absent / <2 ⇒ identity. */
+  points?: [number, number][];
+  // --- brightness_contrast ------------------------------------------------
+  /** −100..100; +100 shifts the whole range up by 255. Absent ⇒ 0. */
+  brightness?: number;
+  /** −100..100; scales values about the midpoint (127.5). Absent ⇒ 0. */
+  contrast?: number;
+}
+
+/**
  * One layer of the mask document (see `docs/design/ps-editor-architecture.md`,
  * M3). Each layer owns its own ordered edit stack. The bottom layer (index 0)
  * is the background: its ops replay directly onto the node's base mask, so a
@@ -310,14 +349,21 @@ export type LayerBlend = "normal" | "multiply" | "screen";
 export interface MaskLayer {
   id: string;
   name: string;
-  /** `"mask"` today; `"pixel"` is reserved by the document model (M4+). */
-  kind: "mask";
+  /**
+   * `"mask"` layers own an edit stack and composite per blend + opacity;
+   * `"adjustment"` layers (M6) carry a `LayerAdjustment` tone map applied to
+   * the composite below them (their `ops` / `blend` are ignored). `"pixel"`
+   * is reserved by the document model.
+   */
+  kind: "mask" | "adjustment";
   blend: LayerBlend;
   /** 0..1 layer opacity. */
   opacity: number;
   visible: boolean;
   /** The layer's ordered edit stack, replayed in recorded order. */
   ops: EditOp[];
+  /** The tone map an `"adjustment"` layer applies (revisable at any time). */
+  adjustment?: LayerAdjustment;
 }
 
 /**
@@ -343,6 +389,15 @@ export function emptyMaskLayer(name = "Background"): MaskLayer {
     opacity: 1,
     visible: true,
     ops: [],
+  };
+}
+
+/** A fresh identity adjustment layer of the given tone-map kind (M6). */
+export function emptyAdjustmentLayer(type: AdjustmentType, name?: string): MaskLayer {
+  return {
+    ...emptyMaskLayer(name ?? type),
+    kind: "adjustment",
+    adjustment: { type },
   };
 }
 

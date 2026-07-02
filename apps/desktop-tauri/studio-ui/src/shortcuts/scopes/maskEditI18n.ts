@@ -47,6 +47,8 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   select_all: { hint: "全选（规划中）。" },
   reselect: { hint: "重新选择（规划中）。" },
   free_transform: { hint: "自由变换：移动 / 缩放 / 旋转蒙版，作为可随时改参的一步。" },
+  adjust_levels: { hint: "新建 色阶 调整图层（PS 色阶为 Ctrl+L；这里 L 已是套索）。" },
+  adjust_curve: { hint: "新建 曲线 调整图层（PS 曲线为 Ctrl+M；这里 M 已是框选）。" },
   duplicate: { hint: "通过拷贝复制选区 / 图层（规划中）。" },
   step_backward: { hint: "后退一步（PS 传统撤销）（规划中；Ctrl+Z 已可撤销）。" },
   fill_dialog: { hint: "填充对话框（规划中）。" },

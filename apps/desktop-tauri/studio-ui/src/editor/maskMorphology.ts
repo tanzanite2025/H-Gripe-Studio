@@ -14,7 +14,7 @@
 // modal wraps a proxy build + `applyOp` in `PreviewLane` for latest-wins drags
 // and does the canvas rasterisation of the result overlay separately.
 
-import type { BrushStroke, EditOp, EditPath, MaskDocument, MaskOperation } from "../types/production";
+import type { BrushStroke, EditOp, EditPath, LayerAdjustment, MaskDocument, MaskOperation } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
@@ -24,8 +24,8 @@ export interface ProxyMask {
   data: Uint8Array;
 }
 
-/** Morphology op ids this module can preview (the amount-taking ones). */
-export const PREVIEWABLE_OP_IDS = ["grow", "shrink", "feather", "smooth"] as const;
+/** Morphology / filter op ids this module can preview (the amount-taking ones). */
+export const PREVIEWABLE_OP_IDS = ["grow", "shrink", "feather", "smooth", "blur", "sharpen"] as const;
 export type PreviewableOpId = (typeof PREVIEWABLE_OP_IDS)[number];
 
 export function isPreviewableOp(id: string): id is PreviewableOpId {
@@ -285,6 +285,20 @@ export function feather(mask: ProxyMask, radius: number): ProxyMask {
   return boxBlur(boxBlur(mask, radius), radius);
 }
 
+/**
+ * Unsharp-mask sharpen: `out = clamp(v + (v − blur(v)))` — boosts the mask
+ * edge by its own high-frequency detail. `radius` is the blur radius in px.
+ */
+export function sharpen(mask: ProxyMask, radius: number): ProxyMask {
+  if (radius <= 0) return cloneMask(mask);
+  const blurred = feather(mask, radius);
+  const out = createProxyMask(mask.w, mask.h);
+  for (let i = 0; i < mask.data.length; i++) {
+    out.data[i] = clamp(2 * mask.data[i] - blurred.data[i], 0, 255);
+  }
+  return out;
+}
+
 /** Morphological open (erode→dilate) then close (dilate→erode): despeckle + fill nicks. */
 export function smooth(mask: ProxyMask, radius: number): ProxyMask {
   const r = Math.max(1, Math.round(radius));
@@ -353,7 +367,10 @@ export function applyOp(mask: ProxyMask, type: string, radius: number): ProxyMas
     case "shrink":
       return erode(mask, radius);
     case "feather":
+    case "blur":
       return feather(mask, radius);
+    case "sharpen":
+      return sharpen(mask, radius);
     case "smooth":
       return smooth(mask, radius);
     case "invert":
@@ -433,6 +450,71 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
   return mask;
 }
 
+/**
+ * Build the 256-entry LUT an adjustment layer's tone map resolves to (M6).
+ * Identity when the params are all at their defaults. Mirrors the Rust
+ * `adjustment_lut` in `subject_mask.rs` exactly, so the proxy preview and
+ * the run cannot drift.
+ */
+export function adjustmentLut(adj: LayerAdjustment): Uint8Array {
+  const lut = new Uint8Array(256);
+  if (adj.type === "levels") {
+    const inBlack = clamp(adj.in_black ?? 0, 0, 255);
+    const inWhite = clamp(adj.in_white ?? 255, 0, 255);
+    const gamma = Math.max(adj.gamma ?? 1, 1e-6);
+    const outBlack = clamp(adj.out_black ?? 0, 0, 255);
+    const outWhite = clamp(adj.out_white ?? 255, 0, 255);
+    const span = Math.max(inWhite - inBlack, 1e-6);
+    for (let v = 0; v < 256; v++) {
+      const t = Math.pow(clamp((v - inBlack) / span, 0, 1), 1 / gamma);
+      lut[v] = Math.round(clamp(outBlack + t * (outWhite - outBlack), 0, 255));
+    }
+  } else if (adj.type === "curve") {
+    const pts = [...(adj.points ?? [])]
+      .filter((p) => Array.isArray(p) && p.length >= 2)
+      .sort((a, b) => a[0] - b[0]);
+    for (let v = 0; v < 256; v++) {
+      if (pts.length < 2) {
+        lut[v] = v;
+        continue;
+      }
+      if (v <= pts[0][0]) {
+        lut[v] = Math.round(clamp(pts[0][1], 0, 255));
+        continue;
+      }
+      if (v >= pts[pts.length - 1][0]) {
+        lut[v] = Math.round(clamp(pts[pts.length - 1][1], 0, 255));
+        continue;
+      }
+      let i = 1;
+      while (pts[i][0] < v) i++;
+      const [x0, y0] = pts[i - 1];
+      const [x1, y1] = pts[i];
+      const t = (v - x0) / Math.max(x1 - x0, 1e-6);
+      lut[v] = Math.round(clamp(y0 + t * (y1 - y0), 0, 255));
+    }
+  } else {
+    // brightness_contrast: scale about the midpoint, then shift.
+    const brightness = (clamp(adj.brightness ?? 0, -100, 100) / 100) * 255;
+    const slope = 1 + clamp(adj.contrast ?? 0, -100, 100) / 100;
+    for (let v = 0; v < 256; v++) {
+      lut[v] = Math.round(clamp((v - 127.5) * slope + 127.5 + brightness, 0, 255));
+    }
+  }
+  return lut;
+}
+
+// Apply an adjustment layer's LUT to the composite in place, lerped by the
+// layer opacity (mirrors the Rust `apply_adjustment`).
+function applyAdjustment(dst: ProxyMask, adj: LayerAdjustment, opacity: number): void {
+  const lut = adjustmentLut(adj);
+  const a = clamp(opacity, 0, 1);
+  for (let i = 0; i < dst.data.length; i++) {
+    const d = dst.data[i];
+    dst.data[i] = Math.round(d + (lut[d] - d) * a);
+  }
+}
+
 // Composite `src` onto `dst` in place per the layer's blend mode + opacity
 // (grayscale surfaces; mirrors the Rust compositor in `subject_mask.rs`).
 function blendInto(dst: ProxyMask, src: ProxyMask, blend: string, opacity: number): void {
@@ -467,6 +549,10 @@ export function buildProxyMask(
   let mask = createProxyMask(w, h);
   doc.layers.forEach((layer, i) => {
     if (!layer.visible) return;
+    if (layer.kind === "adjustment") {
+      if (layer.adjustment) applyAdjustment(mask, layer.adjustment, layer.opacity);
+      return;
+    }
     if (i === 0) {
       mask = replayOps(mask, layer.ops, scale);
       return;

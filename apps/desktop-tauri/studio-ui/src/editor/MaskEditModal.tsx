@@ -15,6 +15,7 @@ import { LangContext, useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, type ProxyMask } from "./maskMorphology";
 import {
+  addAdjustmentLayer,
   addBrushStroke,
   addMatteStroke,
   addOperation,
@@ -36,13 +37,25 @@ import {
   toggleLayerVisible,
   toggleOp,
   undo,
+  updateLayerAdjustment,
   updateOpAmount,
   updateOpTransform,
   updatePathAnchors,
   type EditState,
   type TransformParams,
 } from "./maskEdit";
-import type { BrushStroke, EditOp, EditPath, EditPathPoint, LayerBlend, MaskDocument, MaskOperation, PointPrompt } from "../types/production";
+import type {
+  AdjustmentType,
+  BrushStroke,
+  EditOp,
+  EditPath,
+  EditPathPoint,
+  LayerAdjustment,
+  LayerBlend,
+  MaskDocument,
+  MaskOperation,
+  PointPrompt,
+} from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
 
 // Default logical canvas size when no backing image is available (browser
@@ -67,6 +80,8 @@ type Action =
   | { type: "op_transform"; index: number; params: TransformParams }
   | { type: "path_anchors"; index: number; points: EditPathPoint[] }
   | { type: "layer_add" }
+  | { type: "layer_add_adjustment"; adjType: AdjustmentType }
+  | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
   | { type: "layer_remove"; index: number }
   | { type: "layer_active"; index: number }
   | { type: "layer_visible"; index: number }
@@ -103,6 +118,10 @@ function reducer(state: EditState, action: Action): EditState {
       return updatePathAnchors(state, action.index, action.points);
     case "layer_add":
       return addLayer(state);
+    case "layer_add_adjustment":
+      return addAdjustmentLayer(state, action.adjType);
+    case "layer_adjustment":
+      return updateLayerAdjustment(state, action.index, action.adjustment);
     case "layer_remove":
       return removeLayer(state, action.index);
     case "layer_active":
@@ -195,6 +214,7 @@ export function MaskEditModal({
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
   const previewing = isPreviewableOp(toolId) && preview != null;
+  const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
 
   // Best-effort underlay: a large thumbnail of the connected image. Empty in
   // browser preview (mocked backend) — we then draw a checkerboard so the user
@@ -320,6 +340,8 @@ export function MaskEditModal({
       setPaintTarget("layer");
     },
     quick_mask: () => setQuickMask((v) => !v),
+    adjust_levels: () => dispatch({ type: "layer_add_adjustment", adjType: "levels" }),
+    adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
     swap_mode: () => {
       if (toolId === "brush") setToolId("eraser");
       else if (toolId === "eraser") setToolId("brush");
@@ -702,6 +724,12 @@ export function MaskEditModal({
       return;
     }
     if (tool.status !== "ready") return;
+    // Adjustment layers carry no edit stack — canvas edits that would record
+    // onto the active layer are ignored; document-level matte strokes / SAM
+    // points still land.
+    const activeIsAdjustment = activeLayerKind === "adjustment";
+    const toMatteTarget = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
+    if (activeIsAdjustment && tool.kind !== "point" && !toMatteTarget) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const pt = toImage(e);
     if (tool.kind === "path") {
@@ -838,6 +866,34 @@ export function MaskEditModal({
   const matteStrokes = state.current.matte_strokes;
   const layers = state.current.layers;
   const ops = activeOps(state.current);
+  const activeAdjustment =
+    activeLayerKind === "adjustment" ? layers[state.current.active]?.adjustment ?? null : null;
+
+  // Patch one field of the active adjustment layer (each change is one undo step).
+  const patchAdjustment = (patch: Partial<LayerAdjustment>) => {
+    if (!activeAdjustment) return;
+    dispatch({
+      type: "layer_adjustment",
+      index: state.current.active,
+      adjustment: { ...activeAdjustment, ...patch },
+    });
+  };
+  // The curve panel exposes three fixed control points (shadows / midtones /
+  // highlights at x = 0 / 128 / 255); a stored point list is read best-effort.
+  const curveY = (slot: 0 | 1 | 2): number => {
+    const defaults = [0, 128, 255] as const;
+    const p = activeAdjustment?.points?.[slot];
+    return typeof p?.[1] === "number" ? Math.round(p[1]) : defaults[slot];
+  };
+  const setCurveY = (slot: 0 | 1 | 2, y: number) => {
+    const pts: [number, number][] = [
+      [0, curveY(0)],
+      [128, curveY(1)],
+      [255, curveY(2)],
+    ];
+    pts[slot] = [pts[slot][0], Math.min(Math.max(y, 0), 255)];
+    patchAdjustment({ points: pts });
+  };
 
   // One-line label for a history step (raw op vocabulary, like the old chips).
   const opLabel = (op: EditOp): string => {
@@ -1128,19 +1184,24 @@ export function MaskEditModal({
                         {layer.visible ? "👁" : "—"}
                       </button>
                       <span className="mask-layer-name" title={layer.name}>
+                        {layer.kind === "adjustment" ? "◐ " : ""}
                         {layer.name}
                       </span>
-                      <select
-                        className="mask-layer-blend"
-                        value={layer.blend}
-                        title={t("mask.layerBlend")}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => dispatch({ type: "layer_blend", index: i, blend: e.target.value as LayerBlend })}
-                      >
-                        <option value="normal">{t("mask.blendNormal")}</option>
-                        <option value="multiply">{t("mask.blendMultiply")}</option>
-                        <option value="screen">{t("mask.blendScreen")}</option>
-                      </select>
+                      {layer.kind === "adjustment" ? (
+                        <span className="mask-layer-blend muted">{t("mask.adjustmentBadge")}</span>
+                      ) : (
+                        <select
+                          className="mask-layer-blend"
+                          value={layer.blend}
+                          title={t("mask.layerBlend")}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => dispatch({ type: "layer_blend", index: i, blend: e.target.value as LayerBlend })}
+                        >
+                          <option value="normal">{t("mask.blendNormal")}</option>
+                          <option value="multiply">{t("mask.blendMultiply")}</option>
+                          <option value="screen">{t("mask.blendScreen")}</option>
+                        </select>
+                      )}
                       <input
                         className="mask-layer-opacity"
                         type="number"
@@ -1171,8 +1232,103 @@ export function MaskEditModal({
                 <button onClick={() => dispatch({ type: "layer_add" })} title={t("mask.layerAddTitle")}>
                   + {t("mask.layerAdd")}
                 </button>
+                <select
+                  className="mask-layer-blend"
+                  value=""
+                  title={t("mask.adjustmentAddTitle")}
+                  onChange={(e) => {
+                    const adjType = e.target.value as AdjustmentType | "";
+                    if (adjType) dispatch({ type: "layer_add_adjustment", adjType });
+                  }}
+                >
+                  <option value="" disabled>
+                    ◐ {t("mask.adjustmentAdd")}
+                  </option>
+                  <option value="levels">{t("mask.adjLevels")}</option>
+                  <option value="curve">{t("mask.adjCurve")}</option>
+                  <option value="brightness_contrast">{t("mask.adjBrightnessContrast")}</option>
+                </select>
               </span>
             </div>
+
+            {activeAdjustment ? (
+              <div className="field mask-preview-actions">
+                <span>
+                  {t(
+                    activeAdjustment.type === "levels"
+                      ? "mask.adjLevels"
+                      : activeAdjustment.type === "curve"
+                        ? "mask.adjCurve"
+                        : "mask.adjBrightnessContrast",
+                  )}{" "}
+                  <span className="muted">· {t("mask.adjustmentBadge")}</span>
+                </span>
+                {activeAdjustment.type === "levels" ? (
+                  (
+                    [
+                      ["in_black", "mask.adjInBlack", 0, 255, 1, 0],
+                      ["in_white", "mask.adjInWhite", 0, 255, 1, 255],
+                      ["gamma", "mask.adjGamma", 0.1, 3, 0.05, 1],
+                      ["out_black", "mask.adjOutBlack", 0, 255, 1, 0],
+                      ["out_white", "mask.adjOutWhite", 0, 255, 1, 255],
+                    ] as const
+                  ).map(([key, label, min, max, step, dflt]) => (
+                    <label key={key} className="slider-row">
+                      <span>{t(label)}</span>
+                      <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={activeAdjustment[key] ?? dflt}
+                        onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
+                      />
+                      <output>{activeAdjustment[key] ?? dflt}</output>
+                    </label>
+                  ))
+                ) : activeAdjustment.type === "curve" ? (
+                  (
+                    [
+                      [0, "mask.adjShadows"],
+                      [1, "mask.adjMidtones"],
+                      [2, "mask.adjHighlights"],
+                    ] as const
+                  ).map(([slot, label]) => (
+                    <label key={slot} className="slider-row">
+                      <span>{t(label)}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={255}
+                        value={curveY(slot)}
+                        onChange={(e) => setCurveY(slot, Number(e.target.value))}
+                      />
+                      <output>{curveY(slot)}</output>
+                    </label>
+                  ))
+                ) : (
+                  (
+                    [
+                      ["brightness", "mask.adjBrightness"],
+                      ["contrast", "mask.adjContrast"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="slider-row">
+                      <span>{t(label)}</span>
+                      <input
+                        type="range"
+                        min={-100}
+                        max={100}
+                        value={activeAdjustment[key] ?? 0}
+                        onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
+                      />
+                      <output>{activeAdjustment[key] ?? 0}</output>
+                    </label>
+                  ))
+                )}
+                <small className="muted">{t("mask.adjustmentHint")}</small>
+              </div>
+            ) : null}
 
             <div className="field">
               <span>{t("mask.history", { count: ops.length })}</span>

@@ -397,6 +397,19 @@ fn apply_edit_paths(
         if layer.get("visible").and_then(Value::as_bool) == Some(false) {
             continue;
         }
+        // Adjustment layers (M6) carry no edit stack: they tone-map the
+        // composite below them per a 256-entry LUT, lerped by opacity.
+        if layer.get("kind").and_then(Value::as_str) == Some("adjustment") {
+            if let Some(adjustment) = layer.get("adjustment") {
+                let opacity = layer
+                    .get("opacity")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 1.0);
+                apply_adjustment(mask, adjustment, opacity, operations);
+            }
+            continue;
+        }
         let ops = layer.get("ops");
         if index == 0 {
             replay_ops(image, mask, ops, default_tolerance, operations);
@@ -420,6 +433,108 @@ fn apply_edit_paths(
             }));
         }
     }
+}
+
+/// Apply an adjustment layer's tone map to the composite in place (M6):
+/// build the 256-entry LUT for its params and lerp each pixel toward the
+/// mapped value by the layer `opacity`.
+fn apply_adjustment(
+    mask: &mut GrayImage,
+    adjustment: &Value,
+    opacity: f64,
+    operations: &mut Vec<Value>,
+) {
+    let Some(kind) = adjustment.get("type").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(lut) = adjustment_lut(kind, adjustment) else {
+        return;
+    };
+    for p in mask.pixels_mut() {
+        let v = f64::from(p.0[0]);
+        let mapped = f64::from(lut[p.0[0] as usize]);
+        p.0[0] = (v + (mapped - v) * opacity).round().clamp(0.0, 255.0) as u8;
+    }
+    operations.push(json!({
+        "type": "adjustment",
+        "kind": kind,
+        "opacity": opacity,
+    }));
+}
+
+/// Build the 256-entry LUT an adjustment layer's params resolve to. Mirrors
+/// `adjustmentLut` in `maskMorphology.ts` exactly, so the proxy preview and
+/// the run cannot drift. Unknown kinds return `None` (ignored).
+fn adjustment_lut(kind: &str, adjustment: &Value) -> Option<[u8; 256]> {
+    let field = |key: &str, default: f64| {
+        adjustment
+            .get(key)
+            .and_then(Value::as_f64)
+            .unwrap_or(default)
+    };
+    let mut lut = [0u8; 256];
+    match kind {
+        "levels" => {
+            let in_black = field("in_black", 0.0).clamp(0.0, 255.0);
+            let in_white = field("in_white", 255.0).clamp(0.0, 255.0);
+            let gamma = field("gamma", 1.0).max(1e-6);
+            let out_black = field("out_black", 0.0).clamp(0.0, 255.0);
+            let out_white = field("out_white", 255.0).clamp(0.0, 255.0);
+            let span = (in_white - in_black).max(1e-6);
+            for (v, out) in lut.iter_mut().enumerate() {
+                let t = ((v as f64 - in_black) / span)
+                    .clamp(0.0, 1.0)
+                    .powf(1.0 / gamma);
+                *out = (out_black + t * (out_white - out_black))
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+        }
+        "curve" => {
+            let mut pts: Vec<(f64, f64)> = adjustment
+                .get("points")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|p| {
+                    let p = p.as_array()?;
+                    Some((p.first()?.as_f64()?, p.get(1)?.as_f64()?))
+                })
+                .collect();
+            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (v, out) in lut.iter_mut().enumerate() {
+                let v = v as f64;
+                *out = if pts.len() < 2 {
+                    v as u8
+                } else if v <= pts[0].0 {
+                    pts[0].1.round().clamp(0.0, 255.0) as u8
+                } else if v >= pts[pts.len() - 1].0 {
+                    pts[pts.len() - 1].1.round().clamp(0.0, 255.0) as u8
+                } else {
+                    let i = pts
+                        .iter()
+                        .position(|p| p.0 >= v)
+                        .unwrap_or(pts.len() - 1)
+                        .max(1);
+                    let (x0, y0) = pts[i - 1];
+                    let (x1, y1) = pts[i];
+                    let t = (v - x0) / (x1 - x0).max(1e-6);
+                    (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8
+                };
+            }
+        }
+        "brightness_contrast" => {
+            let brightness = field("brightness", 0.0).clamp(-100.0, 100.0) / 100.0 * 255.0;
+            let slope = 1.0 + field("contrast", 0.0).clamp(-100.0, 100.0) / 100.0;
+            for (v, out) in lut.iter_mut().enumerate() {
+                *out = ((v as f64 - 127.5) * slope + 127.5 + brightness)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+        }
+        _ => return None,
+    }
+    Some(lut)
 }
 
 /// Composite the layer `surface` onto `dst` in place: `normal` replaces,
@@ -606,6 +721,29 @@ fn apply_queued_operation(
             if px > 0.0 {
                 *mask = imageops::blur(mask, px as f32);
                 operations.push(json!({ "type": "feather", "px": px }));
+            }
+        }
+        Some("blur") => {
+            // Gaussian-blur filter step (M6); revisable like feather but a
+            // distinct history entry.
+            let px = amount.unwrap_or(0.0).max(0.0);
+            if px > 0.0 {
+                *mask = imageops::blur(mask, px as f32);
+                operations.push(json!({ "type": "blur", "px": px }));
+            }
+        }
+        Some("sharpen") => {
+            // Unsharp-mask filter step (M6): `out = clamp(2v − blur(v))`,
+            // mirroring the proxy `sharpen` in `maskMorphology.ts`.
+            let px = amount.unwrap_or(0.0).max(0.0);
+            if px > 0.0 {
+                let blurred = imageops::blur(mask, px as f32);
+                for (p, b) in mask.pixels_mut().zip(blurred.pixels()) {
+                    let v = i32::from(p.0[0]);
+                    let bl = i32::from(b.0[0]);
+                    p.0[0] = (2 * v - bl).clamp(0, 255) as u8;
+                }
+                operations.push(json!({ "type": "sharpen", "px": px }));
             }
         }
         Some("smooth") => {
@@ -2186,6 +2324,112 @@ mod tests {
         let mut mask = solid(4, 4, MASK_OFF);
         apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
         assert_eq!(mask.get_pixel(0, 0).0[0], 128);
+    }
+
+    #[test]
+    fn adjustment_layers_tone_map_the_composite_below() {
+        let image = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        // Background all-on; a −100 brightness adjustment crushes it to black.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "invert" }] },
+            { "kind": "adjustment", "ops": [],
+              "adjustment": { "type": "brightness_contrast", "brightness": -100 } }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("adjustment")));
+
+        // Half opacity lerps halfway toward the mapped value.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "invert" }] },
+            { "kind": "adjustment", "ops": [], "opacity": 0.5,
+              "adjustment": { "type": "brightness_contrast", "brightness": -100 } }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
+        assert!(mask.as_raw().iter().all(|&px| px == 128));
+
+        // Hidden adjustment layers are skipped.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "invert" }] },
+            { "kind": "adjustment", "ops": [], "visible": false,
+              "adjustment": { "type": "brightness_contrast", "brightness": -100 } }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_ON));
+    }
+
+    #[test]
+    fn adjustment_lut_matches_the_proxy_formulas() {
+        // Mirrors the vitest cases over `adjustmentLut` in
+        // `maskMorphology.test.ts` — the two implementations must agree.
+        let levels = adjustment_lut("levels", &json!({ "in_black": 64, "in_white": 192 })).unwrap();
+        assert_eq!(levels[64], 0);
+        assert_eq!(levels[128], 128);
+        assert_eq!(levels[192], 255);
+
+        let curve = adjustment_lut(
+            "curve",
+            &json!({ "points": [[0, 0], [128, 192], [255, 255]] }),
+        )
+        .unwrap();
+        assert_eq!(curve[64], 96);
+        assert_eq!(curve[128], 192);
+        let identity = adjustment_lut("curve", &json!({})).unwrap();
+        assert_eq!(identity[77], 77);
+
+        let bc = adjustment_lut("brightness_contrast", &json!({ "contrast": 100 })).unwrap();
+        assert_eq!(bc[64], 1);
+        assert_eq!(bc[192], 255);
+
+        assert!(adjustment_lut("posterize", &json!({})).is_none());
+    }
+
+    #[test]
+    fn blur_and_sharpen_ops_are_revisable_filter_steps() {
+        let image = RgbaImage::from_pixel(12, 12, Rgba([0, 0, 0, 255]));
+        // A blurred block gains soft (intermediate) edge alpha.
+        let doc = json!({ "version": 2, "ops": [
+            { "type": "path", "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
+              "points": [{ "x": 3, "y": 3 }, { "x": 9, "y": 3 }, { "x": 9, "y": 9 }, { "x": 3, "y": 9 }] },
+            { "type": "blur", "amount": 2 }
+        ]});
+        let mut blurred = solid(12, 12, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut blurred, Some(&doc), 24, &mut operations);
+        assert!(blurred.as_raw().iter().any(|&px| px > 0 && px < 255));
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("blur")));
+
+        // Sharpening the blurred result re-steepens the edge (fewer mid greys).
+        let doc = json!({ "version": 2, "ops": [
+            { "type": "path", "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
+              "points": [{ "x": 3, "y": 3 }, { "x": 9, "y": 3 }, { "x": 9, "y": 9 }, { "x": 3, "y": 9 }] },
+            { "type": "blur", "amount": 2 },
+            { "type": "sharpen", "amount": 2 }
+        ]});
+        let mut sharpened = solid(12, 12, MASK_OFF);
+        apply_edit_paths(&image, &mut sharpened, Some(&doc), 24, &mut Vec::new());
+        let mids = |m: &GrayImage| m.as_raw().iter().filter(|&&v| v > 32 && v < 224).count();
+        assert!(mids(&sharpened) < mids(&blurred));
+
+        // Zero-amount filter steps are no-ops and stay unrecorded.
+        let doc = json!({ "version": 2, "ops": [
+            { "type": "invert" },
+            { "type": "blur", "amount": 0 },
+            { "type": "sharpen", "amount": 0 }
+        ]});
+        let mut mask = solid(12, 12, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_ON));
+        assert_eq!(operations.len(), 1);
     }
 
     #[test]
