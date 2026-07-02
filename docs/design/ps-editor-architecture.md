@@ -119,6 +119,12 @@ and the Rust run, unlike `Ctrl+D` clear which wipes the stack itself);
 undoable); `Ctrl+J` duplicate the active layer via copy (fresh id, "… copy"
 name, active above the source).
 
+**M10 — Gradient tool.** `G` gradient as a recorded `gradient` op: dragging a
+start → end vector composites a linear selection ramp (full at the start,
+none at the end) into the mask — `add` unions it in, Alt-drag records
+`subtract` (cuts it away). A revisable history step, replayed identically by
+the proxy (`fillGradient`) and the Rust run (`fill_gradient`).
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product

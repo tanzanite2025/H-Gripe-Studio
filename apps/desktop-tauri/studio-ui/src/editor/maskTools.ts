@@ -41,7 +41,11 @@ export type ToolKind =
   | "path"
   // Canvas navigation (M8): hand pans the zoomed view, zoom clicks in/out.
   // Records nothing — the view is a CSS transform, never part of the document.
-  | "view";
+  | "view"
+  // Drag a start → end vector that records a `gradient` op: a linear ramp
+  // (full selection at the start fading to none at the end) unioned into or
+  // cut away from the mask (M10).
+  | "gradient";
 
 export interface MaskTool {
   id: string;
@@ -89,6 +93,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "matting", label: "Matting", status: "ready", kind: "matte", lane: "render", hint: "Paint the trimap unknown band over hair / fur / glass — the matter resolves it into soft alpha." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
+  { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
   { id: "crop", label: "Crop", status: "ready", kind: "marquee", lane: "preview", hint: "Drag a crop box — the mask is cleared outside it (a revisable step)." },
   { id: "hand", label: "Hand", status: "ready", kind: "view", lane: "interactive", hint: "Drag to pan the zoomed view (or hold Space with any tool)." },

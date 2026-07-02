@@ -46,7 +46,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_healing", combo: "j", status: "planned", hint: "Spot-healing / healing brush (planned)." },
   { id: "tool_clone", combo: "s", status: "planned", hint: "Clone-stamp tool (planned)." },
   { id: "tool_history_brush", combo: "y", status: "planned", hint: "History brush (planned)." },
-  { id: "tool_gradient", combo: "g", status: "planned", hint: "Gradient / paint-bucket tool (planned)." },
+  { id: "tool_gradient", combo: "g", status: "ready", hint: "Gradient tool (drag start → end: a linear selection ramp as a revisable step; Alt-drag subtracts)." },
   { id: "tool_dodge_burn", combo: "o", status: "planned", hint: "Dodge / burn / sponge tool (planned)." },
   { id: "tool_type", combo: "t", status: "planned", hint: "Type tool (planned)." },
   { id: "tool_shape", combo: "u", status: "planned", hint: "Shape tools (planned)." },
@@ -87,6 +87,7 @@ const TOOL_COMBO: Readonly<Record<string, string>> = {
   ellipse: "shift+m",
   move: "v",
   crop: "c",
+  gradient: "g",
   hand: "h",
   zoom: "z",
 };

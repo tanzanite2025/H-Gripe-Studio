@@ -163,6 +163,32 @@ function fillMarquee(mask: ProxyMask, op: MaskOperation, scale: number): void {
   }
 }
 
+/**
+ * Composite a linear gradient ramp (M10): full selection at the drag start
+ * fading to none at the end (image-space `region: [x1,y1,x2,y2]`). `add`
+ * unions the ramp into the mask; `subtract` cuts it away. Mirrors the Rust
+ * `fill_gradient`.
+ */
+function fillGradient(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const region = op.region;
+  if (!region || region.length < 4) return;
+  const ax = region[0] * scale;
+  const ay = region[1] * scale;
+  const dx = region[2] * scale - ax;
+  const dy = region[3] * scale - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-6) return;
+  const subtract = op.mode === "subtract";
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const t = Math.min(Math.max(((x + 0.5 - ax) * dx + (y + 0.5 - ay) * dy) / len2, 0), 1);
+      const ramp = Math.round(255 * (1 - t));
+      const i = y * mask.w + x;
+      mask.data[i] = subtract ? Math.max(mask.data[i] - ramp, 0) : Math.max(mask.data[i], ramp);
+    }
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -447,6 +473,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       stampStroke(mask, op, scale);
     } else if (op.type === "rect" || op.type === "ellipse") {
       fillMarquee(mask, op, scale);
+    } else if (op.type === "gradient") {
+      fillGradient(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {

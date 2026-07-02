@@ -205,6 +205,9 @@ export function MaskEditModal({
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   // In-progress move-tool drag (image-space): committed as a `transform` op.
   const moveDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // In-progress gradient drag (M10): the start → end ramp vector; Alt at
+  // pointer-down records a subtract ramp.
+  const gradientDrag = useRef<{ start: [number, number]; end: [number, number]; subtract: boolean } | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
@@ -345,6 +348,7 @@ export function MaskEditModal({
     tool_lasso: () => selectTool("lasso"),
     tool_rect: () => selectTool("rect"),
     tool_ellipse: () => selectTool("ellipse"),
+    tool_gradient: () => selectTool("gradient"),
     tool_move: () => selectTool("move"),
     tool_crop: () => selectTool("crop"),
     free_transform: () => openFreeTransform(),
@@ -656,8 +660,9 @@ export function MaskEditModal({
       }
     }
 
-    // Live move-tool drag: an arrow from the grab point to the cursor.
-    const md = moveDrag.current;
+    // Live move-tool / gradient drag: an arrow from the grab point to the
+    // cursor (the gradient's ramp runs along it, full → none).
+    const md = moveDrag.current ?? gradientDrag.current;
     if (md) {
       const [x1, y1] = md.start;
       const [x2, y2] = md.end;
@@ -821,6 +826,9 @@ export function MaskEditModal({
     } else if (tool.kind === "transform") {
       moveDrag.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
+    } else if (tool.kind === "gradient") {
+      gradientDrag.current = { start: pt, end: pt, subtract: e.altKey };
+      forceRedraw((n) => n + 1);
     } else if (tool.kind === "marquee") {
       marquee.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
@@ -854,6 +862,9 @@ export function MaskEditModal({
       redraw();
     } else if (moveDrag.current) {
       moveDrag.current.end = toImage(e);
+      redraw();
+    } else if (gradientDrag.current) {
+      gradientDrag.current.end = toImage(e);
       redraw();
     } else if (marquee.current) {
       marquee.current.end = toImage(e);
@@ -899,6 +910,16 @@ export function MaskEditModal({
       const dy = end[1] - start[1];
       if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
         dispatch({ type: "op", op: { type: "transform", dx, dy } });
+      }
+      forceRedraw((n) => n + 1);
+    } else if (gradientDrag.current) {
+      const { start, end, subtract } = gradientDrag.current;
+      gradientDrag.current = null;
+      if (Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1) {
+        dispatch({
+          type: "op",
+          op: { type: "gradient", region: [start[0], start[1], end[0], end[1]], mode: subtract ? "subtract" : "add" },
+        });
       }
       forceRedraw((n) => n + 1);
     } else if (marquee.current) {
