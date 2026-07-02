@@ -37,8 +37,10 @@ import {
   toggleOp,
   undo,
   updateOpAmount,
+  updateOpTransform,
   updatePathAnchors,
   type EditState,
+  type TransformParams,
 } from "./maskEdit";
 import type { BrushStroke, EditOp, EditPath, EditPathPoint, LayerBlend, MaskDocument, MaskOperation, PointPrompt } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
@@ -62,6 +64,7 @@ type Action =
   | { type: "remove_op"; index: number }
   | { type: "toggle_op"; index: number }
   | { type: "op_amount"; index: number; amount: number }
+  | { type: "op_transform"; index: number; params: TransformParams }
   | { type: "path_anchors"; index: number; points: EditPathPoint[] }
   | { type: "layer_add" }
   | { type: "layer_remove"; index: number }
@@ -94,6 +97,8 @@ function reducer(state: EditState, action: Action): EditState {
       return toggleOp(state, action.index);
     case "op_amount":
       return updateOpAmount(state, action.index, action.amount);
+    case "op_transform":
+      return updateOpTransform(state, action.index, action.params);
     case "path_anchors":
       return updatePathAnchors(state, action.index, action.points);
     case "layer_add":
@@ -157,6 +162,11 @@ export function MaskEditModal({
   const [quickProxy, setQuickProxy] = useState<ProxyMask | null>(null);
   // Boolean mode the next committed pen / lasso path combines with.
   const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
+  // Free-transform panel (M5, Ctrl+T): a numeric draft of move / scale /
+  // rotate. `editingTransform` points at the history step being revised
+  // (null ⇒ Apply appends a new `transform` op).
+  const [transformDraft, setTransformDraft] = useState<TransformParams | null>(null);
+  const [editingTransform, setEditingTransform] = useState<number | null>(null);
 
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
@@ -165,6 +175,8 @@ export function MaskEditModal({
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // In-progress move-tool drag (image-space): committed as a `transform` op.
+  const moveDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
@@ -212,6 +224,8 @@ export function MaskEditModal({
   anchorDraftRef.current = anchorDraft;
   const stateRef = useRef(state);
   stateRef.current = state;
+  const transformDraftRef = useRef<TransformParams | null>(null);
+  transformDraftRef.current = transformDraft;
 
   const startPathEdit = (index: number) => {
     const op = activeOps(state.current)[index];
@@ -241,6 +255,28 @@ export function MaskEditModal({
     cancelPathEdit();
     setToolId(id);
   };
+
+  const closeTransformPanel = useCallback(() => {
+    setTransformDraft(null);
+    setEditingTransform(null);
+  }, []);
+
+  const openFreeTransform = () => {
+    // Ctrl+T re-opens the last transform step for revision when one exists;
+    // otherwise it starts a fresh identity draft (PS free transform).
+    selectTool("move");
+    const ops = activeOps(stateRef.current.current);
+    for (let i = ops.length - 1; i >= 0; i--) {
+      const op = ops[i];
+      if (!isPathOp(op) && !isBrushOp(op) && op.type === "transform") {
+        setEditingTransform(i);
+        setTransformDraft({ dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 });
+        return;
+      }
+    }
+    setEditingTransform(null);
+    setTransformDraft({ dx: 0, dy: 0, scale: 1, rotate: 0 });
+  };
   const shortcutHandlers: ShortcutHandlers = {
     tool_brush: () => selectTool("brush"),
     tool_eraser: () => selectTool("eraser"),
@@ -249,6 +285,9 @@ export function MaskEditModal({
     tool_lasso: () => selectTool("lasso"),
     tool_rect: () => selectTool("rect"),
     tool_ellipse: () => selectTool("ellipse"),
+    tool_move: () => selectTool("move"),
+    tool_crop: () => selectTool("crop"),
+    free_transform: () => openFreeTransform(),
     tool_path_select: () => {
       // PS `A` (direct selection): re-edit the anchors of the last path op.
       if (editingPathRef.current != null) {
@@ -295,8 +334,10 @@ export function MaskEditModal({
       closePenPath();
     },
     cancel: () => {
-      // Anchor re-editing or a pending pen path swallows the first Escape.
+      // Anchor re-editing, an open transform panel, or a pending pen path
+      // swallows the first Escape.
       if (editingPathRef.current != null) cancelPathEdit();
+      else if (transformDraftRef.current) closeTransformPanel();
       else if (penPendingRef.current) setPenAnchors([]);
       else onClose();
     },
@@ -542,6 +583,29 @@ export function MaskEditModal({
       }
     }
 
+    // Live move-tool drag: an arrow from the grab point to the cursor.
+    const md = moveDrag.current;
+    if (md) {
+      const [x1, y1] = md.start;
+      const [x2, y2] = md.end;
+      ctx.strokeStyle = "rgba(255,214,90,0.95)";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - 10 * Math.cos(angle - 0.4), y2 - 10 * Math.sin(angle - 0.4));
+      ctx.lineTo(x2 - 10 * Math.cos(angle + 0.4), y2 - 10 * Math.sin(angle + 0.4));
+      ctx.closePath();
+      ctx.fill();
+    }
+
     const mq = marquee.current;
     if (mq) {
       const [x1, y1] = mq.start;
@@ -659,6 +723,9 @@ export function MaskEditModal({
     if (tool.kind === "paint" || tool.kind === "matte") {
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
+    } else if (tool.kind === "transform") {
+      moveDrag.current = { start: pt, end: pt };
+      forceRedraw((n) => n + 1);
     } else if (tool.kind === "marquee") {
       marquee.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
@@ -682,6 +749,9 @@ export function MaskEditModal({
     }
     if (drawing.current) {
       drawing.current.points.push(toImage(e));
+      redraw();
+    } else if (moveDrag.current) {
+      moveDrag.current.end = toImage(e);
       redraw();
     } else if (marquee.current) {
       marquee.current.end = toImage(e);
@@ -716,6 +786,15 @@ export function MaskEditModal({
       };
       const toMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
       dispatch({ type: toMatte ? "matte_stroke" : "stroke", stroke });
+    } else if (moveDrag.current) {
+      const { start, end } = moveDrag.current;
+      moveDrag.current = null;
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
+        dispatch({ type: "op", op: { type: "transform", dx, dy } });
+      }
+      forceRedraw((n) => n + 1);
     } else if (marquee.current) {
       const { start, end } = marquee.current;
       marquee.current = null;
@@ -764,6 +843,11 @@ export function MaskEditModal({
   const opLabel = (op: EditOp): string => {
     if (isPathOp(op)) return `${op.tool} ${op.mode} (${op.points.length})`;
     if (isBrushOp(op)) return `${op.mode === "subtract" ? "eraser" : "brush"} r${op.radius} (${op.points.length})`;
+    if (op.type === "transform") {
+      const scale = op.scale ?? 1;
+      const rotate = op.rotate ?? 0;
+      return `transform Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}${scale !== 1 ? ` ×${scale}` : ""}${rotate !== 0 ? ` ∠${rotate}°` : ""}`;
+    }
     return op.type;
   };
   const showAmount = useMemo(
@@ -955,6 +1039,59 @@ export function MaskEditModal({
               </label>
             ) : null}
 
+            {transformDraft ? (
+              <div className="field mask-preview-actions">
+                <span>{t("mask.freeTransform")}</span>
+                {(
+                  [
+                    ["dx", "mask.transformDx", 1],
+                    ["dy", "mask.transformDy", 1],
+                    ["scale", "mask.transformScale", 100],
+                    ["rotate", "mask.transformRotate", 1],
+                  ] as const
+                ).map(([key, label, factor]) => (
+                  <label key={key} className="slider-row">
+                    <span>{t(label)}</span>
+                    <input
+                      type="number"
+                      value={Math.round(transformDraft[key] * factor)}
+                      onChange={(e) =>
+                        setTransformDraft((prev) =>
+                          prev ? { ...prev, [key]: Number(e.target.value) / factor } : prev,
+                        )
+                      }
+                    />
+                  </label>
+                ))}
+                <span className="slider-row">
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      if (editingTransform != null) {
+                        dispatch({ type: "op_transform", index: editingTransform, params: transformDraft });
+                      } else {
+                        dispatch({
+                          type: "op",
+                          op: {
+                            type: "transform",
+                            dx: transformDraft.dx,
+                            dy: transformDraft.dy,
+                            scale: transformDraft.scale,
+                            rotate: transformDraft.rotate,
+                          },
+                        });
+                      }
+                      closeTransformPanel();
+                    }}
+                  >
+                    {editingTransform != null ? t("mask.transformUpdate") : t("mask.transformApply")}
+                  </button>
+                  <button onClick={closeTransformPanel}>{t("mask.transformCancel")}</button>
+                </span>
+                <small className="muted">{t("mask.transformHint")}</small>
+              </div>
+            ) : null}
+
             {editingPath != null ? (
               <div className="field mask-preview-actions">
                 <span>{t("mask.anchorEditing")}</span>
@@ -1074,6 +1211,18 @@ export function MaskEditModal({
                           className="mask-history-edit"
                           title={t("mask.stepEditAnchors")}
                           onClick={() => (editingPath === i ? cancelPathEdit() : startPathEdit(i))}
+                        >
+                          ✎
+                        </button>
+                      ) : null}
+                      {!isPathOp(op) && !isBrushOp(op) && op.type === "transform" ? (
+                        <button
+                          className="mask-history-edit"
+                          title={t("mask.stepEditTransform")}
+                          onClick={() => {
+                            setEditingTransform(i);
+                            setTransformDraft({ dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 });
+                          }}
                         >
                           ✎
                         </button>

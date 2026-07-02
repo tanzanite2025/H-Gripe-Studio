@@ -163,6 +163,52 @@ function fillMarquee(mask: ProxyMask, op: MaskOperation, scale: number): void {
   }
 }
 
+/** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
+function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const region = op.region;
+  if (!region || region.length < 4) return;
+  const x1 = Math.min(region[0], region[2]) * scale;
+  const y1 = Math.min(region[1], region[3]) * scale;
+  const x2 = Math.max(region[0], region[2]) * scale;
+  const y2 = Math.max(region[1], region[3]) * scale;
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      if (x + 0.5 < x1 || x + 0.5 > x2 || y + 0.5 < y1 || y + 0.5 > y2) mask.data[y * mask.w + x] = 0;
+    }
+  }
+}
+
+/**
+ * Move / scale / rotate the mask about the buffer centre (M5 free transform).
+ * Inverse-mapped nearest-neighbour sampling; pixels mapping outside the
+ * source read as 0. `dx`/`dy` are in the mask's own pixel space; `rotate` in
+ * degrees clockwise; `scale` a uniform factor. Mirrors the Rust
+ * `transform_mask`.
+ */
+export function transformMask(mask: ProxyMask, dx: number, dy: number, scale: number, rotate: number): ProxyMask {
+  const out = createProxyMask(mask.w, mask.h);
+  const s = scale > 1e-6 ? scale : 1e-6;
+  const rad = (rotate * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const cx = mask.w / 2;
+  const cy = mask.h / 2;
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      // Invert: un-translate, un-rotate, un-scale about the centre.
+      const tx = x + 0.5 - dx - cx;
+      const ty = y + 0.5 - dy - cy;
+      const rx = (tx * cos + ty * sin) / s + cx;
+      const ry = (-tx * sin + ty * cos) / s + cy;
+      const sx = Math.floor(rx);
+      const sy = Math.floor(ry);
+      if (sx < 0 || sy < 0 || sx >= mask.w || sy >= mask.h) continue;
+      out.data[y * mask.w + x] = mask.data[sy * mask.w + sx];
+    }
+  }
+  return out;
+}
+
 /** Disc-kernel max filter (grayscale dilation) — grows the mask by `radius` px. */
 export function dilate(mask: ProxyMask, radius: number): ProxyMask {
   return rankFilter(mask, radius, true);
@@ -373,6 +419,10 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       stampStroke(mask, op, scale);
     } else if (op.type === "rect" || op.type === "ellipse") {
       fillMarquee(mask, op, scale);
+    } else if (op.type === "crop") {
+      cropMask(mask, op, scale);
+    } else if (op.type === "transform") {
+      mask = transformMask(mask, (op.dx ?? 0) * scale, (op.dy ?? 0) * scale, op.scale ?? 1, op.rotate ?? 0);
     } else if (op.type === "wand") {
       // Needs the real image; not previewable on the proxy.
     } else {

@@ -82,6 +82,15 @@ describe("mask-edit M4 bindings", () => {
   });
 });
 
+describe("mask-edit M5 bindings", () => {
+  it("flips the move / crop / free-transform combos to ready", () => {
+    for (const id of ["tool_move", "tool_crop", "free_transform"]) {
+      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      expect(b?.status, id).toBe("ready");
+    }
+  });
+});
+
 describe("scope stack dispatch", () => {
   const bindings = (id: string): ShortcutBinding[] => [
     { id, combo: "b", status: "ready", hint: "" },

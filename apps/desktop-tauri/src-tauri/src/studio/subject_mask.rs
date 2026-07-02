@@ -554,6 +554,31 @@ fn apply_queued_operation(
             fill_marquee(mask, kind, &region);
             operations.push(json!({ "type": kind }));
         }
+        Some("crop") => {
+            if region.len() < 4 {
+                return;
+            }
+            crop_mask(mask, &region);
+            operations.push(json!({ "type": "crop" }));
+        }
+        Some("transform") => {
+            let field =
+                |key: &str, default: f64| op.get(key).and_then(Value::as_f64).unwrap_or(default);
+            let dx = field("dx", 0.0);
+            let dy = field("dy", 0.0);
+            let scale = field("scale", 1.0);
+            let rotate = field("rotate", 0.0);
+            if dx != 0.0 || dy != 0.0 || scale != 1.0 || rotate != 0.0 {
+                *mask = transform_mask(mask, dx, dy, scale, rotate);
+                operations.push(json!({
+                    "type": "transform",
+                    "dx": dx,
+                    "dy": dy,
+                    "scale": scale,
+                    "rotate": rotate,
+                }));
+            }
+        }
         Some("invert") => {
             invert(mask);
             operations.push(json!({ "type": "invert" }));
@@ -623,6 +648,50 @@ fn fill_marquee(mask: &mut GrayImage, kind: &str, region: &[f64]) {
             mask.put_pixel(x, y, Luma([MASK_ON]));
         }
     }
+}
+
+/// Clear the mask outside a `crop` region (`[x1, y1, x2, y2]` image-space).
+fn crop_mask(mask: &mut GrayImage, region: &[f64]) {
+    let x1 = region[0].min(region[2]);
+    let y1 = region[1].min(region[3]);
+    let x2 = region[0].max(region[2]);
+    let y2 = region[1].max(region[3]);
+    for (x, y, p) in mask.enumerate_pixels_mut() {
+        let cx = f64::from(x) + 0.5;
+        let cy = f64::from(y) + 0.5;
+        if cx < x1 || cx > x2 || cy < y1 || cy > y2 {
+            p.0[0] = MASK_OFF;
+        }
+    }
+}
+
+/// Move / scale / rotate the mask about the image centre (M5 free transform):
+/// inverse-mapped nearest-neighbour sampling, pixels mapping outside the
+/// source read as background. `dx`/`dy` are px, `rotate` degrees clockwise,
+/// `scale` a uniform factor. Mirrors the proxy `transformMask` in
+/// `maskMorphology.ts`.
+fn transform_mask(mask: &GrayImage, dx: f64, dy: f64, scale: f64, rotate: f64) -> GrayImage {
+    let (width, height) = mask.dimensions();
+    let s = scale.max(1e-6);
+    let rad = rotate.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let cx = f64::from(width) / 2.0;
+    let cy = f64::from(height) / 2.0;
+    let mut out = GrayImage::new(width, height);
+    for (x, y, p) in out.enumerate_pixels_mut() {
+        // Invert: un-translate, un-rotate, un-scale about the centre.
+        let tx = f64::from(x) + 0.5 - dx - cx;
+        let ty = f64::from(y) + 0.5 - dy - cy;
+        let rx = (tx * cos + ty * sin) / s + cx;
+        let ry = (-tx * sin + ty * cos) / s + cy;
+        let sx = rx.floor();
+        let sy = ry.floor();
+        if sx < 0.0 || sy < 0.0 || sx >= f64::from(width) || sy >= f64::from(height) {
+            continue;
+        }
+        p.0[0] = mask.get_pixel(sx as u32, sy as u32).0[0];
+    }
+    out
 }
 
 /// Flood-fill from a seed, selecting the contiguous region whose colour stays
@@ -1975,6 +2044,75 @@ mod tests {
         apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut operations);
         assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
         assert!(operations.is_empty());
+    }
+
+    #[test]
+    fn transform_op_translates_the_mask() {
+        // M5: a `transform` step with only dx/dy moves the mask verbatim.
+        let image = RgbaImage::from_pixel(9, 9, Rgba([0, 0, 0, 255]));
+        let value = json!({
+            "version": 2,
+            "ops": [
+                { "type": "brush", "mode": "add", "radius": 0, "points": [[2, 2]] },
+                { "type": "transform", "dx": 3, "dy": 1 }
+            ]
+        });
+        let mut mask = solid(9, 9, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(5, 3).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_OFF);
+    }
+
+    #[test]
+    fn transform_op_rotates_about_the_centre() {
+        // 90° clockwise about the centre of a 9x9: (2,4) → (4,2).
+        let image = RgbaImage::from_pixel(9, 9, Rgba([0, 0, 0, 255]));
+        let value = json!({
+            "version": 2,
+            "ops": [
+                { "type": "brush", "mode": "add", "radius": 0, "points": [[2, 4]] },
+                { "type": "transform", "rotate": 90 }
+            ]
+        });
+        let mut mask = solid(9, 9, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(4, 2).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(2, 4).0[0], MASK_OFF);
+    }
+
+    #[test]
+    fn identity_transform_is_a_noop() {
+        let image = RgbaImage::from_pixel(9, 9, Rgba([0, 0, 0, 255]));
+        let value = json!({
+            "version": 2,
+            "ops": [
+                { "type": "invert" },
+                { "type": "transform" }
+            ]
+        });
+        let mut mask = solid(9, 9, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_ON));
+        // Only the invert is recorded: the identity transform is skipped.
+        assert_eq!(operations.len(), 1);
+    }
+
+    #[test]
+    fn crop_op_clears_the_mask_outside_the_region() {
+        let image = RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255]));
+        let value = json!({
+            "version": 2,
+            "ops": [
+                { "type": "invert" },
+                { "type": "crop", "region": [3, 3, 7, 7] }
+            ]
+        });
+        let mut mask = solid(10, 10, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(5, 5).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(1, 1).0[0], MASK_OFF);
+        assert_eq!(mask.get_pixel(9, 9).0[0], MASK_OFF);
     }
 
     #[test]

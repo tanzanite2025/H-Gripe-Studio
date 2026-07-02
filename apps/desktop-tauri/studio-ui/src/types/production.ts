@@ -198,12 +198,24 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform`. */
   type: string;
   /** Operation-specific scalar (tolerance / px / radius), when relevant. */
   amount?: number;
-  /** `[x, y]` seed for `wand`, or `[x1, y1, x2, y2]` for marquee ops. */
+  /** `[x, y]` seed for `wand`, or `[x1, y1, x2, y2]` for marquee / `crop` ops. */
   region?: number[];
+  // --- `transform` op params (M5 free transform / move) -----------------
+  // A `transform` step moves the mask by `dx`/`dy` px and scales / rotates
+  // it about the canvas centre. Absent fields read as the identity, so a
+  // move-tool drag records only `dx`/`dy`.
+  /** Horizontal translation in image px. Absent ⇒ 0. */
+  dx?: number;
+  /** Vertical translation in image px. Absent ⇒ 0. */
+  dy?: number;
+  /** Uniform scale factor about the canvas centre. Absent ⇒ 1. */
+  scale?: number;
+  /** Rotation in degrees (clockwise) about the canvas centre. Absent ⇒ 0. */
+  rotate?: number;
 }
 
 /**

@@ -39,8 +39,8 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   // `planned` bindings are never dispatched; they only reserve the PS-default
   // key against future conflicts (guarded by the no-conflict CI test) and show
   // in the cheat sheet as coming soon. Full PS default-tool letter map:
-  { id: "tool_move", combo: "v", status: "planned", hint: "Move tool (planned)." },
-  { id: "tool_crop", combo: "c", status: "planned", hint: "Crop tool (planned)." },
+  { id: "tool_move", combo: "v", status: "ready", hint: "Move tool (drag to move the mask; Ctrl+T for free transform)." },
+  { id: "tool_crop", combo: "c", status: "ready", hint: "Crop tool (drag a box; the mask is cleared outside it)." },
   { id: "tool_frame", combo: "k", status: "planned", hint: "Frame tool (planned)." },
   { id: "tool_eyedropper", combo: "i", status: "planned", hint: "Eyedropper tool (planned)." },
   { id: "tool_healing", combo: "j", status: "planned", hint: "Spot-healing / healing brush (planned)." },
@@ -59,7 +59,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   // Commands.
   { id: "select_all", combo: "ctrl+a", status: "planned", hint: "Select all (planned)." },
   { id: "reselect", combo: "ctrl+shift+d", status: "planned", hint: "Reselect (planned)." },
-  { id: "free_transform", combo: "ctrl+t", status: "planned", hint: "Free transform (planned)." },
+  { id: "free_transform", combo: "ctrl+t", status: "ready", hint: "Free transform: move / scale / rotate the mask as a revisable step." },
   { id: "duplicate", combo: "ctrl+j", status: "planned", hint: "Duplicate selection / layer via copy (planned)." },
   { id: "fill_dialog", combo: "shift+f5", status: "planned", hint: "Fill dialog (planned)." },
   { id: "feather_dialog", combo: "shift+f6", status: "planned", hint: "Feather dialog (planned; feather is a toolbar op today)." },
@@ -83,6 +83,8 @@ const TOOL_COMBO: Readonly<Record<string, string>> = {
   lasso: "l",
   rect: "m",
   ellipse: "shift+m",
+  move: "v",
+  crop: "c",
 };
 
 export function toolCombo(toolId: string): string | undefined {

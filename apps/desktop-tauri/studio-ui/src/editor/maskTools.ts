@@ -32,6 +32,9 @@ export type ToolKind =
   | "global"
   // Drag a marquee that records an `operations` entry with a rect region.
   | "marquee"
+  // Drag on the canvas to move the mask: records a `transform` op with the
+  // drag's `dx`/`dy` (Ctrl+T opens the numeric free-transform panel).
+  | "transform"
   // Vector path selection: pen (click anchors, bezier-capable) / lasso
   // (freehand). Recorded as an `EditPath`; the backend rasterises the closed
   // polygon and boolean-combines it with the mask (add/subtract/intersect).
@@ -81,6 +84,8 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "matting", label: "Matting", status: "ready", kind: "matte", lane: "render", hint: "Paint the trimap unknown band over hair / fur / glass — the matter resolves it into soft alpha." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
+  { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
+  { id: "crop", label: "Crop", status: "ready", kind: "marquee", lane: "preview", hint: "Drag a crop box — the mask is cleared outside it (a revisable step)." },
 ] as const;
 
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
