@@ -146,8 +146,10 @@ sequence, with unimplemented tools as greyed placeholders; the retouch batch
 then ships one tool per step, flipping each from `planned` to `ready`:
 `J` spot-healing brush (paint a region — it is rebuilt smoothly from the
 surrounding mask by diffusion, a revisable `heal` op replayed identically by
-the proxy `healStroke` and the Rust `heal_region`), then `S` clone stamp,
-`Y` history brush, `O` dodge / burn.
+the proxy `healStroke` and the Rust `heal_region`); `S` clone stamp
+(Alt+click picks a source point, painting copies the mask from the fixed
+source offset — a revisable `clone` op, proxy `cloneStroke` / Rust
+`clone_region`); then `Y` history brush, `O` dodge / burn.
 
 ## 5. Explicitly deferred / out of scope
 

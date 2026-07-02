@@ -48,7 +48,10 @@ export type ToolKind =
   | "gradient"
   // Freehand paint that records a `heal` op: the painted region is rebuilt
   // smoothly from the surrounding mask (PS spot-healing brush).
-  | "heal";
+  | "heal"
+  // Alt+click picks a source point, then painting records a `clone` op:
+  // the stroke copies the mask from the source-offset region (PS clone stamp).
+  | "clone";
 
 export interface MaskTool {
   id: string;
@@ -95,6 +98,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "sharpen", label: "Sharpen", status: "ready", kind: "global", lane: "preview", hint: "Unsharp-mask sharpen the mask edge by N px (a revisable filter step)." },
   { id: "matting", label: "Matting", status: "ready", kind: "matte", lane: "render", hint: "Paint the trimap unknown band over hair / fur / glass — the matter resolves it into soft alpha." },
   { id: "heal", label: "Heal", status: "ready", kind: "heal", lane: "preview", hint: "Spot-healing brush: paint over a blemish — the region is rebuilt smoothly from the surrounding mask (a revisable step)." },
+  { id: "clone", label: "Clone", status: "ready", kind: "clone", lane: "preview", hint: "Clone stamp: Alt+click picks a source point, then paint copies the mask from the source offset (a revisable step)." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
@@ -106,7 +110,6 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
   { id: "eyedropper", label: "Eyedropper", status: "planned", kind: "click", lane: "render", hint: "Sample the image colour under the cursor (planned)." },
-  { id: "clone", label: "Clone", status: "planned", kind: "paint", lane: "render", hint: "Clone stamp: paint from an Alt-picked source point (planned)." },
   { id: "history_brush", label: "History brush", status: "planned", kind: "paint", lane: "interactive", hint: "Paint a region back to an earlier history state (planned)." },
   { id: "dodge_burn", label: "Dodge / burn", status: "planned", kind: "paint", lane: "interactive", hint: "Locally lighten (dodge) or darken (burn) the mask (planned)." },
 ] as const;

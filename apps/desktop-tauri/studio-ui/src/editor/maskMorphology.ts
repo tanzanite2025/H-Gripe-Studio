@@ -260,6 +260,32 @@ export function healStroke(mask: ProxyMask, op: MaskOperation, scale: number): v
   }
 }
 
+/**
+ * Clone stamp (PS S on a mask): copy the mask into a painted stroke from the
+ * `dx`/`dy` source offset — each covered pixel `p` reads the pre-op mask at
+ * `p + [dx, dy]` (out-of-bounds reads as empty). Mirrors the Rust
+ * `clone_region`.
+ */
+export function cloneStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const dx = Math.round((op.dx ?? 0) * scale);
+  const dy = Math.round((op.dy ?? 0) * scale);
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "clone", mode: "add", radius, points }, scale);
+  const base = Uint8Array.from(mask.data);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const i = y * mask.w + x;
+      if (coverage.data[i] === 0) continue;
+      const sx = x + dx;
+      const sy = y + dy;
+      mask.data[i] = sx >= 0 && sx < mask.w && sy >= 0 && sy < mask.h ? base[sy * mask.w + sx] : 0;
+    }
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -551,6 +577,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       fillCoverage(mask, op);
     } else if (op.type === "heal") {
       healStroke(mask, op, scale);
+    } else if (op.type === "clone") {
+      cloneStroke(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {

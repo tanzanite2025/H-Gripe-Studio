@@ -110,6 +110,9 @@ export function MaskEditModal({
   // In-progress gradient drag (M10): the start → end ramp vector; Alt at
   // pointer-down records a subtract ramp.
   const gradientDrag = useRef<{ start: [number, number]; end: [number, number]; subtract: boolean } | null>(null);
+  // Clone-stamp source point (image-space), picked by Alt+click; null until
+  // picked — painting without a source is inert (PS behaviour).
+  const cloneSource = useRef<[number, number] | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
@@ -309,6 +312,7 @@ export function MaskEditModal({
     },
     quick_mask: () => setQuickMask((v) => !v),
     tool_healing: () => selectTool("heal"),
+    tool_clone: () => selectTool("clone"),
     tool_hand: () => selectTool("hand"),
     tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
@@ -493,11 +497,13 @@ export function MaskEditModal({
         live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
         ctx.stroke();
         ctx.setLineDash([]);
-      } else if (tool.kind === "heal") {
-        // Live heal band: a translucent green band marking the region that
-        // will be rebuilt from its surroundings on release.
-        ctx.strokeStyle = "rgba(120,220,140,0.45)";
-        ctx.fillStyle = "rgba(120,220,140,0.45)";
+      } else if (tool.kind === "heal" || tool.kind === "clone") {
+        // Live retouch band: a translucent band marking the painted region
+        // (green: rebuilt from its surroundings; violet: cloned from the
+        // source offset on release).
+        const band = tool.kind === "heal" ? "rgba(120,220,140,0.45)" : "rgba(190,140,255,0.45)";
+        ctx.strokeStyle = band;
+        ctx.fillStyle = band;
         ctx.lineWidth = brushSize * 2;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
@@ -518,6 +524,22 @@ export function MaskEditModal({
           liveMatte ? "matte" : "paint",
         );
       }
+    }
+
+    // Clone-stamp source marker: a crosshair at the Alt-picked source point.
+    if (tool.kind === "clone" && cloneSource.current) {
+      const [sx, sy] = cloneSource.current;
+      ctx.strokeStyle = "rgba(190,140,255,0.95)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx - 7, sy);
+      ctx.lineTo(sx + 7, sy);
+      ctx.moveTo(sx, sy - 7);
+      ctx.lineTo(sx, sy + 7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // Anchor re-editing: dashed outline of the draft path plus draggable
@@ -784,7 +806,17 @@ export function MaskEditModal({
       setPenAnchors((prev) => [...prev, pt]);
       return;
     }
-    if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal") {
+    if (tool.kind === "clone") {
+      // Alt+click picks the source; painting without one is inert.
+      if (e.altKey) {
+        cloneSource.current = pt;
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (!cloneSource.current) return;
+      drawing.current = { points: [pt] };
+      forceRedraw((n) => n + 1);
+    } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal") {
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "transform") {
@@ -867,6 +899,17 @@ export function MaskEditModal({
         // Spot-heal (M13): the stroke records a `heal` op — the painted
         // region is rebuilt from its surroundings on replay.
         dispatch({ type: "op", op: { type: "heal", amount: brushSize, points: pts } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.kind === "clone") {
+        // Clone stamp (M13): the source offset is fixed at the drag start
+        // (PS aligned mode) — painted pixel `p` copies from `p + [dx, dy]`.
+        const src = cloneSource.current;
+        if (src) {
+          const [dx, dy] = [src[0] - pts[0][0], src[1] - pts[0][1]];
+          dispatch({ type: "op", op: { type: "clone", amount: brushSize, points: pts, dx, dy } });
+        }
         forceRedraw((n) => n + 1);
         return;
       }
