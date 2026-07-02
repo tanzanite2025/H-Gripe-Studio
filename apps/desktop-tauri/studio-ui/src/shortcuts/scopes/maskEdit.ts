@@ -91,6 +91,12 @@ const TOOL_COMBO: Readonly<Record<string, string>> = {
   hand: "h",
   rotate_view: "r",
   zoom: "z",
+  // Planned tools' reserved PS keys (tooltips on the greyed placeholders).
+  eyedropper: "i",
+  heal: "j",
+  clone: "s",
+  history_brush: "y",
+  dodge_burn: "o",
 };
 
 export function toolCombo(toolId: string): string | undefined {

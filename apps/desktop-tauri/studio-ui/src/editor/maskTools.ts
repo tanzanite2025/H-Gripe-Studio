@@ -99,6 +99,13 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "hand", label: "Hand", status: "ready", kind: "view", lane: "interactive", hint: "Drag to pan the zoomed view (or hold Space with any tool)." },
   { id: "rotate_view", label: "Rotate view", status: "ready", kind: "view", lane: "interactive", hint: "Drag to rotate the view around its centre — screen-space only, the mask is untouched (Esc resets, Ctrl+0 fits and resets)." },
   { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
+  // Planned tools: greyed placeholders holding their PS toolbar slot (and
+  // reserved key) until each ships. Keep `planned` after every `ready` entry.
+  { id: "eyedropper", label: "Eyedropper", status: "planned", kind: "click", lane: "render", hint: "Sample the image colour under the cursor (planned)." },
+  { id: "heal", label: "Heal", status: "planned", kind: "paint", lane: "render", hint: "Spot-healing brush: repair a painted region from its surroundings (planned)." },
+  { id: "clone", label: "Clone", status: "planned", kind: "paint", lane: "render", hint: "Clone stamp: paint from an Alt-picked source point (planned)." },
+  { id: "history_brush", label: "History brush", status: "planned", kind: "paint", lane: "interactive", hint: "Paint a region back to an earlier history state (planned)." },
+  { id: "dodge_burn", label: "Dodge / burn", status: "planned", kind: "paint", lane: "interactive", hint: "Locally lighten (dodge) or darken (burn) the mask (planned)." },
 ] as const;
 
 /**
@@ -108,10 +115,12 @@ export const MASK_TOOLS: readonly MaskTool[] = [
  * appears in exactly one group (pinned by a registry test).
  */
 export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = [
-  // Selection: move, marquees, lasso, wand / point prompts, crop.
-  ["move", "rect", "ellipse", "lasso", "wand", "point", "crop"],
-  // Paint: brush, eraser, matting band, gradient.
-  ["brush", "eraser", "matting", "gradient"],
+  // Selection block (PS V / M / L / W / C / I row): move, marquees, lasso,
+  // wand / SAM points, crop, eyedropper.
+  ["move", "rect", "ellipse", "lasso", "wand", "point", "crop", "eyedropper"],
+  // Paint / retouch block (PS J / B / S / Y / E / G / O row): heal, brush,
+  // matting band, clone stamp, history brush, eraser, gradient, dodge/burn.
+  ["heal", "brush", "matting", "clone", "history_brush", "eraser", "gradient", "dodge_burn"],
   // Vector: pen.
   ["pen"],
   // Whole-mask operations (PS menu commands; toolbar buttons here).
