@@ -12,9 +12,9 @@ mod blend;
 mod composite;
 mod doc;
 mod ops;
-mod surface;
 mod qualifier;
 mod scopes;
+mod surface;
 mod trc;
 
 pub use blend::{blend_channel, blend_rgb, BlendMode};

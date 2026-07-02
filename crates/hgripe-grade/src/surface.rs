@@ -34,7 +34,11 @@ pub struct GradeSurface {
 impl GradeSurface {
     /// Ingress: widen 16-bit RGBA samples to f32 `0..1` (`v / 65535`).
     pub fn from_rgba16(w: u32, h: u32, pixels: &[u16], space: GradeSpace) -> Self {
-        assert_eq!(pixels.len(), (w as usize) * (h as usize) * 4, "rgba16 length");
+        assert_eq!(
+            pixels.len(),
+            (w as usize) * (h as usize) * 4,
+            "rgba16 length"
+        );
         let data = pixels.iter().map(|&v| f32::from(v) / 65535.0).collect();
         Self { w, h, data, space }
     }

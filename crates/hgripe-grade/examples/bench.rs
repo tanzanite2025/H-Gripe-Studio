@@ -5,7 +5,9 @@
 
 use std::time::Instant;
 
-use hgripe_grade::{apply, BlendMode, CurveChannel, GradeDoc, GradeLayer, GradeOp, GradeSpace, GradeSurface};
+use hgripe_grade::{
+    apply, BlendMode, CurveChannel, GradeDoc, GradeLayer, GradeOp, GradeSpace, GradeSurface,
+};
 
 fn hd_surface() -> GradeSurface {
     let (w, h) = (1920u32, 1080u32);
@@ -15,7 +17,12 @@ fn hd_surface() -> GradeSurface {
         let t = px as f32 / n as f32;
         data.extend([t, (t * 7.3).fract(), 1.0 - t, 1.0]);
     }
-    GradeSurface { w, h, data, space: GradeSpace::Srgb }
+    GradeSurface {
+        w,
+        h,
+        data,
+        space: GradeSpace::Srgb,
+    }
 }
 
 fn grade_doc(n_px: usize) -> GradeDoc {
@@ -40,7 +47,10 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                 qualifier: None,
                 ops: vec![
                     GradeOp::Exposure { ev: 0.5 },
-                    GradeOp::WhiteBalance { temp: 0.1, tint: -0.05 },
+                    GradeOp::WhiteBalance {
+                        temp: 0.1,
+                        tint: -0.05,
+                    },
                     GradeOp::Curves {
                         channel: CurveChannel::Master,
                         points: vec![[0.0, 0.05], [0.5, 0.6], [1.0, 0.95]],
@@ -65,7 +75,13 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                 visible: true,
                 mask: None,
                 qualifier: None,
-                ops: vec![GradeOp::Lut3d { size, table: lut_table }, GradeOp::Saturation { amount: 0.3 }],
+                ops: vec![
+                    GradeOp::Lut3d {
+                        size,
+                        table: lut_table,
+                    },
+                    GradeOp::Saturation { amount: 0.3 },
+                ],
             },
         ],
     }
@@ -102,10 +118,22 @@ fn main() {
     // Per-op timings on a single normal layer.
     let single_ops: Vec<(&str, GradeOp)> = vec![
         ("exposure", GradeOp::Exposure { ev: 0.5 }),
-        ("white_balance", GradeOp::WhiteBalance { temp: 0.1, tint: -0.05 }),
+        (
+            "white_balance",
+            GradeOp::WhiteBalance {
+                temp: 0.1,
+                tint: -0.05,
+            },
+        ),
         (
             "levels",
-            GradeOp::Levels { in_black: 0.05, in_white: 0.95, gamma: 1.2, out_black: 0.0, out_white: 1.0 },
+            GradeOp::Levels {
+                in_black: 0.05,
+                in_white: 0.95,
+                gamma: 1.2,
+                out_black: 0.0,
+                out_white: 1.0,
+            },
         ),
         (
             "curves",
@@ -117,9 +145,20 @@ fn main() {
         ("saturation", GradeOp::Saturation { amount: 0.3 }),
         (
             "lift_gamma_gain",
-            GradeOp::LiftGammaGain { lift: [0.05, 0.0, -0.05], gamma: [1.1, 1.0, 0.9], gain: [1.05, 1.0, 0.95] },
+            GradeOp::LiftGammaGain {
+                lift: [0.05, 0.0, -0.05],
+                gamma: [1.1, 1.0, 0.9],
+                gain: [1.05, 1.0, 0.95],
+            },
         ),
-        ("hsl_adjust", GradeOp::HslAdjust { hue: 30.0, saturation: 0.2, lightness: -0.1 }),
+        (
+            "hsl_adjust",
+            GradeOp::HslAdjust {
+                hue: 30.0,
+                saturation: 0.2,
+                lightness: -0.1,
+            },
+        ),
         ("lut3d (17^3)", doc.layers[2].ops[0].clone()),
     ];
     for (name, op) in single_ops {

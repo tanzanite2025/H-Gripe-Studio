@@ -1674,9 +1674,8 @@ fn normalise_layer(layer: Value) -> Value {
     if let Some(name) = layer.get("name").and_then(Value::as_str) {
         out["name"] = json!(name);
     }
-    if let Some(
-        blend @ ("normal" | "multiply" | "screen" | "darken" | "lighten" | "difference"),
-    ) = layer.get("blend").and_then(Value::as_str)
+    if let Some(blend @ ("normal" | "multiply" | "screen" | "darken" | "lighten" | "difference")) =
+        layer.get("blend").and_then(Value::as_str)
     {
         out["blend"] = json!(blend);
     }

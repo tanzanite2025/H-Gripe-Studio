@@ -65,7 +65,10 @@ mod tests {
     #[test]
     fn srgb_matches_the_app_curve_goldens() {
         // The photometric midpoint golden from studio/color/linear.rs.
-        assert_eq!((trc_encode(GradeSpace::Srgb, 0.5) * 255.0).round() as u8, 188);
+        assert_eq!(
+            (trc_encode(GradeSpace::Srgb, 0.5) * 255.0).round() as u8,
+            188
+        );
         assert_eq!(trc_decode(GradeSpace::Srgb, 0.0), 0.0);
         assert!((trc_decode(GradeSpace::Srgb, 1.0) - 1.0).abs() < 1e-6);
     }

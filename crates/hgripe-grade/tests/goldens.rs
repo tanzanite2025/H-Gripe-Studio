@@ -8,8 +8,8 @@
 // `scopes` cases run the read-only analysers and assert exact integer counts.
 
 use hgripe_grade::{
-    apply, composite_over, histogram, vectorscope, waveform, BlendMode, GradeDoc, GradeSpace, GradeSurface, Histogram,
-    Vectorscope, Waveform,
+    apply, composite_over, histogram, vectorscope, waveform, BlendMode, GradeDoc, GradeSpace,
+    GradeSurface, Histogram, Vectorscope, Waveform,
 };
 use serde::Deserialize;
 
@@ -97,12 +97,19 @@ fn golden_vectors() {
             continue;
         }
         let file: GoldenFile =
-            serde_json::from_str(&std::fs::read_to_string(&path).expect("read golden")).expect("parse golden");
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read golden"))
+                .expect("parse golden");
         match file {
             GoldenFile::Composite { cases } => {
                 for case in cases {
                     let mut dst = case.backdrop.surface();
-                    composite_over(&mut dst, &case.source.surface(), case.mode, case.opacity, case.mask.as_deref());
+                    composite_over(
+                        &mut dst,
+                        &case.source.surface(),
+                        case.mode,
+                        case.opacity,
+                        case.mask.as_deref(),
+                    );
                     assert_close(&case.name, &dst.data, &case.expected, case.tolerance);
                     ran += 1;
                 }
@@ -121,16 +128,18 @@ fn golden_vectors() {
                     let name = &case.name;
                     match case.scope {
                         ScopeSpec::Histogram { bins } => {
-                            let want: Histogram = serde_json::from_value(case.expected).expect("histogram expected");
+                            let want: Histogram =
+                                serde_json::from_value(case.expected).expect("histogram expected");
                             assert_eq!(histogram(&surface, bins), want, "{name}");
                         }
                         ScopeSpec::Waveform { cols, rows } => {
-                            let want: Waveform = serde_json::from_value(case.expected).expect("waveform expected");
+                            let want: Waveform =
+                                serde_json::from_value(case.expected).expect("waveform expected");
                             assert_eq!(waveform(&surface, cols, rows), want, "{name}");
                         }
                         ScopeSpec::Vectorscope { size } => {
-                            let want: Vectorscope =
-                                serde_json::from_value(case.expected).expect("vectorscope expected");
+                            let want: Vectorscope = serde_json::from_value(case.expected)
+                                .expect("vectorscope expected");
                             assert_eq!(vectorscope(&surface, size), want, "{name}");
                         }
                     }
