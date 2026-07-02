@@ -50,6 +50,18 @@ pub(crate) fn read_image_data_url(path: String) -> Result<String, String> {
     let bytes =
         std::fs::read(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
 
+    // HEIC/AVIF: no `image`-crate decoder; decode via the vendored libav
+    // libraries and inline as PNG (like any other non-`<img>`-native format).
+    if crate::studio::heif_decode::heif_kind(&bytes).is_some() {
+        let decoded =
+            crate::studio::heif_decode::decode_rgba_from_path(path, MAX_PREVIEW_DECODE_PIXELS)?;
+        let mut png: Vec<u8> = Vec::new();
+        image::DynamicImage::ImageRgba8(decoded)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|err| format!("failed to encode {}: {err}", path.display()))?;
+        return Ok(format!("data:image/png;base64,{}", base64_encode(&png)));
+    }
+
     let format = image::guess_format(&bytes)
         .map_err(|_| format!("unsupported image type: {}", path.display()))?;
 
@@ -95,6 +107,10 @@ fn probe_image_dims_inner(path: &str) -> Result<ImageDims, String> {
     if !src.is_file() {
         return Err(format!("file does not exist: {trimmed}"));
     }
+    if is_heif_file(src) {
+        let (width, height) = crate::studio::heif_decode::probe_dims(src)?;
+        return Ok(ImageDims { width, height });
+    }
     let (width, height) = image::ImageReader::open(src)
         .map_err(|err| format!("failed to open {}: {err}", src.display()))?
         .with_guessed_format()
@@ -102,6 +118,18 @@ fn probe_image_dims_inner(path: &str) -> Result<ImageDims, String> {
         .into_dimensions()
         .map_err(|err| format!("failed to read image dimensions: {err}"))?;
     Ok(ImageDims { width, height })
+}
+
+/// Whether a file starts with a HEIF (HEIC/AVIF) `ftyp` header.
+fn is_heif_file(path: &Path) -> bool {
+    let mut header = [0u8; 64];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(read) = std::io::Read::read(&mut file, &mut header) else {
+        return false;
+    };
+    crate::studio::heif_decode::heif_kind(&header[..read]).is_some()
 }
 
 /// Read an image's `width` x `height` from its header. This is the fast first

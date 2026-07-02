@@ -224,7 +224,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "absolute path to an image file",
         inline: true,
         pickerFilterName: "Images",
-        pickerExtensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"],
+        pickerExtensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif", "avif"],
       },
     ],
   },

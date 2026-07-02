@@ -15,7 +15,7 @@ import { generateThumbnail } from "../bridge/tauri";
 // is preserved. In browser preview the backend is mocked and returns an empty
 // data URL, so we degrade to a path-only card.
 
-const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
+const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
 function basename(p: string): string {
   const parts = p.split(/[/\\]/);

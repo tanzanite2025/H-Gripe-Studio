@@ -52,7 +52,19 @@ import { useT } from "./i18n";
 // land on the generic image card (`imageSource`); videos land on the generic
 // video card (`videoSource`), a separate track that shows a poster frame +
 // metadata (see docs/cards/generic-media-card.md).
-const IMAGE_DROP_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff"]);
+const IMAGE_DROP_EXTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tif",
+  "tiff",
+  "heic",
+  "heif",
+  "avif",
+]);
 const VIDEO_DROP_EXTS = new Set(["mp4", "mov", "mkv", "webm", "avi", "m4v"]);
 
 function dropExtension(path: string): string {
