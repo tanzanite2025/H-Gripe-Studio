@@ -302,7 +302,8 @@ export function emptyEditPaths(): EditPaths {
 }
 
 /** Blend modes the M3 compositor supports (grayscale mask surfaces). */
-export type LayerBlend = "normal" | "multiply" | "screen";
+export const LAYER_BLENDS = ["normal", "multiply", "screen", "darken", "lighten", "difference"] as const;
+export type LayerBlend = (typeof LAYER_BLENDS)[number];
 
 /**
  * Tone-mapping kinds an adjustment layer can carry (M6). The document is
@@ -365,6 +366,8 @@ export interface MaskLayer {
   /** 0..1 layer opacity. */
   opacity: number;
   visible: boolean;
+  /** PS "lock all": a locked layer rejects new edits and deletion. */
+  locked?: boolean;
   /** The layer's ordered edit stack, replayed in recorded order. */
   ops: EditOp[];
   /** The tone map an `"adjustment"` layer applies (revisable at any time). */

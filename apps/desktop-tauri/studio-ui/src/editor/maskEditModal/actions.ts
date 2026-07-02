@@ -20,6 +20,7 @@ import {
   setActiveLayer,
   setLayerBlend,
   setLayerOpacity,
+  toggleLayerLock,
   toggleLayerVisible,
   toggleOp,
   undo,
@@ -65,6 +66,7 @@ export type MaskEditAction =
   | { type: "layer_move"; from: number; to: number }
   | { type: "layer_active"; index: number }
   | { type: "layer_visible"; index: number }
+  | { type: "layer_lock"; index: number }
   | { type: "layer_opacity"; index: number; opacity: number }
   | { type: "layer_blend"; index: number; blend: LayerBlend };
 
@@ -124,6 +126,8 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return setActiveLayer(state, action.index);
     case "layer_visible":
       return toggleLayerVisible(state, action.index);
+    case "layer_lock":
+      return toggleLayerLock(state, action.index);
     case "layer_opacity":
       return setLayerOpacity(state, action.index, action.opacity);
     case "layer_blend":
