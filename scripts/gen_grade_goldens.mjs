@@ -315,6 +315,28 @@ function applyOp(surface, op) {
       });
       break;
     }
+    case "color_warper": {
+      const points = op.points.filter((p) =>
+        [p.hue, p.sat, p.hue_shift, p.sat_scale, p.hue_radius, p.sat_radius].every((v) => Number.isFinite(v)),
+      );
+      forEachHsl(surface, (h, s, l) => {
+        let hueShift = 0;
+        let satFactor = 1;
+        for (const p of points) {
+          const dRaw = (((h - p.hue) % 360) + 360) % 360;
+          const dh = Math.min(dRaw, 360 - dRaw);
+          const ds = s - clamp01(p.sat);
+          const d = Math.sqrt(
+            (dh / Math.max(p.hue_radius, 1e-3)) ** 2 + (ds / Math.max(p.sat_radius, 1e-3)) ** 2,
+          );
+          const w = smoothstep(1 - d);
+          hueShift += w * p.hue_shift;
+          satFactor *= 1 + w * (p.sat_scale - 1);
+        }
+        return [(((h + hueShift) % 360) + 360) % 360, clamp01(s * Math.max(satFactor, 0)), l];
+      });
+      break;
+    }
   }
 }
 
@@ -840,3 +862,48 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: lut1dCases }, null, 2) + "\n",
 );
 console.log(`wrote ${lut1dCases.length} lut1d cases`);
+
+// ---- Color-warper cases (wave 3) ----
+
+const warperCases = [
+  docCase("color_warper: no points is identity", {
+    layers: [layer([{ type: "color_warper", points: [] }])],
+  }, opsInput),
+  docCase("color_warper: pull reds toward orange", {
+    layers: [layer([{ type: "color_warper", points: [
+      { hue: 0, sat: 0.7, hue_shift: 30, sat_scale: 1, hue_radius: 60, sat_radius: 0.6 },
+    ] }])],
+  }, opsInput),
+  docCase("color_warper: desaturate greens only", {
+    layers: [layer([{ type: "color_warper", points: [
+      { hue: 120, sat: 0.5, hue_shift: 0, sat_scale: 0.3, hue_radius: 50, sat_radius: 0.8 },
+    ] }])],
+  }, opsInput),
+  docCase("color_warper: two points accumulate", {
+    layers: [layer([{ type: "color_warper", points: [
+      { hue: 0, sat: 0.6, hue_shift: 20, sat_scale: 1.3, hue_radius: 70, sat_radius: 0.7 },
+      { hue: 240, sat: 0.6, hue_shift: -25, sat_scale: 0.8, hue_radius: 80, sat_radius: 0.7 },
+    ] }])],
+  }, opsInput),
+  docCase("color_warper: wrap across the 0/360 hue seam", {
+    layers: [layer([{ type: "color_warper", points: [
+      { hue: 350, sat: 0.5, hue_shift: 40, sat_scale: 1.2, hue_radius: 40, sat_radius: 1.0 },
+    ] }])],
+  }, opsInput),
+  docCase("color_warper: pro_photo space", {
+    layers: [layer([{ type: "color_warper", points: [
+      { hue: 30, sat: 0.5, hue_shift: -15, sat_scale: 1.4, hue_radius: 90, sat_radius: 0.9 },
+    ] }])],
+  }, opsInputPro),
+  docCase("color_warper: stacked under color blend with mask", {
+    layers: [layer([{ type: "color_warper", points: [
+      { hue: 200, sat: 0.5, hue_shift: 35, sat_scale: 1.5, hue_radius: 100, sat_radius: 1.0 },
+    ] }], { blend: "color", opacity: 0.75, mask: [1, 0.5, 0, 1, 0.25, 0.75] })],
+  }, opsInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_warper.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: warperCases }, null, 2) + "\n",
+);
+console.log(`wrote ${warperCases.length} warper cases`);

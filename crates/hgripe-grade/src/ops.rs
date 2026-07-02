@@ -127,6 +127,24 @@ pub enum GradeOp {
     /// as a tone LUT, or chained before a [`GradeOp::Lut3d`] as its shaper.
     /// Build one from a file with [`parse_cube`].
     Lut1d { size: u32, table: Vec<f32> },
+    /// Resolve-style colour warper on encoded values: control points on the
+    /// hue–saturation plane each pull nearby colours (`hue_shift` degrees,
+    /// `sat_scale` multiplier) with a smoothstep falloff over an elliptical
+    /// radius (`hue_radius` degrees × `sat_radius`). Shifts from multiple
+    /// points accumulate. No points is identity; non-finite points are
+    /// skipped.
+    ColorWarper { points: Vec<WarpPoint> },
+}
+
+/// One colour-warper control point (see [`GradeOp::ColorWarper`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WarpPoint {
+    pub hue: f32,
+    pub sat: f32,
+    pub hue_shift: f32,
+    pub sat_scale: f32,
+    pub hue_radius: f32,
+    pub sat_radius: f32,
 }
 
 /// Apply one op to every pixel's RGB (alpha untouched).
@@ -306,6 +324,39 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 for c in 0..3 {
                     rgb[c] = rows[c][0] * src[0] + rows[c][1] * src[1] + rows[c][2] * src[2];
                 }
+            });
+        }
+        GradeOp::ColorWarper { points } => {
+            let points: Vec<WarpPoint> = points
+                .iter()
+                .copied()
+                .filter(|p| {
+                    [p.hue, p.sat, p.hue_shift, p.sat_scale, p.hue_radius, p.sat_radius]
+                        .iter()
+                        .all(|v| v.is_finite())
+                })
+                .collect();
+            for_each_hsl(surface, n, |h, s, l| {
+                let mut hue_shift = 0.0f32;
+                let mut sat_factor = 1.0f32;
+                for p in &points {
+                    let dh = {
+                        let d = (h - p.hue).rem_euclid(360.0);
+                        d.min(360.0 - d)
+                    };
+                    let ds = s - p.sat.clamp(0.0, 1.0);
+                    let d = ((dh / p.hue_radius.max(1e-3)).powi(2)
+                        + (ds / p.sat_radius.max(1e-3)).powi(2))
+                    .sqrt();
+                    let w = smoothstep(1.0 - d);
+                    hue_shift += w * p.hue_shift;
+                    sat_factor *= 1.0 + w * (p.sat_scale - 1.0);
+                }
+                (
+                    (h + hue_shift).rem_euclid(360.0),
+                    (s * sat_factor.max(0.0)).clamp(0.0, 1.0),
+                    l,
+                )
             });
         }
         GradeOp::Lut1d { size, table } => {

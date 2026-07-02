@@ -12,6 +12,7 @@ import opsLut1d from "../../../../../crates/hgripe-grade/goldens/ops_lut1d.json"
 import opsMixer from "../../../../../crates/hgripe-grade/goldens/ops_mixer.json";
 import opsPro from "../../../../../crates/hgripe-grade/goldens/ops_pro.json";
 import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json";
+import opsWarper from "../../../../../crates/hgripe-grade/goldens/ops_warper.json";
 import {
   applyDoc,
   compositeOver,
@@ -83,6 +84,7 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
     ["ops_hdr.json", opsHdr],
     ["ops_mixer.json", opsMixer],
     ["ops_lut1d.json", opsLut1d],
+    ["ops_warper.json", opsWarper],
   ] as const) {
     for (const c of (json as { cases: DocCase[] }).cases) {
       it(`${file}: ${c.name}`, () => {
