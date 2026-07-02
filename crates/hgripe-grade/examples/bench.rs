@@ -37,6 +37,7 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                 opacity: 1.0,
                 visible: true,
                 mask: None,
+                qualifier: None,
                 ops: vec![
                     GradeOp::Exposure { ev: 0.5 },
                     GradeOp::WhiteBalance { temp: 0.1, tint: -0.05 },
@@ -51,6 +52,7 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                 opacity: 0.8,
                 visible: true,
                 mask: Some(mask),
+                qualifier: None,
                 ops: vec![GradeOp::LiftGammaGain {
                     lift: [0.05, 0.0, -0.05],
                     gamma: [1.1, 1.0, 0.9],
@@ -62,6 +64,7 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                 opacity: 0.6,
                 visible: true,
                 mask: None,
+                qualifier: None,
                 ops: vec![GradeOp::Lut3d { size, table: lut_table }, GradeOp::Saturation { amount: 0.3 }],
             },
         ],

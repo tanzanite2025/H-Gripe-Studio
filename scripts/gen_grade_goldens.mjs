@@ -229,7 +229,75 @@ function applyOp(surface, op) {
       }
       break;
     }
+    case "hue_vs_hue": {
+      const curve = periodicSpline(op.points, 0);
+      forEachHsl(surface, (h, s, l) => [(((h + curve(h)) % 360) + 360) % 360, s, l]);
+      break;
+    }
+    case "hue_vs_sat": {
+      const curve = periodicSpline(op.points, 1);
+      forEachHsl(surface, (h, s, l) => [h, clamp01(s * curve(h)), l]);
+      break;
+    }
+    case "lum_vs_sat": {
+      const curve = op.points.length === 0 ? () => 1 : monotoneSpline(op.points);
+      forEachHsl(surface, (h, s, l) => [h, clamp01(s * curve(l)), l]);
+      break;
+    }
+    case "sat_vs_sat": {
+      const curve = op.points.length === 0 ? () => 1 : monotoneSpline(op.points);
+      forEachHsl(surface, (h, s, l) => [h, clamp01(s * curve(s)), l]);
+      break;
+    }
+    case "log_wheels": {
+      const low = Math.max(op.low_pivot, 1e-6);
+      const highSpan = Math.max(1 - op.high_pivot, 1e-6);
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          const v = clamp01(surface.data[i + c]);
+          const ws = 1 - smoothstep(v / low);
+          const wh = smoothstep((v - op.high_pivot) / highSpan);
+          const wm = Math.max(1 - ws - wh, 0);
+          surface.data[i + c] = clamp01(v + ws * op.shadows[c] + wm * op.midtones[c] + wh * op.highlights[c]);
+        }
+      }
+      break;
+    }
+    case "contrast": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          const v = clamp01(surface.data[i + c]);
+          surface.data[i + c] = clamp01(op.pivot + (v - op.pivot) * op.amount);
+        }
+      }
+      break;
+    }
   }
+}
+
+const smoothstep = (t) => {
+  const c = clamp01(t);
+  return c * c * (3 - 2 * c);
+};
+
+function forEachHsl(surface, f) {
+  for (let px = 0; px < surface.w * surface.h; px++) {
+    const i = px * 4;
+    const [h, s, l] = rgbToHsl([0, 1, 2].map((c) => clamp01(surface.data[i + c])));
+    const out = hslToRgb(...f(h, s, l));
+    for (let c = 0; c < 3; c++) surface.data[i + c] = out[c];
+  }
+}
+
+// Hue-domain curve (period 360): points replicated one period below/above.
+function periodicSpline(points, neutral) {
+  if (points.length === 0) return () => neutral;
+  const base = points.map(([x, y]) => [((x % 360) + 360) % 360, y]).sort((a, b) => a[0] - b[0]);
+  const wrapped = [-360, 0, 360].flatMap((shift) => base.map(([x, y]) => [x + shift, y]));
+  const spline = monotoneSpline(wrapped);
+  return (hue) => spline(((hue % 360) + 360) % 360);
 }
 
 function rgbToHsl(rgb) {
@@ -282,13 +350,42 @@ function lut3dSample(size, table, rgb) {
   return out;
 }
 
+// 1 inside [lo, hi], smoothstep falloff over `soft` outside, 0 beyond.
+function bandWeight(v, lo, hi, soft) {
+  if (v >= lo && v <= hi) return 1;
+  if (soft <= 0) return 0;
+  const d = v < lo ? lo - v : v - hi;
+  return 1 - smoothstep(d / soft);
+}
+
+// The HSL qualifier's per-pixel gate over a surface.
+function qualifierGate(q, surface) {
+  const n = surface.w * surface.h;
+  const gate = new Array(n);
+  for (let px = 0; px < n; px++) {
+    const i = px * 4;
+    const [h, s, l] = rgbToHsl([0, 1, 2].map((c) => clamp01(surface.data[i + c])));
+    let d = (((h - q.hue_center) % 360) + 360) % 360;
+    d = Math.min(d, 360 - d);
+    const hueW = d <= q.hue_range ? 1 : q.hue_soft <= 0 ? 0 : 1 - smoothstep((d - q.hue_range) / q.hue_soft);
+    const w = hueW * bandWeight(s, q.sat_range[0], q.sat_range[1], q.sat_soft) * bandWeight(l, q.lum_range[0], q.lum_range[1], q.lum_soft);
+    gate[px] = q.invert ? 1 - w : w;
+  }
+  return gate;
+}
+
 function applyDoc(doc, input) {
   const surface = { ...input, data: input.data.slice() };
   for (const layer of doc.layers) {
     if (!layer.visible) continue;
+    let gate = layer.mask;
+    if (layer.qualifier) {
+      gate = qualifierGate(layer.qualifier, surface);
+      if (layer.mask) gate = gate.map((g, px) => g * clamp01(layer.mask[px]));
+    }
     const graded = { ...surface, data: surface.data.slice() };
     for (const op of layer.ops) applyOp(graded, op);
-    const out = composite({ ...surface }, graded, layer.blend, layer.opacity, layer.mask);
+    const out = composite({ ...surface }, graded, layer.blend, layer.opacity, gate);
     surface.data = out;
   }
   return surface.data;
@@ -456,3 +553,63 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: videoCases }, null, 2) + "\n",
 );
 console.log(`wrote ${videoCases.length} video-op cases`);
+
+// ---- Pro cases: secondaries (qualifier), hue curves, log wheels, contrast ----
+
+const redQualifier = {
+  hue_center: 0, hue_range: 30, hue_soft: 30,
+  sat_range: [0.15, 1], sat_soft: 0.1,
+  lum_range: [0, 1], lum_soft: 0,
+  invert: false,
+};
+const shadowQualifier = {
+  hue_center: 0, hue_range: 180, hue_soft: 0,
+  sat_range: [0, 1], sat_soft: 0,
+  lum_range: [0, 0.35], lum_soft: 0.15,
+  invert: false,
+};
+
+const proCases = [
+  docCase("qualifier: desaturate reds only", {
+    layers: [layer([{ type: "saturation", amount: -0.8 }], { qualifier: redQualifier })],
+  }, opsInput),
+  docCase("qualifier: inverted red selection", {
+    layers: [layer([{ type: "exposure", ev: 0.8 }], { qualifier: { ...redQualifier, invert: true } })],
+  }, opsInput),
+  docCase("qualifier: shadows-only lift, stacked with mask", {
+    layers: [layer([{ type: "exposure", ev: 1.0 }], { qualifier: shadowQualifier, mask })],
+  }, opsInput),
+  docCase("hue_vs_hue: push oranges toward red", {
+    layers: [layer([{ type: "hue_vs_hue", points: [[0, 0], [30, -15], [120, 0], [240, 0]] }])],
+  }, opsInput),
+  docCase("hue_vs_hue: empty points is identity", {
+    layers: [layer([{ type: "hue_vs_hue", points: [] }])],
+  }, opsInput),
+  docCase("hue_vs_sat: boost blues, mute greens", {
+    layers: [layer([{ type: "hue_vs_sat", points: [[120, 0.4], [240, 1.6], [0, 1]] }])],
+  }, opsInput),
+  docCase("lum_vs_sat: desaturate shadows", {
+    layers: [layer([{ type: "lum_vs_sat", points: [[0, 0.2], [0.5, 1], [1, 1]] }])],
+  }, opsInput),
+  docCase("sat_vs_sat: boost muted colours only", {
+    layers: [layer([{ type: "sat_vs_sat", points: [[0, 1.5], [0.5, 1], [1, 1]] }])],
+  }, opsInput),
+  docCase("log_wheels: neutral is a no-op", {
+    layers: [layer([{ type: "log_wheels", shadows: [0, 0, 0], midtones: [0, 0, 0], highlights: [0, 0, 0], low_pivot: 0.33, high_pivot: 0.55 }])],
+  }, opsInput),
+  docCase("log_wheels: cool shadows, warm highlights", {
+    layers: [layer([{ type: "log_wheels", shadows: [-0.05, 0, 0.05], midtones: [0.02, 0, 0], highlights: [0.06, 0.02, -0.04], low_pivot: 0.33, high_pivot: 0.55 }])],
+  }, opsInput),
+  docCase("contrast: 1.3 about Resolve's default pivot", {
+    layers: [layer([{ type: "contrast", amount: 1.3, pivot: 0.435 }])],
+  }, opsInput),
+  docCase("contrast: flatten to the pivot", {
+    layers: [layer([{ type: "contrast", amount: 0.5, pivot: 0.5 }])],
+  }, opsInputPro),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_pro.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: proCases }, null, 2) + "\n",
+);
+console.log(`wrote ${proCases.length} pro cases`);

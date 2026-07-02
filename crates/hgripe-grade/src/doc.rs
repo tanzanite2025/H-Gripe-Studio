@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::blend::BlendMode;
 use crate::composite::composite_over;
 use crate::ops::{apply_op, GradeOp};
+use crate::qualifier::HslQualifier;
 use crate::surface::GradeSurface;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -23,6 +24,11 @@ pub struct GradeLayer {
     /// Optional grayscale gate (`w * h` f32s, `0..=1`) confining the layer's
     /// effect to part of the frame.
     pub mask: Option<Vec<f32>>,
+    /// Optional HSL qualifier: a per-pixel gate computed from the layer's
+    /// input (the accumulated result below), multiplied with `mask` — the
+    /// secondary-grading model. Absent in older documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier: Option<HslQualifier>,
     /// The layer's ops, applied in order to a copy of the accumulated result
     /// below; the graded copy then composites back per blend + opacity + mask.
     pub ops: Vec<GradeOp>,
@@ -37,12 +43,28 @@ pub fn apply(doc: &GradeDoc, surface: &mut GradeSurface) {
         if !layer.visible {
             continue;
         }
-        let mut graded = surface.clone();
-        for op in &layer.ops {
-            apply_op(&mut graded, op);
-        }
-        composite_over(surface, &graded, layer.blend, layer.opacity, layer.mask.as_deref());
+        apply_layer(layer, surface);
     }
+}
+
+// One layer: grade a copy of the accumulated result, gate by
+// qualifier × mask, composite back.
+fn apply_layer(layer: &GradeLayer, surface: &mut GradeSurface) {
+    let gate = layer.qualifier.as_ref().map(|q| {
+        let mut g = q.gate(surface);
+        if let Some(m) = layer.mask.as_deref() {
+            for (gv, mv) in g.iter_mut().zip(m) {
+                *gv *= mv.clamp(0.0, 1.0);
+            }
+        }
+        g
+    });
+    let mask = gate.as_deref().or(layer.mask.as_deref());
+    let mut graded = surface.clone();
+    for op in &layer.ops {
+        apply_op(&mut graded, op);
+    }
+    composite_over(surface, &graded, layer.blend, layer.opacity, mask);
 }
 
 /// Row-parallel [`apply`]: the surface is split into horizontal bands, each
@@ -78,12 +100,14 @@ pub fn apply_parallel(doc: &GradeDoc, surface: &mut GradeSurface) {
                 if !layer.visible {
                     continue;
                 }
-                let mut graded = band_surface.clone();
-                for op in &layer.ops {
-                    apply_op(&mut graded, op);
-                }
-                let mask = layer.mask.as_deref().map(|m| &m[start_px..start_px + rows * w]);
-                composite_over(&mut band_surface, &graded, layer.blend, layer.opacity, mask);
+                let band_layer = GradeLayer {
+                    mask: layer
+                        .mask
+                        .as_deref()
+                        .map(|m| m[start_px..start_px + rows * w].to_vec()),
+                    ..layer.clone()
+                };
+                apply_layer(&band_layer, &mut band_surface);
             }
             chunk.copy_from_slice(&band_surface.data);
         });
@@ -102,6 +126,7 @@ mod tests {
                 opacity: 1.0,
                 visible: false,
                 mask: None,
+                qualifier: None,
                 ops: vec![GradeOp::Exposure { ev: 2.0 }],
             }],
         };

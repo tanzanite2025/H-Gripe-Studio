@@ -6,7 +6,7 @@
 
 #![cfg(feature = "parallel")]
 
-use hgripe_grade::{apply, apply_parallel, BlendMode, CurveChannel, GradeDoc, GradeLayer, GradeOp, GradeSpace, GradeSurface};
+use hgripe_grade::{apply, apply_parallel, BlendMode, CurveChannel, GradeDoc, GradeLayer, GradeOp, GradeSpace, GradeSurface, HslQualifier};
 
 fn test_surface(w: u32, h: u32) -> GradeSurface {
     let n = (w as usize) * (h as usize);
@@ -30,6 +30,7 @@ fn test_doc(n_px: usize) -> GradeDoc {
                 opacity: 1.0,
                 visible: true,
                 mask: None,
+                qualifier: None,
                 ops: vec![
                     GradeOp::Exposure { ev: 0.5 },
                     GradeOp::Curves {
@@ -43,6 +44,16 @@ fn test_doc(n_px: usize) -> GradeDoc {
                 opacity: 0.8,
                 visible: true,
                 mask: Some(mask),
+                qualifier: Some(HslQualifier {
+                    hue_center: 20.0,
+                    hue_range: 60.0,
+                    hue_soft: 40.0,
+                    sat_range: [0.1, 1.0],
+                    sat_soft: 0.1,
+                    lum_range: [0.0, 0.8],
+                    lum_soft: 0.2,
+                    invert: false,
+                }),
                 ops: vec![
                     GradeOp::LiftGammaGain {
                         lift: [0.05, 0.0, -0.05],
@@ -57,7 +68,21 @@ fn test_doc(n_px: usize) -> GradeDoc {
                 opacity: 0.6,
                 visible: true,
                 mask: None,
-                ops: vec![GradeOp::Lut3d { size: 2, table: identity_lut }, GradeOp::Saturation { amount: 0.4 }],
+                qualifier: None,
+                ops: vec![
+                    GradeOp::Lut3d { size: 2, table: identity_lut },
+                    GradeOp::Saturation { amount: 0.4 },
+                    GradeOp::HueVsHue { points: vec![[0.0, 10.0], [180.0, -10.0]] },
+                    GradeOp::LumVsSat { points: vec![[0.0, 0.3], [1.0, 1.0]] },
+                    GradeOp::LogWheels {
+                        shadows: [-0.03, 0.0, 0.03],
+                        midtones: [0.01, 0.0, 0.0],
+                        highlights: [0.04, 0.01, -0.02],
+                        low_pivot: 0.33,
+                        high_pivot: 0.55,
+                    },
+                    GradeOp::Contrast { amount: 1.2, pivot: 0.435 },
+                ],
             },
         ],
     }

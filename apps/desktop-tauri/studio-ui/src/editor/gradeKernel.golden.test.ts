@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import blendSeparable from "../../../../../crates/hgripe-grade/goldens/blend_separable.json";
 import opsCore from "../../../../../crates/hgripe-grade/goldens/ops_core.json";
+import opsPro from "../../../../../crates/hgripe-grade/goldens/ops_pro.json";
 import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json";
 import {
   applyDoc,
@@ -75,6 +76,7 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
   for (const [file, json] of [
     ["ops_core.json", opsCore],
     ["ops_video.json", opsVideo],
+    ["ops_pro.json", opsPro],
   ] as const) {
     for (const c of (json as { cases: DocCase[] }).cases) {
       it(`${file}: ${c.name}`, () => {

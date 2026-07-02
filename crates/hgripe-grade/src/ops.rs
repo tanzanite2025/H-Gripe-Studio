@@ -67,6 +67,34 @@ pub enum GradeOp {
     /// `size³ × 3` RGB triples with red varying fastest (the `.cube`
     /// convention); build one from a file with [`parse_cube`].
     Lut3d { size: u32, table: Vec<f32> },
+    /// Resolve-style hue-vs-hue curve on encoded values: `x` is hue in
+    /// degrees (`0..360`, periodic), `y` is the hue shift in degrees at
+    /// that hue. No points is identity.
+    HueVsHue { points: Vec<[f32; 2]> },
+    /// Hue-vs-sat: `x` is hue in degrees (periodic), `y` is a saturation
+    /// multiplier (1 = unchanged). No points is identity.
+    HueVsSat { points: Vec<[f32; 2]> },
+    /// Lum-vs-sat: `x` is HSL lightness (`0..=1`), `y` a saturation
+    /// multiplier — e.g. desaturate shadows only. Flat outside endpoints.
+    LumVsSat { points: Vec<[f32; 2]> },
+    /// Sat-vs-sat: `x` is HSL saturation (`0..=1`), `y` a saturation
+    /// multiplier — e.g. boost only muted colours. Flat outside endpoints.
+    SatVsSat { points: Vec<[f32; 2]> },
+    /// Resolve log-style zoned offsets on encoded values: shadows /
+    /// midtones / highlights each add a per-channel offset weighted by a
+    /// smoothstep zone split at `low_pivot` and `high_pivot`
+    /// (Resolve defaults: 0.33 / 0.55). Neutral is all-zero offsets.
+    LogWheels {
+        shadows: [f32; 3],
+        midtones: [f32; 3],
+        highlights: [f32; 3],
+        low_pivot: f32,
+        high_pivot: f32,
+    },
+    /// Contrast about a pivot on encoded values:
+    /// `v = pivot + (v − pivot) × amount`, clamped to `0..=1`.
+    /// `amount = 1` is neutral; Resolve's default pivot is 0.435.
+    Contrast { amount: f32, pivot: f32 },
 }
 
 /// Apply one op to every pixel's RGB (alpha untouched).
@@ -166,6 +194,52 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 surface.data[i + 2] = out[2];
             }
         }
+        GradeOp::HueVsHue { points } => {
+            let curve = PeriodicSpline::new(points, 0.0);
+            for_each_hsl(surface, n, |h, s, l| ((h + curve.eval(h)).rem_euclid(360.0), s, l));
+        }
+        GradeOp::HueVsSat { points } => {
+            let curve = PeriodicSpline::new(points, 1.0);
+            for_each_hsl(surface, n, |h, s, l| (h, (s * curve.eval(h)).clamp(0.0, 1.0), l));
+        }
+        GradeOp::LumVsSat { points } => {
+            let curve = MultiplierSpline::new(points);
+            for_each_hsl(surface, n, |h, s, l| (h, (s * curve.eval(l)).clamp(0.0, 1.0), l));
+        }
+        GradeOp::SatVsSat { points } => {
+            let curve = MultiplierSpline::new(points);
+            for_each_hsl(surface, n, |h, s, l| (h, (s * curve.eval(s)).clamp(0.0, 1.0), l));
+        }
+        GradeOp::LogWheels {
+            shadows,
+            midtones,
+            highlights,
+            low_pivot,
+            high_pivot,
+        } => {
+            let low = low_pivot.max(1e-6);
+            let high_span = (1.0 - high_pivot).max(1e-6);
+            for px in 0..n {
+                let i = px * 4;
+                for c in 0..3 {
+                    let v = surface.data[i + c].clamp(0.0, 1.0);
+                    let w_s = 1.0 - smoothstep(v / low);
+                    let w_h = smoothstep((v - high_pivot) / high_span);
+                    let w_m = (1.0 - w_s - w_h).max(0.0);
+                    surface.data[i + c] =
+                        (v + w_s * shadows[c] + w_m * midtones[c] + w_h * highlights[c]).clamp(0.0, 1.0);
+                }
+            }
+        }
+        GradeOp::Contrast { amount, pivot } => {
+            for px in 0..n {
+                let i = px * 4;
+                for c in 0..3 {
+                    let v = surface.data[i + c].clamp(0.0, 1.0);
+                    surface.data[i + c] = (pivot + (v - pivot) * amount).clamp(0.0, 1.0);
+                }
+            }
+        }
         GradeOp::Lut3d { size, table } => {
             let lut = Lut3d::new(*size, table);
             for px in 0..n {
@@ -183,8 +257,85 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
     }
 }
 
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+// Convert each pixel to HSL, map it, convert back (alpha untouched).
+fn for_each_hsl(surface: &mut GradeSurface, n: usize, f: impl Fn(f32, f32, f32) -> (f32, f32, f32)) {
+    for px in 0..n {
+        let i = px * 4;
+        let (h, s, l) = rgb_to_hsl([
+            surface.data[i].clamp(0.0, 1.0),
+            surface.data[i + 1].clamp(0.0, 1.0),
+            surface.data[i + 2].clamp(0.0, 1.0),
+        ]);
+        let (h, s, l) = f(h, s, l);
+        let out = hsl_to_rgb(h, s, l);
+        surface.data[i] = out[0];
+        surface.data[i + 1] = out[1];
+        surface.data[i + 2] = out[2];
+    }
+}
+
+/// A hue-domain curve (period 360): the control points are replicated one
+/// period below and above before building the spline, so evaluation wraps
+/// seamlessly. No points evaluates to `neutral` everywhere.
+struct PeriodicSpline {
+    spline: MonotoneSpline,
+    neutral: f32,
+    empty: bool,
+}
+
+impl PeriodicSpline {
+    fn new(points: &[[f32; 2]], neutral: f32) -> Self {
+        let mut base: Vec<[f32; 2]> = points.iter().map(|p| [p[0].rem_euclid(360.0), p[1]]).collect();
+        base.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        let mut wrapped: Vec<[f32; 2]> = Vec::with_capacity(base.len() * 3);
+        for shift in [-360.0, 0.0, 360.0] {
+            wrapped.extend(base.iter().map(|p| [p[0] + shift, p[1]]));
+        }
+        Self {
+            spline: MonotoneSpline::new(&wrapped),
+            neutral,
+            empty: points.is_empty(),
+        }
+    }
+
+    fn eval(&self, hue: f32) -> f32 {
+        if self.empty {
+            return self.neutral;
+        }
+        self.spline.eval(hue.rem_euclid(360.0))
+    }
+}
+
+/// A `0..=1`-domain multiplier curve: no points is the identity
+/// multiplier 1; otherwise the monotone spline (flat outside endpoints).
+struct MultiplierSpline {
+    spline: MonotoneSpline,
+    empty: bool,
+}
+
+impl MultiplierSpline {
+    fn new(points: &[[f32; 2]]) -> Self {
+        Self {
+            spline: MonotoneSpline::new(points),
+            empty: points.is_empty(),
+        }
+    }
+
+    fn eval(&self, x: f32) -> f32 {
+        if self.empty {
+            return 1.0;
+        }
+        self.spline.eval(x)
+    }
+}
+
 /// RGB (`0..=1`) → HSL with hue in degrees (`0..360`).
-fn rgb_to_hsl(rgb: [f32; 3]) -> (f32, f32, f32) {
+pub(crate) fn rgb_to_hsl(rgb: [f32; 3]) -> (f32, f32, f32) {
     let max = rgb[0].max(rgb[1]).max(rgb[2]);
     let min = rgb[0].min(rgb[1]).min(rgb[2]);
     let l = (max + min) / 2.0;
