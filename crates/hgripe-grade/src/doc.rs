@@ -45,6 +45,50 @@ pub fn apply(doc: &GradeDoc, surface: &mut GradeSurface) {
     }
 }
 
+/// Row-parallel [`apply`]: the surface is split into horizontal bands, each
+/// band runs the whole document independently (every op and the compositing
+/// formula are per-pixel, so this is bit-identical to the serial path —
+/// asserted in `tests/parallel.rs`). Only compiled with the `parallel`
+/// feature, per the design doc's dependency policy.
+#[cfg(feature = "parallel")]
+pub fn apply_parallel(doc: &GradeDoc, surface: &mut GradeSurface) {
+    use rayon::prelude::*;
+
+    let w = surface.w as usize;
+    let h = surface.h as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let rows_per_band = h.div_ceil(rayon::current_num_threads()).max(1);
+    let space = surface.space;
+    surface
+        .data
+        .par_chunks_mut(rows_per_band * w * 4)
+        .enumerate()
+        .for_each(|(band, chunk)| {
+            let rows = chunk.len() / (w * 4);
+            let start_px = band * rows_per_band * w;
+            let mut band_surface = GradeSurface {
+                w: w as u32,
+                h: rows as u32,
+                data: chunk.to_vec(),
+                space,
+            };
+            for layer in &doc.layers {
+                if !layer.visible {
+                    continue;
+                }
+                let mut graded = band_surface.clone();
+                for op in &layer.ops {
+                    apply_op(&mut graded, op);
+                }
+                let mask = layer.mask.as_deref().map(|m| &m[start_px..start_px + rows * w]);
+                composite_over(&mut band_surface, &graded, layer.blend, layer.opacity, mask);
+            }
+            chunk.copy_from_slice(&band_surface.data);
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

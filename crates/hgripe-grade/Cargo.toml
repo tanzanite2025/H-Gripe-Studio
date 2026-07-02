@@ -6,10 +6,19 @@ description = "Standalone f32 colour-grading kernel (see docs/design/grade-kerne
 publish = false
 
 # The kernel core is deliberately dependency-free f32 array code. serde only
-# exists so the op graph / golden vectors are serialisable; nothing else is
-# allowed in without updating docs/design/grade-kernel.md.
+# exists so the op graph / golden vectors are serialisable; rayon is the
+# design doc's sanctioned optional feature for row-parallel application
+# (must stay bit-identical to the serial path — asserted in tests). Nothing
+# else is allowed in without updating docs/design/grade-kernel.md.
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+rayon = { version = "1", optional = true }
+
+[features]
+parallel = ["dep:rayon"]
 
 [dev-dependencies]
 serde_json = "1"
+
+[[example]]
+name = "bench"

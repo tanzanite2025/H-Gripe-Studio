@@ -17,6 +17,8 @@ mod trc;
 
 pub use blend::{blend_channel, blend_rgb, BlendMode};
 pub use composite::composite_over;
+#[cfg(feature = "parallel")]
+pub use doc::apply_parallel;
 pub use doc::{apply, GradeDoc, GradeLayer};
 pub use ops::{apply_op, parse_cube, CurveChannel, GradeOp, MonotoneSpline};
 pub use surface::{GradeSpace, GradeSurface};
