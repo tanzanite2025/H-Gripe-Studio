@@ -414,8 +414,24 @@ fn apply_edit_paths(
         if index == 0 {
             replay_ops(image, mask, ops, default_tolerance, operations);
         } else {
-            let mut surface = GrayImage::from_pixel(mask.width(), mask.height(), Luma([MASK_OFF]));
-            replay_ops(image, &mut surface, ops, default_tolerance, operations);
+            // Upper layers replay from an empty surface, so their result is a
+            // pure function of (dims, ops, tolerance[, image for wand]) and is
+            // cached across runs (M7): re-running after editing one layer
+            // skips the full replay of every other layer.
+            let key =
+                replay_cache::layer_key(mask.width(), mask.height(), ops, default_tolerance, image);
+            let (surface, log) = match replay_cache::get(key) {
+                Some(hit) => hit,
+                None => {
+                    let mut surface =
+                        GrayImage::from_pixel(mask.width(), mask.height(), Luma([MASK_OFF]));
+                    let mut log = Vec::new();
+                    replay_ops(image, &mut surface, ops, default_tolerance, &mut log);
+                    replay_cache::put(key, surface.clone(), log.clone());
+                    (surface, log)
+                }
+            };
+            operations.extend(log);
             let blend = layer
                 .get("blend")
                 .and_then(Value::as_str)
@@ -431,6 +447,91 @@ fn apply_edit_paths(
                 "blend": blend,
                 "opacity": opacity,
             }));
+        }
+    }
+}
+
+/// Process-global LRU of replayed upper-layer surfaces (M7 performance layer;
+/// the run-side counterpart of the frontend `ProxyLayerCache`). An upper
+/// layer's replay starts from an empty surface, so its result is fully
+/// determined by the cache key; the entry stores the surface *and* the ops it
+/// logged so a hit reproduces an identical `matte_report`. Bounded to a few
+/// entries — full-resolution surfaces are megabytes each — mirroring the
+/// `image_buffer` LRU this grows out of.
+mod replay_cache {
+    use std::sync::{Mutex, OnceLock};
+
+    use image::{GrayImage, RgbaImage};
+    use serde_json::Value;
+
+    const CAPACITY: usize = 4;
+
+    struct Entry {
+        key: u64,
+        surface: GrayImage,
+        log: Vec<Value>,
+    }
+
+    static CACHE: OnceLock<Mutex<Vec<Entry>>> = OnceLock::new();
+
+    fn cache() -> &'static Mutex<Vec<Entry>> {
+        CACHE.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    /// FNV-1a over `bytes`, chained from `hash`.
+    fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+        for b in bytes {
+            hash ^= u64::from(*b);
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+        hash
+    }
+
+    /// Cache key for one upper layer's replay: dims + tolerance + the ops
+    /// JSON, plus a fingerprint of the source pixels when the stack contains
+    /// a `wand` op (the only op that reads the image).
+    pub(super) fn layer_key(
+        width: u32,
+        height: u32,
+        ops: Option<&Value>,
+        default_tolerance: i32,
+        image: &RgbaImage,
+    ) -> u64 {
+        let mut hash = fnv1a(0xcbf2_9ce4_8422_2325, &width.to_le_bytes());
+        hash = fnv1a(hash, &height.to_le_bytes());
+        hash = fnv1a(hash, &default_tolerance.to_le_bytes());
+        let ops_json = ops.map(Value::to_string).unwrap_or_default();
+        hash = fnv1a(hash, ops_json.as_bytes());
+        let has_wand = ops
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("wand"));
+        if has_wand {
+            hash = fnv1a(hash, image.as_raw());
+        }
+        hash
+    }
+
+    pub(super) fn get(key: u64) -> Option<(GrayImage, Vec<Value>)> {
+        let mut lru = cache().lock().ok()?;
+        let pos = lru.iter().position(|e| e.key == key)?;
+        let entry = lru.remove(pos);
+        let hit = (entry.surface.clone(), entry.log.clone());
+        lru.push(entry); // most-recently used at the back
+        Some(hit)
+    }
+
+    pub(super) fn put(key: u64, surface: GrayImage, log: Vec<Value>) {
+        let Ok(mut lru) = cache().lock() else {
+            return;
+        };
+        if let Some(pos) = lru.iter().position(|e| e.key == key) {
+            lru.remove(pos);
+        }
+        lru.push(Entry { key, surface, log });
+        while lru.len() > CAPACITY {
+            lru.remove(0);
         }
     }
 }
@@ -2388,6 +2489,72 @@ mod tests {
         assert_eq!(bc[192], 255);
 
         assert!(adjustment_lut("posterize", &json!({})).is_none());
+    }
+
+    #[test]
+    fn upper_layer_replay_is_cached_and_a_hit_reproduces_the_run() {
+        let image = RgbaImage::from_pixel(6, 6, Rgba([0, 0, 0, 255]));
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [] },
+            { "ops": [
+                { "type": "brush", "mode": "add", "radius": 1, "points": [[2, 2]] },
+                { "type": "grow", "amount": 1 }
+            ], "blend": "screen", "opacity": 0.5 }
+        ]});
+
+        // First run populates the replay cache; the second must hit it and
+        // produce a byte-identical mask and operations log.
+        let mut first_mask = solid(6, 6, MASK_OFF);
+        let mut first_ops = Vec::new();
+        apply_edit_paths(&image, &mut first_mask, Some(&doc), 24, &mut first_ops);
+        let mut second_mask = solid(6, 6, MASK_OFF);
+        let mut second_ops = Vec::new();
+        apply_edit_paths(&image, &mut second_mask, Some(&doc), 24, &mut second_ops);
+        assert_eq!(first_mask.as_raw(), second_mask.as_raw());
+        assert_eq!(first_ops, second_ops);
+    }
+
+    #[test]
+    fn replay_cache_keys_separate_dims_ops_tolerance_and_wand_pixels() {
+        let dark = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        let light = RgbaImage::from_pixel(4, 4, Rgba([255, 255, 255, 255]));
+        let brush = json!([{ "type": "brush", "mode": "add", "radius": 1, "points": [[1, 1]] }]);
+        let grow = json!([{ "type": "grow", "amount": 2 }]);
+        let wand = json!([{ "type": "wand", "region": [1, 1] }]);
+
+        let base = replay_cache::layer_key(4, 4, Some(&brush), 24, &dark);
+        assert_ne!(base, replay_cache::layer_key(8, 4, Some(&brush), 24, &dark));
+        assert_ne!(base, replay_cache::layer_key(4, 4, Some(&grow), 24, &dark));
+        assert_ne!(base, replay_cache::layer_key(4, 4, Some(&brush), 32, &dark));
+        // Pixel-independent ops ignore the image; a wand stack keys on it.
+        assert_eq!(
+            base,
+            replay_cache::layer_key(4, 4, Some(&brush), 24, &light)
+        );
+        assert_ne!(
+            replay_cache::layer_key(4, 4, Some(&wand), 24, &dark),
+            replay_cache::layer_key(4, 4, Some(&wand), 24, &light),
+        );
+    }
+
+    #[test]
+    fn replay_cache_lru_roundtrips_and_evicts_oldest() {
+        // Distinct high keys so this test cannot collide with entries other
+        // tests put in the process-global cache.
+        let surface = |v: u8| GrayImage::from_pixel(2, 2, Luma([v]));
+        let k = |i: u64| 0xDEAD_BEEF_0000_0000 + i;
+        for i in 0..6 {
+            replay_cache::put(k(i), surface(i as u8), vec![json!({ "i": i })]);
+        }
+        // Capacity is 4: the two oldest fell out. (Concurrent tests only add
+        // entries, which can only evict more — never resurrect these.)
+        assert!(replay_cache::get(k(0)).is_none());
+        assert!(replay_cache::get(k(1)).is_none());
+        // Roundtrip: a fresh put is immediately readable with its log.
+        replay_cache::put(k(5), surface(5), vec![json!({ "i": 5 })]);
+        let (hit, log) = replay_cache::get(k(5)).expect("newest entry resident");
+        assert_eq!(hit.get_pixel(0, 0).0[0], 5);
+        assert_eq!(log, vec![json!({ "i": 5 })]);
     }
 
     #[test]

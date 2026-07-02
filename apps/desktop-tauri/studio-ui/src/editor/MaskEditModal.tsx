@@ -13,7 +13,7 @@ import { useShortcutScope, comboLabel, type ShortcutHandlers } from "../shortcut
 import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
 import { LangContext, useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
-import { applyOp, buildProxyMask, isPreviewableOp, type ProxyMask } from "./maskMorphology";
+import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
 import {
   addAdjustmentLayer,
   addBrushStroke,
@@ -211,6 +211,10 @@ export function MaskEditModal({
   // (docs/cards/editor-resource-model.md § "Four lanes" → Preview).
   const previewLane = useRef(new PreviewLane());
   const [preview, setPreview] = useState<ProxyMask | null>(null);
+  // Persistent proxy render cache (M7): per-layer surfaces are reused across
+  // rebuilds and the composite recomputes dirty tiles only, so a slider drag
+  // or brush commit on a large document stays cheap.
+  const proxyCache = useRef(new ProxyLayerCache());
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
   const previewing = isPreviewableOp(toolId) && preview != null;
@@ -663,7 +667,7 @@ export function MaskEditModal({
     let disposed = false;
     void previewLane.current
       .run<ProxyMask | null>(async (signal) => {
-        const { mask, scale } = buildProxyMask(state.current, dims);
+        const { mask, scale } = buildProxyMask(state.current, dims, { cache: proxyCache.current });
         if (signal.cancelled) return null;
         return applyOp(mask, toolId, Math.max(0, Math.round(amount * scale)));
       })
@@ -682,7 +686,7 @@ export function MaskEditModal({
       setQuickProxy(null);
       return;
     }
-    setQuickProxy(buildProxyMask(state.current, dims).mask);
+    setQuickProxy(buildProxyMask(state.current, dims, { cache: proxyCache.current }).mask);
   }, [quickMask, state.current, dims]);
 
   // Commit a closed pen / lasso path (straight anchors; no handles from the UI).
