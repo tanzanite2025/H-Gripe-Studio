@@ -22,6 +22,7 @@ describe("combo parsing / matching", () => {
     expect(parseCombo("Ctrl+Shift+Z")).toEqual({ ctrl: true, shift: true, alt: false, key: "z" });
     expect(canonicalCombo("shift+ctrl+Z")).toBe("ctrl+shift+z");
     expect(canonicalCombo("[")).toBe("[");
+    expect(parseCombo("space").key).toBe(" ");
   });
 
   it("matches events, treating meta as ctrl (macOS ⌘)", () => {

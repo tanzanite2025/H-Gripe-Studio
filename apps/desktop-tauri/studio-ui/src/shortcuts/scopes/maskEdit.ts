@@ -33,15 +33,45 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "cancel", combo: "escape", status: "ready", hint: "Cancel the pending pen path; pressed again, close the editor." },
   // View.
   { id: "toggle_overlay", combo: "ctrl+h", status: "ready", hint: "Toggle mask-only view (PS Hide Extras)." },
-  // Reserved PS combos for tools that are not implemented yet. `planned`
-  // bindings are never dispatched; they only reserve the key against future
-  // conflicts and show in the cheat sheet as coming soon.
-  { id: "tool_zoom", combo: "z", status: "planned", hint: "Zoom tool (planned)." },
-  { id: "tool_hand", combo: "h", status: "planned", hint: "Hand / pan tool (planned)." },
+  // Reserved PS combos for tools / commands that are not implemented yet.
+  // `planned` bindings are never dispatched; they only reserve the PS-default
+  // key against future conflicts (guarded by the no-conflict CI test) and show
+  // in the cheat sheet as coming soon. Full PS default-tool letter map:
+  { id: "tool_move", combo: "v", status: "planned", hint: "Move tool (planned)." },
   { id: "tool_crop", combo: "c", status: "planned", hint: "Crop tool (planned)." },
+  { id: "tool_frame", combo: "k", status: "planned", hint: "Frame tool (planned)." },
+  { id: "tool_eyedropper", combo: "i", status: "planned", hint: "Eyedropper tool (planned)." },
+  { id: "tool_healing", combo: "j", status: "planned", hint: "Spot-healing / healing brush (planned)." },
+  { id: "tool_clone", combo: "s", status: "planned", hint: "Clone-stamp tool (planned)." },
+  { id: "tool_history_brush", combo: "y", status: "planned", hint: "History brush (planned)." },
+  { id: "tool_gradient", combo: "g", status: "planned", hint: "Gradient / paint-bucket tool (planned)." },
+  { id: "tool_dodge_burn", combo: "o", status: "planned", hint: "Dodge / burn / sponge tool (planned)." },
+  { id: "tool_type", combo: "t", status: "planned", hint: "Type tool (planned)." },
+  { id: "tool_path_select", combo: "a", status: "planned", hint: "Path / direct selection tool (planned; needed for re-editing committed pen anchors)." },
+  { id: "tool_shape", combo: "u", status: "planned", hint: "Shape tools (planned)." },
+  { id: "tool_hand", combo: "h", status: "planned", hint: "Hand / pan tool (planned)." },
+  { id: "tool_rotate_view", combo: "r", status: "planned", hint: "Rotate-view tool (planned)." },
+  { id: "tool_zoom", combo: "z", status: "planned", hint: "Zoom tool (planned)." },
+  { id: "default_colors", combo: "d", status: "planned", hint: "Reset to default add/subtract (PS default colours) (planned)." },
   { id: "quick_mask", combo: "q", status: "planned", hint: "Quick-mask preview toggle (planned)." },
+  { id: "screen_mode", combo: "f", status: "planned", hint: "Cycle screen modes (planned)." },
+  // Commands.
+  { id: "select_all", combo: "ctrl+a", status: "planned", hint: "Select all (planned)." },
+  { id: "reselect", combo: "ctrl+shift+d", status: "planned", hint: "Reselect (planned)." },
   { id: "free_transform", combo: "ctrl+t", status: "planned", hint: "Free transform (planned)." },
+  { id: "duplicate", combo: "ctrl+j", status: "planned", hint: "Duplicate selection / layer via copy (planned)." },
+  { id: "step_backward", combo: "alt+ctrl+z", status: "planned", hint: "Step backward (PS legacy undo) (planned; Ctrl+Z already undoes)." },
+  { id: "fill_dialog", combo: "shift+f5", status: "planned", hint: "Fill dialog (planned)." },
   { id: "feather_dialog", combo: "shift+f6", status: "planned", hint: "Feather dialog (planned; feather is a toolbar op today)." },
+  { id: "delete_selection", combo: "delete", status: "planned", hint: "Delete the selected region (planned)." },
+  // View / navigation.
+  { id: "pan_space", combo: "space", status: "planned", hint: "Hold Space to pan (planned)." },
+  { id: "zoom_in", combo: "ctrl+=", status: "planned", hint: "Zoom in (planned)." },
+  { id: "zoom_out", combo: "ctrl+-", status: "planned", hint: "Zoom out (planned)." },
+  { id: "zoom_fit", combo: "ctrl+0", status: "planned", hint: "Fit on screen (planned)." },
+  { id: "zoom_100", combo: "ctrl+1", status: "planned", hint: "100% zoom (planned)." },
+  { id: "brush_softer", combo: "shift+[", status: "planned", hint: "Decrease brush hardness (planned; brush is hard-edged today)." },
+  { id: "brush_harder", combo: "shift+]", status: "planned", hint: "Increase brush hardness (planned)." },
 ] as const;
 
 /** The combo a toolbar tool is bound to (for tooltips), if any. */
