@@ -286,6 +286,22 @@ export function cloneStroke(mask: ProxyMask, op: MaskOperation, scale: number): 
   }
 }
 
+/**
+ * History brush (PS Y on a mask): restore a painted stroke to the layer's
+ * initial state — `base` is the mask as it was before any edit steps of the
+ * stack replayed. Mirrors the Rust `history_region`.
+ */
+export function historyStroke(mask: ProxyMask, base: Uint8Array, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "history_brush", mode: "add", radius, points }, scale);
+  for (let i = 0; i < mask.data.length; i++) {
+    if (coverage.data[i] !== 0) mask.data[i] = base[i];
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -561,6 +577,11 @@ function fillPath(mask: ProxyMask, path: EditPath, scale: number): void {
 
 // Replay one layer's ordered edit stack onto (a copy of) `mask`.
 function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
+  // The layer's pre-edit state, the history brush's restore source (only
+  // snapshotted when the stack contains a `history_brush` step).
+  const base = ops.some((op) => !isPathOp(op) && !isBrushOp(op) && op.type === "history_brush")
+    ? Uint8Array.from(mask.data)
+    : null;
   for (const op of ops) {
     if (op.disabled) {
       // Disabled history steps stay recorded but are skipped on replay.
@@ -579,6 +600,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       healStroke(mask, op, scale);
     } else if (op.type === "clone") {
       cloneStroke(mask, op, scale);
+    } else if (op.type === "history_brush") {
+      if (base) historyStroke(mask, base, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {

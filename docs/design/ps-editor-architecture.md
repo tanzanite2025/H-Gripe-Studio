@@ -149,7 +149,9 @@ surrounding mask by diffusion, a revisable `heal` op replayed identically by
 the proxy `healStroke` and the Rust `heal_region`); `S` clone stamp
 (Alt+click picks a source point, painting copies the mask from the fixed
 source offset — a revisable `clone` op, proxy `cloneStroke` / Rust
-`clone_region`); then `Y` history brush, `O` dodge / burn.
+`clone_region`); `Y` history brush (paint a region back to the layer's
+initial pre-edit state — a revisable `history_brush` op, proxy
+`historyStroke` / Rust `history_region`); then `O` dodge / burn.
 
 ## 5. Explicitly deferred / out of scope
 

@@ -198,13 +198,13 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush`. */
   type: string;
-  /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone`: brush radius px), when relevant. */
+  /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone` / `history_brush`: brush radius px), when relevant. */
   amount?: number;
   /** `[x, y]` seed for `wand`, or `[x1, y1, x2, y2]` for marquee / `crop` ops (for `gradient`: the drag vector start → end). */
   region?: number[];
-  /** `heal` / `clone`: the stroke polyline in image px. `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset. */
+  /** `heal` / `clone` / `history_brush`: the stroke polyline in image px. `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset; `history_brush` restores the region to the layer's initial (pre-edit) state. */
   points?: [number, number][];
   /** `gradient` / `fill` only: `add` unions in, `subtract` cuts away. Absent ⇒ `add`. */
   mode?: string;

@@ -665,6 +665,14 @@ fn replay_ops(
     default_tolerance: i32,
     operations: &mut Vec<Value>,
 ) {
+    // The layer's pre-edit state, the history brush's restore source (only
+    // snapshotted when the stack contains a `history_brush` step).
+    let base = ops
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|op| op.get("type").and_then(Value::as_str) == Some("history_brush"))
+        .then(|| mask.clone());
     for op in ops.and_then(Value::as_array).into_iter().flatten() {
         // Disabled history steps stay recorded but are skipped on replay.
         if op.get("disabled").and_then(Value::as_bool) == Some(true) {
@@ -724,6 +732,28 @@ fn replay_ops(
                         "radius": radius,
                     }));
                 }
+            }
+            Some("history_brush") => {
+                // History brush (M13): restore the stroke coverage to the
+                // layer's pre-edit state. `amount` is the brush radius;
+                // `points` the stroke polyline.
+                let Some(base) = base.as_ref() else {
+                    continue;
+                };
+                let radius = op
+                    .get("amount")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(8.0)
+                    .max(1.0) as u32;
+                let points = parse_points(op.get("points"));
+                if points.is_empty() {
+                    continue;
+                }
+                let (w, h) = mask.dimensions();
+                let mut coverage = GrayImage::new(w, h);
+                stamp_stroke(&mut coverage, &points, radius, MASK_ON);
+                history_region(mask, base, &coverage);
+                operations.push(json!({ "type": "history_brush", "radius": radius }));
             }
             Some(_) => apply_queued_operation(image, mask, op, default_tolerance, operations),
             None => {}
@@ -1155,6 +1185,21 @@ fn heal_region(mask: &mut GrayImage, coverage: &GrayImage) {
             if coverage.get_pixel(x, y).0[0] != 0 {
                 mask.put_pixel(x, y, Luma([buf[idx(x, y)].round().clamp(0.0, 255.0) as u8]));
             }
+        }
+    }
+}
+
+/// History brush (PS Y on a mask): restore the mask inside `coverage` to the
+/// layer's pre-edit state `base`. Mirrors the proxy `historyStroke` in
+/// `maskMorphology.ts`.
+fn history_region(mask: &mut GrayImage, base: &GrayImage, coverage: &GrayImage) {
+    for ((m, b), c) in mask
+        .pixels_mut()
+        .zip(base.pixels())
+        .zip(coverage.pixels())
+    {
+        if c.0[0] != 0 {
+            m.0[0] = b.0[0];
         }
     }
 }
@@ -2136,6 +2181,19 @@ mod tests {
         let mut mask = solid(5, 5, MASK_OFF);
         fill_holes(&mut mask);
         assert_eq!(mask_coverage(&mask), 0.0);
+    }
+
+    #[test]
+    fn history_region_restores_base_under_coverage() {
+        // Base is empty; the current mask is fully on: brushing restores the
+        // covered pixels to the empty base and leaves the rest on.
+        let base = solid(21, 21, MASK_OFF);
+        let mut mask = solid(21, 21, MASK_ON);
+        let mut coverage = GrayImage::new(21, 21);
+        stamp_stroke(&mut coverage, &[(10.0, 10.0)], 3, MASK_ON);
+        history_region(&mut mask, &base, &coverage);
+        assert_eq!(mask.get_pixel(10, 10).0[0], MASK_OFF); // restored
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON); // outside the stroke
     }
 
     #[test]
