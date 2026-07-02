@@ -8,7 +8,9 @@ import {
   ZOOM_STEP,
   clampView,
   isFitView,
+  normalizeAngle,
   panBy,
+  rotateTo,
   viewTransform,
   zoom100,
   zoomAt,
@@ -66,6 +68,22 @@ describe("canvasView (M8)", () => {
     expect(zoom100(FIT_VIEW, 400, W, H).zoom).toBe(MIN_ZOOM);
     // Absurd ratios still clamp to MAX.
     expect(zoom100(FIT_VIEW, 100_000, W, H).zoom).toBe(MAX_ZOOM);
+  });
+
+  it("rotateTo normalises the angle and drops a zero rotation", () => {
+    expect(normalizeAngle(370)).toBe(10);
+    expect(normalizeAngle(-190)).toBe(170);
+    expect(normalizeAngle(180)).toBe(180);
+    const rotated = rotateTo(FIT_VIEW, 45);
+    expect(rotated).toEqual({ zoom: 1, panX: 0, panY: 0, rotate: 45 });
+    expect(isFitView(rotated)).toBe(false);
+    expect(viewTransform(rotated)).toBe("translate(0px, 0px) rotate(45deg) scale(1)");
+    // Rotating back to 0 drops the key, so the view compares equal to FIT_VIEW.
+    expect(rotateTo(rotated, 0)).toEqual(FIT_VIEW);
+    expect(rotateTo(rotated, 360)).toEqual(FIT_VIEW);
+    // Rotation survives zoom / pan clamping.
+    expect(clampView({ zoom: 2, panX: 0, panY: 0, rotate: 30 }, W, H).rotate).toBe(30);
+    expect(zoomIn(rotated, W, H).rotate).toBe(45);
   });
 
   it("clampView + viewTransform round-trip the CSS transform", () => {

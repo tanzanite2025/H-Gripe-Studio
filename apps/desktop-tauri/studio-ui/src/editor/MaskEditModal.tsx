@@ -12,7 +12,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEd
 import { useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, ZOOM_STEP, panBy, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, ZOOM_STEP, panBy, rotateTo, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
 import {
   activeOps,
   canRedo,
@@ -137,15 +137,31 @@ export function MaskEditModal({
   // Space-hold pan (PS): any tool pans while Space is down.
   const [spacePan, setSpacePan] = useState(false);
   const panDrag = useRef<{ x: number; y: number } | null>(null);
+  // In-progress rotate-view drag: the pointer's start angle about the canvas
+  // centre plus the rotation it started from.
+  const rotateDrag = useRef<{ angle: number; rotate: number } | null>(null);
+  // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
+  const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
 
   // The canvas's untransformed on-screen size (the clamp space for pan).
+  // `offsetWidth`/`offsetHeight` are layout sizes, unaffected by the view's
+  // CSS transform, so they stay correct under rotation.
   const viewBase = useCallback((): [number, number] => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return [1, 1];
-    return [rect.width / viewRef.current.zoom, rect.height / viewRef.current.zoom];
+    const canvas = canvasRef.current;
+    if (!canvas) return [1, 1];
+    return [canvas.offsetWidth || 1, canvas.offsetHeight || 1];
   }, []);
+
+  // The pointer's angle (degrees) about the canvas centre on screen.
+  const pointerAngle = (e: React.PointerEvent): number => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+  };
 
   // Space keyup ends the hold-to-pan (keydown arrives via the shortcut scope).
   useEffect(() => {
@@ -293,7 +309,9 @@ export function MaskEditModal({
     },
     quick_mask: () => setQuickMask((v) => !v),
     tool_hand: () => selectTool("hand"),
+    tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
+    screen_mode: () => setScreenMode((m) => ((m + 1) % 3) as 0 | 1 | 2),
     pan_space: () => setSpacePan(true),
     zoom_in: () => setView((v) => zoomIn(v, ...viewBase())),
     zoom_out: () => setView((v) => zoomOut(v, ...viewBase())),
@@ -327,20 +345,31 @@ export function MaskEditModal({
       else if (transformDraftRef.current) closeTransformPanel();
       else if (fillDraftRef.current) setFillDraft(null);
       else if (penPendingRef.current) setPenAnchors([]);
+      else if (toolId === "rotate_view" && viewRef.current.rotate) setView((v) => rotateTo(v, 0));
       else onClose();
     },
     toggle_overlay: () => setOverlayOnly((v) => !v),
   };
   useShortcutScope(MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, shortcutHandlers);
 
-  // Map a pointer event to image-pixel coordinates.
+  // Map a pointer event to image-pixel coordinates: offset from the rendered
+  // centre (the transform's fixed point), un-rotated and un-scaled back into
+  // the canvas's untransformed layout space, then scaled to image pixels.
   const toImage = useCallback(
     (e: React.PointerEvent): [number, number] => {
       const canvas = canvasRef.current;
       if (!canvas) return [0, 0];
       const rect = canvas.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * dims.w;
-      const y = ((e.clientY - rect.top) / rect.height) * dims.h;
+      const view = viewRef.current;
+      const dx = e.clientX - (rect.left + rect.width / 2);
+      const dy = e.clientY - (rect.top + rect.height / 2);
+      const rad = (-(view.rotate ?? 0) * Math.PI) / 180;
+      const ux = (dx * Math.cos(rad) - dy * Math.sin(rad)) / view.zoom;
+      const uy = (dx * Math.sin(rad) + dy * Math.cos(rad)) / view.zoom;
+      const baseW = canvas.offsetWidth || 1;
+      const baseH = canvas.offsetHeight || 1;
+      const x = ((ux + baseW / 2) / baseW) * dims.w;
+      const y = ((uy + baseH / 2) / baseH) * dims.h;
       return [Math.round(x), Math.round(y)];
     },
     [dims.w, dims.h],
@@ -689,6 +718,11 @@ export function MaskEditModal({
       setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
       return;
     }
+    if (tool.id === "rotate_view") {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      rotateDrag.current = { angle: pointerAngle(e), rotate: viewRef.current.rotate ?? 0 };
+      return;
+    }
     if (editingPath != null && anchorDraft) {
       // Anchor re-editing mode: grab the nearest anchor square, if any.
       (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -755,6 +789,11 @@ export function MaskEditModal({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (rotateDrag.current) {
+      const { angle, rotate } = rotateDrag.current;
+      setView((v) => rotateTo(v, rotate + pointerAngle(e) - angle));
+      return;
+    }
     if (panDrag.current) {
       const dx = e.clientX - panDrag.current.x;
       const dy = e.clientY - panDrag.current.y;
@@ -784,6 +823,10 @@ export function MaskEditModal({
   };
 
   const onPointerUp = () => {
+    if (rotateDrag.current) {
+      rotateDrag.current = null;
+      return;
+    }
     if (panDrag.current) {
       panDrag.current = null;
       return;
@@ -912,7 +955,7 @@ export function MaskEditModal({
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
-      <div className="media-viewer mask-edit" onClick={(e) => e.stopPropagation()}>
+      <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="media-viewer-bar">
           <span className="media-viewer-name" title={title}>
             {title} <span className="muted">· {t("mask.editor")}</span>

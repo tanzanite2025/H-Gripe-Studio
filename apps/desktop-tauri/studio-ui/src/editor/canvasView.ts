@@ -8,11 +8,16 @@
 // unchanged, and the M7 proxy/tile pipeline is untouched. Pure helpers here;
 // the modal owns the React state.
 
-/** The canvas view: `zoom` ≥ 1 (1 = fit), pan offsets in pre-scale CSS px. */
+/**
+ * The canvas view: `zoom` ≥ 1 (1 = fit), pan offsets in pre-scale CSS px,
+ * `rotate` an optional view rotation in degrees (PS rotate-view: purely a
+ * screen-space transform, never part of the document; absent ⇒ 0).
+ */
 export interface CanvasView {
   zoom: number;
   panX: number;
   panY: number;
+  rotate?: number;
 }
 
 /** Fit-on-screen: the canvas fills its stage slot, unpanned. */
@@ -27,11 +32,28 @@ const EPS = 1e-9;
 
 /** `transform` value for the canvas element (origin must be `center`). */
 export function viewTransform(view: CanvasView): string {
-  return `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`;
+  const rotate = view.rotate ? ` rotate(${view.rotate}deg)` : "";
+  return `translate(${view.panX}px, ${view.panY}px)${rotate} scale(${view.zoom})`;
 }
 
 export function isFitView(view: CanvasView): boolean {
-  return view.zoom <= MIN_ZOOM + EPS && view.panX === 0 && view.panY === 0;
+  return view.zoom <= MIN_ZOOM + EPS && view.panX === 0 && view.panY === 0 && !view.rotate;
+}
+
+/** Normalise an angle in degrees to (-180, 180]. */
+export function normalizeAngle(deg: number): number {
+  const wrapped = ((deg % 360) + 360) % 360;
+  return wrapped > 180 ? wrapped - 360 : wrapped;
+}
+
+/**
+ * Set the view rotation (degrees, normalised). Zoom / pan are untouched;
+ * a zero rotation drops the key so fit views compare equal to `FIT_VIEW`.
+ */
+export function rotateTo(view: CanvasView, deg: number): CanvasView {
+  const rotate = normalizeAngle(deg);
+  const { rotate: _drop, ...rest } = view;
+  return rotate === 0 ? rest : { ...rest, rotate };
 }
 
 /**
@@ -48,6 +70,7 @@ export function clampView(view: CanvasView, baseW: number, baseH: number): Canva
     zoom,
     panX: Math.min(Math.max(view.panX, -maxX), maxX) + 0,
     panY: Math.min(Math.max(view.panY, -maxY), maxY) + 0,
+    ...(view.rotate ? { rotate: view.rotate } : {}),
   };
 }
 
@@ -72,6 +95,7 @@ export function zoomAt(
   const ratio = zoom / view.zoom;
   return clampView(
     {
+      ...view,
       zoom,
       panX: view.panX + (1 - ratio) * (cx - view.panX),
       panY: view.panY + (1 - ratio) * (cy - view.panY),
@@ -96,10 +120,10 @@ export function zoomOut(view: CanvasView, baseW: number, baseH: number): CanvasV
  */
 export function zoom100(view: CanvasView, imageW: number, baseW: number, baseH: number): CanvasView {
   const zoom = baseW > 0 ? imageW / baseW : MIN_ZOOM;
-  return clampView({ zoom, panX: view.panX, panY: view.panY }, baseW, baseH);
+  return clampView({ ...view, zoom }, baseW, baseH);
 }
 
 /** Pan by an on-screen drag delta (hand tool / Space-drag). */
 export function panBy(view: CanvasView, dx: number, dy: number, baseW: number, baseH: number): CanvasView {
-  return clampView({ zoom: view.zoom, panX: view.panX + dx, panY: view.panY + dy }, baseW, baseH);
+  return clampView({ ...view, panX: view.panX + dx, panY: view.panY + dy }, baseW, baseH);
 }

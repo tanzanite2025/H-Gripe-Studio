@@ -25,7 +25,7 @@ export function MaskStage({ canvasRef, dims, view, spacePan, toolId, onPointerDo
           aspectRatio: `${dims.w} / ${dims.h}`,
           transform: isFitView(view) ? undefined : viewTransform(view),
           transformOrigin: "center",
-          cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : undefined,
+          cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : toolId === "rotate_view" ? "crosshair" : undefined,
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

@@ -1005,6 +1005,10 @@ button:disabled { opacity: 0.6; cursor: default; }
   overflow-y: auto;
 }
 .mask-edit-controls .field { margin-top: 6px; }
+/* Screen-mode cycle (PS `F`): 1 hides the right panels, 2 leaves canvas only. */
+.mask-edit.mask-screen-1 .mask-edit-controls { display: none; }
+.mask-edit.mask-screen-2 .mask-edit-controls,
+.mask-edit.mask-screen-2 .mask-edit-tools { display: none; }
 /* PS-style panel blocks on the right rail (tool options / layers / history / info). */
 .mask-panel {
   border: 1px solid var(--border);

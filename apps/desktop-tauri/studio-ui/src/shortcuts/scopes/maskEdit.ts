@@ -51,11 +51,11 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_type", combo: "t", status: "planned", hint: "Type tool (planned)." },
   { id: "tool_shape", combo: "u", status: "planned", hint: "Shape tools (planned)." },
   { id: "tool_hand", combo: "h", status: "ready", hint: "Hand tool (drag to pan the zoomed view; hold Space with any tool)." },
-  { id: "tool_rotate_view", combo: "r", status: "planned", hint: "Rotate-view tool (planned)." },
+  { id: "tool_rotate_view", combo: "r", status: "ready", hint: "Rotate-view tool (drag to rotate the view; Esc resets)." },
   { id: "tool_zoom", combo: "z", status: "ready", hint: "Zoom tool (click zooms in, Alt+click zooms out)." },
   { id: "default_colors", combo: "d", status: "ready", hint: "Reset to the default brush / add mode (PS default colours)." },
   { id: "quick_mask", combo: "q", status: "ready", hint: "Toggle the quick-mask (ruby) overlay of the current selection." },
-  { id: "screen_mode", combo: "f", status: "planned", hint: "Cycle screen modes (planned)." },
+  { id: "screen_mode", combo: "f", status: "ready", hint: "Cycle screen modes: full UI → panels hidden → canvas only (PS full-screen cycle)." },
   // Commands.
   { id: "select_all", combo: "ctrl+a", status: "ready", hint: "Select all (the whole canvas, as a history step)." },
   { id: "reselect", combo: "ctrl+shift+d", status: "ready", hint: "Reselect: restore the selection the last clear dropped." },
@@ -89,6 +89,7 @@ const TOOL_COMBO: Readonly<Record<string, string>> = {
   crop: "c",
   gradient: "g",
   hand: "h",
+  rotate_view: "r",
   zoom: "z",
 };
 

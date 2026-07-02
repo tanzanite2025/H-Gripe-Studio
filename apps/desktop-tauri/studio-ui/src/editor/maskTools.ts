@@ -97,6 +97,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
   { id: "crop", label: "Crop", status: "ready", kind: "marquee", lane: "preview", hint: "Drag a crop box — the mask is cleared outside it (a revisable step)." },
   { id: "hand", label: "Hand", status: "ready", kind: "view", lane: "interactive", hint: "Drag to pan the zoomed view (or hold Space with any tool)." },
+  { id: "rotate_view", label: "Rotate view", status: "ready", kind: "view", lane: "interactive", hint: "Drag to rotate the view around its centre — screen-space only, the mask is untouched (Esc resets, Ctrl+0 fits and resets)." },
   { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
 ] as const;
 
@@ -115,8 +116,8 @@ export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = [
   ["pen"],
   // Whole-mask operations (PS menu commands; toolbar buttons here).
   ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"],
-  // Navigation: hand, zoom.
-  ["hand", "zoom"],
+  // Navigation: hand, rotate-view, zoom.
+  ["hand", "rotate_view", "zoom"],
 ] as const;
 
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
