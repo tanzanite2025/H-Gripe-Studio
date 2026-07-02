@@ -677,6 +677,15 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "Phase 1 runs the manual_* / hybrid modes; the auto_* model modes are Phase 2",
       },
       {
+        key: "sam2_variant",
+        label: "SAM 2 variant",
+        control: "select",
+        options: ["tiny", "small", "base_plus", "large"],
+        defaultValue: "tiny",
+        inline: true,
+        hint: "SAM 2 model size for point prompts — bigger is slower but cleaner; a missing weight falls back to tiny (scripts/fetch-sam2 downloads variants)",
+      },
+      {
         key: "wand_tolerance",
         label: "Wand tolerance",
         control: "slider",

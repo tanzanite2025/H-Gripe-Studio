@@ -115,9 +115,10 @@ pub(super) trait SubjectSegmenter {
 pub(super) fn segmenter_for_mode(
     mode: AutoMode,
     points: &[PointPrompt],
+    sam2_variant: super::subject_sam2::Sam2Variant,
 ) -> Box<dyn SubjectSegmenter> {
     if points.iter().any(|p| p.positive) {
-        if let Some(sam2) = super::subject_sam2::Sam2Segmenter::resolve_and_load() {
+        if let Some(sam2) = super::subject_sam2::Sam2Segmenter::resolve_and_load(sam2_variant) {
             return Box::new(sam2);
         }
     }
@@ -392,7 +393,7 @@ mod tests {
     #[test]
     fn builtin_selects_foreground_block() {
         let image = scene_with_block();
-        let result = segmenter_for_mode(AutoMode::Subject, &[])
+        let result = segmenter_for_mode(AutoMode::Subject, &[], Default::default())
             .segment(&SegmentRequest {
                 image: &image,
                 mode: AutoMode::Subject,
@@ -515,7 +516,7 @@ mod tests {
             y: 5,
             positive: false,
         }];
-        let seg = segmenter_for_mode(AutoMode::Subject, &negatives);
+        let seg = segmenter_for_mode(AutoMode::Subject, &negatives, Default::default());
         assert_eq!(seg.provider(), "builtin-cpu");
     }
 

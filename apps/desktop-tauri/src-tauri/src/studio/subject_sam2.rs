@@ -51,10 +51,63 @@ const LABEL_BACKGROUND: f32 = 0.0;
 /// SAM mask logits above this are foreground.
 const MASK_LOGIT_CUTOFF: f32 = 0.0;
 
-const ENCODER_FILE: &str = "sam2_tiny.encoder.onnx";
-const DECODER_FILE: &str = "sam2_tiny.decoder.onnx";
 const ENCODER_ENV: &str = "HGRIPE_SAM2_ENCODER";
 const DECODER_ENV: &str = "HGRIPE_SAM2_DECODER";
+
+/// The SAM 2 (hiera) model size the node runs. All four share the same ONNX
+/// interface and preprocessing; only the encoder weight differs (tiny ~134 MB
+/// → large ~889 MB), trading speed for edge quality. `scripts/fetch-sam2.*`
+/// fetch any variant; per-node selection makes side-by-side (XY) comparison of
+/// the variants possible by pointing two nodes at the same prompts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(super) enum Sam2Variant {
+    #[default]
+    Tiny,
+    Small,
+    BasePlus,
+    Large,
+}
+
+impl Sam2Variant {
+    /// Parse the node's `sam2_variant` param; unknown / empty values fall back
+    /// to `tiny` (the smallest, always-suggested weight).
+    pub(super) fn from_param(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "small" => Self::Small,
+            "base_plus" | "base+" | "baseplus" => Self::BasePlus,
+            "large" => Self::Large,
+            _ => Self::Tiny,
+        }
+    }
+
+    /// The id recorded in `matte_report` / `detected_subjects`.
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            Self::Tiny => "tiny",
+            Self::Small => "small",
+            Self::BasePlus => "base_plus",
+            Self::Large => "large",
+        }
+    }
+
+    fn encoder_file(self) -> &'static str {
+        match self {
+            Self::Tiny => "sam2_tiny.encoder.onnx",
+            Self::Small => "sam2_small.encoder.onnx",
+            Self::BasePlus => "sam2_base_plus.encoder.onnx",
+            Self::Large => "sam2_large.encoder.onnx",
+        }
+    }
+
+    fn decoder_file(self) -> &'static str {
+        match self {
+            Self::Tiny => "sam2_tiny.decoder.onnx",
+            Self::Small => "sam2_small.decoder.onnx",
+            Self::BasePlus => "sam2_base_plus.decoder.onnx",
+            Self::Large => "sam2_large.decoder.onnx",
+        }
+    }
+}
 
 /// SAM 2 image encoder + mask decoder held together. Both are warm sessions
 /// shared from the process-wide pool; `Session::run` takes `&mut self`, so the
@@ -63,19 +116,35 @@ const DECODER_ENV: &str = "HGRIPE_SAM2_DECODER";
 pub(super) struct Sam2Segmenter {
     encoder: SharedSession,
     decoder: SharedSession,
+    variant: Sam2Variant,
 }
 
 impl Sam2Segmenter {
-    /// Build a SAM 2 segmenter when *both* the encoder and decoder weights
-    /// resolve; `None` otherwise (the caller falls through to the salient /
-    /// builtin pipeline). Both sessions come from the warm pool, so repeated
-    /// runs reuse the parsed weights instead of reloading ~150 MB each time.
-    pub(super) fn resolve_and_load() -> Option<Self> {
-        let encoder = resolve_model_file(ENCODER_ENV, ENCODER_FILE)?;
-        let decoder = resolve_model_file(DECODER_ENV, DECODER_FILE)?;
+    /// Build a SAM 2 segmenter for a variant when *both* its encoder and
+    /// decoder weights resolve; `None` otherwise. A non-tiny request whose
+    /// weight is missing falls back to `tiny` before giving up, so selecting a
+    /// not-yet-downloaded variant degrades to the always-suggested weight
+    /// instead of dropping to the salient / builtin pipeline. The env
+    /// overrides (`HGRIPE_SAM2_ENCODER` / `HGRIPE_SAM2_DECODER`) point at
+    /// explicit files and win for whichever variant is requested. Both
+    /// sessions come from the warm pool, so repeated runs reuse the parsed
+    /// weights instead of reloading them each time.
+    pub(super) fn resolve_and_load(variant: Sam2Variant) -> Option<Self> {
+        if let Some(segmenter) = Self::load_variant(variant) {
+            return Some(segmenter);
+        }
+        (variant != Sam2Variant::Tiny)
+            .then(|| Self::load_variant(Sam2Variant::Tiny))
+            .flatten()
+    }
+
+    fn load_variant(variant: Sam2Variant) -> Option<Self> {
+        let encoder = resolve_model_file(ENCODER_ENV, variant.encoder_file())?;
+        let decoder = resolve_model_file(DECODER_ENV, variant.decoder_file())?;
         Some(Self {
             encoder: cached_session(&encoder).ok()?,
             decoder: cached_session(&decoder).ok()?,
+            variant,
         })
     }
 }
@@ -188,6 +257,7 @@ impl SubjectSegmenter for Sam2Segmenter {
                 "bbox": [x0, y0, x1 - x0 + 1, y1 - y0 + 1],
                 "coverage": coverage(&mask),
                 "provider": PROVIDER,
+                "variant": self.variant.id(),
             })],
             None => Vec::new(),
         };
@@ -309,6 +379,25 @@ mod tests {
     }
 
     #[test]
+    fn variant_parses_params_and_maps_weight_files() {
+        assert_eq!(Sam2Variant::from_param(""), Sam2Variant::Tiny);
+        assert_eq!(Sam2Variant::from_param("garbage"), Sam2Variant::Tiny);
+        assert_eq!(Sam2Variant::from_param(" Small "), Sam2Variant::Small);
+        assert_eq!(Sam2Variant::from_param("base+"), Sam2Variant::BasePlus);
+        assert_eq!(Sam2Variant::from_param("BASE_PLUS"), Sam2Variant::BasePlus);
+        assert_eq!(Sam2Variant::from_param("large"), Sam2Variant::Large);
+        for v in [
+            Sam2Variant::Tiny,
+            Sam2Variant::Small,
+            Sam2Variant::BasePlus,
+            Sam2Variant::Large,
+        ] {
+            assert_eq!(v.encoder_file(), format!("sam2_{}.encoder.onnx", v.id()));
+            assert_eq!(v.decoder_file(), format!("sam2_{}.decoder.onnx", v.id()));
+        }
+    }
+
+    #[test]
     fn best_mask_rejects_empty() {
         assert!(best_mask(&[1, 0, 0, 0], &[], &[], 4, 4).is_err());
     }
@@ -349,7 +438,7 @@ mod tests {
     /// otherwise so CI without the weights still passes.
     #[test]
     fn sam2_inference_when_weights_present() {
-        let Some(segmenter) = Sam2Segmenter::resolve_and_load() else {
+        let Some(segmenter) = Sam2Segmenter::resolve_and_load(Sam2Variant::Tiny) else {
             eprintln!("skipping sam2: encoder/decoder weights not resolvable");
             return;
         };

@@ -239,6 +239,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "选取主体并生成 蒙版 / 抠像 / alpha 三件套。Phase 1 在原生 Rust 内进程运行（无 python 桥）：魔棒漫水选择 + 画笔/橡皮笔触（记录在 edit_paths 中）、形态学（扩张/收缩、填洞）以及最后的羽化。输出蒙版、alpha 图、抠像图与增强版抠像报告。自动主体模型模式（SAM/RMBG/BiRefNet）属于 Phase 2。",
     params: {
       mode: { label: "模式", hint: "Phase 1 运行 manual_* / hybrid 模式；auto_* 模型模式属于 Phase 2" },
+      sam2_variant: {
+        label: "SAM 2 型号",
+        hint: "点提示使用的 SAM 2 模型规格——越大越慢但边缘越干净；缺少权重时回退到 tiny（用 scripts/fetch-sam2 下载各型号）",
+      },
       wand_tolerance: { label: "魔棒容差", hint: "魔棒漫水选择的颜色距离" },
       grow_px: { label: "扩张 / 收缩 px", hint: "正值膨胀蒙版，负值腐蚀蒙版" },
       fill_holes: { label: "填洞", hint: "羽化前封闭内部封闭空隙" },
