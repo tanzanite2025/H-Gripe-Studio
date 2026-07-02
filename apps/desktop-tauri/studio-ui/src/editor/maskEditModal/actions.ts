@@ -11,7 +11,9 @@ import {
   addLayer,
   clearEdits,
   duplicateLayer,
+  moveLayer,
   redo,
+  renameLayer,
   reselect,
   removeLayer,
   removeOp,
@@ -59,6 +61,8 @@ export type MaskEditAction =
   | { type: "layer_add_adjustment"; adjType: AdjustmentType }
   | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
   | { type: "layer_remove"; index: number }
+  | { type: "layer_rename"; index: number; name: string }
+  | { type: "layer_move"; from: number; to: number }
   | { type: "layer_active"; index: number }
   | { type: "layer_visible"; index: number }
   | { type: "layer_opacity"; index: number; opacity: number }
@@ -112,6 +116,10 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return updateLayerAdjustment(state, action.index, action.adjustment);
     case "layer_remove":
       return removeLayer(state, action.index);
+    case "layer_rename":
+      return renameLayer(state, action.index, action.name);
+    case "layer_move":
+      return moveLayer(state, action.from, action.to);
     case "layer_active":
       return setActiveLayer(state, action.index);
     case "layer_visible":

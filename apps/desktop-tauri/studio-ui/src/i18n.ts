@@ -510,6 +510,7 @@ export const messages = {
   "mask.layers": { en: "Layers ({count})", zh: "图层（{count}）" },
   "mask.layerAdd": { en: "New layer", zh: "新建图层" },
   "mask.layerAddTitle": { en: "Add an empty layer above the stack", zh: "在栈顶新建空图层" },
+  "mask.layerDuplicate": { en: "Duplicate the active layer (Ctrl+J)", zh: "复制当前图层（Ctrl+J）" },
   "mask.layerDelete": { en: "Delete this layer", zh: "删除该图层" },
   "mask.layerHide": { en: "Hide this layer", zh: "隐藏该图层" },
   "mask.layerShow": { en: "Show this layer", zh: "显示该图层" },

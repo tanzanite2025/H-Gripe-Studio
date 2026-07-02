@@ -1,9 +1,12 @@
 // Right rail — "Layers" panel block (M3): the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
+import { useState, type DragEvent } from "react";
 import { useT } from "../../i18n";
 import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
+
+const LAYER_MIME = "application/x-hgripe-layer";
 
 interface LayersPanelProps {
   layers: readonly MaskLayer[];
@@ -16,6 +19,24 @@ interface LayersPanelProps {
 export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
+  // PS double-click rename: the stack index being renamed + the draft text.
+  const [renaming, setRenaming] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+
+  const commitRename = () => {
+    if (renaming != null) dispatch({ type: "layer_rename", index: renaming, name: draft });
+    setRenaming(null);
+  };
+  const allowLayerDrop = (e: DragEvent) => {
+    if (e.dataTransfer.types.includes(LAYER_MIME)) e.preventDefault();
+  };
+  const dropOn = (e: DragEvent, to: number) => {
+    const from = Number(e.dataTransfer.getData(LAYER_MIME));
+    if (!Number.isInteger(from)) return;
+    e.preventDefault();
+    dispatch({ type: "layer_move", from, to });
+  };
+
   return (
     <div className="mask-panel-body">
       {/* PS-style panel head: blend mode + opacity act on the active layer. */}
@@ -52,6 +73,13 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
             <div
               key={layer.id}
               className={`mask-layer-row${i === active ? " active" : ""}${layer.visible ? "" : " hidden"}`}
+              draggable={renaming !== i}
+              onDragStart={(e) => {
+                e.dataTransfer.setData(LAYER_MIME, String(i));
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={allowLayerDrop}
+              onDrop={(e) => dropOn(e, i)}
               onClick={() => {
                 onBeforeLayerChange();
                 dispatch({ type: "layer_active", index: i });
@@ -70,9 +98,32 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
               <span className="mask-layer-thumb" aria-hidden="true">
                 {layer.kind === "adjustment" ? "◐" : ""}
               </span>
-              <span className="mask-layer-name" title={layer.name}>
-                {layer.name}
-              </span>
+              {renaming === i ? (
+                <input
+                  className="mask-layer-rename"
+                  value={draft}
+                  autoFocus
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span
+                  className="mask-layer-name"
+                  title={layer.name}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setDraft(layer.name);
+                    setRenaming(i);
+                  }}
+                >
+                  {layer.name}
+                </span>
+              )}
               <button
                 className="mask-layer-delete"
                 title={t("mask.layerDelete")}
@@ -89,12 +140,10 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
           );
         })}
       </div>
+      {/* PS bottom action bar: icon buttons on the right edge of the panel. */}
       <div className="mask-layer-actions">
-        <button onClick={() => dispatch({ type: "layer_add" })} title={t("mask.layerAddTitle")}>
-          + {t("mask.layerAdd")}
-        </button>
         <select
-          className="mask-layer-blend"
+          className="mask-layer-adjustment-add"
           value=""
           title={t("mask.adjustmentAddTitle")}
           onChange={(e) => {
@@ -103,12 +152,33 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
           }}
         >
           <option value="" disabled>
-            ◐ {t("mask.adjustmentAdd")}
+            ◐
           </option>
           <option value="levels">{t("mask.adjLevels")}</option>
           <option value="curve">{t("mask.adjCurve")}</option>
           <option value="brightness_contrast">{t("mask.adjBrightnessContrast")}</option>
         </select>
+        <button
+          className="mask-layer-action"
+          title={t("mask.layerDuplicate")}
+          onClick={() => dispatch({ type: "layer_duplicate" })}
+        >
+          ⧉
+        </button>
+        <button className="mask-layer-action" title={t("mask.layerAddTitle")} onClick={() => dispatch({ type: "layer_add" })}>
+          ⊞
+        </button>
+        <button
+          className="mask-layer-action"
+          title={t("mask.layerDelete")}
+          disabled={layers.length <= 1}
+          onClick={() => {
+            onBeforeLayerChange();
+            dispatch({ type: "layer_remove", index: active });
+          }}
+        >
+          🗑
+        </button>
       </div>
     </div>
   );

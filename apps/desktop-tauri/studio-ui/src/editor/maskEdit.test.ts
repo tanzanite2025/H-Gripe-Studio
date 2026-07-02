@@ -13,9 +13,11 @@ import {
   duplicateLayer,
   editCount,
   initEditState,
+  moveLayer,
   normalizeEditPaths,
   isEmpty,
   redo,
+  renameLayer,
   reselect,
   removeLayer,
   removeOp,
@@ -255,6 +257,33 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers[1].ops[0]).not.toBe(s.current.layers[0].ops[0]);
     s = undo(s);
     expect(s.current.layers).toHaveLength(1);
+  });
+
+  it("renames a layer (undoable) and ignores blank or unchanged names", () => {
+    let s = initEditState();
+    const original = s.current.layers[0].name;
+    expect(renameLayer(s, 0, "   ")).toBe(s);
+    expect(renameLayer(s, 0, original)).toBe(s);
+    expect(renameLayer(s, 5, "x")).toBe(s);
+    s = renameLayer(s, 0, "  Sky mask  ");
+    expect(s.current.layers[0].name).toBe("Sky mask");
+    s = undo(s);
+    expect(s.current.layers[0].name).toBe(original);
+  });
+
+  it("moves a layer within the stack, keeping the active layer by identity", () => {
+    let s = initEditState();
+    s = addLayer(s, "B");
+    s = addLayer(s, "C"); // stack: [Background, B, C], active = 2 (C)
+    const activeId = s.current.layers[2].id;
+    s = moveLayer(s, 2, 0); // stack: [C, Background, B]
+    expect(s.current.layers.map((l) => l.name)).toEqual(["C", "Background", "B"]);
+    expect(s.current.layers[s.current.active].id).toBe(activeId);
+    expect(moveLayer(s, 1, 1)).toBe(s);
+    expect(moveLayer(s, -1, 0)).toBe(s);
+    expect(moveLayer(s, 0, 9)).toBe(s);
+    s = undo(s);
+    expect(s.current.layers.map((l) => l.name)).toEqual(["Background", "B", "C"]);
   });
 
   it("removes a history step (undoable)", () => {
