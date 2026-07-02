@@ -41,7 +41,7 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   hand: { label: "抓手", hint: "拖拽以平移放大后的视图（任意工具下按住 Space 也可平移）。" },
   rotate_view: { label: "旋转视图", hint: "拖拽绕中心旋转视图——仅屏幕空间，不改动蒙版（Esc 复位，Ctrl+0 适应屏幕并复位）。" },
   zoom: { label: "缩放", hint: "点击处放大，Alt+点击缩小（Ctrl+0 适应屏幕，Ctrl+1 100%）。" },
-  eyedropper: { label: "吸管", hint: "取样光标下的图像颜色（规划中）。" },
+  eyedropper: { label: "吸管", hint: "吸管：点击取样光标下的图像颜色——色样显示在工具选项里。" },
   heal: { label: "污点修复", hint: "污点修复画笔：涂抹瑕疵区域，由周围蒙版平滑重建（可随时改参的一步）。" },
   clone: { label: "仿制图章", hint: "仿制图章：Alt+点击设定源点，涂抹时按源点偏移复制蒙版（可随时改参的一步）。" },
   history_brush: { label: "历史画笔", hint: "历史记录画笔：把区域涂抹回图层初始状态——所有编辑步骤之前的蒙版（可随时改参的一步）。" },

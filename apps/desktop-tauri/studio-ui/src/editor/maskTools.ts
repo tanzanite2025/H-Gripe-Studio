@@ -58,7 +58,10 @@ export type ToolKind =
   | "history"
   // Freehand paint that records a `dodge_burn` op: the painted region is
   // locally lightened (dodge) or, with Alt held, darkened (burn).
-  | "dodge";
+  | "dodge"
+  // Click samples the image colour under the cursor from the underlay (PS
+  // eyedropper) — a pure read: nothing is recorded on the document.
+  | "sample";
 
 export interface MaskTool {
   id: string;
@@ -108,6 +111,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "clone", label: "Clone", status: "ready", kind: "clone", lane: "preview", hint: "Clone stamp: Alt+click picks a source point, then paint copies the mask from the source offset (a revisable step)." },
   { id: "history_brush", label: "History brush", status: "ready", kind: "history", lane: "preview", hint: "History brush: paint a region back to the layer's initial state — the mask before any edit steps (a revisable step)." },
   { id: "dodge_burn", label: "Dodge / burn", status: "ready", kind: "dodge", lane: "preview", hint: "Dodge / burn: paint to locally lighten the mask (Alt-drag darkens) — a revisable step." },
+  { id: "eyedropper", label: "Eyedropper", status: "ready", kind: "sample", lane: "interactive", hint: "Eyedropper: click to sample the image colour under the cursor — the swatch shows in tool options." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
@@ -118,7 +122,6 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
-  { id: "eyedropper", label: "Eyedropper", status: "planned", kind: "click", lane: "render", hint: "Sample the image colour under the cursor (planned)." },
 ] as const;
 
 /**

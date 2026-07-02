@@ -25,6 +25,8 @@ interface ToolOptionsPanelProps {
   setBrushSpacing: (n: number) => void;
   paintTarget: PaintTarget;
   setPaintTarget: (t: PaintTarget) => void;
+  /** Eyedropper sample (`#rrggbb`); null until a colour has been picked. */
+  sampledColor: string | null;
   showAmount: boolean;
   amount: number;
   setAmount: (n: number) => void;
@@ -62,6 +64,7 @@ export function ToolOptionsPanel({
   setBrushSpacing,
   paintTarget,
   setPaintTarget,
+  sampledColor,
   showAmount,
   amount,
   setAmount,
@@ -193,6 +196,25 @@ export function ToolOptionsPanel({
               <button onClick={cancelPenPath}>{t("mask.cancelPath")}</button>
             </span>
           ) : null}
+        </div>
+      ) : null}
+      {tool.kind === "sample" ? (
+        <div className="field">
+          <span>{t("mask.sampledColor")}</span>
+          <span className="slider-row">
+            <span
+              className="mask-color-swatch"
+              style={{
+                display: "inline-block",
+                width: 24,
+                height: 24,
+                borderRadius: 4,
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: sampledColor ?? "transparent",
+              }}
+            />
+            <output>{sampledColor ?? t("mask.sampledNone")}</output>
+          </span>
         </div>
       ) : null}
       {tool.id === "wand" ? (

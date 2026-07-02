@@ -42,7 +42,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_move", combo: "v", status: "ready", hint: "Move tool (drag to move the mask; Ctrl+T for free transform)." },
   { id: "tool_crop", combo: "c", status: "ready", hint: "Crop tool (drag a box; the mask is cleared outside it)." },
   { id: "tool_frame", combo: "k", status: "planned", hint: "Frame tool (planned)." },
-  { id: "tool_eyedropper", combo: "i", status: "planned", hint: "Eyedropper tool (planned)." },
+  { id: "tool_eyedropper", combo: "i", status: "ready", hint: "Eyedropper tool (click to sample the image colour under the cursor)." },
   { id: "tool_healing", combo: "j", status: "ready", hint: "Spot-healing brush (paint a region — it's rebuilt from its surroundings)." },
   { id: "tool_clone", combo: "s", status: "ready", hint: "Clone-stamp tool (Alt+click picks the source, then paint copies from it)." },
   { id: "tool_history_brush", combo: "y", status: "ready", hint: "History brush (paint a region back to the layer's initial state)." },

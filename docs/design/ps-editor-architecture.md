@@ -156,6 +156,12 @@ the mask toward on, Alt-drag burns it toward off, each pass at a fixed 50%
 exposure — a revisable `dodge_burn` op, proxy `dodgeBurnStroke` / Rust
 `dodge_burn_region`).
 
+**M14 — Eyedropper.** `I` eyedropper as a pure view read: clicking samples
+the image colour under the cursor from the underlay thumbnail (offscreen
+canvas at document size) and shows the `#rrggbb` swatch in tool options —
+nothing is recorded on the document. Flips from `planned` to `ready`; with
+it every non-deferred toolbar slot is live.
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product
