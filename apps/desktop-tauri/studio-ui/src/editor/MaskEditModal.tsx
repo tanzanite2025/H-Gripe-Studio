@@ -18,20 +18,27 @@ import {
   addOperation,
   addPath,
   addPoint,
+  activeOps,
+  addLayer,
   canRedo,
   canUndo,
   clearEdits,
   editCount,
   initEditState,
   redo,
+  removeLayer,
   removeOp,
+  setActiveLayer,
+  setLayerBlend,
+  setLayerOpacity,
+  toggleLayerVisible,
   toggleOp,
   undo,
   updateOpAmount,
   updatePathAnchors,
   type EditState,
 } from "./maskEdit";
-import type { BrushStroke, EditOp, EditPath, EditPathPoint, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import type { BrushStroke, EditOp, EditPath, EditPathPoint, LayerBlend, MaskDocument, MaskOperation, PointPrompt } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
 
 // Default logical canvas size when no backing image is available (browser
@@ -53,7 +60,13 @@ type Action =
   | { type: "remove_op"; index: number }
   | { type: "toggle_op"; index: number }
   | { type: "op_amount"; index: number; amount: number }
-  | { type: "path_anchors"; index: number; points: EditPathPoint[] };
+  | { type: "path_anchors"; index: number; points: EditPathPoint[] }
+  | { type: "layer_add" }
+  | { type: "layer_remove"; index: number }
+  | { type: "layer_active"; index: number }
+  | { type: "layer_visible"; index: number }
+  | { type: "layer_opacity"; index: number; opacity: number }
+  | { type: "layer_blend"; index: number; blend: LayerBlend };
 
 function reducer(state: EditState, action: Action): EditState {
   switch (action.type) {
@@ -81,6 +94,18 @@ function reducer(state: EditState, action: Action): EditState {
       return updateOpAmount(state, action.index, action.amount);
     case "path_anchors":
       return updatePathAnchors(state, action.index, action.points);
+    case "layer_add":
+      return addLayer(state);
+    case "layer_remove":
+      return removeLayer(state, action.index);
+    case "layer_active":
+      return setActiveLayer(state, action.index);
+    case "layer_visible":
+      return toggleLayerVisible(state, action.index);
+    case "layer_opacity":
+      return setLayerOpacity(state, action.index, action.opacity);
+    case "layer_blend":
+      return setLayerBlend(state, action.index, action.blend);
   }
 }
 
@@ -88,10 +113,10 @@ interface MaskEditModalProps {
   title: string;
   /** Backing image path (best-effort underlay); may be missing in preview. */
   imagePath?: string | null;
-  initial: EditPaths | null;
+  initial: MaskDocument | null;
   /** Magic-wand colour tolerance from the node's param. */
   wandTolerance: number;
-  onCommit: (edits: EditPaths) => void;
+  onCommit: (edits: MaskDocument) => void;
   onClose: () => void;
   /** Optional bar content (e.g. the unified editor's tool-group switcher). */
   headerExtra?: ReactNode;
@@ -176,7 +201,7 @@ export function MaskEditModal({
   stateRef.current = state;
 
   const startPathEdit = (index: number) => {
-    const op = state.current.ops[index];
+    const op = activeOps(state.current)[index];
     if (!op || !isPathOp(op)) return;
     setPenAnchors([]);
     setEditingPath(index);
@@ -217,7 +242,7 @@ export function MaskEditModal({
         commitPathEdit();
         return;
       }
-      const ops = stateRef.current.current.ops;
+      const ops = activeOps(stateRef.current.current);
       for (let i = ops.length - 1; i >= 0; i--) {
         if (isPathOp(ops[i])) {
           startPathEdit(i);
@@ -357,10 +382,13 @@ export function MaskEditModal({
     // brush strokes (transformed), so skip the raw stroke overlay to avoid a
     // confusing double-draw; matte strokes / points / marquee still render.
     if (!previewing) {
-      state.current.ops.forEach((op, i) => {
-        if (op.disabled || i === editingPath) return;
-        if (isBrushOp(op)) paintStroke(op);
-        else if (isPathOp(op)) paintPath(op);
+      state.current.layers.forEach((layer, li) => {
+        if (!layer.visible) return;
+        layer.ops.forEach((op, i) => {
+          if (op.disabled || (li === state.current.active && i === editingPath)) return;
+          if (isBrushOp(op)) paintStroke(op);
+          else if (isPathOp(op)) paintPath(op);
+        });
       });
     }
     state.current.matte_strokes.forEach((s) => paintStroke(s, "matte"));
@@ -477,7 +505,7 @@ export function MaskEditModal({
       }
       ctx.setLineDash([]);
     }
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.ops, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, editingPath, anchorDraft, previewing, preview]);
+  }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, editingPath, anchorDraft, previewing, preview]);
 
   useEffect(() => {
     redraw();
@@ -660,6 +688,8 @@ export function MaskEditModal({
   const count = editCount(state.current);
   const points = state.current.points;
   const matteStrokes = state.current.matte_strokes;
+  const layers = state.current.layers;
+  const ops = activeOps(state.current);
 
   // One-line label for a history step (raw op vocabulary, like the old chips).
   const opLabel = (op: EditOp): string => {
@@ -810,12 +840,83 @@ export function MaskEditModal({
             ) : null}
 
             <div className="field">
-              <span>{t("mask.history", { count: state.current.ops.length })}</span>
+              <span>{t("mask.layers", { count: layers.length })}</span>
+              <div className="mask-layer-list">
+                {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
+                  const layer = layers[i];
+                  return (
+                    <div
+                      key={layer.id}
+                      className={`mask-layer-row${i === state.current.active ? " active" : ""}${layer.visible ? "" : " hidden"}`}
+                      onClick={() => {
+                        if (editingPath != null) cancelPathEdit();
+                        dispatch({ type: "layer_active", index: i });
+                      }}
+                    >
+                      <button
+                        className="mask-layer-visible"
+                        title={layer.visible ? t("mask.layerHide") : t("mask.layerShow")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dispatch({ type: "layer_visible", index: i });
+                        }}
+                      >
+                        {layer.visible ? "👁" : "—"}
+                      </button>
+                      <span className="mask-layer-name" title={layer.name}>
+                        {layer.name}
+                      </span>
+                      <select
+                        className="mask-layer-blend"
+                        value={layer.blend}
+                        title={t("mask.layerBlend")}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => dispatch({ type: "layer_blend", index: i, blend: e.target.value as LayerBlend })}
+                      >
+                        <option value="normal">{t("mask.blendNormal")}</option>
+                        <option value="multiply">{t("mask.blendMultiply")}</option>
+                        <option value="screen">{t("mask.blendScreen")}</option>
+                      </select>
+                      <input
+                        className="mask-layer-opacity"
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={Math.round(layer.opacity * 100)}
+                        title={t("mask.layerOpacity")}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => dispatch({ type: "layer_opacity", index: i, opacity: Number(e.target.value) / 100 })}
+                      />
+                      <button
+                        className="mask-layer-delete"
+                        title={t("mask.layerDelete")}
+                        disabled={layers.length <= 1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (editingPath != null) cancelPathEdit();
+                          dispatch({ type: "layer_remove", index: i });
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <span className="slider-row">
+                <button onClick={() => dispatch({ type: "layer_add" })} title={t("mask.layerAddTitle")}>
+                  + {t("mask.layerAdd")}
+                </button>
+              </span>
+            </div>
+
+            <div className="field">
+              <span>{t("mask.history", { count: ops.length })}</span>
               <div className="mask-history-list">
-                {state.current.ops.length === 0 ? (
+                {ops.length === 0 ? (
                   <small className="muted">{t("mask.historyEmpty")}</small>
                 ) : (
-                  state.current.ops.map((op, i) => (
+                  ops.map((op, i) => (
                     <div
                       key={i}
                       className={`mask-history-row${op.disabled ? " disabled" : ""}${editingPath === i ? " editing" : ""}`}

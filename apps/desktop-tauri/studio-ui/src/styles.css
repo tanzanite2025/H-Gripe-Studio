@@ -1050,6 +1050,67 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: inherit;
 }
 
+/* Layers panel (M3): one row per document layer, top of the stack first. */
+.mask-layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.mask-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(91, 140, 255, 0.08);
+  border: 1px solid rgba(91, 140, 255, 0.2);
+  color: var(--accent);
+  cursor: pointer;
+}
+.mask-layer-row.active {
+  border-color: rgba(120, 230, 140, 0.6);
+  background: rgba(120, 230, 140, 0.1);
+}
+.mask-layer-row.hidden { opacity: 0.45; }
+.mask-layer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-layer-row button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.mask-layer-row button:hover:not(:disabled) { color: #fff; }
+.mask-layer-row button:disabled { opacity: 0.4; cursor: default; }
+.mask-layer-blend {
+  font-size: 11px;
+  padding: 0 2px;
+  background: #11131a;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+}
+.mask-layer-opacity {
+  width: 40px;
+  font-size: 11px;
+  padding: 0 4px;
+  background: #11131a;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+}
+
 .mask-preview-actions {
   padding: 8px;
   border-radius: 8px;

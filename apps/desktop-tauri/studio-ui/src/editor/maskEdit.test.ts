@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeOps,
   addBrushStroke,
+  addLayer,
   addMatteStroke,
   addOperation,
   addPath,
@@ -10,17 +12,26 @@ import {
   clearEdits,
   editCount,
   initEditState,
-  isEmpty,
   normalizeEditPaths,
+  isEmpty,
   redo,
+  removeLayer,
   removeOp,
+  setActiveLayer,
+  setLayerBlend,
+  setLayerOpacity,
+  toggleLayerVisible,
   toggleOp,
   undo,
   updateOpAmount,
   updatePathAnchors,
 } from "./maskEdit";
-import type { BrushStroke } from "../types/production";
-import { editStackBrushStrokes, editStackOperations, editStackPaths } from "../types/production";
+import type { BrushStroke, MaskDocument } from "../types/production";
+import { isBrushOp, isMaskOperation, isPathOp } from "../types/production";
+
+const stackPaths = (doc: MaskDocument) => activeOps(doc).filter(isPathOp);
+const stackBrushStrokes = (doc: MaskDocument) => activeOps(doc).filter(isBrushOp);
+const stackOperations = (doc: MaskDocument) => activeOps(doc).filter(isMaskOperation);
 
 const stroke = (id: string): BrushStroke => ({
   id,
@@ -33,11 +44,15 @@ const stroke = (id: string): BrushStroke => ({
 });
 
 describe("maskEdit normalizeEditPaths", () => {
-  it("returns an empty, well-formed EditPaths for junk input", () => {
+  it("returns an empty, well-formed single-layer document for junk input", () => {
     for (const bad of [null, undefined, 42, "x", {}]) {
       const e = normalizeEditPaths(bad);
-      expect(e.version).toBe(2);
-      expect(e.ops).toEqual([]);
+      expect(e.version).toBe(3);
+      expect(e.layers).toHaveLength(1);
+      expect(e.layers[0].ops).toEqual([]);
+      expect(e.layers[0].blend).toBe("normal");
+      expect(e.layers[0].visible).toBe(true);
+      expect(e.active).toBe(0);
       expect(e.matte_strokes).toEqual([]);
       expect(e.points).toEqual([]);
     }
@@ -51,19 +66,37 @@ describe("maskEdit normalizeEditPaths", () => {
       matte_strokes: [stroke("m1")],
       operations: [{ type: "feather", amount: 3 }],
     });
-    expect(e.version).toBe(2);
-    expect(e.ops.map((op) => op.type)).toEqual(["path", "brush", "feather"]);
+    expect(e.version).toBe(3);
+    expect(e.layers[0].ops.map((op) => op.type)).toEqual(["path", "brush", "feather"]);
     expect(e.matte_strokes).toHaveLength(1);
   });
 
-  it("preserves an existing version-2 ops stack (recorded order)", () => {
+  it("loads a version-2 ops stack as the single background layer (recorded order)", () => {
     const e = normalizeEditPaths({
       version: 2,
       ops: [{ type: "invert" }, { ...stroke("s1"), type: "brush" }],
       matte_strokes: [],
       points: [],
     });
-    expect(e.ops.map((op) => op.type)).toEqual(["invert", "brush"]);
+    expect(e.layers).toHaveLength(1);
+    expect(e.layers[0].ops.map((op) => op.type)).toEqual(["invert", "brush"]);
+  });
+
+  it("loads a version-3 layered document, clamping malformed fields", () => {
+    const e = normalizeEditPaths({
+      version: 3,
+      layers: [
+        { name: "bg", ops: [{ type: "invert" }] },
+        { name: "top", blend: "screen", opacity: 2, visible: false, ops: [] },
+      ],
+      active: 99,
+    });
+    expect(e.layers).toHaveLength(2);
+    expect(e.layers[0].name).toBe("bg");
+    expect(e.layers[1].blend).toBe("screen");
+    expect(e.layers[1].opacity).toBe(1); // clamped
+    expect(e.layers[1].visible).toBe(false);
+    expect(e.active).toBe(1); // clamped into range
   });
 });
 
@@ -72,9 +105,9 @@ describe("maskEdit reducer-style helpers", () => {
     let s = initEditState();
     s = addBrushStroke(s, stroke("s1"));
     s = addOperation(s, { type: "feather", amount: 3 });
-    expect(editStackBrushStrokes(s.current)).toHaveLength(1);
-    expect(editStackOperations(s.current)).toHaveLength(1);
-    expect(s.current.ops.map((op) => op.type)).toEqual(["brush", "feather"]);
+    expect(stackBrushStrokes(s.current)).toHaveLength(1);
+    expect(stackOperations(s.current)).toHaveLength(1);
+    expect(activeOps(s.current).map((op) => op.type)).toEqual(["brush", "feather"]);
     expect(editCount(s.current)).toBe(2);
     expect(isEmpty(s.current)).toBe(false);
   });
@@ -83,7 +116,7 @@ describe("maskEdit reducer-style helpers", () => {
     let s = initEditState();
     s = addMatteStroke(s, stroke("m1"));
     expect(s.current.matte_strokes).toHaveLength(1);
-    expect(editStackBrushStrokes(s.current)).toHaveLength(0);
+    expect(stackBrushStrokes(s.current)).toHaveLength(0);
     expect(editCount(s.current)).toBe(1);
     expect(isEmpty(s.current)).toBe(false);
     s = undo(s);
@@ -117,11 +150,11 @@ describe("maskEdit reducer-style helpers", () => {
         { x: 10, y: 10 },
       ],
     });
-    expect(editStackPaths(s.current)).toHaveLength(1);
+    expect(stackPaths(s.current)).toHaveLength(1);
     expect(editCount(s.current)).toBe(1);
     expect(isEmpty(s.current)).toBe(false);
     s = undo(s);
-    expect(editStackPaths(s.current)).toHaveLength(0);
+    expect(stackPaths(s.current)).toHaveLength(0);
   });
 
   it("ignores degenerate paths with fewer than three anchors", () => {
@@ -136,7 +169,7 @@ describe("maskEdit reducer-style helpers", () => {
         { x: 10, y: 0 },
       ],
     });
-    expect(editStackPaths(s.current)).toHaveLength(0);
+    expect(stackPaths(s.current)).toHaveLength(0);
   });
 
   it("migrates legacy [x, y] points to positive prompts on load", () => {
@@ -154,7 +187,7 @@ describe("maskEdit reducer-style helpers", () => {
   it("ignores empty strokes", () => {
     let s = initEditState();
     s = addBrushStroke(s, { id: "x", mode: "add", radius: 4, points: [] });
-    expect(editStackBrushStrokes(s.current)).toHaveLength(0);
+    expect(stackBrushStrokes(s.current)).toHaveLength(0);
   });
 
   it("undo/redo walks the history and toggles availability", () => {
@@ -183,7 +216,7 @@ describe("maskEdit reducer-style helpers", () => {
     expect(canRedo(s)).toBe(true);
     s = addOperation(s, { type: "invert" });
     expect(canRedo(s)).toBe(false);
-    expect(editStackOperations(s.current)).toHaveLength(1);
+    expect(stackOperations(s.current)).toHaveLength(1);
   });
 
   it("clear is undoable and a no-op when already empty", () => {
@@ -201,9 +234,9 @@ describe("maskEdit reducer-style helpers", () => {
     s = addBrushStroke(s, stroke("s1"));
     s = addOperation(s, { type: "feather", amount: 3 });
     s = removeOp(s, 0);
-    expect(s.current.ops.map((op) => op.type)).toEqual(["feather"]);
+    expect(activeOps(s.current).map((op) => op.type)).toEqual(["feather"]);
     s = undo(s);
-    expect(s.current.ops.map((op) => op.type)).toEqual(["brush", "feather"]);
+    expect(activeOps(s.current).map((op) => op.type)).toEqual(["brush", "feather"]);
     expect(removeOp(s, 99)).toBe(s); // out of range: no-op
   });
 
@@ -211,9 +244,9 @@ describe("maskEdit reducer-style helpers", () => {
     let s = initEditState();
     s = addOperation(s, { type: "invert" });
     s = toggleOp(s, 0);
-    expect(s.current.ops[0].disabled).toBe(true);
+    expect(activeOps(s.current)[0].disabled).toBe(true);
     s = toggleOp(s, 0);
-    expect(s.current.ops[0].disabled).toBeUndefined();
+    expect(activeOps(s.current)[0].disabled).toBeUndefined();
     expect(toggleOp(s, 5)).toBe(s);
   });
 
@@ -222,11 +255,11 @@ describe("maskEdit reducer-style helpers", () => {
     s = addOperation(s, { type: "feather", amount: 3 });
     s = addBrushStroke(s, stroke("s1"));
     s = updateOpAmount(s, 0, 8);
-    expect(editStackOperations(s.current)[0].amount).toBe(8);
+    expect(stackOperations(s.current)[0].amount).toBe(8);
     expect(updateOpAmount(s, 0, 8)).toBe(s); // unchanged value: no-op
     expect(updateOpAmount(s, 1, 8)).toBe(s); // brush step: no-op
     s = undo(s);
-    expect(editStackOperations(s.current)[0].amount).toBe(3);
+    expect(stackOperations(s.current)[0].amount).toBe(3);
   });
 
   it("replaces a path step's anchors (undoable, path-only)", () => {
@@ -248,10 +281,62 @@ describe("maskEdit reducer-style helpers", () => {
       { x: 12, y: 12 },
     ];
     s = updatePathAnchors(s, 0, moved);
-    expect(editStackPaths(s.current)[0].points).toEqual(moved);
+    expect(stackPaths(s.current)[0].points).toEqual(moved);
     expect(updatePathAnchors(s, 0, moved.slice(0, 2))).toBe(s); // degenerate: no-op
     s = undo(s);
-    expect(editStackPaths(s.current)[0].points[0]).toEqual({ x: 0, y: 0 });
+    expect(stackPaths(s.current)[0].points[0]).toEqual({ x: 0, y: 0 });
+  });
+
+  it("adds a layer above the stack, records edits onto it, and undoes", () => {
+    let s = initEditState();
+    s = addBrushStroke(s, stroke("s1"));
+    s = addLayer(s);
+    expect(s.current.layers).toHaveLength(2);
+    expect(s.current.active).toBe(1);
+    s = addOperation(s, { type: "invert" });
+    expect(s.current.layers[0].ops.map((op) => op.type)).toEqual(["brush"]);
+    expect(s.current.layers[1].ops.map((op) => op.type)).toEqual(["invert"]);
+    s = undo(s);
+    s = undo(s);
+    expect(s.current.layers).toHaveLength(1);
+    expect(s.current.active).toBe(0);
+  });
+
+  it("removes a layer (undoable) but never the last one", () => {
+    let s = initEditState();
+    expect(removeLayer(s, 0)).toBe(s); // last layer: no-op
+    s = addLayer(s);
+    s = removeLayer(s, 1);
+    expect(s.current.layers).toHaveLength(1);
+    expect(s.current.active).toBe(0);
+    s = undo(s);
+    expect(s.current.layers).toHaveLength(2);
+  });
+
+  it("selects the active layer without recording an undo step", () => {
+    let s = initEditState();
+    s = addLayer(s);
+    const before = s;
+    s = setActiveLayer(s, 0);
+    expect(s.current.active).toBe(0);
+    expect(s.past).toBe(before.past); // no new history entry
+    expect(setActiveLayer(s, 9)).toBe(s); // out of range: no-op
+  });
+
+  it("toggles visibility and revises blend / opacity (undoable, clamped)", () => {
+    let s = initEditState();
+    s = addLayer(s);
+    s = toggleLayerVisible(s, 1);
+    expect(s.current.layers[1].visible).toBe(false);
+    s = setLayerBlend(s, 1, "screen");
+    expect(s.current.layers[1].blend).toBe("screen");
+    expect(setLayerBlend(s, 1, "screen")).toBe(s); // unchanged: no-op
+    s = setLayerOpacity(s, 1, 2);
+    expect(s.current.layers[1].opacity).toBe(1); // clamped
+    s = setLayerOpacity(s, 1, 0.4);
+    expect(s.current.layers[1].opacity).toBe(0.4);
+    s = undo(s);
+    expect(s.current.layers[1].opacity).toBe(1);
   });
 
   it("seeds from an initial EditPaths (including a legacy version-1 value)", () => {
