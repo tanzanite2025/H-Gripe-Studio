@@ -10,17 +10,26 @@
 // `matte_strokes` band.
 
 import type {
+  AdjustmentType,
   BrushStroke,
   EditOp,
   EditPath,
   EditPathPoint,
+  LayerAdjustment,
   LayerBlend,
   MaskDocument,
   MaskLayer,
   MaskOperation,
   PointPrompt,
 } from "../types/production";
-import { activeLayer, emptyMaskDocument, emptyMaskLayer, isMaskOperation, isPathOp } from "../types/production";
+import {
+  activeLayer,
+  emptyAdjustmentLayer,
+  emptyMaskDocument,
+  emptyMaskLayer,
+  isMaskOperation,
+  isPathOp,
+} from "../types/production";
 
 export interface EditState {
   /** The committed document. */
@@ -91,21 +100,35 @@ function normalizeLayer(value: unknown): MaskLayer | null {
   const v = value as {
     id?: unknown;
     name?: unknown;
+    kind?: unknown;
     blend?: unknown;
     opacity?: unknown;
     visible?: unknown;
     ops?: unknown;
+    adjustment?: unknown;
   };
   const blank = emptyMaskLayer();
+  const adjustment = normalizeAdjustment(v.adjustment);
+  const isAdjustment = v.kind === "adjustment" && adjustment !== null;
   return {
     id: typeof v.id === "string" && v.id ? v.id : blank.id,
     name: typeof v.name === "string" && v.name ? v.name : blank.name,
-    kind: "mask",
+    kind: isAdjustment ? "adjustment" : "mask",
     blend: v.blend === "multiply" || v.blend === "screen" ? v.blend : "normal",
     opacity: typeof v.opacity === "number" ? Math.min(Math.max(v.opacity, 0), 1) : 1,
     visible: v.visible !== false,
     ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
+    ...(isAdjustment ? { adjustment } : null),
   };
+}
+
+const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["levels", "curve", "brightness_contrast"];
+
+function normalizeAdjustment(value: unknown): LayerAdjustment | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as LayerAdjustment;
+  if (!ADJUSTMENT_TYPES.includes(v.type)) return null;
+  return v;
 }
 
 function isEditOp(value: unknown): value is EditOp {
@@ -241,6 +264,19 @@ export function updatePathAnchors(state: EditState, index: number, points: EditP
 export function addLayer(state: EditState, name?: string): EditState {
   const layers = [...state.current.layers, emptyMaskLayer(name ?? `Layer ${state.current.layers.length + 1}`)];
   return commit(state, { ...state.current, layers, active: layers.length - 1 });
+}
+
+/** Append an identity adjustment layer above the stack, active (undoable; M6). */
+export function addAdjustmentLayer(state: EditState, type: AdjustmentType): EditState {
+  const layers = [...state.current.layers, emptyAdjustmentLayer(type)];
+  return commit(state, { ...state.current, layers, active: layers.length - 1 });
+}
+
+/** Revise an adjustment layer's tone-map params (undoable; M6). */
+export function updateLayerAdjustment(state: EditState, index: number, adjustment: LayerAdjustment): EditState {
+  const layer = state.current.layers[index];
+  if (!layer || layer.kind !== "adjustment") return state;
+  return withLayer(state, index, { adjustment });
 }
 
 /** Delete one layer (undoable). The last remaining layer cannot be deleted. */

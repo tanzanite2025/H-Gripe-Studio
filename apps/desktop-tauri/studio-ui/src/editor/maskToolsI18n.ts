@@ -24,6 +24,8 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   grow: { label: "扩张", hint: "将蒙版膨胀 N 像素。" },
   shrink: { label: "收缩", hint: "将蒙版腐蚀 N 像素。" },
   feather: { label: "羽化", hint: "对蒙版边缘做高斯羽化。" },
+  blur: { label: "模糊", hint: "对整个蒙版做 N 像素高斯模糊（可随时改参的滤镜一步）。" },
+  sharpen: { label: "锐化", hint: "用 USM 锐化蒙版边缘 N 像素（可随时改参的滤镜一步）。" },
   matting: {
     label: "抠像",
     hint: "在 头发 / 绒毛 / 玻璃 上涂出三分图未知带——抠像器会将其解算为软 alpha。",

@@ -60,6 +60,8 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "select_all", combo: "ctrl+a", status: "planned", hint: "Select all (planned)." },
   { id: "reselect", combo: "ctrl+shift+d", status: "planned", hint: "Reselect (planned)." },
   { id: "free_transform", combo: "ctrl+t", status: "ready", hint: "Free transform: move / scale / rotate the mask as a revisable step." },
+  { id: "adjust_levels", combo: "ctrl+shift+l", status: "ready", hint: "Add a Levels adjustment layer (PS Levels is Ctrl+L; L is the lasso here)." },
+  { id: "adjust_curve", combo: "ctrl+shift+m", status: "ready", hint: "Add a Curve adjustment layer (PS Curves is Ctrl+M; M is the marquee here)." },
   { id: "duplicate", combo: "ctrl+j", status: "planned", hint: "Duplicate selection / layer via copy (planned)." },
   { id: "fill_dialog", combo: "shift+f5", status: "planned", hint: "Fill dialog (planned)." },
   { id: "feather_dialog", combo: "shift+f6", status: "planned", hint: "Feather dialog (planned; feather is a toolbar op today)." },

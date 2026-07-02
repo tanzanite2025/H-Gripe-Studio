@@ -81,6 +81,8 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "grow", label: "Grow", status: "ready", kind: "global", lane: "preview", hint: "Dilate the mask by N px." },
   { id: "shrink", label: "Shrink", status: "ready", kind: "global", lane: "preview", hint: "Erode the mask by N px." },
   { id: "feather", label: "Feather", status: "ready", kind: "global", lane: "preview", hint: "Gaussian-feather the mask edge." },
+  { id: "blur", label: "Blur", status: "ready", kind: "global", lane: "preview", hint: "Gaussian-blur the whole mask by N px (a revisable filter step)." },
+  { id: "sharpen", label: "Sharpen", status: "ready", kind: "global", lane: "preview", hint: "Unsharp-mask sharpen the mask edge by N px (a revisable filter step)." },
   { id: "matting", label: "Matting", status: "ready", kind: "matte", lane: "render", hint: "Paint the trimap unknown band over hair / fur / glass — the matter resolves it into soft alpha." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
