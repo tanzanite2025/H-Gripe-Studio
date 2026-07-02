@@ -61,7 +61,10 @@ export type ToolKind =
   | "dodge"
   // Click samples the image colour under the cursor from the underlay (PS
   // eyedropper) — a pure read: nothing is recorded on the document.
-  | "sample";
+  | "sample"
+  // Drag a bounding box that commits a geometric shape (triangle / polygon /
+  // star / line) as an ordinary vector path step (PS shape tools on a mask).
+  | "shape";
 
 export interface MaskTool {
   id: string;
@@ -113,6 +116,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "dodge_burn", label: "Dodge / burn", status: "ready", kind: "dodge", lane: "preview", hint: "Dodge / burn: paint to locally lighten the mask (Alt-drag darkens) — a revisable step." },
   { id: "eyedropper", label: "Eyedropper", status: "ready", kind: "sample", lane: "interactive", hint: "Eyedropper: click to sample the image colour under the cursor — the swatch shows in tool options." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
+  { id: "shape", label: "Shape", status: "ready", kind: "shape", lane: "interactive", hint: "Drag a box — the chosen shape (triangle / polygon / star / line) commits as an ordinary path step (add / subtract / intersect)." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
@@ -137,8 +141,8 @@ export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = [
   // Paint / retouch block (PS J / B / S / Y / E / G / O row): heal, brush,
   // matting band, clone stamp, history brush, eraser, gradient, dodge/burn.
   ["heal", "brush", "matting", "clone", "history_brush", "eraser", "gradient", "dodge_burn"],
-  // Vector: pen.
-  ["pen"],
+  // Vector block (PS P / U): pen, shapes.
+  ["pen", "shape"],
   // Whole-mask operations (PS menu commands; toolbar buttons here).
   ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"],
   // Navigation: hand, rotate-view, zoom.
@@ -156,6 +160,61 @@ export function maskTool(id: string): MaskTool | undefined {
 export function toolTargets(tool: MaskTool): readonly PaintTarget[] {
   if (tool.targets) return tool.targets;
   return tool.kind === "matte" ? ["matte"] : ["layer"];
+}
+
+/** Shape-tool variants (PS U flyout, mask-relevant subset). */
+export type ShapeKind = "triangle" | "polygon" | "star" | "line";
+
+/**
+ * The vertex polygon of a shape inscribed in the drag box `[x1,y1,x2,y2]`
+ * (image px). `sides` is the vertex count for `polygon` / `star` (min 3);
+ * `line` is a thin `thickness`-px rectangle along the drag vector. The
+ * result feeds the ordinary path-op rasteriser, so shapes replay like any
+ * pen / lasso step.
+ */
+export function shapeVertices(
+  kind: ShapeKind,
+  box: [number, number, number, number],
+  sides: number,
+  thickness = 4,
+): [number, number][] {
+  const [x1, y1, x2, y2] = box;
+  if (kind === "line") {
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    if (len === 0) return [];
+    const t = Math.max(1, thickness) / 2;
+    // Unit normal to the drag vector.
+    const nx = (-(y2 - y1) / len) * t;
+    const ny = ((x2 - x1) / len) * t;
+    return [
+      [x1 + nx, y1 + ny],
+      [x2 + nx, y2 + ny],
+      [x2 - nx, y2 - ny],
+      [x1 - nx, y1 - ny],
+    ];
+  }
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  const rx = Math.abs(x2 - x1) / 2;
+  const ry = Math.abs(y2 - y1) / 2;
+  if (rx === 0 || ry === 0) return [];
+  const n = Math.max(3, Math.round(sides));
+  const points: [number, number][] = [];
+  if (kind === "star") {
+    // n outer points interleaved with n half-radius inner points.
+    for (let i = 0; i < n * 2; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / n;
+      const f = i % 2 === 0 ? 1 : 0.5;
+      points.push([cx + Math.cos(a) * rx * f, cy + Math.sin(a) * ry * f]);
+    }
+    return points;
+  }
+  const count = kind === "triangle" ? 3 : n;
+  for (let i = 0; i < count; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / count;
+    points.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]);
+  }
+  return points;
 }
 
 /** First selectable (ready) tool — the modal's default. */

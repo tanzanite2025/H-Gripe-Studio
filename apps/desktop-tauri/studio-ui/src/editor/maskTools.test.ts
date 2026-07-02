@@ -7,6 +7,7 @@ import {
   PLANNED_TOOLS,
   READY_TOOLS,
   maskTool,
+  shapeVertices,
   toolTargets,
 } from "./maskTools";
 
@@ -107,5 +108,50 @@ describe("mask tool registry", () => {
     for (const id of ["point", "wand", "matting"]) {
       expect(maskTool(id)?.lane, id).toBe("render");
     }
+  });
+
+  it("ships the shape tool as a ready interactive tool (M15)", () => {
+    const shape = maskTool("shape");
+    expect(shape?.status).toBe("ready");
+    expect(shape?.kind).toBe("shape");
+    expect(shape?.lane).toBe("interactive");
+  });
+});
+
+describe("shapeVertices", () => {
+  const box: [number, number, number, number] = [0, 0, 100, 50];
+
+  it("builds a triangle inscribed in the drag box", () => {
+    const pts = shapeVertices("triangle", box, 5);
+    expect(pts).toHaveLength(3);
+    expect(pts[0][0]).toBeCloseTo(50); // apex at top centre
+    expect(pts[0][1]).toBeCloseTo(0);
+  });
+
+  it("builds a regular n-gon with the requested side count", () => {
+    expect(shapeVertices("polygon", box, 6)).toHaveLength(6);
+    expect(shapeVertices("polygon", box, 2)).toHaveLength(3); // clamped to >= 3
+  });
+
+  it("builds a star with interleaved inner points", () => {
+    const pts = shapeVertices("star", box, 5);
+    expect(pts).toHaveLength(10);
+    const cx = 50;
+    const cy = 25;
+    const r = (p: [number, number]) => Math.hypot((p[0] - cx) / 50, (p[1] - cy) / 25);
+    expect(r(pts[0])).toBeCloseTo(1);
+    expect(r(pts[1])).toBeCloseTo(0.5);
+  });
+
+  it("builds a line as a thin rectangle along the drag vector", () => {
+    const pts = shapeVertices("line", [0, 0, 100, 0], 5, 10);
+    expect(pts).toHaveLength(4);
+    expect(pts[0][1]).toBeCloseTo(5);
+    expect(pts[3][1]).toBeCloseTo(-5);
+  });
+
+  it("returns no vertices for a degenerate drag", () => {
+    expect(shapeVertices("polygon", [10, 10, 10, 40], 5)).toHaveLength(0);
+    expect(shapeVertices("line", [10, 10, 10, 10], 5)).toHaveLength(0);
   });
 });

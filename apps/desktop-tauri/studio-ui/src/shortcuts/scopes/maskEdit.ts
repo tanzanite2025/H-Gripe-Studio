@@ -49,7 +49,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_gradient", combo: "g", status: "ready", hint: "Gradient tool (drag start → end: a linear selection ramp as a revisable step; Alt-drag subtracts)." },
   { id: "tool_dodge_burn", combo: "o", status: "ready", hint: "Dodge / burn tool (paint lightens the mask, Alt-drag darkens)." },
   { id: "tool_type", combo: "t", status: "planned", hint: "Type tool (planned)." },
-  { id: "tool_shape", combo: "u", status: "planned", hint: "Shape tools (planned)." },
+  { id: "tool_shape", combo: "u", status: "ready", hint: "Shape tool (drag a box; triangle / polygon / star / line commits as a path step)." },
   { id: "tool_hand", combo: "h", status: "ready", hint: "Hand tool (drag to pan the zoomed view; hold Space with any tool)." },
   { id: "tool_rotate_view", combo: "r", status: "ready", hint: "Rotate-view tool (drag to rotate the view; Esc resets)." },
   { id: "tool_zoom", combo: "z", status: "ready", hint: "Zoom tool (click zooms in, Alt+click zooms out)." },

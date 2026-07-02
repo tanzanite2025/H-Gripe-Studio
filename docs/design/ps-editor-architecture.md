@@ -162,11 +162,18 @@ canvas at document size) and shows the `#rrggbb` swatch in tool options —
 nothing is recorded on the document. Flips from `planned` to `ready`; with
 it every non-deferred toolbar slot is live.
 
+**M15 — Shape tool.** `U` shape tool: drag a bounding box and the chosen
+shape (triangle / regular polygon / star / line) commits as an ordinary
+vector path step (`shapeVertices` → path op with `tool: "shape"`), so it
+reuses the existing polygon rasteriser on both the proxy and the Rust
+backend, supports add / subtract / intersect, and replays / re-edits like
+any pen or lasso step. No backend changes.
+
 ## 5. Explicitly deferred / out of scope
 
-- Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product
-  goal (product-image processing); their keys stay reserved, implementation
-  deferred indefinitely.
+- Type tool `T`, frame tool `K`: weakly related to the product goal
+  (product-image processing); their keys stay reserved, implementation
+  deferred indefinitely. (Shape tools `U` shipped in M15.)
 - Smart objects / linked files: the document model reserves a
   `Layer.source_ref` field; not implemented.
 - PSD layer-level round-tripping: the psd-tools foundation exists; a separate
