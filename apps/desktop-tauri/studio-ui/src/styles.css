@@ -940,6 +940,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   flex-wrap: wrap;
   align-content: flex-start;
   gap: 0 4px;
+  min-height: 0;
+  max-height: 100%;
   overflow: visible;
   background: var(--panel-2);
   border: 1px solid var(--border);
