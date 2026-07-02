@@ -141,6 +141,14 @@ zoom/pan (`CanvasView.rotate`), never part of the document; Esc resets,
 hidden → canvas only (PS full-screen cycle). Both combos flip from `planned`
 to `ready`.
 
+**M13 — Retouch tools (PS toolbar order).** The toolbar mirrors PS's icon
+sequence, with unimplemented tools as greyed placeholders; the retouch batch
+then ships one tool per step, flipping each from `planned` to `ready`:
+`J` spot-healing brush (paint a region — it is rebuilt smoothly from the
+surrounding mask by diffusion, a revisable `heal` op replayed identically by
+the proxy `healStroke` and the Rust `heal_region`), then `S` clone stamp,
+`Y` history brush, `O` dodge / burn.
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product

@@ -308,6 +308,7 @@ export function MaskEditModal({
       setPaintTarget("layer");
     },
     quick_mask: () => setQuickMask((v) => !v),
+    tool_healing: () => selectTool("heal"),
     tool_hand: () => selectTool("hand"),
     tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
@@ -492,6 +493,24 @@ export function MaskEditModal({
         live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
         ctx.stroke();
         ctx.setLineDash([]);
+      } else if (tool.kind === "heal") {
+        // Live heal band: a translucent green band marking the region that
+        // will be rebuilt from its surroundings on release.
+        ctx.strokeStyle = "rgba(120,220,140,0.45)";
+        ctx.fillStyle = "rgba(120,220,140,0.45)";
+        ctx.lineWidth = brushSize * 2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        if (live.points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(live.points[0][0], live.points[0][1], brushSize, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+          ctx.stroke();
+        }
+        ctx.lineWidth = 1;
       } else {
         const liveMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
         paintStroke(
@@ -765,7 +784,7 @@ export function MaskEditModal({
       setPenAnchors((prev) => [...prev, pt]);
       return;
     }
-    if (tool.kind === "paint" || tool.kind === "matte") {
+    if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal") {
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "transform") {
@@ -841,6 +860,13 @@ export function MaskEditModal({
       drawing.current = null;
       if (tool.id === "lasso") {
         commitPath("lasso", pts);
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.kind === "heal") {
+        // Spot-heal (M13): the stroke records a `heal` op — the painted
+        // region is rebuilt from its surroundings on replay.
+        dispatch({ type: "op", op: { type: "heal", amount: brushSize, points: pts } });
         forceRedraw((n) => n + 1);
         return;
       }

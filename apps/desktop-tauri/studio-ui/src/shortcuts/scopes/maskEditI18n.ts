@@ -30,7 +30,7 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   tool_crop: { hint: "裁剪工具（拖出裁剪框；框外蒙版被清除）。" },
   tool_frame: { hint: "图框工具（规划中）。" },
   tool_eyedropper: { hint: "吸管工具（规划中）。" },
-  tool_healing: { hint: "污点修复 / 修复画笔（规划中）。" },
+  tool_healing: { hint: "污点修复画笔（涂抹区域，由周围蒙版重建）。" },
   tool_clone: { hint: "仿制图章工具（规划中）。" },
   tool_history_brush: { hint: "历史记录画笔（规划中）。" },
   tool_gradient: { hint: "渐变工具（拖拽 起点 → 终点：线性选区渐变，作为可随时改参的一步；按住 Alt 拖拽为减去）。" },

@@ -204,6 +204,62 @@ function fillCoverage(mask: ProxyMask, op: MaskOperation): void {
   }
 }
 
+/**
+ * Spot-heal (PS J on a mask): rebuild the mask under a painted stroke from
+ * its surroundings by diffusion — iterative 4-neighbour averaging inside the
+ * stroke coverage with the boundary held fixed, converging toward the
+ * harmonic (smooth) fill. Alternating forward / backward Gauss-Seidel sweeps
+ * over the coverage bounding box; iterations scale with the region size under
+ * a fixed work budget. Mirrors the Rust `heal_region`.
+ */
+export function healStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "heal", mode: "add", radius, points }, scale);
+  // Coverage bounding box (also counts the region's pixels for the budget).
+  let x0 = mask.w, y0 = mask.h, x1 = -1, y1 = -1, area = 0;
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      if (coverage.data[y * mask.w + x] === 0) continue;
+      area++;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return;
+  // Diffusion converges in ~O(d²) sweeps for a region d pixels across;
+  // clamped, and capped by a fixed total work budget for huge regions.
+  const maxDim = Math.max(x1 - x0 + 1, y1 - y0 + 1);
+  const iters = Math.max(Math.min(maxDim * maxDim, 512, Math.ceil(4e8 / Math.max(area, 1))), 16);
+  const buf = Float32Array.from(mask.data);
+  const relax = (x: number, y: number) => {
+    const i = y * mask.w + x;
+    if (coverage.data[i] === 0) return;
+    const left = x > 0 ? buf[i - 1] : buf[i];
+    const right = x < mask.w - 1 ? buf[i + 1] : buf[i];
+    const up = y > 0 ? buf[i - mask.w] : buf[i];
+    const down = y < mask.h - 1 ? buf[i + mask.w] : buf[i];
+    buf[i] = (left + right + up + down) / 4;
+  };
+  for (let it = 0; it < iters; it++) {
+    if (it % 2 === 0) {
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) relax(x, y);
+    } else {
+      for (let y = y1; y >= y0; y--) for (let x = x1; x >= x0; x--) relax(x, y);
+    }
+  }
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = y * mask.w + x;
+      if (coverage.data[i] !== 0) mask.data[i] = Math.round(Math.min(Math.max(buf[i], 0), 255));
+    }
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -493,6 +549,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
     } else if (op.type === "fill") {
       // The amount is an opacity (%), not a px radius — no proxy scaling.
       fillCoverage(mask, op);
+    } else if (op.type === "heal") {
+      healStroke(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {

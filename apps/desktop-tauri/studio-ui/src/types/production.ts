@@ -198,12 +198,14 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal`. */
   type: string;
-  /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100), when relevant. */
+  /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal`: brush radius px), when relevant. */
   amount?: number;
   /** `[x, y]` seed for `wand`, or `[x1, y1, x2, y2]` for marquee / `crop` ops (for `gradient`: the drag vector start → end). */
   region?: number[];
+  /** `heal` only: the stroke polyline in image px — the painted region is rebuilt from its surroundings. */
+  points?: [number, number][];
   /** `gradient` / `fill` only: `add` unions in, `subtract` cuts away. Absent ⇒ `add`. */
   mode?: string;
   // --- `transform` op params (M5 free transform / move) -----------------

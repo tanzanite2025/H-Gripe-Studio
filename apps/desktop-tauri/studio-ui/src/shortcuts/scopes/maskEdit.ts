@@ -43,7 +43,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_crop", combo: "c", status: "ready", hint: "Crop tool (drag a box; the mask is cleared outside it)." },
   { id: "tool_frame", combo: "k", status: "planned", hint: "Frame tool (planned)." },
   { id: "tool_eyedropper", combo: "i", status: "planned", hint: "Eyedropper tool (planned)." },
-  { id: "tool_healing", combo: "j", status: "planned", hint: "Spot-healing / healing brush (planned)." },
+  { id: "tool_healing", combo: "j", status: "ready", hint: "Spot-healing brush (paint a region — it's rebuilt from its surroundings)." },
   { id: "tool_clone", combo: "s", status: "planned", hint: "Clone-stamp tool (planned)." },
   { id: "tool_history_brush", combo: "y", status: "planned", hint: "History brush (planned)." },
   { id: "tool_gradient", combo: "g", status: "ready", hint: "Gradient tool (drag start → end: a linear selection ramp as a revisable step; Alt-drag subtracts)." },

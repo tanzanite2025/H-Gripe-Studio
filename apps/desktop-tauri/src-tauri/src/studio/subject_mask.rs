@@ -846,6 +846,21 @@ fn apply_queued_operation(
             fill_holes(mask);
             operations.push(json!({ "type": "fill_holes" }));
         }
+        Some("heal") => {
+            // Spot-heal (M13): rebuild the mask under the stroke coverage
+            // from its surroundings. `amount` is the brush radius; `points`
+            // the stroke polyline.
+            let radius = amount.unwrap_or(8.0).max(1.0) as u32;
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let (w, h) = mask.dimensions();
+            let mut coverage = GrayImage::new(w, h);
+            stamp_stroke(&mut coverage, &points, radius, MASK_ON);
+            heal_region(mask, &coverage);
+            operations.push(json!({ "type": "heal", "radius": radius }));
+        }
         Some("grow") => {
             let px = amount.unwrap_or(0.0).max(0.0) as u32;
             if px > 0 {
@@ -1054,6 +1069,76 @@ fn neighbours(x: u32, y: u32, width: u32, height: u32) -> Vec<(u32, u32)> {
         out.push((x, y + 1));
     }
     out
+}
+
+/// Spot-heal (PS J on a mask): rebuild the mask inside `coverage` from its
+/// surroundings by diffusion — iterative 4-neighbour averaging with the
+/// boundary held fixed, converging toward the harmonic (smooth) fill.
+/// Alternating forward / backward Gauss-Seidel sweeps over the coverage
+/// bounding box; iterations scale with the region size under a fixed work
+/// budget. Mirrors the proxy `healStroke` in `maskMorphology.ts`.
+fn heal_region(mask: &mut GrayImage, coverage: &GrayImage) {
+    let (w, h) = mask.dimensions();
+    let (mut x0, mut y0, mut x1, mut y1) = (w as i64, h as i64, -1i64, -1i64);
+    let mut area: u64 = 0;
+    for y in 0..h {
+        for x in 0..w {
+            if coverage.get_pixel(x, y).0[0] == 0 {
+                continue;
+            }
+            area += 1;
+            x0 = x0.min(x as i64);
+            x1 = x1.max(x as i64);
+            y0 = y0.min(y as i64);
+            y1 = y1.max(y as i64);
+        }
+    }
+    if x1 < 0 {
+        return;
+    }
+    let (x0, y0, x1, y1) = (x0 as u32, y0 as u32, x1 as u32, y1 as u32);
+    // Diffusion converges in ~O(d²) sweeps for a region d pixels across;
+    // clamped, and capped by a fixed total work budget for huge regions.
+    let max_dim = (x1 - x0 + 1).max(y1 - y0 + 1) as u64;
+    let iters = (max_dim * max_dim)
+        .min(512)
+        .min(400_000_000 / area.max(1))
+        .max(16);
+    let mut buf: Vec<f32> = mask.pixels().map(|p| f32::from(p.0[0])).collect();
+    let idx = |x: u32, y: u32| (y * w + x) as usize;
+    let mut relax = |buf: &mut Vec<f32>, x: u32, y: u32| {
+        if coverage.get_pixel(x, y).0[0] == 0 {
+            return;
+        }
+        let i = idx(x, y);
+        let left = if x > 0 { buf[i - 1] } else { buf[i] };
+        let right = if x < w - 1 { buf[i + 1] } else { buf[i] };
+        let up = if y > 0 { buf[i - w as usize] } else { buf[i] };
+        let down = if y < h - 1 { buf[i + w as usize] } else { buf[i] };
+        buf[i] = (left + right + up + down) / 4.0;
+    };
+    for it in 0..iters {
+        if it % 2 == 0 {
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    relax(&mut buf, x, y);
+                }
+            }
+        } else {
+            for y in (y0..=y1).rev() {
+                for x in (x0..=x1).rev() {
+                    relax(&mut buf, x, y);
+                }
+            }
+        }
+    }
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            if coverage.get_pixel(x, y).0[0] != 0 {
+                mask.put_pixel(x, y, Luma([buf[idx(x, y)].round().clamp(0.0, 255.0) as u8]));
+            }
+        }
+    }
 }
 
 /// Stamp filled discs of `radius` along a polyline, writing `value`.
@@ -2009,6 +2094,21 @@ mod tests {
         let mut mask = solid(5, 5, MASK_OFF);
         fill_holes(&mut mask);
         assert_eq!(mask_coverage(&mask), 0.0);
+    }
+
+    #[test]
+    fn heal_region_rebuilds_blemish_from_surroundings() {
+        // A solid mask with an off blemish in the middle: healing over it
+        // pulls the region back toward the surrounding on-value, leaving
+        // pixels outside the coverage untouched.
+        let mut mask = solid(31, 31, MASK_ON);
+        stamp_disc(&mut mask, 15.0, 15.0, 4, MASK_OFF);
+        assert_eq!(mask.get_pixel(15, 15).0[0], MASK_OFF);
+        let mut coverage = GrayImage::new(31, 31);
+        stamp_stroke(&mut coverage, &[(15.0, 15.0)], 6, MASK_ON);
+        heal_region(&mut mask, &coverage);
+        assert!(mask.get_pixel(15, 15).0[0] > 200);
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_ON);
     }
 
     #[test]
