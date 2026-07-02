@@ -113,6 +113,14 @@ describe("buildProxyMask", () => {
     expect(area(mask)).toBeGreaterThan(0);
   });
 
+  it("skips disabled history steps on replay", () => {
+    const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
+    const enabled: EditPaths = { ...emptyEditPaths(), ops: [stroke] };
+    const disabled: EditPaths = { ...emptyEditPaths(), ops: [{ ...stroke, disabled: true }] };
+    expect(area(buildProxyMask(enabled, { w: 960, h: 640 }).mask)).toBeGreaterThan(0);
+    expect(area(buildProxyMask(disabled, { w: 960, h: 640 }).mask)).toBe(0);
+  });
+
   it("applies queued morphology operations in order on top of strokes", () => {
     const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
     const baseEdits: EditPaths = { ...emptyEditPaths(), ops: [stroke] };

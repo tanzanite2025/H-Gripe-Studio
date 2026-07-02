@@ -24,11 +24,15 @@ import {
   editCount,
   initEditState,
   redo,
+  removeOp,
+  toggleOp,
   undo,
+  updateOpAmount,
+  updatePathAnchors,
   type EditState,
 } from "./maskEdit";
-import type { BrushStroke, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
-import { editStackBrushStrokes, editStackOperations, editStackPaths } from "../types/production";
+import type { BrushStroke, EditOp, EditPath, EditPathPoint, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import { isBrushOp, isPathOp } from "../types/production";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -45,7 +49,11 @@ type Action =
   | { type: "path"; path: EditPath }
   | { type: "undo" }
   | { type: "redo" }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "remove_op"; index: number }
+  | { type: "toggle_op"; index: number }
+  | { type: "op_amount"; index: number; amount: number }
+  | { type: "path_anchors"; index: number; points: EditPathPoint[] };
 
 function reducer(state: EditState, action: Action): EditState {
   switch (action.type) {
@@ -65,6 +73,14 @@ function reducer(state: EditState, action: Action): EditState {
       return redo(state);
     case "clear":
       return clearEdits(state);
+    case "remove_op":
+      return removeOp(state, action.index);
+    case "toggle_op":
+      return toggleOp(state, action.index);
+    case "op_amount":
+      return updateOpAmount(state, action.index, action.amount);
+    case "path_anchors":
+      return updatePathAnchors(state, action.index, action.points);
   }
 }
 
@@ -113,6 +129,11 @@ export function MaskEditModal({
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
+  // Anchor re-editing (M2): index of the path op being re-edited plus a local
+  // draft of its anchors; committed as one undoable step on Done / Enter.
+  const [editingPath, setEditingPath] = useState<number | null>(null);
+  const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
+  const draggingAnchor = useRef<number | null>(null);
   const [, forceRedraw] = useState(0);
 
   // Preview lane for morphology ops: a live, best-effort proxy render of
@@ -147,11 +168,39 @@ export function MaskEditModal({
 
   const penPendingRef = useRef(false);
   penPendingRef.current = penAnchors.length > 0;
+  const editingPathRef = useRef<number | null>(null);
+  editingPathRef.current = editingPath;
+  const anchorDraftRef = useRef<EditPathPoint[] | null>(null);
+  anchorDraftRef.current = anchorDraft;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const startPathEdit = (index: number) => {
+    const op = state.current.ops[index];
+    if (!op || !isPathOp(op)) return;
+    setPenAnchors([]);
+    setEditingPath(index);
+    setAnchorDraft(op.points.map((p) => ({ ...p })));
+  };
+
+  const commitPathEdit = useCallback(() => {
+    if (editingPathRef.current != null && anchorDraftRef.current) {
+      dispatch({ type: "path_anchors", index: editingPathRef.current, points: anchorDraftRef.current });
+    }
+    setEditingPath(null);
+    setAnchorDraft(null);
+  }, []);
+
+  const cancelPathEdit = useCallback(() => {
+    setEditingPath(null);
+    setAnchorDraft(null);
+  }, []);
 
   // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
   // active only while this modal is mounted, shadowing the canvas shortcuts.
   const selectTool = (id: string) => {
     if (id !== "pen") setPenAnchors([]);
+    cancelPathEdit();
     setToolId(id);
   };
   const shortcutHandlers: ShortcutHandlers = {
@@ -162,9 +211,25 @@ export function MaskEditModal({
     tool_lasso: () => selectTool("lasso"),
     tool_rect: () => selectTool("rect"),
     tool_ellipse: () => selectTool("ellipse"),
+    tool_path_select: () => {
+      // PS `A` (direct selection): re-edit the anchors of the last path op.
+      if (editingPathRef.current != null) {
+        commitPathEdit();
+        return;
+      }
+      const ops = stateRef.current.current.ops;
+      for (let i = ops.length - 1; i >= 0; i--) {
+        if (isPathOp(ops[i])) {
+          startPathEdit(i);
+          return;
+        }
+      }
+      return false;
+    },
     undo: () => dispatch({ type: "undo" }),
     redo: () => dispatch({ type: "redo" }),
     redo_alt: () => dispatch({ type: "redo" }),
+    step_backward: () => dispatch({ type: "undo" }),
     clear: () => dispatch({ type: "clear" }),
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
     brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
@@ -175,12 +240,17 @@ export function MaskEditModal({
       else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
     },
     close_path: () => {
+      if (editingPathRef.current != null) {
+        commitPathEdit();
+        return;
+      }
       if (!penPendingRef.current || penAnchors.length < 3) return false;
       closePenPath();
     },
     cancel: () => {
-      // A pending pen path swallows the first Escape (cancel the path).
-      if (penPendingRef.current) setPenAnchors([]);
+      // Anchor re-editing or a pending pen path swallows the first Escape.
+      if (editingPathRef.current != null) cancelPathEdit();
+      else if (penPendingRef.current) setPenAnchors([]);
       else onClose();
     },
     toggle_overlay: () => setOverlayOnly((v) => !v),
@@ -287,8 +357,11 @@ export function MaskEditModal({
     // brush strokes (transformed), so skip the raw stroke overlay to avoid a
     // confusing double-draw; matte strokes / points / marquee still render.
     if (!previewing) {
-      editStackBrushStrokes(state.current).forEach((s) => paintStroke(s));
-      editStackPaths(state.current).forEach(paintPath);
+      state.current.ops.forEach((op, i) => {
+        if (op.disabled || i === editingPath) return;
+        if (isBrushOp(op)) paintStroke(op);
+        else if (isPathOp(op)) paintPath(op);
+      });
     }
     state.current.matte_strokes.forEach((s) => paintStroke(s, "matte"));
     const live = drawing.current;
@@ -308,6 +381,23 @@ export function MaskEditModal({
           tool.kind === "matte" ? "matte" : "paint",
         );
       }
+    }
+
+    // Anchor re-editing: dashed outline of the draft path plus draggable
+    // anchor squares (the dragged anchor is highlighted).
+    if (editingPath != null && anchorDraft) {
+      ctx.strokeStyle = "rgba(120,230,140,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      anchorDraft.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      anchorDraft.forEach((p, i) => {
+        ctx.fillStyle = draggingAnchor.current === i ? "rgba(255,214,90,0.95)" : "rgba(120,230,140,0.95)";
+        ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+      });
     }
 
     // Pending pen path: anchor squares + dashed polyline; the first anchor is
@@ -387,7 +477,7 @@ export function MaskEditModal({
       }
       ctx.setLineDash([]);
     }
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.ops, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, previewing, preview]);
+  }, [dims.w, dims.h, underlay, overlayOnly, state.current.ops, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, editingPath, anchorDraft, previewing, preview]);
 
   useEffect(() => {
     redraw();
@@ -439,6 +529,23 @@ export function MaskEditModal({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (editingPath != null && anchorDraft) {
+      // Anchor re-editing mode: grab the nearest anchor square, if any.
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      const [x, y] = toImage(e);
+      const grabRadius = Math.max(10, dims.w * 0.012);
+      let best = -1;
+      let bestDist = grabRadius;
+      anchorDraft.forEach((p, i) => {
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d <= bestDist) {
+          best = i;
+          bestDist = d;
+        }
+      });
+      draggingAnchor.current = best >= 0 ? best : null;
+      return;
+    }
     if (tool.status !== "ready") return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const pt = toImage(e);
@@ -476,6 +583,12 @@ export function MaskEditModal({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (draggingAnchor.current != null) {
+      const [x, y] = toImage(e);
+      const idx = draggingAnchor.current;
+      setAnchorDraft((prev) => (prev ? prev.map((p, i) => (i === idx ? { ...p, x, y } : p)) : prev));
+      return;
+    }
     if (drawing.current) {
       drawing.current.points.push(toImage(e));
       redraw();
@@ -486,6 +599,11 @@ export function MaskEditModal({
   };
 
   const onPointerUp = () => {
+    if (draggingAnchor.current != null) {
+      draggingAnchor.current = null;
+      forceRedraw((n) => n + 1);
+      return;
+    }
     if (drawing.current) {
       const pts = drawing.current.points;
       drawing.current = null;
@@ -517,6 +635,7 @@ export function MaskEditModal({
   const onToolClick = (t: MaskTool) => {
     if (t.status !== "ready") return;
     if (t.id !== "pen") setPenAnchors([]);
+    cancelPathEdit();
     if (t.kind === "global") {
       // Amount-taking morphology ops (grow/shrink/feather/smooth) enter a live
       // preview mode — the user tunes the amount and commits via Apply. The
@@ -539,10 +658,15 @@ export function MaskEditModal({
   };
 
   const count = editCount(state.current);
-  const ops = editStackOperations(state.current);
   const points = state.current.points;
   const matteStrokes = state.current.matte_strokes;
-  const paths = editStackPaths(state.current);
+
+  // One-line label for a history step (raw op vocabulary, like the old chips).
+  const opLabel = (op: EditOp): string => {
+    if (isPathOp(op)) return `${op.tool} ${op.mode} (${op.points.length})`;
+    if (isBrushOp(op)) return `${op.mode === "subtract" ? "eraser" : "brush"} r${op.radius} (${op.points.length})`;
+    return op.type;
+  };
   const showAmount = useMemo(
     () => tool.kind === "global" || ["grow", "shrink", "feather", "smooth"].includes(toolId),
     [tool.kind, toolId],
@@ -674,32 +798,69 @@ export function MaskEditModal({
               </label>
             ) : null}
 
-            <div className="field">
-              <span>{t("mask.queuedOps", { count: ops.length })}</span>
-              <div className="mask-op-list">
-                {ops.length === 0 ? (
-                  <small className="muted">{t("mask.opsEmpty")}</small>
-                ) : (
-                  ops.map((op, i) => (
-                    <span key={i} className="mask-op-chip">
-                      {op.type}
-                      {op.amount != null ? ` ${op.amount}` : ""}
-                    </span>
-                  ))
-                )}
+            {editingPath != null ? (
+              <div className="field mask-preview-actions">
+                <span>{t("mask.anchorEditing")}</span>
+                <span className="slider-row">
+                  <button className="primary" onClick={commitPathEdit}>{t("mask.anchorDone")}</button>
+                  <button onClick={cancelPathEdit}>{t("mask.anchorCancel")}</button>
+                </span>
+                <small className="muted">{t("mask.anchorHint")}</small>
               </div>
-            </div>
+            ) : null}
 
             <div className="field">
-              <span>{t("mask.paths", { count: paths.length })}</span>
-              <div className="mask-op-list">
-                {paths.length === 0 ? (
-                  <small className="muted">{t("mask.pathsEmpty")}</small>
+              <span>{t("mask.history", { count: state.current.ops.length })}</span>
+              <div className="mask-history-list">
+                {state.current.ops.length === 0 ? (
+                  <small className="muted">{t("mask.historyEmpty")}</small>
                 ) : (
-                  paths.map((p, i) => (
-                    <span key={p.id ?? i} className={`mask-op-chip${p.mode === "subtract" ? " negative" : ""}`}>
-                      {p.tool} {p.mode} ({p.points.length})
-                    </span>
+                  state.current.ops.map((op, i) => (
+                    <div
+                      key={i}
+                      className={`mask-history-row${op.disabled ? " disabled" : ""}${editingPath === i ? " editing" : ""}`}
+                    >
+                      <button
+                        className="mask-history-toggle"
+                        title={op.disabled ? t("mask.stepEnable") : t("mask.stepDisable")}
+                        onClick={() => dispatch({ type: "toggle_op", index: i })}
+                      >
+                        {op.disabled ? "◌" : "●"}
+                      </button>
+                      <span className="mask-history-label" title={opLabel(op)}>
+                        {i + 1}. {opLabel(op)}
+                      </span>
+                      {!isPathOp(op) && !isBrushOp(op) && op.amount != null ? (
+                        <input
+                          className="mask-history-amount"
+                          type="number"
+                          min={0}
+                          max={255}
+                          value={op.amount}
+                          title={t("mask.stepAmount")}
+                          onChange={(e) => dispatch({ type: "op_amount", index: i, amount: Number(e.target.value) })}
+                        />
+                      ) : null}
+                      {isPathOp(op) ? (
+                        <button
+                          className="mask-history-edit"
+                          title={t("mask.stepEditAnchors")}
+                          onClick={() => (editingPath === i ? cancelPathEdit() : startPathEdit(i))}
+                        >
+                          ✎
+                        </button>
+                      ) : null}
+                      <button
+                        className="mask-history-delete"
+                        title={t("mask.stepDelete")}
+                        onClick={() => {
+                          if (editingPath === i) cancelPathEdit();
+                          dispatch({ type: "remove_op", index: i });
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
