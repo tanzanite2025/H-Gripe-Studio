@@ -38,7 +38,10 @@ export type ToolKind =
   // Vector path selection: pen (click anchors, bezier-capable) / lasso
   // (freehand). Recorded as an `EditPath`; the backend rasterises the closed
   // polygon and boolean-combines it with the mask (add/subtract/intersect).
-  | "path";
+  | "path"
+  // Canvas navigation (M8): hand pans the zoomed view, zoom clicks in/out.
+  // Records nothing — the view is a CSS transform, never part of the document.
+  | "view";
 
 export interface MaskTool {
   id: string;
@@ -88,6 +91,8 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
   { id: "crop", label: "Crop", status: "ready", kind: "marquee", lane: "preview", hint: "Drag a crop box — the mask is cleared outside it (a revisable step)." },
+  { id: "hand", label: "Hand", status: "ready", kind: "view", lane: "interactive", hint: "Drag to pan the zoomed view (or hold Space with any tool)." },
+  { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
 ] as const;
 
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
