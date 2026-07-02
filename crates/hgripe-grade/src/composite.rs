@@ -21,6 +21,12 @@ pub fn composite_over(dst: &mut GradeSurface, src: &GradeSurface, mode: BlendMod
         assert_eq!(m.len(), (dst.w as usize) * (dst.h as usize), "mask length");
     }
     let opacity = opacity.clamp(0.0, 1.0);
+    // The blend-mode formulas are defined on 0..=1 values. In the
+    // scene-referred linear space, Normal (which never mixes channels
+    // non-linearly) passes values through unclamped so HDR headroom and
+    // negatives survive across layers; every other mode still works on
+    // the clamped display window.
+    let unbounded = dst.space == crate::surface::GradeSpace::LinearRec709 && mode == BlendMode::Normal;
 
     for px in 0..(dst.w as usize) * (dst.h as usize) {
         let i = px * 4;
@@ -28,16 +34,9 @@ pub fn composite_over(dst: &mut GradeSurface, src: &GradeSurface, mode: BlendMod
         let sa = src.data[i + 3].clamp(0.0, 1.0) * opacity * gate;
         let ba = dst.data[i + 3].clamp(0.0, 1.0);
         let oa = sa + ba * (1.0 - sa);
-        let cb = [
-            dst.data[i].clamp(0.0, 1.0),
-            dst.data[i + 1].clamp(0.0, 1.0),
-            dst.data[i + 2].clamp(0.0, 1.0),
-        ];
-        let cs = [
-            src.data[i].clamp(0.0, 1.0),
-            src.data[i + 1].clamp(0.0, 1.0),
-            src.data[i + 2].clamp(0.0, 1.0),
-        ];
+        let load = |v: f32| if unbounded { v } else { v.clamp(0.0, 1.0) };
+        let cb = [load(dst.data[i]), load(dst.data[i + 1]), load(dst.data[i + 2])];
+        let cs = [load(src.data[i]), load(src.data[i + 1]), load(src.data[i + 2])];
         let blended = blend_rgb(mode, cb, cs);
         for c in 0..3 {
             dst.data[i + c] = if oa == 0.0 {

@@ -95,6 +95,21 @@ pub enum GradeOp {
     /// `v = pivot + (v − pivot) × amount`, clamped to `0..=1`.
     /// `amount = 1` is neutral; Resolve's default pivot is 0.435.
     Contrast { amount: f32, pivot: f32 },
+    /// Soft clip in linear light: values above `high_start` roll off
+    /// asymptotically toward 1 (`v = hs + (1−hs)·t/(1+t)`,
+    /// `t = (v−hs)/(1−hs)`), values below `low_start` roll off toward 0
+    /// (`v = ls − ls·t/(1+t)`, `t = (ls−v)/ls`; `ls = 0` hard-clips
+    /// negatives). C¹-continuous at both knees. This is how scene-referred
+    /// HDR headroom is mapped back into display range without a hard clip.
+    SoftClip { high_start: f32, low_start: f32 },
+    /// Planckian-locus white balance in linear light: `temp_k` is a
+    /// correlated colour temperature in Kelvin (1667..=25000), `tint` a
+    /// nominal `±1` green–magenta offset (Δy = 0.05·tint on the xy
+    /// chromaticity). Channel gains are the Rec.709 linear RGB of the
+    /// blackbody chromaticity at `temp_k`, relative to the 6504 K neutral,
+    /// normalised to preserve Rec.709 luma — so `temp_k < 6504` warms and
+    /// `temp_k > 6504` cools. Neutral is `temp_k = 6504`, `tint = 0`.
+    WhiteBalanceK { temp_k: f32, tint: f32 },
 }
 
 /// Apply one op to every pixel's RGB (alpha untouched).
@@ -240,6 +255,23 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 }
             }
         }
+        GradeOp::SoftClip { high_start, low_start } => {
+            let hs = high_start.clamp(0.0, 1.0 - 1e-4);
+            let ls = low_start.clamp(0.0, hs);
+            for_each_rgb_linear(surface, n, |rgb| {
+                for c in rgb.iter_mut() {
+                    *c = soft_clip(*c, hs, ls);
+                }
+            });
+        }
+        GradeOp::WhiteBalanceK { temp_k, tint } => {
+            let gains = planckian_gains(*temp_k, *tint);
+            for_each_rgb_linear(surface, n, |rgb| {
+                for (c, g) in rgb.iter_mut().zip(gains) {
+                    *c *= g;
+                }
+            });
+        }
         GradeOp::Lut3d { size, table } => {
             let lut = Lut3d::new(*size, table);
             for px in 0..n {
@@ -255,6 +287,68 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
             }
         }
     }
+}
+
+fn soft_clip(v: f32, hs: f32, ls: f32) -> f32 {
+    if v > hs {
+        let t = (v - hs) / (1.0 - hs);
+        hs + (1.0 - hs) * t / (1.0 + t)
+    } else if v < ls {
+        if ls <= 0.0 {
+            return 0.0;
+        }
+        let t = (ls - v) / ls;
+        ls - ls * t / (1.0 + t)
+    } else {
+        v
+    }
+}
+
+/// Rec.709 linear RGB channel gains for a Planckian white point at
+/// `temp_k` (+ `tint` Δy), relative to the 6504 K neutral, luma-normalised.
+/// CCT → xy uses the Kim et al. cubic approximation of the Planckian locus
+/// (the standard CIE fit, valid 1667..25000 K); xy → XYZ → Rec.709 uses the
+/// IEC/ITU matrix. All in f64 so both ends agree within f32 tolerance.
+pub(crate) fn planckian_gains(temp_k: f32, tint: f32) -> [f32; 3] {
+    let reference = planckian_rgb(6504.0, 0.0);
+    let target = planckian_rgb(f64::from(temp_k), f64::from(tint));
+    let raw = [
+        target[0] / reference[0],
+        target[1] / reference[1],
+        target[2] / reference[2],
+    ];
+    let luma = f64::from(LUMA[0]) * raw[0] + f64::from(LUMA[1]) * raw[1] + f64::from(LUMA[2]) * raw[2];
+    [
+        (raw[0] / luma) as f32,
+        (raw[1] / luma) as f32,
+        (raw[2] / luma) as f32,
+    ]
+}
+
+fn planckian_rgb(temp_k: f64, tint: f64) -> [f64; 3] {
+    let t = if temp_k.is_finite() { temp_k.clamp(1667.0, 25000.0) } else { 6504.0 };
+    // Kim et al. cubic fit of the Planckian locus.
+    let x = if t <= 4000.0 {
+        -0.2661239e9 / (t * t * t) - 0.2343589e6 / (t * t) + 0.8776956e3 / t + 0.179910
+    } else {
+        -3.0258469e9 / (t * t * t) + 2.1070379e6 / (t * t) + 0.2226347e3 / t + 0.240390
+    };
+    let y_locus = if t <= 2222.0 {
+        ((-1.1063814 * x - 1.34811020) * x + 2.18555832) * x - 0.20219683
+    } else if t <= 4000.0 {
+        ((-0.9549476 * x - 1.37418593) * x + 2.09137015) * x - 0.16748867
+    } else {
+        ((3.0817580 * x - 5.87338670) * x + 3.75112997) * x - 0.37001483
+    };
+    let tint = if tint.is_finite() { tint.clamp(-1.0, 1.0) } else { 0.0 };
+    let y = (y_locus + 0.05 * tint).max(1e-4);
+    // xyY (Y = 1) → XYZ → linear Rec.709.
+    let big_x = x / y;
+    let big_z = (1.0 - x - y) / y;
+    let r = 3.2404542 * big_x - 1.5371385 - 0.4985314 * big_z;
+    let g = -0.9692660 * big_x + 1.8760108 + 0.0415560 * big_z;
+    let b = 0.0556434 * big_x - 0.2040259 + 1.0572252 * big_z;
+    [r.max(1e-4), g.max(1e-4), b.max(1e-4)]
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -500,15 +594,18 @@ pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
 
 // Decode RGB to linear light, run `f`, re-encode. The encode clamps to
 // `0..=1` (negative / >1 linear values have no encoded representation), which
-// is where linear-op headroom lands back in range.
+// is where linear-op headroom lands back in range — except the scene-referred
+// linear space, whose values pass through unclamped and unbounded.
 fn for_each_rgb_linear(surface: &mut GradeSurface, n: usize, mut f: impl FnMut(&mut [f32; 3])) {
     let space = surface.space;
+    let clamp_in = space != crate::surface::GradeSpace::LinearRec709;
+    let load = |v: f32| if clamp_in { v.clamp(0.0, 1.0) } else { v };
     for px in 0..n {
         let i = px * 4;
         let mut rgb = [
-            trc_decode(space, surface.data[i].clamp(0.0, 1.0)),
-            trc_decode(space, surface.data[i + 1].clamp(0.0, 1.0)),
-            trc_decode(space, surface.data[i + 2].clamp(0.0, 1.0)),
+            trc_decode(space, load(surface.data[i])),
+            trc_decode(space, load(surface.data[i + 1])),
+            trc_decode(space, load(surface.data[i + 2])),
         ];
         f(&mut rgb);
         surface.data[i] = trc_encode(space, rgb[0]);

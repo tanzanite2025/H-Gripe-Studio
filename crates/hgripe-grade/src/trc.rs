@@ -8,9 +8,11 @@
 
 use crate::surface::GradeSpace;
 
-/// Decode a gamma-encoded sample (`0..=1`) to linear light.
+/// Decode a gamma-encoded sample (`0..=1`) to linear light. The
+/// scene-referred linear space is already linear: identity, no clamp.
 pub fn trc_decode(space: GradeSpace, c: f32) -> f32 {
     match space {
+        GradeSpace::LinearRec709 => c,
         GradeSpace::Srgb => {
             if c <= 0.04045 {
                 c / 12.92
@@ -30,10 +32,15 @@ pub fn trc_decode(space: GradeSpace, c: f32) -> f32 {
 }
 
 /// Encode linear light back to a gamma-encoded sample. Clamps to `0..=1`
-/// (negative linear values have no encoded representation).
+/// (negative linear values have no encoded representation) — except the
+/// scene-referred linear space, which stays unbounded.
 pub fn trc_encode(space: GradeSpace, l: f32) -> f32 {
+    if space == GradeSpace::LinearRec709 {
+        return l;
+    }
     let l = l.clamp(0.0, 1.0);
     match space {
+        GradeSpace::LinearRec709 => l,
         GradeSpace::Srgb => {
             if l <= 0.003_130_8 {
                 12.92 * l
