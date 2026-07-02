@@ -7,7 +7,7 @@
 //   Co  = ( αs'×(1−αb)×Cs + αs'×αb×B(Cb,Cs) + (1−αs')×αb×Cb ) / αo
 // (Co = 0 where αo = 0.) No quantisation — everything stays f32.
 
-use crate::blend::{blend_channel, BlendMode};
+use crate::blend::{blend_rgb, BlendMode};
 use crate::surface::GradeSurface;
 
 /// Composite `src` over `dst` in place. `opacity` is the layer opacity
@@ -28,13 +28,22 @@ pub fn composite_over(dst: &mut GradeSurface, src: &GradeSurface, mode: BlendMod
         let sa = src.data[i + 3].clamp(0.0, 1.0) * opacity * gate;
         let ba = dst.data[i + 3].clamp(0.0, 1.0);
         let oa = sa + ba * (1.0 - sa);
+        let cb = [
+            dst.data[i].clamp(0.0, 1.0),
+            dst.data[i + 1].clamp(0.0, 1.0),
+            dst.data[i + 2].clamp(0.0, 1.0),
+        ];
+        let cs = [
+            src.data[i].clamp(0.0, 1.0),
+            src.data[i + 1].clamp(0.0, 1.0),
+            src.data[i + 2].clamp(0.0, 1.0),
+        ];
+        let blended = blend_rgb(mode, cb, cs);
         for c in 0..3 {
-            let cb = dst.data[i + c].clamp(0.0, 1.0);
-            let cs = src.data[i + c].clamp(0.0, 1.0);
             dst.data[i + c] = if oa == 0.0 {
                 0.0
             } else {
-                let mixed = sa * (1.0 - ba) * cs + sa * ba * blend_channel(mode, cb, cs) + (1.0 - sa) * ba * cb;
+                let mixed = sa * (1.0 - ba) * cs[c] + sa * ba * blended[c] + (1.0 - sa) * ba * cb[c];
                 mixed / oa
             };
         }

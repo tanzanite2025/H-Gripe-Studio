@@ -21,6 +21,10 @@ export const BLEND_MODES = [
   "exclusion",
   "linear_dodge",
   "linear_burn",
+  "hue",
+  "saturation",
+  "color",
+  "luminosity",
 ] as const;
 export type GradeBlendMode = (typeof BLEND_MODES)[number];
 
@@ -72,6 +76,59 @@ export function blendChannel(mode: GradeBlendMode, cb: number, cs: number): numb
       return Math.min(1, cb + cs);
     case "linear_burn":
       return Math.max(0, cb + cs - 1);
+    case "hue":
+    case "saturation":
+    case "color":
+    case "luminosity":
+      throw new Error(`${mode} is non-separable; use blendRgb`);
+  }
+}
+
+type Rgb = [number, number, number];
+
+// W3C compositing-1 non-separable helpers (mirror Rust `blend.rs`).
+const lum = (c: Rgb) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+const satOf = (c: Rgb) => Math.max(...c) - Math.min(...c);
+
+function clipColor(c: Rgb): Rgb {
+  const l = lum(c);
+  const n = Math.min(...c);
+  const x = Math.max(...c);
+  let out = c;
+  if (n < 0) out = out.map((v) => l + ((v - l) * l) / (l - n)) as Rgb;
+  if (x > 1) out = out.map((v) => l + ((v - l) * (1 - l)) / (x - l)) as Rgb;
+  return out;
+}
+
+const setLum = (c: Rgb, l: number): Rgb => {
+  const d = l - lum(c);
+  return clipColor([c[0] + d, c[1] + d, c[2] + d]);
+};
+
+function setSat(c: Rgb, s: number): Rgb {
+  const idx = [0, 1, 2].sort((a, b) => c[a] - c[b]);
+  const [lo, mid, hi] = idx;
+  const out: Rgb = [0, 0, 0];
+  if (c[hi] > c[lo]) {
+    out[mid] = ((c[mid] - c[lo]) * s) / (c[hi] - c[lo]);
+    out[hi] = s;
+  }
+  return out;
+}
+
+/** `B(Cb, Cs)` over the whole RGB triple (mirrors Rust `blend_rgb`). */
+export function blendRgb(mode: GradeBlendMode, cb: Rgb, cs: Rgb): Rgb {
+  switch (mode) {
+    case "hue":
+      return setLum(setSat(cs, satOf(cb)), lum(cb));
+    case "saturation":
+      return setLum(setSat(cb, satOf(cs)), lum(cb));
+    case "color":
+      return setLum(cs, lum(cb));
+    case "luminosity":
+      return setLum(cb, lum(cs));
+    default:
+      return [blendChannel(mode, cb[0], cs[0]), blendChannel(mode, cb[1], cs[1]), blendChannel(mode, cb[2], cs[2])];
   }
 }
 
@@ -95,7 +152,10 @@ export type GradeOp =
   | { type: "white_balance"; temp: number; tint: number }
   | { type: "levels"; in_black: number; in_white: number; gamma: number; out_black: number; out_white: number }
   | { type: "curves"; channel: CurveChannel; points: [number, number][] }
-  | { type: "saturation"; amount: number };
+  | { type: "saturation"; amount: number }
+  | { type: "lift_gamma_gain"; lift: [number, number, number]; gamma: [number, number, number]; gain: [number, number, number] }
+  | { type: "hsl_adjust"; hue: number; saturation: number; lightness: number }
+  | { type: "lut3d"; size: number; table: number[] };
 
 export interface GradeLayer {
   blend: GradeBlendMode;
@@ -225,7 +285,143 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       });
       break;
     }
+    case "lift_gamma_gain": {
+      const invGamma = op.gamma.map((g) => 1 / Math.max(g, 1e-6));
+      forEachRgbLinear(surface, (rgb) => {
+        for (let c = 0; c < 3; c++) {
+          const v = Math.max((rgb[c] + op.lift[c] * (1 - rgb[c])) * op.gain[c], 0);
+          rgb[c] = Math.pow(v, invGamma[c]);
+        }
+      });
+      break;
+    }
+    case "hsl_adjust": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        const [h, s, l] = rgbToHsl([
+          clamp01(surface.data[i]),
+          clamp01(surface.data[i + 1]),
+          clamp01(surface.data[i + 2]),
+        ]);
+        const out = hslToRgb(
+          (((h + op.hue) % 360) + 360) % 360,
+          clamp01(s * (1 + op.saturation)),
+          clamp01(l * (1 + op.lightness)),
+        );
+        surface.data[i] = out[0];
+        surface.data[i + 1] = out[1];
+        surface.data[i + 2] = out[2];
+      }
+      break;
+    }
+    case "lut3d": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        const out = lut3dSample(op.size, op.table, [
+          clamp01(surface.data[i]),
+          clamp01(surface.data[i + 1]),
+          clamp01(surface.data[i + 2]),
+        ]);
+        surface.data[i] = out[0];
+        surface.data[i + 1] = out[1];
+        surface.data[i + 2] = out[2];
+      }
+      break;
+    }
   }
+}
+
+/** RGB (`0..=1`) → HSL with hue in degrees (mirrors Rust `rgb_to_hsl`). */
+function rgbToHsl(rgb: Rgb): [number, number, number] {
+  const max = Math.max(...rgb);
+  const min = Math.min(...rgb);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d <= 0) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rgb[0]) h = 60 * ((((rgb[1] - rgb[2]) / d) % 6 + 6) % 6);
+  else if (max === rgb[1]) h = 60 * ((rgb[2] - rgb[0]) / d + 2);
+  else h = 60 * ((rgb[0] - rgb[1]) / d + 4);
+  return [h, s, l];
+}
+
+/** HSL (hue in degrees) → RGB (mirrors Rust `hsl_to_rgb`). */
+function hslToRgb(h: number, s: number, l: number): Rgb {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs(((hp % 2) + 2) % 2 - 1));
+  const seg = Math.min(Math.floor(hp), 5);
+  const [r, g, b] = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ][seg];
+  const m = l - c / 2;
+  return [r + m, g + m, b + m];
+}
+
+// Trilinear 3D-LUT sample; `table` is size³ × 3 with red varying fastest
+// (the .cube convention), mirroring Rust `Lut3d::sample`.
+function lut3dSample(size: number, table: number[], rgb: Rgb): Rgb {
+  const n = size - 1;
+  const pos = rgb.map((v) => v * n);
+  const i0 = pos.map((p) => Math.min(Math.floor(p), size - 2));
+  const f = pos.map((p, c) => p - i0[c]);
+  const out: Rgb = [0, 0, 0];
+  for (let corner = 0; corner < 8; corner++) {
+    const dr = corner & 1;
+    const dg = (corner >> 1) & 1;
+    const db = (corner >> 2) & 1;
+    const w = (dr ? f[0] : 1 - f[0]) * (dg ? f[1] : 1 - f[1]) * (db ? f[2] : 1 - f[2]);
+    const e = (((i0[2] + db) * size + (i0[1] + dg)) * size + (i0[0] + dr)) * 3;
+    for (let c = 0; c < 3; c++) out[c] += w * table[e + c];
+  }
+  return out;
+}
+
+/**
+ * Parse a `.cube` 3D LUT into a `lut3d` op (mirrors Rust `parse_cube`).
+ * Supports TITLE, LUT_3D_SIZE, the standard 0..1 DOMAIN, comments.
+ */
+export function parseCube(text: string): GradeOp {
+  let size: number | null = null;
+  const table: number[] = [];
+  const lines = text.split(/\r?\n/);
+  for (let lineno = 0; lineno < lines.length; lineno++) {
+    const line = lines[lineno].trim();
+    if (!line || line.startsWith("#")) continue;
+    const parts = line.split(/\s+/);
+    const head = parts[0];
+    if (head === "TITLE") continue;
+    if (head === "LUT_3D_SIZE") {
+      const v = Number(parts[1]);
+      if (!Number.isInteger(v) || v < 2) throw new Error(`line ${lineno + 1}: bad LUT_3D_SIZE`);
+      size = v;
+    } else if (head === "DOMAIN_MIN" || head === "DOMAIN_MAX") {
+      const want = head === "DOMAIN_MIN" ? 0 : 1;
+      for (let k = 1; k <= 3; k++) {
+        if (Number(parts[k]) !== want) throw new Error(`line ${lineno + 1}: only the standard 0..1 domain is supported`);
+      }
+    } else if (head === "LUT_1D_SIZE") {
+      throw new Error(`line ${lineno + 1}: 1D LUTs are not supported`);
+    } else {
+      if (parts.length < 3) throw new Error(`line ${lineno + 1}: expected 3 values`);
+      for (let k = 0; k < 3; k++) {
+        const v = Number(parts[k]);
+        if (!Number.isFinite(v)) throw new Error(`line ${lineno + 1}: bad value`);
+        table.push(v);
+      }
+    }
+  }
+  if (size === null) throw new Error("missing LUT_3D_SIZE");
+  if (table.length !== size * size * size * 3) {
+    throw new Error(`expected ${size * size * size * 3} table values, got ${table.length}`);
+  }
+  return { type: "lut3d", size, table };
 }
 
 /**
@@ -265,11 +461,11 @@ export function compositeOver(
     const sa = clamp01(src.data[i + 3]) * op * gate;
     const ba = clamp01(dst.data[i + 3]);
     const oa = sa + ba * (1 - sa);
+    const cb: Rgb = [clamp01(dst.data[i]), clamp01(dst.data[i + 1]), clamp01(dst.data[i + 2])];
+    const cs: Rgb = [clamp01(src.data[i]), clamp01(src.data[i + 1]), clamp01(src.data[i + 2])];
+    const blended = blendRgb(mode, cb, cs);
     for (let c = 0; c < 3; c++) {
-      const cb = clamp01(dst.data[i + c]);
-      const cs = clamp01(src.data[i + c]);
-      dst.data[i + c] =
-        oa === 0 ? 0 : (sa * (1 - ba) * cs + sa * ba * blendChannel(mode, cb, cs) + (1 - sa) * ba * cb) / oa;
+      dst.data[i + c] = oa === 0 ? 0 : (sa * (1 - ba) * cs[c] + sa * ba * blended[c] + (1 - sa) * ba * cb[c]) / oa;
     }
     dst.data[i + 3] = oa;
   }

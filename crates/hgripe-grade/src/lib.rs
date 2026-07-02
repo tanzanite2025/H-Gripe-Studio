@@ -15,9 +15,9 @@ mod ops;
 mod surface;
 mod trc;
 
-pub use blend::{blend_channel, BlendMode};
+pub use blend::{blend_channel, blend_rgb, BlendMode};
 pub use composite::composite_over;
 pub use doc::{apply, GradeDoc, GradeLayer};
-pub use ops::{apply_op, CurveChannel, GradeOp, MonotoneSpline};
+pub use ops::{apply_op, parse_cube, CurveChannel, GradeOp, MonotoneSpline};
 pub use surface::{GradeSpace, GradeSurface};
 pub use trc::{trc_decode, trc_encode};
