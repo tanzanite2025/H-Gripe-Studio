@@ -75,6 +75,23 @@ fn test_doc(n_px: usize) -> GradeDoc {
                     },
                 ],
             },
+            // A spatial layer between per-pixel layers, so the parallel
+            // path has to break its band runs around it.
+            GradeLayer {
+                blend: BlendMode::Normal,
+                opacity: 0.7,
+                visible: true,
+                mask: None,
+                qualifier: None,
+                ops: vec![
+                    GradeOp::Sharpen { amount: 0.8 },
+                    GradeOp::Denoise { amount: 0.5 },
+                    GradeOp::FilmGrain {
+                        amount: 0.1,
+                        seed: 1234,
+                    },
+                ],
+            },
             GradeLayer {
                 blend: BlendMode::Color,
                 opacity: 0.6,

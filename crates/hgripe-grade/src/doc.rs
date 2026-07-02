@@ -74,20 +74,45 @@ fn apply_layer_masked(layer: &GradeLayer, surface: &mut GradeSurface, layer_mask
     composite_over(surface, &graded, layer.blend, layer.opacity, mask);
 }
 
-/// Row-parallel [`apply`]: the surface is split into horizontal bands, each
-/// band runs the whole document independently (every op and the compositing
-/// formula are per-pixel, so this is bit-identical to the serial path —
-/// asserted in `tests/parallel.rs`). Only compiled with the `parallel`
+/// Row-parallel [`apply`]: the surface is split into horizontal bands and
+/// consecutive runs of band-safe layers run over each band independently
+/// (every per-pixel op and the compositing formula are pixel-local, so this
+/// is bit-identical to the serial path — asserted in `tests/parallel.rs`).
+/// Layers containing a spatial op ([`crate::GradeOp::is_spatial`]) read
+/// neighbouring pixels or frame positions, so they run serially over the
+/// full frame between parallel runs. Only compiled with the `parallel`
 /// feature, per the design doc's dependency policy.
 #[cfg(feature = "parallel")]
 pub fn apply_parallel(doc: &GradeDoc, surface: &mut GradeSurface) {
-    use rayon::prelude::*;
-
-    let w = surface.w as usize;
-    let h = surface.h as usize;
-    if w == 0 || h == 0 {
+    if surface.w == 0 || surface.h == 0 {
         return;
     }
+    let mut run: Vec<&GradeLayer> = Vec::new();
+    for layer in &doc.layers {
+        if !layer.visible {
+            continue;
+        }
+        if layer.ops.iter().any(|op| op.is_spatial()) {
+            apply_run_parallel(&run, surface);
+            run.clear();
+            apply_layer(layer, surface);
+        } else {
+            run.push(layer);
+        }
+    }
+    apply_run_parallel(&run, surface);
+}
+
+// Run a batch of band-safe layers over the surface in horizontal bands.
+#[cfg(feature = "parallel")]
+fn apply_run_parallel(layers: &[&GradeLayer], surface: &mut GradeSurface) {
+    use rayon::prelude::*;
+
+    if layers.is_empty() {
+        return;
+    }
+    let w = surface.w as usize;
+    let h = surface.h as usize;
     let rows_per_band = h.div_ceil(rayon::current_num_threads()).max(1);
     let space = surface.space;
     surface
@@ -103,10 +128,7 @@ pub fn apply_parallel(doc: &GradeDoc, surface: &mut GradeSurface) {
                 data: chunk.to_vec(),
                 space,
             };
-            for layer in &doc.layers {
-                if !layer.visible {
-                    continue;
-                }
+            for layer in layers {
                 let band_mask = layer
                     .mask
                     .as_deref()
