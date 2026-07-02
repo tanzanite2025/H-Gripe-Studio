@@ -433,6 +433,17 @@ export const messages = {
   "mask.brushSize": { en: "Brush size", zh: "笔刷大小" },
   "mask.amount": { en: "Amount (px)", zh: "数量（px）" },
   "mask.wandTolerance": { en: "Wand tolerance", zh: "魔棒容差" },
+  "mask.pathMode": { en: "Path mode", zh: "路径模式" },
+  "mask.pathAdd": { en: "Add", zh: "添加" },
+  "mask.pathSubtract": { en: "Subtract", zh: "减去" },
+  "mask.pathIntersect": { en: "Intersect", zh: "交集" },
+  "mask.closePath": { en: "Close path ({count})", zh: "闭合路径（{count}）" },
+  "mask.cancelPath": { en: "Cancel", zh: "取消" },
+  "mask.paths": { en: "Paths ({count})", zh: "路径（{count}）" },
+  "mask.pathsEmpty": {
+    en: "none — pick Pen or Lasso and outline the subject",
+    zh: "无 —— 选择 钢笔 或 套索 并勾勒主体",
+  },
   "mask.previewApply": { en: "Apply {op}", zh: "应用{op}" },
   "mask.previewCancel": { en: "Cancel", zh: "取消" },
   "mask.previewBadge": { en: "live preview", zh: "实时预览" },
@@ -455,8 +466,8 @@ export const messages = {
   },
   "mask.notePrefix": { en: "Edits ({count}) are recorded as ", zh: "编辑（{count}）记录为 " },
   "mask.noteSuffix": {
-    en: " and applied by the backend on run. Point (SAM 2) prompts route auto modes to the SAM 2 segmenter — left-click includes, right-click excludes; Matting paints the trimap unknown band (resolved to soft alpha by ViTMatte / the builtin guided filter); pen/lasso are planned (greyed).",
-    zh: "，在运行时由后端应用。点 (SAM 2) 提示会把 auto 模式路由到 SAM 2 分割器——左键包含、右键排除；抠像 在三分图未知带上涂抹（由 ViTMatte / 内置引导滤波解算为软 alpha）；钢笔/套索 为计划中（置灰）。",
+    en: " and applied by the backend on run. Point (SAM 2) prompts route auto modes to the SAM 2 segmenter — left-click includes, right-click excludes; Matting paints the trimap unknown band (resolved to soft alpha by ViTMatte / the builtin guided filter); Pen/Lasso paths are rasterised and boolean-combined (add/subtract/intersect).",
+    zh: "，在运行时由后端应用。点 (SAM 2) 提示会把 auto 模式路由到 SAM 2 分割器——左键包含、右键排除；抠像 在三分图未知带上涂抹（由 ViTMatte / 内置引导滤波解算为软 alpha）；钢笔/套索 路径会被栅格化并布尔合并（添加/减去/交集）。",
   },
 } satisfies Record<string, { en: string; zh: string }>;
 

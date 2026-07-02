@@ -5,10 +5,10 @@
 // renderer-agnostic and side-effect-free means it is unit-testable on its own
 // and the React component stays a thin view. The committed `EditPaths` is what
 // gets written back onto the node's `edit_paths` param; the Rust backend
-// rasterises it on run (Phase 1 stores `paths`, applies `brush_strokes` +
-// `operations`).
+// rasterises it on run (pen/lasso `paths`, `brush_strokes`, `matte_strokes`
+// and the queued `operations`).
 
-import type { BrushStroke, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import type { BrushStroke, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
 import { emptyEditPaths } from "../types/production";
 
 export interface EditState {
@@ -83,6 +83,15 @@ export function addMatteStroke(state: EditState, stroke: BrushStroke): EditState
   return commit(state, {
     ...state.current,
     matte_strokes: [...state.current.matte_strokes, stroke],
+  });
+}
+
+/** Append a closed pen / lasso vector path (rasterised by the backend on run). */
+export function addPath(state: EditState, path: EditPath): EditState {
+  if (path.points.length < 3) return state;
+  return commit(state, {
+    ...state.current,
+    paths: [...state.current.paths, path],
   });
 }
 

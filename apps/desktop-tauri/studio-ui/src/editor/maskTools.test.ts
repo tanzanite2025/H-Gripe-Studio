@@ -14,9 +14,10 @@ describe("mask tool registry", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("keeps pen / lasso planned (greyed) per the contract", () => {
+  it("ships pen / lasso as ready path tools", () => {
     for (const id of ["pen", "lasso"]) {
-      expect(maskTool(id)?.status, id).toBe("planned");
+      expect(maskTool(id)?.status, id).toBe("ready");
+      expect(maskTool(id)?.kind, id).toBe("path");
     }
   });
 
@@ -43,8 +44,10 @@ describe("mask tool registry", () => {
     expect(PLANNED_TOOLS.every((t) => t.status === "planned")).toBe(true);
     expect(READY_TOOLS.length + PLANNED_TOOLS.length).toBe(MASK_TOOLS.length);
     const firstPlanned = MASK_TOOLS.findIndex((t) => t.status === "planned");
-    const lastReady = MASK_TOOLS.map((t) => t.status).lastIndexOf("ready");
-    expect(lastReady).toBeLessThan(firstPlanned);
+    if (firstPlanned !== -1) {
+      const lastReady = MASK_TOOLS.map((t) => t.status).lastIndexOf("ready");
+      expect(lastReady).toBeLessThan(firstPlanned);
+    }
   });
 
   it("the default tool is ready and selectable", () => {

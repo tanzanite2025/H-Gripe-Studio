@@ -3,6 +3,7 @@ import {
   addBrushStroke,
   addMatteStroke,
   addOperation,
+  addPath,
   addPoint,
   canRedo,
   canUndo,
@@ -77,6 +78,41 @@ describe("maskEdit reducer-style helpers", () => {
     expect(isEmpty(s.current)).toBe(false);
     s = undo(s);
     expect(s.current.points).toEqual([{ x: 120, y: 80, label: 1 }]);
+  });
+
+  it("records closed pen / lasso paths and counts them", () => {
+    let s = initEditState();
+    s = addPath(s, {
+      id: "p1",
+      mode: "add",
+      tool: "lasso",
+      closed: true,
+      points: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+      ],
+    });
+    expect(s.current.paths).toHaveLength(1);
+    expect(editCount(s.current)).toBe(1);
+    expect(isEmpty(s.current)).toBe(false);
+    s = undo(s);
+    expect(s.current.paths).toHaveLength(0);
+  });
+
+  it("ignores degenerate paths with fewer than three anchors", () => {
+    let s = initEditState();
+    s = addPath(s, {
+      id: "p1",
+      mode: "add",
+      tool: "pen",
+      closed: true,
+      points: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+      ],
+    });
+    expect(s.current.paths).toHaveLength(0);
   });
 
   it("migrates legacy [x, y] points to positive prompts on load", () => {

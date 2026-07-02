@@ -28,8 +28,11 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
     label: "抠像",
     hint: "在 头发 / 绒毛 / 玻璃 上涂出三分图未知带——抠像器会将其解算为软 alpha。",
   },
-  pen: { label: "钢笔", hint: "Phase 3 —— 贝塞尔路径，栅格化 + 布尔合并。" },
-  lasso: { label: "套索", hint: "Phase 3 —— 自由手绘路径选择。" },
+  pen: {
+    label: "钢笔",
+    hint: "点击放置锚点；点击第一个锚点（或 闭合路径）即可闭合——运行时栅格化并布尔合并。",
+  },
+  lasso: { label: "套索", hint: "围绕主体自由拖拽一圈；松开后闭合为一条路径选区。" },
 };
 
 /** Return the tool's `label` / `hint` translated into `lang` (English fallback). */

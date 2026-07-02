@@ -1,9 +1,8 @@
 // Mask-Edit tool registry (Subject Mask card).
 //
 // The Mask-Edit modal renders its toolbar from this registry rather than
-// hard-coding buttons, so Phase 1 can ship the morphology/brush set while
-// pen/lasso/matting stay visibly stubbed. A `planned` tool renders greyed
-// ("coming soon") and is not selectable. This mirrors the frozen contract in
+// hard-coding buttons. A `planned` tool renders greyed ("coming soon") and is
+// not selectable. This mirrors the frozen contract in
 // `docs/cards/subject-mask-matte.md` (§ "Mask-Edit tool registry").
 
 import type { ExecLane } from "./execLanes";
@@ -25,7 +24,9 @@ export type ToolKind =
   | "global"
   // Drag a marquee that records an `operations` entry with a rect region.
   | "marquee"
-  // Phase 3+: places vector anchor points (stored, not rasterised in Phase 1).
+  // Vector path selection: pen (click anchors, bezier-capable) / lasso
+  // (freehand). Recorded as an `EditPath`; the backend rasterises the closed
+  // polygon and boolean-combines it with the mask (add/subtract/intersect).
   | "path";
 
 export interface MaskTool {
@@ -64,8 +65,8 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "shrink", label: "Shrink", status: "ready", kind: "global", lane: "preview", hint: "Erode the mask by N px." },
   { id: "feather", label: "Feather", status: "ready", kind: "global", lane: "preview", hint: "Gaussian-feather the mask edge." },
   { id: "matting", label: "Matting", status: "ready", kind: "matte", lane: "render", hint: "Paint the trimap unknown band over hair / fur / glass — the matter resolves it into soft alpha." },
-  { id: "pen", label: "Pen", status: "planned", kind: "path", lane: "interactive", hint: "Phase 3 — bezier path, rasterised + boolean-combined." },
-  { id: "lasso", label: "Lasso", status: "planned", kind: "path", lane: "interactive", hint: "Phase 3 — freehand path selection." },
+  { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
+  { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
 ] as const;
 
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");

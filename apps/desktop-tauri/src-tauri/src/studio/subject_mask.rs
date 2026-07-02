@@ -365,8 +365,12 @@ fn load_mask_sized(
 
 // --- pure mask operations (unit-tested without disk) -----------------------
 
-/// Apply the manual edits recorded in `edit_paths`: magic-wand flood selections,
-/// brush / eraser strokes, and a whole-mask invert. Unknown entries are ignored.
+/// Apply the manual edits recorded in `edit_paths`: pen / lasso vector paths
+/// (rasterised and boolean-combined), magic-wand flood selections, brush /
+/// eraser strokes, and the queued marquee / morphology operations. Unknown
+/// entries are ignored. Order mirrors the Mask-Edit modal's proxy preview
+/// (`buildProxyMask`): geometry first (paths, then strokes), then the queued
+/// `operations` in the order they were recorded.
 fn apply_edit_paths(
     image: &RgbaImage,
     mask: &mut GrayImage,
@@ -377,6 +381,15 @@ fn apply_edit_paths(
     let Some(value) = parse_edit_paths(edit_paths) else {
         return;
     };
+
+    for path in parse_mask_paths(&value) {
+        apply_mask_path(mask, &path);
+        operations.push(json!({
+            "type": format!("path_{}", path.mode.as_str()),
+            "tool": path.tool,
+            "points": path.polygon.len(),
+        }));
+    }
 
     for op in value
         .get("ops")
@@ -431,6 +444,125 @@ fn apply_edit_paths(
             "type": if subtract { "brush_subtract" } else { "brush_add" },
             "radius": radius,
         }));
+    }
+
+    for op in value
+        .get("operations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        apply_queued_operation(image, mask, op, default_tolerance, operations);
+    }
+}
+
+/// Apply one queued `operations` entry recorded by the Mask-Edit modal
+/// (`MaskOperation`: `type` + optional `amount` scalar + optional `region`).
+fn apply_queued_operation(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    op: &Value,
+    default_tolerance: i32,
+    operations: &mut Vec<Value>,
+) {
+    let amount = op.get("amount").and_then(Value::as_f64);
+    let region: Vec<f64> = op
+        .get("region")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_f64)
+        .collect();
+    match op.get("type").and_then(Value::as_str) {
+        Some("wand") => {
+            // Region carries the `[x, y]` seed; `amount` is the tolerance.
+            let (Some(&x), Some(&y)) = (region.first(), region.get(1)) else {
+                return;
+            };
+            if x < 0.0 || y < 0.0 {
+                return;
+            }
+            let tolerance = amount
+                .map(|t| (t as i64).clamp(0, 255) as i32)
+                .unwrap_or(default_tolerance);
+            wand_select(image, mask, x as u32, y as u32, tolerance);
+            operations.push(json!({ "type": "wand", "tolerance": tolerance }));
+        }
+        Some(kind @ ("rect" | "ellipse")) => {
+            if region.len() < 4 {
+                return;
+            }
+            fill_marquee(mask, kind, &region);
+            operations.push(json!({ "type": kind }));
+        }
+        Some("invert") => {
+            invert(mask);
+            operations.push(json!({ "type": "invert" }));
+        }
+        Some("fill_holes") => {
+            fill_holes(mask);
+            operations.push(json!({ "type": "fill_holes" }));
+        }
+        Some("grow") => {
+            let px = amount.unwrap_or(0.0).max(0.0) as u32;
+            if px > 0 {
+                *mask = dilate(mask, px);
+                operations.push(json!({ "type": "grow", "px": px }));
+            }
+        }
+        Some("shrink") => {
+            let px = amount.unwrap_or(0.0).max(0.0) as u32;
+            if px > 0 {
+                *mask = erode(mask, px);
+                operations.push(json!({ "type": "shrink", "px": px }));
+            }
+        }
+        Some("feather") => {
+            let px = amount.unwrap_or(0.0).max(0.0);
+            if px > 0.0 {
+                *mask = imageops::blur(mask, px as f32);
+                operations.push(json!({ "type": "feather", "px": px }));
+            }
+        }
+        Some("smooth") => {
+            let px = amount.unwrap_or(0.0).max(0.0) as u32;
+            if px > 0 {
+                // Morphological open (despeckle) then close (fill nicks).
+                *mask = dilate(&erode(mask, px), px);
+                *mask = erode(&dilate(mask, px), px);
+                operations.push(json!({ "type": "smooth", "px": px }));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Fill a marquee `rect` / `ellipse` region (`[x1, y1, x2, y2]` image-space).
+fn fill_marquee(mask: &mut GrayImage, kind: &str, region: &[f64]) {
+    let (width, height) = mask.dimensions();
+    let x1 = region[0].min(region[2]);
+    let y1 = region[1].min(region[3]);
+    let x2 = region[0].max(region[2]);
+    let y2 = region[1].max(region[3]);
+    let cx = (x1 + x2) / 2.0;
+    let cy = (y1 + y2) / 2.0;
+    let rx = ((x2 - x1) / 2.0).max(0.5);
+    let ry = ((y2 - y1) / 2.0).max(0.5);
+    let px0 = x1.floor().max(0.0) as u32;
+    let py0 = y1.floor().max(0.0) as u32;
+    let px1 = (x2.ceil() as i64).clamp(0, width as i64 - 1) as u32;
+    let py1 = (y2.ceil() as i64).clamp(0, height as i64 - 1) as u32;
+    for y in py0..=py1 {
+        for x in px0..=px1 {
+            if kind == "ellipse" {
+                let nx = (x as f64 - cx) / rx;
+                let ny = (y as f64 - cy) / ry;
+                if nx * nx + ny * ny > 1.0 {
+                    continue;
+                }
+            }
+            mask.put_pixel(x, y, Luma([MASK_ON]));
+        }
     }
 }
 
@@ -716,6 +848,204 @@ fn parse_point_prompts(edit_paths: Option<&Value>) -> Vec<PointPrompt> {
             _ => None,
         })
         .collect()
+}
+
+/// How a rasterised pen / lasso path combines with the mask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathMode {
+    Add,
+    Subtract,
+    Intersect,
+}
+
+impl PathMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            PathMode::Add => "add",
+            PathMode::Subtract => "subtract",
+            PathMode::Intersect => "intersect",
+        }
+    }
+}
+
+/// A parsed pen / lasso vector path, flattened to a closed polygon.
+#[derive(Debug)]
+struct MaskPath {
+    mode: PathMode,
+    tool: String,
+    polygon: Vec<(f32, f32)>,
+}
+
+/// One anchor of a pen path: the point plus optional bezier control handles.
+#[derive(Debug, Clone, Copy)]
+struct PathAnchor {
+    x: f32,
+    y: f32,
+    /// Incoming control handle (the curve arrives through this point).
+    handle_in: Option<(f32, f32)>,
+    /// Outgoing control handle (the curve leaves through this point).
+    handle_out: Option<(f32, f32)>,
+}
+
+/// Parse `edit_paths.paths` (pen / lasso vector paths) into flattened closed
+/// polygons ready to rasterise. A path needs at least 3 anchors to enclose an
+/// area; the polygon is always closed for the fill (a lasso releases into a
+/// closed loop, a pen path closes back to its first anchor).
+fn parse_mask_paths(value: &Value) -> Vec<MaskPath> {
+    value
+        .get("paths")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|path| {
+            let anchors: Vec<PathAnchor> = path
+                .get("points")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(parse_path_anchor)
+                .collect();
+            if anchors.len() < 3 {
+                return None;
+            }
+            let mode = match path.get("mode").and_then(Value::as_str) {
+                Some("subtract") => PathMode::Subtract,
+                Some("intersect") => PathMode::Intersect,
+                _ => PathMode::Add,
+            };
+            let tool = path
+                .get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or("pen")
+                .to_string();
+            Some(MaskPath {
+                mode,
+                tool,
+                polygon: flatten_path(&anchors),
+            })
+        })
+        .collect()
+}
+
+fn parse_path_anchor(value: &Value) -> Option<PathAnchor> {
+    let x = json_f32(value.get("x"))?;
+    let y = json_f32(value.get("y"))?;
+    let handle = |key: &str| -> Option<(f32, f32)> {
+        let pair = value.get(key)?.as_array()?;
+        Some((json_f32(pair.first())?, json_f32(pair.get(1))?))
+    };
+    Some(PathAnchor {
+        x,
+        y,
+        handle_in: handle("in"),
+        handle_out: handle("out"),
+    })
+}
+
+/// Flatten the anchor loop into a polygon. A segment whose endpoints carry
+/// bezier control handles (`out` on the start / `in` on the end) is sampled as
+/// a cubic bezier; a handle-less segment is a straight line. The closing
+/// segment (last anchor back to the first) is included so the fill always sees
+/// a closed loop.
+fn flatten_path(anchors: &[PathAnchor]) -> Vec<(f32, f32)> {
+    let mut polygon = Vec::new();
+    for i in 0..anchors.len() {
+        let a = anchors[i];
+        let b = anchors[(i + 1) % anchors.len()];
+        polygon.push((a.x, a.y));
+        if a.handle_out.is_none() && b.handle_in.is_none() {
+            continue;
+        }
+        let c1 = a.handle_out.unwrap_or((a.x, a.y));
+        let c2 = b.handle_in.unwrap_or((b.x, b.y));
+        let chord = ((b.x - a.x).hypot(b.y - a.y)
+            + (c1.0 - a.x).hypot(c1.1 - a.y)
+            + (c2.0 - b.x).hypot(c2.1 - b.y)) as usize;
+        let steps = chord.clamp(8, 128);
+        for s in 1..steps {
+            let t = s as f32 / steps as f32;
+            polygon.push(cubic_bezier(a, c1, c2, b, t));
+        }
+    }
+    polygon
+}
+
+fn cubic_bezier(
+    a: PathAnchor,
+    c1: (f32, f32),
+    c2: (f32, f32),
+    b: PathAnchor,
+    t: f32,
+) -> (f32, f32) {
+    let u = 1.0 - t;
+    let (uu, tt) = (u * u, t * t);
+    let (uuu, ttt) = (uu * u, tt * t);
+    (
+        uuu * a.x + 3.0 * uu * t * c1.0 + 3.0 * u * tt * c2.0 + ttt * b.x,
+        uuu * a.y + 3.0 * uu * t * c1.1 + 3.0 * u * tt * c2.1 + ttt * b.y,
+    )
+}
+
+/// Rasterise the flattened polygon (even-odd scanline fill at pixel centres)
+/// and boolean-combine it with the mask: `add` turns the interior on,
+/// `subtract` turns it off, `intersect` keeps only what is already selected
+/// inside it (everything outside goes off).
+fn apply_mask_path(mask: &mut GrayImage, path: &MaskPath) {
+    let (width, height) = mask.dimensions();
+    let polygon = &path.polygon;
+    if polygon.len() < 3 {
+        return;
+    }
+    for y in 0..height {
+        let scan = y as f32 + 0.5;
+        // Even-odd rule: collect the x-crossings of every polygon edge with
+        // this scanline, sort them, and fill between alternating pairs.
+        let mut crossings: Vec<f32> = Vec::new();
+        for i in 0..polygon.len() {
+            let (x0, y0) = polygon[i];
+            let (x1, y1) = polygon[(i + 1) % polygon.len()];
+            if (y0 <= scan) == (y1 <= scan) {
+                continue;
+            }
+            crossings.push(x0 + (scan - y0) / (y1 - y0) * (x1 - x0));
+        }
+        crossings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mut inside_spans: Vec<(u32, u32)> = Vec::new();
+        for pair in crossings.chunks_exact(2) {
+            let start = pair[0].max(0.0).round() as i64;
+            let end = (pair[1].round() as i64 - 1).min(width as i64 - 1);
+            if end >= start && start < width as i64 {
+                inside_spans.push((start as u32, end as u32));
+            }
+        }
+        match path.mode {
+            PathMode::Add | PathMode::Subtract => {
+                let value = if path.mode == PathMode::Add {
+                    MASK_ON
+                } else {
+                    MASK_OFF
+                };
+                for &(start, end) in &inside_spans {
+                    for x in start..=end {
+                        mask.put_pixel(x, y, Luma([value]));
+                    }
+                }
+            }
+            PathMode::Intersect => {
+                let mut inside = vec![false; width as usize];
+                for &(start, end) in &inside_spans {
+                    for x in start..=end {
+                        inside[x as usize] = true;
+                    }
+                }
+                for x in 0..width {
+                    if !inside[x as usize] {
+                        mask.put_pixel(x, y, Luma([MASK_OFF]));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Trimap unknown-band strokes painted by the Mask-Edit "Matting" tool, read
@@ -1028,6 +1358,168 @@ mod tests {
         assert_eq!(mask.get_pixel(1, 1).0[0], MASK_ON);
         assert_eq!(mask.get_pixel(2, 2).0[0], MASK_ON);
         assert_eq!(ops.len(), 1);
+    }
+
+    #[test]
+    fn lasso_path_rasterises_as_filled_polygon() {
+        // A straight-edged rectangle lasso [2,2]..[7,6] on a 10x10 mask.
+        let value = json!({
+            "paths": [{
+                "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
+                "points": [
+                    { "x": 2, "y": 2 }, { "x": 8, "y": 2 },
+                    { "x": 8, "y": 7 }, { "x": 2, "y": 7 }
+                ]
+            }]
+        });
+        let mut mask = solid(10, 10, MASK_OFF);
+        let mut ops = Vec::new();
+        apply_edit_paths(
+            &RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255])),
+            &mut mask,
+            Some(&value),
+            24,
+            &mut ops,
+        );
+        assert_eq!(mask.get_pixel(4, 4).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_OFF);
+        assert_eq!(mask.get_pixel(9, 9).0[0], MASK_OFF);
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["type"], "path_add");
+        assert_eq!(ops[0]["tool"], "lasso");
+    }
+
+    #[test]
+    fn subtract_and_intersect_paths_boolean_combine() {
+        let mut mask = solid(10, 10, MASK_ON);
+        let subtract = json!({
+            "paths": [{
+                "id": "p1", "mode": "subtract", "tool": "lasso", "closed": true,
+                "points": [
+                    { "x": 0, "y": 0 }, { "x": 5, "y": 0 },
+                    { "x": 5, "y": 10 }, { "x": 0, "y": 10 }
+                ]
+            }]
+        });
+        let image = RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255]));
+        apply_edit_paths(&image, &mut mask, Some(&subtract), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(2, 5).0[0], MASK_OFF);
+        assert_eq!(mask.get_pixel(7, 5).0[0], MASK_ON);
+
+        let intersect = json!({
+            "paths": [{
+                "id": "p2", "mode": "intersect", "tool": "lasso", "closed": true,
+                "points": [
+                    { "x": 6, "y": 0 }, { "x": 10, "y": 0 },
+                    { "x": 10, "y": 4 }, { "x": 6, "y": 4 }
+                ]
+            }]
+        });
+        apply_edit_paths(&image, &mut mask, Some(&intersect), 24, &mut Vec::new());
+        // Only the on-pixels inside the intersect region survive.
+        assert_eq!(mask.get_pixel(7, 2).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(7, 8).0[0], MASK_OFF);
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_OFF);
+    }
+
+    #[test]
+    fn pen_path_with_bezier_handles_bulges_past_the_chord() {
+        // A triangle whose top edge bows upward via control handles: the curve
+        // must select pixels above the straight chord between its anchors.
+        let value = json!({
+            "paths": [{
+                "id": "p1", "mode": "add", "tool": "pen", "closed": true,
+                "points": [
+                    { "x": 4, "y": 20, "out": [4, 2] },
+                    { "x": 26, "y": 20, "in": [26, 2] },
+                    { "x": 15, "y": 28 }
+                ]
+            }]
+        });
+        let mut mask = solid(30, 30, MASK_OFF);
+        apply_edit_paths(
+            &RgbaImage::from_pixel(30, 30, Rgba([0, 0, 0, 255])),
+            &mut mask,
+            Some(&value),
+            24,
+            &mut Vec::new(),
+        );
+        // Above the chord y=20 (the bezier bulge) is selected...
+        assert_eq!(mask.get_pixel(15, 10).0[0], MASK_ON);
+        // ...the interior below the chord too, and the far corner is not.
+        assert_eq!(mask.get_pixel(15, 22).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_OFF);
+    }
+
+    #[test]
+    fn open_or_degenerate_paths_are_ignored_below_three_anchors() {
+        let value = json!({
+            "paths": [{
+                "id": "p1", "mode": "add", "tool": "pen", "closed": false,
+                "points": [ { "x": 1, "y": 1 }, { "x": 8, "y": 8 } ]
+            }]
+        });
+        let mut mask = solid(10, 10, MASK_OFF);
+        let mut ops = Vec::new();
+        apply_edit_paths(
+            &RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255])),
+            &mut mask,
+            Some(&value),
+            24,
+            &mut ops,
+        );
+        assert_eq!(mask_coverage(&mask), 0.0);
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn queued_operations_apply_marquee_and_morphology() {
+        // The Mask-Edit modal records `operations` (type/amount/region): a rect
+        // marquee fill, then a whole-mask invert.
+        let value = json!({
+            "operations": [
+                { "type": "rect", "region": [2, 2, 8, 7] },
+                { "type": "invert" }
+            ]
+        });
+        let mut mask = solid(10, 10, MASK_OFF);
+        let mut ops = Vec::new();
+        apply_edit_paths(
+            &RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255])),
+            &mut mask,
+            Some(&value),
+            24,
+            &mut ops,
+        );
+        // Rect filled then inverted: inside off, outside on.
+        assert_eq!(mask.get_pixel(4, 4).0[0], MASK_OFF);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
+        assert_eq!(ops.len(), 2);
+    }
+
+    #[test]
+    fn queued_wand_operation_reads_region_seed_and_amount_tolerance() {
+        // Left half red, right half blue (as in the direct wand test), recorded
+        // in the modal's `operations` shape: region = seed, amount = tolerance.
+        let mut image = RgbaImage::new(4, 2);
+        for y in 0..2 {
+            for x in 0..4 {
+                let colour = if x < 2 {
+                    Rgba([200, 0, 0, 255])
+                } else {
+                    Rgba([0, 0, 200, 255])
+                };
+                image.put_pixel(x, y, colour);
+            }
+        }
+        let value = json!({
+            "operations": [ { "type": "wand", "amount": 20, "region": [0, 0] } ]
+        });
+        let mut mask = solid(4, 2, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut Vec::new());
+        assert_eq!(mask.get_pixel(1, 1).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(3, 1).0[0], MASK_OFF);
     }
 
     #[test]

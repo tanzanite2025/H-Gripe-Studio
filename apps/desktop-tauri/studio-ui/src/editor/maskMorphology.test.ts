@@ -126,6 +126,47 @@ describe("buildProxyMask", () => {
     expect(area(grown.mask)).toBeGreaterThan(area(base.mask));
   });
 
+  it("rasterises pen / lasso paths and boolean-combines by mode", () => {
+    const square = (x0: number, y0: number, x1: number, y1: number) => [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ];
+    const added: EditPaths = {
+      ...emptyEditPaths(),
+      paths: [{ id: "p1", mode: "add", tool: "lasso", closed: true, points: square(120, 120, 840, 520) }],
+    };
+    const { mask, scale } = buildProxyMask(added, { w: 960, h: 640 }, { proxyWidth: 320 });
+    const at = (x: number, y: number) => mask.data[Math.round(y * scale) * mask.w + Math.round(x * scale)];
+    expect(at(480, 320)).toBe(255); // interior on
+    expect(at(30, 30)).toBe(0); // exterior off
+
+    const subtracted: EditPaths = {
+      ...added,
+      paths: [
+        ...added.paths,
+        { id: "p2", mode: "subtract", tool: "pen", closed: true, points: square(400, 250, 560, 390) },
+      ],
+    };
+    const sub = buildProxyMask(subtracted, { w: 960, h: 640 }, { proxyWidth: 320 });
+    const atSub = (x: number, y: number) => sub.mask.data[Math.round(y * sub.scale) * sub.mask.w + Math.round(x * sub.scale)];
+    expect(atSub(480, 320)).toBe(0); // carved out
+    expect(atSub(200, 200)).toBe(255); // rest of the add survives
+
+    const intersected: EditPaths = {
+      ...added,
+      paths: [
+        ...added.paths,
+        { id: "p3", mode: "intersect", tool: "lasso", closed: true, points: square(120, 120, 480, 320) },
+      ],
+    };
+    const inter = buildProxyMask(intersected, { w: 960, h: 640 }, { proxyWidth: 320 });
+    const atInter = (x: number, y: number) => inter.mask.data[Math.round(y * inter.scale) * inter.mask.w + Math.round(x * inter.scale)];
+    expect(atInter(200, 200)).toBe(255); // inside both
+    expect(atInter(700, 450)).toBe(0); // inside add only
+  });
+
   it("skips wand ops (no source pixels on the proxy)", () => {
     const edits: EditPaths = {
       ...emptyEditPaths(),
