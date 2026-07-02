@@ -2,23 +2,37 @@
 // the kernel and asserted within its tolerance. The studio-ui mirror runs
 // the exact same files (`gradeKernel.golden.test.ts`), so the two
 // implementations are pinned to one spec instead of hand-mirrored.
+//
+// Two file kinds: `composite` cases exercise the blend/composite primitive
+// directly; `doc` cases run a whole `GradeDoc` over an input surface.
 
-use hgripe_grade::{composite_over, BlendMode, GradeSpace, GradeSurface};
+use hgripe_grade::{apply, composite_over, BlendMode, GradeDoc, GradeSpace, GradeSurface};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-struct GoldenFile {
-    cases: Vec<GoldenCase>,
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum GoldenFile {
+    Composite { cases: Vec<CompositeCase> },
+    Doc { cases: Vec<DocCase> },
 }
 
 #[derive(Deserialize)]
-struct GoldenCase {
+struct CompositeCase {
     name: String,
     mode: BlendMode,
     opacity: f32,
     mask: Option<Vec<f32>>,
     backdrop: GoldenSurface,
     source: GoldenSurface,
+    expected: Vec<f32>,
+    tolerance: f32,
+}
+
+#[derive(Deserialize)]
+struct DocCase {
+    name: String,
+    doc: GradeDoc,
+    input: GoldenSurface,
     expected: Vec<f32>,
     tolerance: f32,
 }
@@ -42,6 +56,16 @@ impl GoldenSurface {
     }
 }
 
+fn assert_close(name: &str, got: &[f32], want: &[f32], tolerance: f32) {
+    assert_eq!(got.len(), want.len(), "{name}: length");
+    for (i, (&g, &w)) in got.iter().zip(want).enumerate() {
+        assert!(
+            (g - w).abs() <= tolerance,
+            "{name}: sample {i}: got {g}, want {w} (±{tolerance})"
+        );
+    }
+}
+
 #[test]
 fn golden_vectors() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens");
@@ -53,19 +77,23 @@ fn golden_vectors() {
         }
         let file: GoldenFile =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("read golden")).expect("parse golden");
-        for case in file.cases {
-            let mut dst = case.backdrop.surface();
-            composite_over(&mut dst, &case.source.surface(), case.mode, case.opacity, case.mask.as_deref());
-            assert_eq!(dst.data.len(), case.expected.len(), "{}: length", case.name);
-            for (i, (&got, &want)) in dst.data.iter().zip(&case.expected).enumerate() {
-                assert!(
-                    (got - want).abs() <= case.tolerance,
-                    "{}: sample {i}: got {got}, want {want} (±{})",
-                    case.name,
-                    case.tolerance
-                );
+        match file {
+            GoldenFile::Composite { cases } => {
+                for case in cases {
+                    let mut dst = case.backdrop.surface();
+                    composite_over(&mut dst, &case.source.surface(), case.mode, case.opacity, case.mask.as_deref());
+                    assert_close(&case.name, &dst.data, &case.expected, case.tolerance);
+                    ran += 1;
+                }
             }
-            ran += 1;
+            GoldenFile::Doc { cases } => {
+                for case in cases {
+                    let mut surface = case.input.surface();
+                    apply(&case.doc, &mut surface);
+                    assert_close(&case.name, &surface.data, &case.expected, case.tolerance);
+                    ran += 1;
+                }
+            }
         }
     }
     assert!(ran > 0, "no golden cases found in {}", dir.display());

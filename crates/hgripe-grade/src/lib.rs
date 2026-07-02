@@ -10,8 +10,14 @@
 
 mod blend;
 mod composite;
+mod doc;
+mod ops;
 mod surface;
+mod trc;
 
 pub use blend::{blend_channel, BlendMode};
 pub use composite::composite_over;
+pub use doc::{apply, GradeDoc, GradeLayer};
+pub use ops::{apply_op, CurveChannel, GradeOp, MonotoneSpline};
 pub use surface::{GradeSpace, GradeSurface};
+pub use trc::{trc_decode, trc_encode};
