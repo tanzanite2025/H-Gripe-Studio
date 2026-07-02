@@ -15,6 +15,7 @@ function opLabel(op: EditOp): string {
     return `transform Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}${scale !== 1 ? ` ×${scale}` : ""}${rotate !== 0 ? ` ∠${rotate}°` : ""}`;
   }
   if (op.type === "fill") return `fill ${op.mode === "subtract" ? "subtract" : "add"} ${op.amount ?? 100}%`;
+  if (op.type === "heal") return `heal r${op.amount ?? 8} (${op.points?.length ?? 0})`;
   return op.type;
 }
 

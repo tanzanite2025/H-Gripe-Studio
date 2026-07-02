@@ -8,6 +8,7 @@ import {
   erode,
   feather,
   fillHoles,
+  healStroke,
   invert,
   isPreviewableOp,
   PREVIEWABLE_OP_IDS,
@@ -47,6 +48,22 @@ function filledSquare(size: number, inset: number): ProxyMask {
 }
 
 describe("maskMorphology preview primitives", () => {
+  it("healStroke rebuilds the painted region from its surroundings", () => {
+    // A solid mask with a dark blemish in the middle: healing over it should
+    // pull the region back toward the surrounding on-value.
+    const mask = filledSquare(31, 0);
+    stampDisc(mask, 15, 15, 4, 0);
+    expect(mask.data[15 * 31 + 15]).toBe(0);
+    healStroke(mask, { type: "heal", amount: 6, points: [[15, 15]] }, 1);
+    expect(mask.data[15 * 31 + 15]).toBeGreaterThan(200);
+    // Pixels outside the stroke coverage stay untouched.
+    expect(mask.data[2 * 31 + 2]).toBe(255);
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    healStroke(mask, { type: "heal", amount: 6, points: [] }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
   it("stampDisc fills a clamped circular region", () => {
     const mask = createProxyMask(20, 20);
     stampDisc(mask, 10, 10, 5, 255);
