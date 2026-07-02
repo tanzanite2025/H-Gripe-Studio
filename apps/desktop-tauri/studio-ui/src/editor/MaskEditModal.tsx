@@ -25,13 +25,30 @@ import {
 } from "./maskEdit";
 import type {
   BrushStroke,
-  EditPath,
   EditPathPoint,
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
 import { maskEditReducer, type FillDraft } from "./maskEditModal/actions";
+import {
+  paintAnchorDraft,
+  paintCloneSource,
+  paintDragArrow,
+  paintLassoLoop,
+  paintMarquee,
+  paintPath,
+  paintPenAnchors,
+  paintPreviewOverlay,
+  paintQuickMask,
+  paintRetouchBand,
+  paintSamPoints,
+  paintShapeDraft,
+  paintStroke,
+  retouchBandColor,
+} from "./maskEditModal/stagePainter";
+import { PanelDock } from "./maskEditModal/PanelDock";
+import "./maskEditModal/maskEditModal.css";
 import { MaskToolbar } from "./maskEditModal/MaskToolbar";
 import { MaskStage } from "./maskEditModal/MaskStage";
 import { ToolOptionsPanel } from "./maskEditModal/ToolOptionsPanel";
@@ -452,71 +469,6 @@ export function MaskEditModal({
       ctx.fillRect(0, 0, dims.w, dims.h);
     }
 
-    const paintStroke = (
-      s: { mode: string; radius: number; points: [number, number][]; hardness?: number; flow?: number },
-      kind: "paint" | "matte" = "paint",
-    ) => {
-      ctx.strokeStyle =
-        kind === "matte"
-          ? "rgba(244,196,84,0.6)"
-          : s.mode === "subtract"
-            ? "rgba(244,98,98,0.55)"
-            : "rgba(86,168,255,0.55)";
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.lineWidth = s.radius * 2;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      // Soft strokes read as a blurred, flow-capped band (advisory overlay;
-      // the proxy / backend stamps are the authoritative soft rasterisation).
-      const hardness = s.hardness ?? 1;
-      const flow = s.flow ?? 1;
-      ctx.save();
-      if (hardness < 1) ctx.filter = `blur(${((1 - hardness) * s.radius) / 2}px)`;
-      if (flow < 1) ctx.globalAlpha = Math.max(0.15, flow);
-      if (s.points.length === 1) {
-        const [x, y] = s.points[0];
-        ctx.beginPath();
-        ctx.arc(x, y, s.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        return;
-      }
-      ctx.beginPath();
-      s.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      ctx.stroke();
-      ctx.restore();
-    };
-
-    // Committed pen / lasso vector paths: translucent fill + outline (bezier
-    // segments where control handles are recorded).
-    const paintPath = (p: EditPath) => {
-      if (p.points.length < 2) return;
-      ctx.beginPath();
-      ctx.moveTo(p.points[0].x, p.points[0].y);
-      for (let i = 1; i <= p.points.length; i++) {
-        const prev = p.points[i - 1];
-        const next = p.points[i % p.points.length];
-        if (prev.out || next.in) {
-          const c1 = prev.out ?? [prev.x, prev.y];
-          const c2 = next.in ?? [next.x, next.y];
-          ctx.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], next.x, next.y);
-        } else {
-          ctx.lineTo(next.x, next.y);
-        }
-      }
-      ctx.closePath();
-      ctx.fillStyle =
-        p.mode === "subtract"
-          ? "rgba(244,98,98,0.3)"
-          : p.mode === "intersect"
-            ? "rgba(190,120,255,0.3)"
-            : "rgba(86,168,255,0.3)";
-      ctx.strokeStyle = p.mode === "subtract" ? "rgba(244,98,98,0.9)" : p.mode === "intersect" ? "rgba(190,120,255,0.9)" : "rgba(86,168,255,0.9)";
-      ctx.lineWidth = 1.5;
-      ctx.fill("evenodd");
-      ctx.stroke();
-    };
-
     // While previewing a morphology op, the proxy overlay already folds in the
     // brush strokes (transformed), so skip the raw stroke overlay to avoid a
     // confusing double-draw; matte strokes / points / marquee still render.
@@ -525,232 +477,41 @@ export function MaskEditModal({
         if (!layer.visible) return;
         layer.ops.forEach((op, i) => {
           if (op.disabled || (li === state.current.active && i === editingPath)) return;
-          if (isBrushOp(op)) paintStroke(op);
-          else if (isPathOp(op)) paintPath(op);
+          if (isBrushOp(op)) paintStroke(ctx, op);
+          else if (isPathOp(op)) paintPath(ctx, op);
         });
       });
     }
-    state.current.matte_strokes.forEach((s) => paintStroke(s, "matte"));
+    state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
     const live = drawing.current;
     if (live) {
       if (tool.kind === "path") {
-        // Live lasso loop: thin dashed outline, not a brush band.
-        ctx.strokeStyle = "rgba(86,168,255,0.9)";
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-        ctx.stroke();
-        ctx.setLineDash([]);
+        paintLassoLoop(ctx, live.points);
       } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
-        // Live retouch band: a translucent band marking the painted region
-        // (green: rebuilt from its surroundings; violet: cloned from the
-        // source offset; amber: restored to the layer's initial state;
-        // white / black: dodged lighter / burned darker).
-        const band =
-          tool.kind === "heal"
-            ? "rgba(120,220,140,0.45)"
-            : tool.kind === "clone"
-              ? "rgba(190,140,255,0.45)"
-              : tool.kind === "history"
-                ? "rgba(255,196,90,0.45)"
-                : dodgeBurnMode.current === "burn"
-                  ? "rgba(30,30,40,0.45)"
-                  : "rgba(255,255,255,0.45)";
-        ctx.strokeStyle = band;
-        ctx.fillStyle = band;
-        ctx.lineWidth = brushSize * 2;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        if (live.points.length === 1) {
-          ctx.beginPath();
-          ctx.arc(live.points[0][0], live.points[0][1], brushSize, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.beginPath();
-          live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-          ctx.stroke();
-        }
-        ctx.lineWidth = 1;
+        paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, dodgeBurnMode.current));
       } else {
         const liveMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
         paintStroke(
+          ctx,
           { mode: tool.mode ?? "add", radius: brushSize, points: live.points, hardness: brushHardness, flow: brushFlow },
           liveMatte ? "matte" : "paint",
         );
       }
     }
 
-    // Clone-stamp source marker: a crosshair at the Alt-picked source point.
-    if (tool.kind === "clone" && cloneSource.current) {
-      const [sx, sy] = cloneSource.current;
-      ctx.strokeStyle = "rgba(190,140,255,0.95)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(sx - 7, sy);
-      ctx.lineTo(sx + 7, sy);
-      ctx.moveTo(sx, sy - 7);
-      ctx.lineTo(sx, sy + 7);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(sx, sy, 4, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    if (tool.kind === "clone" && cloneSource.current) paintCloneSource(ctx, cloneSource.current);
+    if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
+    if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
+    paintSamPoints(ctx, state.current.points);
+    if (previewing && preview) paintPreviewOverlay(ctx, preview, dims.w, dims.h);
+    if (quickMask && quickProxy) paintQuickMask(ctx, quickProxy, dims.w, dims.h);
 
-    // Anchor re-editing: dashed outline of the draft path plus draggable
-    // anchor squares (the dragged anchor is highlighted).
-    if (editingPath != null && anchorDraft) {
-      ctx.strokeStyle = "rgba(120,230,140,0.9)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      anchorDraft.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      anchorDraft.forEach((p, i) => {
-        ctx.fillStyle = draggingAnchor.current === i ? "rgba(255,214,90,0.95)" : "rgba(120,230,140,0.95)";
-        ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
-      });
-    }
-
-    // Pending pen path: anchor squares + dashed polyline; the first anchor is
-    // highlighted (clicking it closes the path).
-    if (penAnchors.length > 0) {
-      ctx.strokeStyle = "rgba(86,168,255,0.9)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      penAnchors.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      ctx.stroke();
-      ctx.setLineDash([]);
-      penAnchors.forEach(([x, y], i) => {
-        ctx.fillStyle = i === 0 ? "rgba(120,230,140,0.95)" : "rgba(86,168,255,0.95)";
-        ctx.fillRect(x - 3, y - 3, 6, 6);
-      });
-    }
-
-    // SAM 2 point prompts: numbered crosshair markers. Positive (include)
-    // points are green and draw a `+`; negative (exclude) points are red and
-    // draw a `−`, mirroring SAM 2's point_labels.
-    state.current.points.forEach(({ x, y, label }, i) => {
-      const colour = label === 0 ? "rgba(244,98,98,0.95)" : "rgba(120,230,140,0.95)";
-      ctx.strokeStyle = colour;
-      ctx.fillStyle = colour;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x - 9, y);
-      ctx.lineTo(x + 9, y);
-      if (label !== 0) {
-        ctx.moveTo(x, y - 9);
-        ctx.lineTo(x, y + 9);
-      }
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(x, y, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.font = "600 13px system-ui, sans-serif";
-      ctx.fillText(String(i + 1), x + 11, y - 6);
-    });
-
-    // Morphology preview: paint the proxy result mask (scaled up) as a tinted
-    // overlay. Soft alpha (feather) reads through the per-pixel opacity.
-    if (previewing && preview) {
-      const tmp = document.createElement("canvas");
-      tmp.width = preview.w;
-      tmp.height = preview.h;
-      const tctx = tmp.getContext("2d");
-      if (tctx) {
-        const img = tctx.createImageData(preview.w, preview.h);
-        for (let i = 0; i < preview.data.length; i++) {
-          const a = preview.data[i];
-          img.data[i * 4] = 86;
-          img.data[i * 4 + 1] = 168;
-          img.data[i * 4 + 2] = 255;
-          img.data[i * 4 + 3] = Math.round(a * 0.55);
-        }
-        tctx.putImageData(img, 0, 0);
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(tmp, 0, 0, dims.w, dims.h);
-      }
-    }
-
-    // Quick mask (Q): PS-style ruby overlay — tint the *unselected* area red
-    // so the selection reads as the clear region.
-    if (quickMask && quickProxy) {
-      const tmp = document.createElement("canvas");
-      tmp.width = quickProxy.w;
-      tmp.height = quickProxy.h;
-      const tctx = tmp.getContext("2d");
-      if (tctx) {
-        const img = tctx.createImageData(quickProxy.w, quickProxy.h);
-        for (let i = 0; i < quickProxy.data.length; i++) {
-          img.data[i * 4] = 224;
-          img.data[i * 4 + 1] = 32;
-          img.data[i * 4 + 2] = 32;
-          img.data[i * 4 + 3] = Math.round((255 - quickProxy.data[i]) * 0.5);
-        }
-        tctx.putImageData(img, 0, 0);
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(tmp, 0, 0, dims.w, dims.h);
-      }
-    }
-
-    // Live move-tool / gradient drag: an arrow from the grab point to the
-    // cursor (the gradient's ramp runs along it, full → none).
     const md = moveDrag.current ?? gradientDrag.current;
-    if (md) {
-      const [x1, y1] = md.start;
-      const [x2, y2] = md.end;
-      ctx.strokeStyle = "rgba(255,214,90,0.95)";
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      const angle = Math.atan2(y2 - y1, x2 - x1);
-      ctx.beginPath();
-      ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 - 10 * Math.cos(angle - 0.4), y2 - 10 * Math.sin(angle - 0.4));
-      ctx.lineTo(x2 - 10 * Math.cos(angle + 0.4), y2 - 10 * Math.sin(angle + 0.4));
-      ctx.closePath();
-      ctx.fill();
-    }
-
+    if (md) paintDragArrow(ctx, md.start, md.end);
     const sd = shapeDrag.current;
-    if (sd) {
-      const pts = shapeVertices(shapeKind, [sd.start[0], sd.start[1], sd.end[0], sd.end[1]], shapeSides, brushSize);
-      if (pts.length >= 3) {
-        ctx.strokeStyle = "rgba(86,168,255,0.9)";
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-        ctx.closePath();
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-
+    if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
-    if (mq) {
-      const [x1, y1] = mq.start;
-      const [x2, y2] = mq.end;
-      ctx.strokeStyle = "rgba(86,168,255,0.9)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      if (tool.id === "ellipse") {
-        ctx.beginPath();
-        ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      } else {
-        ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-      }
-      ctx.setLineDash([]);
-    }
+    if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
   }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
 
   useEffect(() => {
@@ -1182,25 +943,14 @@ export function MaskEditModal({
           />
 
           <div className="mask-edit-controls">
-            <div className="mask-panel-group">
-              <div className="mask-panel-tabs" role="tablist">
-                <button
-                  role="tab"
-                  className={topTab === "options" ? "active" : ""}
-                  onClick={() => setTopTab("options")}
-                >
-                  {t("mask.panelOptions")}
-                </button>
-                <button
-                  role="tab"
-                  className={topTab === "info" ? "active" : ""}
-                  onClick={() => setTopTab("info")}
-                >
-                  {t("mask.panelInfo")}
-                </button>
-              </div>
-              <div className="mask-panel-group-body">
-                {topTab === "options" ? (
+            <PanelDock
+              active={topTab}
+              onSelect={setTopTab}
+              panels={[
+                {
+                  id: "options",
+                  label: t("mask.panelOptions"),
+                  content: (
             <ToolOptionsPanel
               tool={tool}
               toolId={toolId}
@@ -1242,31 +992,25 @@ export function MaskEditModal({
               commitPathEdit={commitPathEdit}
               cancelPathEdit={cancelPathEdit}
             />
-                ) : (
-                  <InfoPanel matteStrokes={matteStrokes} points={points} count={count} />
-                )}
-              </div>
-            </div>
+                  ),
+                },
+                {
+                  id: "info",
+                  label: t("mask.panelInfo"),
+                  content: <InfoPanel matteStrokes={matteStrokes} points={points} count={count} />,
+                },
+              ]}
+            />
 
-            <div className="mask-panel-group grow">
-              <div className="mask-panel-tabs" role="tablist">
-                <button
-                  role="tab"
-                  className={bottomTab === "layers" ? "active" : ""}
-                  onClick={() => setBottomTab("layers")}
-                >
-                  {t("mask.layers", { count: layers.length })}
-                </button>
-                <button
-                  role="tab"
-                  className={bottomTab === "history" ? "active" : ""}
-                  onClick={() => setBottomTab("history")}
-                >
-                  {t("mask.history", { count: ops.length })}
-                </button>
-              </div>
-              <div className="mask-panel-group-body">
-                {bottomTab === "layers" ? (
+            <PanelDock
+              grow
+              active={bottomTab}
+              onSelect={setBottomTab}
+              panels={[
+                {
+                  id: "layers",
+                  label: t("mask.layers", { count: layers.length }),
+                  content: (
             <LayersPanel
               layers={layers}
               active={state.current.active}
@@ -1279,7 +1023,12 @@ export function MaskEditModal({
               curveY={curveY}
               setCurveY={setCurveY}
             />
-                ) : (
+                  ),
+                },
+                {
+                  id: "history",
+                  label: t("mask.history", { count: ops.length }),
+                  content: (
             <HistoryPanel
               ops={ops}
               dispatch={dispatch}
@@ -1292,9 +1041,10 @@ export function MaskEditModal({
                 setTransformDraft({ dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 });
               }}
             />
-                )}
-              </div>
-            </div>
+                  ),
+                },
+              ]}
+            />
           </div>
         </div>
       </div>
