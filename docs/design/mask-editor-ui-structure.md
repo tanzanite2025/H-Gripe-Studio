@@ -18,11 +18,14 @@ src/editor/
   canvasView.ts              ← zoom / pan / rotate view maths (pure)
   maskEditModal/             ← everything mask-modal-specific lives here
     actions.ts               ← the modal's reducer (dispatch actions)
-    PanelDock.tsx            ← generic PS-style tabbed dock group
+    PanelDock.tsx            ← generic PS-style tabbed dock group (render-only)
+    dockLayout.ts            ← dock layout as data: groups/tabs/rail width,
+                               pure move/select/resize fns + persistence hook
     MaskToolbar.tsx          ← left icon rail (+ flyouts)
     MaskStage.tsx            ← the canvas element + view transform
     stagePainter.ts          ← ALL overlay canvas painting (pure functions)
     ToolOptionsPanel.tsx     ← per-tool options (top dock)
+    PropertiesPanel.tsx      ← active adjustment layer's parameters (PS 属性)
     InfoPanel.tsx            ← mask info (top dock)
     LayersPanel.tsx          ← PS-style layers panel (bottom dock)
     CurveEditor.tsx          ← draggable tone-curve grid (curve adjustment)
@@ -41,8 +44,15 @@ src/editor/
      branch; keep the pointer branch a thin dispatch;
    - view/navigation maths → `canvasView.ts`.
 2. **Right-rail panels register through `PanelDock`.** A new panel (Channels,
-   Paths, Properties, …) is a new component in `maskEditModal/` plus one
-   `DockPanel` entry in `MaskEditModal` — never bespoke tab markup.
+   Paths, …) is a new component in `maskEditModal/` plus one entry in
+   `MaskEditModal`'s panel map and the default layout in `dockLayout`'s
+   consumer — never bespoke tab markup. Panels render a headerless
+   `.mask-panel-body`; the dock's tab strip is the only chrome.
+   **The dock layout itself is data** (`dockLayout.ts`): which tabs live in
+   which group, the active tab per group, and the rail width. Users re-dock
+   tabs by dragging and resize the rail; the layout persists in localStorage
+   (`hgripe.studio.maskDock.v1`) and is reconciled against the known panel
+   ids on load. Never hard-code group membership in JSX.
 3. **Styles go in `maskEditModal.css`, not the global `styles.css`.** Express
    PS design-language values through the tokens at the top of that file
    (`--ps-dock-border`, `--ps-tab-strip`, `--ps-hover`, `--ps-active-overlay`,

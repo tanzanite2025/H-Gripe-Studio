@@ -98,8 +98,7 @@ export function ToolOptionsPanel({
   const t = useT();
   const lang = useContext(LangContext);
   return (
-    <section className="mask-panel">
-      <header>{t("mask.panelOptions")}</header>
+    <div className="mask-panel-body">
       <label className="field">
         <span>{t("mask.brushSize")}</span>
         <span className="slider-row">
@@ -368,6 +367,6 @@ export function ToolOptionsPanel({
           <small className="muted">{t("mask.anchorHint")}</small>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }

@@ -474,6 +474,12 @@ export const messages = {
   "mask.anchorCancel": { en: "Cancel", zh: "取消" },
   "mask.panelOptions": { en: "Tool options", zh: "工具选项" },
   "mask.panelInfo": { en: "Mask info", zh: "蒙版信息" },
+  "mask.panelProperties": { en: "Properties", zh: "属性" },
+  "mask.propsEmpty": {
+    en: "Select an adjustment layer to edit its parameters.",
+    zh: "选择一个调整图层以编辑其参数。",
+  },
+  "mask.railResize": { en: "Drag to resize the panel rail", zh: "拖动调整面板栏宽度" },
   "mask.fillDialog": { en: "Fill", zh: "填充" },
   "mask.fillAdd": { en: "Add", zh: "添加" },
   "mask.fillSubtract": { en: "Subtract", zh: "减去" },
