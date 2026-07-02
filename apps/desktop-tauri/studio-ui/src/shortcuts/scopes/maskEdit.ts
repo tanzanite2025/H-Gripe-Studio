@@ -50,9 +50,9 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_dodge_burn", combo: "o", status: "planned", hint: "Dodge / burn / sponge tool (planned)." },
   { id: "tool_type", combo: "t", status: "planned", hint: "Type tool (planned)." },
   { id: "tool_shape", combo: "u", status: "planned", hint: "Shape tools (planned)." },
-  { id: "tool_hand", combo: "h", status: "planned", hint: "Hand / pan tool (planned)." },
+  { id: "tool_hand", combo: "h", status: "ready", hint: "Hand tool (drag to pan the zoomed view; hold Space with any tool)." },
   { id: "tool_rotate_view", combo: "r", status: "planned", hint: "Rotate-view tool (planned)." },
-  { id: "tool_zoom", combo: "z", status: "planned", hint: "Zoom tool (planned)." },
+  { id: "tool_zoom", combo: "z", status: "ready", hint: "Zoom tool (click zooms in, Alt+click zooms out)." },
   { id: "default_colors", combo: "d", status: "ready", hint: "Reset to the default brush / add mode (PS default colours)." },
   { id: "quick_mask", combo: "q", status: "ready", hint: "Toggle the quick-mask (ruby) overlay of the current selection." },
   { id: "screen_mode", combo: "f", status: "planned", hint: "Cycle screen modes (planned)." },
@@ -67,11 +67,11 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "feather_dialog", combo: "shift+f6", status: "planned", hint: "Feather dialog (planned; feather is a toolbar op today)." },
   { id: "delete_selection", combo: "delete", status: "planned", hint: "Delete the selected region (planned)." },
   // View / navigation.
-  { id: "pan_space", combo: "space", status: "planned", hint: "Hold Space to pan (planned)." },
-  { id: "zoom_in", combo: "ctrl+=", status: "planned", hint: "Zoom in (planned)." },
-  { id: "zoom_out", combo: "ctrl+-", status: "planned", hint: "Zoom out (planned)." },
-  { id: "zoom_fit", combo: "ctrl+0", status: "planned", hint: "Fit on screen (planned)." },
-  { id: "zoom_100", combo: "ctrl+1", status: "planned", hint: "100% zoom (planned)." },
+  { id: "pan_space", combo: "space", status: "ready", hint: "Hold Space to pan the zoomed view with any tool." },
+  { id: "zoom_in", combo: "ctrl+=", status: "ready", hint: "Zoom in." },
+  { id: "zoom_out", combo: "ctrl+-", status: "ready", hint: "Zoom out." },
+  { id: "zoom_fit", combo: "ctrl+0", status: "ready", hint: "Fit on screen." },
+  { id: "zoom_100", combo: "ctrl+1", status: "ready", hint: "100% zoom (one image pixel per screen pixel)." },
   { id: "brush_softer", combo: "shift+[", status: "ready", hint: "Decrease brush hardness (softer edge)." },
   { id: "brush_harder", combo: "shift+]", status: "ready", hint: "Increase brush hardness (harder edge)." },
 ] as const;
@@ -87,6 +87,8 @@ const TOOL_COMBO: Readonly<Record<string, string>> = {
   ellipse: "shift+m",
   move: "v",
   crop: "c",
+  hand: "h",
+  zoom: "z",
 };
 
 export function toolCombo(toolId: string): string | undefined {

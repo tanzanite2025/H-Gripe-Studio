@@ -91,6 +91,15 @@ describe("mask-edit M5 bindings", () => {
   });
 });
 
+describe("mask-edit M8 bindings", () => {
+  it("flips the hand / zoom / navigation combos to ready", () => {
+    for (const id of ["tool_hand", "tool_zoom", "pan_space", "zoom_in", "zoom_out", "zoom_fit", "zoom_100"]) {
+      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      expect(b?.status, id).toBe("ready");
+    }
+  });
+});
+
 describe("scope stack dispatch", () => {
   const bindings = (id: string): ShortcutBinding[] => [
     { id, combo: "b", status: "ready", hint: "" },

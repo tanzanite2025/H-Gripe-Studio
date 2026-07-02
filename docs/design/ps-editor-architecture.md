@@ -106,6 +106,12 @@ compositor recomputes dirty tiles only; large-image interaction validated (8K
 scenarios). M7 comes after M3 because tiling should wait for the compositor's
 shape to stabilise.
 
+**M8 — Canvas navigation.** Zoom / pan as a pure view layer (a CSS transform
+on the canvas; the document and the M7 render path are untouched): `H` hand
+tool, `Z` zoom tool (click in / Alt+click out, cursor-anchored), Space-hold
+pan with any tool, `Ctrl+=` / `Ctrl+-` / `Ctrl+0` (fit) / `Ctrl+1` (100%).
+Follows M7 so 100% zoom on 8K images lands on an interaction that stays cheap.
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product

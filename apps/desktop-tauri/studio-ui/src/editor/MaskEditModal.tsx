@@ -14,6 +14,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/sc
 import { LangContext, useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
+import { FIT_VIEW, ZOOM_STEP, isFitView, panBy, viewTransform, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
 import {
   addAdjustmentLayer,
   addBrushStroke,
@@ -215,8 +216,35 @@ export function MaskEditModal({
   // rebuilds and the composite recomputes dirty tiles only, so a slider drag
   // or brush commit on a large document stays cheap.
   const proxyCache = useRef(new ProxyLayerCache());
+  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the canvas
+  // — the render path and pointer→image mapping are untouched by it.
+  const [view, setView] = useState<CanvasView>(FIT_VIEW);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  // Space-hold pan (PS): any tool pans while Space is down.
+  const [spacePan, setSpacePan] = useState(false);
+  const panDrag = useRef<{ x: number; y: number } | null>(null);
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
+
+  // The canvas's untransformed on-screen size (the clamp space for pan).
+  const viewBase = useCallback((): [number, number] => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return [1, 1];
+    return [rect.width / viewRef.current.zoom, rect.height / viewRef.current.zoom];
+  }, []);
+
+  // Space keyup ends the hold-to-pan (keydown arrives via the shortcut scope).
+  useEffect(() => {
+    const up = (e: KeyboardEvent) => {
+      if (e.key === " ") {
+        setSpacePan(false);
+        panDrag.current = null;
+      }
+    };
+    window.addEventListener("keyup", up);
+    return () => window.removeEventListener("keyup", up);
+  }, []);
   const previewing = isPreviewableOp(toolId) && preview != null;
   const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
 
@@ -344,6 +372,13 @@ export function MaskEditModal({
       setPaintTarget("layer");
     },
     quick_mask: () => setQuickMask((v) => !v),
+    tool_hand: () => selectTool("hand"),
+    tool_zoom: () => selectTool("zoom"),
+    pan_space: () => setSpacePan(true),
+    zoom_in: () => setView((v) => zoomIn(v, ...viewBase())),
+    zoom_out: () => setView((v) => zoomOut(v, ...viewBase())),
+    zoom_fit: () => setView(FIT_VIEW),
+    zoom_100: () => setView((v) => zoom100(v, dims.w, ...viewBase())),
     adjust_levels: () => dispatch({ type: "layer_add_adjustment", adjType: "levels" }),
     adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
     swap_mode: () => {
@@ -710,6 +745,22 @@ export function MaskEditModal({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // Canvas navigation (M8): hand tool / Space-hold pans; zoom tool clicks
+    // in (Alt+click out) anchored at the cursor. Neither records anything.
+    if (spacePan || tool.id === "hand") {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      panDrag.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (tool.id === "zoom") {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const cx = e.clientX - (rect.left + rect.width / 2);
+      const cy = e.clientY - (rect.top + rect.height / 2);
+      const factor = e.altKey ? 1 / ZOOM_STEP : ZOOM_STEP;
+      setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
+      return;
+    }
     if (editingPath != null && anchorDraft) {
       // Anchor re-editing mode: grab the nearest anchor square, if any.
       (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -773,6 +824,13 @@ export function MaskEditModal({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (panDrag.current) {
+      const dx = e.clientX - panDrag.current.x;
+      const dy = e.clientY - panDrag.current.y;
+      panDrag.current = { x: e.clientX, y: e.clientY };
+      setView((v) => panBy(v, dx, dy, ...viewBase()));
+      return;
+    }
     if (draggingAnchor.current != null) {
       const [x, y] = toImage(e);
       const idx = draggingAnchor.current;
@@ -792,6 +850,10 @@ export function MaskEditModal({
   };
 
   const onPointerUp = () => {
+    if (panDrag.current) {
+      panDrag.current = null;
+      return;
+    }
     if (draggingAnchor.current != null) {
       draggingAnchor.current = null;
       forceRedraw((n) => n + 1);
@@ -973,7 +1035,12 @@ export function MaskEditModal({
             <canvas
               ref={canvasRef}
               className="mask-edit-canvas"
-              style={{ aspectRatio: `${dims.w} / ${dims.h}` }}
+              style={{
+                aspectRatio: `${dims.w} / ${dims.h}`,
+                transform: isFitView(view) ? undefined : viewTransform(view),
+                transformOrigin: "center",
+                cursor: spacePan || tool.id === "hand" ? "grab" : tool.id === "zoom" ? "zoom-in" : undefined,
+              }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}

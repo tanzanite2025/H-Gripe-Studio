@@ -1390,6 +1390,12 @@ fn normalise_layer(layer: Value) -> Value {
     if let Some(ops) = layer.get("ops").and_then(Value::as_array) {
         out["ops"] = json!(ops);
     }
+    if let Some(kind @ ("mask" | "adjustment")) = layer.get("kind").and_then(Value::as_str) {
+        out["kind"] = json!(kind);
+    }
+    if let Some(adjustment) = layer.get("adjustment") {
+        out["adjustment"] = adjustment.clone();
+    }
     out
 }
 
