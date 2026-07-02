@@ -1,66 +1,41 @@
-import { useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { generateThumbnail } from "../bridge/tauri";
 import {
   MASK_TOOLS,
-  MASK_TOOL_GROUPS,
   maskTool,
-  toolTargets,
   DEFAULT_TOOL_ID,
   type MaskTool,
   type PaintTarget,
 } from "./maskTools";
-import { localizeTool } from "./maskToolsI18n";
-import { useShortcutScope, comboLabel, type ShortcutHandlers } from "../shortcuts";
-import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
-import { LangContext, useT } from "../i18n";
+import { useShortcutScope, type ShortcutHandlers } from "../shortcuts";
+import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEdit";
+import { useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, ZOOM_STEP, isFitView, panBy, viewTransform, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, ZOOM_STEP, panBy, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
 import {
-  addAdjustmentLayer,
-  addBrushStroke,
-  addMatteStroke,
-  addOperation,
-  addPath,
-  addPoint,
   activeOps,
-  addLayer,
   canRedo,
   canUndo,
-  clearEdits,
-  duplicateLayer,
   editCount,
   initEditState,
-  redo,
-  reselect,
-  removeLayer,
-  removeOp,
-  setActiveLayer,
-  setLayerBlend,
-  setLayerOpacity,
-  toggleLayerVisible,
-  toggleOp,
-  undo,
-  updateLayerAdjustment,
-  updateOpAmount,
-  updateOpTransform,
-  updatePathAnchors,
-  type EditState,
   type TransformParams,
 } from "./maskEdit";
 import type {
-  AdjustmentType,
   BrushStroke,
-  EditOp,
   EditPath,
   EditPathPoint,
   LayerAdjustment,
-  LayerBlend,
   MaskDocument,
-  MaskOperation,
-  PointPrompt,
 } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
+import { maskEditReducer, type FillDraft } from "./maskEditModal/actions";
+import { MaskToolbar } from "./maskEditModal/MaskToolbar";
+import { MaskStage } from "./maskEditModal/MaskStage";
+import { ToolOptionsPanel } from "./maskEditModal/ToolOptionsPanel";
+import { LayersPanel } from "./maskEditModal/LayersPanel";
+import { HistoryPanel } from "./maskEditModal/HistoryPanel";
+import { InfoPanel } from "./maskEditModal/InfoPanel";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -68,82 +43,6 @@ import { isBrushOp, isPathOp } from "../types/production";
 // them against the real image on run.
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
-
-type Action =
-  | { type: "stroke"; stroke: BrushStroke }
-  | { type: "matte_stroke"; stroke: BrushStroke }
-  | { type: "op"; op: MaskOperation }
-  | { type: "point"; point: PointPrompt }
-  | { type: "path"; path: EditPath }
-  | { type: "undo" }
-  | { type: "redo" }
-  | { type: "clear" }
-  | { type: "reselect" }
-  | { type: "layer_duplicate" }
-  | { type: "remove_op"; index: number }
-  | { type: "toggle_op"; index: number }
-  | { type: "op_amount"; index: number; amount: number }
-  | { type: "op_transform"; index: number; params: TransformParams }
-  | { type: "path_anchors"; index: number; points: EditPathPoint[] }
-  | { type: "layer_add" }
-  | { type: "layer_add_adjustment"; adjType: AdjustmentType }
-  | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
-  | { type: "layer_remove"; index: number }
-  | { type: "layer_active"; index: number }
-  | { type: "layer_visible"; index: number }
-  | { type: "layer_opacity"; index: number; opacity: number }
-  | { type: "layer_blend"; index: number; blend: LayerBlend };
-
-function reducer(state: EditState, action: Action): EditState {
-  switch (action.type) {
-    case "stroke":
-      return addBrushStroke(state, action.stroke);
-    case "matte_stroke":
-      return addMatteStroke(state, action.stroke);
-    case "op":
-      return addOperation(state, action.op);
-    case "point":
-      return addPoint(state, action.point);
-    case "path":
-      return addPath(state, action.path);
-    case "undo":
-      return undo(state);
-    case "redo":
-      return redo(state);
-    case "clear":
-      return clearEdits(state);
-    case "reselect":
-      return reselect(state);
-    case "layer_duplicate":
-      return duplicateLayer(state);
-    case "remove_op":
-      return removeOp(state, action.index);
-    case "toggle_op":
-      return toggleOp(state, action.index);
-    case "op_amount":
-      return updateOpAmount(state, action.index, action.amount);
-    case "op_transform":
-      return updateOpTransform(state, action.index, action.params);
-    case "path_anchors":
-      return updatePathAnchors(state, action.index, action.points);
-    case "layer_add":
-      return addLayer(state);
-    case "layer_add_adjustment":
-      return addAdjustmentLayer(state, action.adjType);
-    case "layer_adjustment":
-      return updateLayerAdjustment(state, action.index, action.adjustment);
-    case "layer_remove":
-      return removeLayer(state, action.index);
-    case "layer_active":
-      return setActiveLayer(state, action.index);
-    case "layer_visible":
-      return toggleLayerVisible(state, action.index);
-    case "layer_opacity":
-      return setLayerOpacity(state, action.index, action.opacity);
-    case "layer_blend":
-      return setLayerBlend(state, action.index, action.blend);
-  }
-}
 
 interface MaskEditModalProps {
   title: string;
@@ -171,8 +70,7 @@ export function MaskEditModal({
   headerExtra,
 }: MaskEditModalProps) {
   const t = useT();
-  const lang = useContext(LangContext);
-  const [state, dispatch] = useReducer(reducer, initial, initEditState);
+  const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
   const [toolId, setToolId] = useState<string>(DEFAULT_TOOL_ID);
   const [brushSize, setBrushSize] = useState(24);
   // Soft-brush parameters (M4): hardness / flow are 0..1 (1 = the legacy hard
@@ -198,7 +96,7 @@ export function MaskEditModal({
   const [editingTransform, setEditingTransform] = useState<number | null>(null);
   // Fill dialog (M11, Shift+F5): a draft of mode + opacity; Apply records a
   // revisable `fill` op.
-  const [fillDraft, setFillDraft] = useState<{ mode: "add" | "subtract"; opacity: number } | null>(null);
+  const [fillDraft, setFillDraft] = useState<FillDraft | null>(null);
 
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
@@ -293,7 +191,7 @@ export function MaskEditModal({
   stateRef.current = state;
   const transformDraftRef = useRef<TransformParams | null>(null);
   transformDraftRef.current = transformDraft;
-  const fillDraftRef = useRef<{ mode: "add" | "subtract"; opacity: number } | null>(null);
+  const fillDraftRef = useRef<FillDraft | null>(null);
   fillDraftRef.current = fillDraft;
 
   const startPathEdit = (index: number) => {
@@ -1007,18 +905,6 @@ export function MaskEditModal({
     patchAdjustment({ points: pts });
   };
 
-  // One-line label for a history step (raw op vocabulary, like the old chips).
-  const opLabel = (op: EditOp): string => {
-    if (isPathOp(op)) return `${op.tool} ${op.mode} (${op.points.length})`;
-    if (isBrushOp(op)) return `${op.mode === "subtract" ? "eraser" : "brush"} r${op.radius} (${op.points.length})`;
-    if (op.type === "transform") {
-      const scale = op.scale ?? 1;
-      const rotate = op.rotate ?? 0;
-      return `transform Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}${scale !== 1 ? ` ×${scale}` : ""}${rotate !== 0 ? ` ∠${rotate}°` : ""}`;
-    }
-    if (op.type === "fill") return `fill ${op.mode === "subtract" ? "subtract" : "add"} ${op.amount ?? 100}%`;
-    return op.type;
-  };
   const showAmount = useMemo(
     () => tool.kind === "global" || ["grow", "shrink", "feather", "smooth"].includes(toolId),
     [tool.kind, toolId],
@@ -1058,558 +944,84 @@ export function MaskEditModal({
         </div>
 
         <div className="mask-edit-body">
-          <div className="mask-edit-tools">
-            {MASK_TOOL_GROUPS.map((group, gi) => (
-              <div key={gi} className="mask-tool-group">
-                {group.map((id) => maskTool(id)).filter((mt): mt is MaskTool => mt != null).map((mt) => {
-                  const loc = localizeTool(mt, lang);
-                  const combo = toolCombo(mt.id);
-                  const hint = combo ? `${loc.hint} (${comboLabel(combo)})` : loc.hint;
-                  return (
-                    <button
-                      key={mt.id}
-                      className={`mask-tool ${mt.status === "planned" ? "planned" : ""} ${toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id)) ? "active" : ""}`}
-                      disabled={mt.status === "planned"}
-                      title={mt.status === "planned" ? `${hint}（${t("mask.comingSoon")}）` : hint}
-                      onClick={() => onToolClick(mt)}
-                    >
-                      {loc.label}
-                      {combo ? <em className="combo">{comboLabel(combo)}</em> : null}
-                      {mt.status === "planned" ? <em className="soon">{t("mask.soon")}</em> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          <MaskToolbar toolId={toolId} onToolClick={onToolClick} />
 
-          <div className="mask-edit-stage">
-            <canvas
-              ref={canvasRef}
-              className="mask-edit-canvas"
-              style={{
-                aspectRatio: `${dims.w} / ${dims.h}`,
-                transform: isFitView(view) ? undefined : viewTransform(view),
-                transformOrigin: "center",
-                cursor: spacePan || tool.id === "hand" ? "grab" : tool.id === "zoom" ? "zoom-in" : undefined,
-              }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerUp}
-              onContextMenu={(e) => e.preventDefault()}
-            />
-          </div>
+          <MaskStage
+            canvasRef={canvasRef}
+            dims={dims}
+            view={view}
+            spacePan={spacePan}
+            toolId={tool.id}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+          />
 
           <div className="mask-edit-controls">
-            <section className="mask-panel">
-            <header>{t("mask.panelOptions")}</header>
-            <label className="field">
-              <span>{t("mask.brushSize")}</span>
-              <span className="slider-row">
-                <input type="range" min={1} max={96} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} />
-                <output>{brushSize}</output>
-              </span>
-            </label>
-            {tool.kind === "paint" || tool.kind === "matte" ? (
-              <>
-                <label className="field">
-                  <span>{t("mask.brushHardness")}</span>
-                  <span className="slider-row">
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={Math.round(brushHardness * 100)}
-                      onChange={(e) => setBrushHardness(Number(e.target.value) / 100)}
-                    />
-                    <output>{Math.round(brushHardness * 100)}</output>
-                  </span>
-                </label>
-                <label className="field">
-                  <span>{t("mask.brushFlow")}</span>
-                  <span className="slider-row">
-                    <input
-                      type="range"
-                      min={1}
-                      max={100}
-                      value={Math.round(brushFlow * 100)}
-                      onChange={(e) => setBrushFlow(Number(e.target.value) / 100)}
-                    />
-                    <output>{Math.round(brushFlow * 100)}</output>
-                  </span>
-                </label>
-                <label className="field">
-                  <span>{t("mask.brushSpacing")}</span>
-                  <span className="slider-row">
-                    <input
-                      type="range"
-                      min={1}
-                      max={100}
-                      value={Math.round(brushSpacing * 100)}
-                      onChange={(e) => setBrushSpacing(Number(e.target.value) / 100)}
-                    />
-                    <output>{Math.round(brushSpacing * 100)}</output>
-                  </span>
-                </label>
-              </>
-            ) : null}
-            {toolTargets(tool).length > 1 ? (
-              <div className="field">
-                <span>{t("mask.paintTarget")}</span>
-                <span className="slider-row">
-                  {toolTargets(tool).map((tg) => (
-                    <button key={tg} className={paintTarget === tg ? "active" : ""} onClick={() => setPaintTarget(tg)}>
-                      {t(tg === "layer" ? "mask.targetLayer" : "mask.targetMatte")}
-                    </button>
-                  ))}
-                </span>
-              </div>
-            ) : null}
-            {showAmount ? (
-              <label className="field">
-                <span>{t("mask.amount")}</span>
-                <span className="slider-row">
-                  <input type="range" min={0} max={16} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
-                  <output>{amount}</output>
-                </span>
-              </label>
-            ) : null}
-            {isPreviewableOp(toolId) ? (
-              <div className="field mask-preview-actions">
-                <span>
-                  {localizeTool(tool, lang).label}{" "}
-                  <span className="muted">· {t("mask.previewBadge")}</span>
-                </span>
-                <span className="slider-row">
-                  <button className="primary" onClick={applyPreviewOp} title={t("mask.applyTitle")}>
-                    {t("mask.previewApply", { op: localizeTool(tool, lang).label })}
-                  </button>
-                  <button onClick={() => setToolId(DEFAULT_TOOL_ID)}>{t("mask.previewCancel")}</button>
-                </span>
-                <small className="muted">{t("mask.previewHint")}</small>
-              </div>
-            ) : null}
-            {tool.kind === "path" ? (
-              <div className="field">
-                <span>{t("mask.pathMode")}</span>
-                <span className="slider-row">
-                  {(["add", "subtract", "intersect"] as const).map((m) => (
-                    <button key={m} className={pathMode === m ? "active" : ""} onClick={() => setPathMode(m)}>
-                      {t(m === "add" ? "mask.pathAdd" : m === "subtract" ? "mask.pathSubtract" : "mask.pathIntersect")}
-                    </button>
-                  ))}
-                </span>
-                {tool.id === "pen" && penAnchors.length > 0 ? (
-                  <span className="slider-row">
-                    <button className="primary" disabled={penAnchors.length < 3} onClick={closePenPath}>
-                      {t("mask.closePath", { count: penAnchors.length })}
-                    </button>
-                    <button onClick={() => setPenAnchors([])}>{t("mask.cancelPath")}</button>
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {tool.id === "wand" ? (
-              <label className="field">
-                <span>{t("mask.wandTolerance")}</span>
-                <span className="slider-row">
-                  <input type="range" min={0} max={255} value={tolerance} onChange={(e) => setTolerance(Number(e.target.value))} />
-                  <output>{tolerance}</output>
-                </span>
-              </label>
-            ) : null}
+            <ToolOptionsPanel
+              tool={tool}
+              toolId={toolId}
+              dispatch={dispatch}
+              brushSize={brushSize}
+              setBrushSize={setBrushSize}
+              brushHardness={brushHardness}
+              setBrushHardness={setBrushHardness}
+              brushFlow={brushFlow}
+              setBrushFlow={setBrushFlow}
+              brushSpacing={brushSpacing}
+              setBrushSpacing={setBrushSpacing}
+              paintTarget={paintTarget}
+              setPaintTarget={setPaintTarget}
+              showAmount={showAmount}
+              amount={amount}
+              setAmount={setAmount}
+              applyPreviewOp={applyPreviewOp}
+              cancelPreview={() => setToolId(DEFAULT_TOOL_ID)}
+              pathMode={pathMode}
+              setPathMode={setPathMode}
+              penAnchors={penAnchors}
+              closePenPath={closePenPath}
+              cancelPenPath={() => setPenAnchors([])}
+              tolerance={tolerance}
+              setTolerance={setTolerance}
+              fillDraft={fillDraft}
+              setFillDraft={setFillDraft}
+              transformDraft={transformDraft}
+              setTransformDraft={setTransformDraft}
+              editingTransform={editingTransform}
+              closeTransformPanel={closeTransformPanel}
+              editingPath={editingPath}
+              commitPathEdit={commitPathEdit}
+              cancelPathEdit={cancelPathEdit}
+            />
 
-            {fillDraft ? (
-              <div className="field mask-preview-actions">
-                <span>{t("mask.fillDialog")}</span>
-                <span className="slider-row">
-                  {(["add", "subtract"] as const).map((m) => (
-                    <button
-                      key={m}
-                      className={fillDraft.mode === m ? "active" : ""}
-                      onClick={() => setFillDraft((prev) => (prev ? { ...prev, mode: m } : prev))}
-                    >
-                      {t(m === "add" ? "mask.fillAdd" : "mask.fillSubtract")}
-                    </button>
-                  ))}
-                </span>
-                <label className="slider-row">
-                  <span>{t("mask.fillOpacity")}</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={fillDraft.opacity}
-                    onChange={(e) =>
-                      setFillDraft((prev) => (prev ? { ...prev, opacity: Number(e.target.value) } : prev))
-                    }
-                  />
-                  <output>{fillDraft.opacity}</output>
-                </label>
-                <span className="slider-row">
-                  <button
-                    className="primary"
-                    onClick={() => {
-                      dispatch({ type: "op", op: { type: "fill", mode: fillDraft.mode, amount: fillDraft.opacity } });
-                      setFillDraft(null);
-                    }}
-                  >
-                    {t("mask.fillApply")}
-                  </button>
-                  <button onClick={() => setFillDraft(null)}>{t("mask.fillCancel")}</button>
-                </span>
-                <small className="muted">{t("mask.fillHint")}</small>
-              </div>
-            ) : null}
+            <LayersPanel
+              layers={layers}
+              active={state.current.active}
+              dispatch={dispatch}
+              onBeforeLayerChange={() => {
+                if (editingPath != null) cancelPathEdit();
+              }}
+              activeAdjustment={activeAdjustment}
+              patchAdjustment={patchAdjustment}
+              curveY={curveY}
+              setCurveY={setCurveY}
+            />
 
-            {transformDraft ? (
-              <div className="field mask-preview-actions">
-                <span>{t("mask.freeTransform")}</span>
-                {(
-                  [
-                    ["dx", "mask.transformDx", 1],
-                    ["dy", "mask.transformDy", 1],
-                    ["scale", "mask.transformScale", 100],
-                    ["rotate", "mask.transformRotate", 1],
-                  ] as const
-                ).map(([key, label, factor]) => (
-                  <label key={key} className="slider-row">
-                    <span>{t(label)}</span>
-                    <input
-                      type="number"
-                      value={Math.round(transformDraft[key] * factor)}
-                      onChange={(e) =>
-                        setTransformDraft((prev) =>
-                          prev ? { ...prev, [key]: Number(e.target.value) / factor } : prev,
-                        )
-                      }
-                    />
-                  </label>
-                ))}
-                <span className="slider-row">
-                  <button
-                    className="primary"
-                    onClick={() => {
-                      if (editingTransform != null) {
-                        dispatch({ type: "op_transform", index: editingTransform, params: transformDraft });
-                      } else {
-                        dispatch({
-                          type: "op",
-                          op: {
-                            type: "transform",
-                            dx: transformDraft.dx,
-                            dy: transformDraft.dy,
-                            scale: transformDraft.scale,
-                            rotate: transformDraft.rotate,
-                          },
-                        });
-                      }
-                      closeTransformPanel();
-                    }}
-                  >
-                    {editingTransform != null ? t("mask.transformUpdate") : t("mask.transformApply")}
-                  </button>
-                  <button onClick={closeTransformPanel}>{t("mask.transformCancel")}</button>
-                </span>
-                <small className="muted">{t("mask.transformHint")}</small>
-              </div>
-            ) : null}
+            <HistoryPanel
+              ops={ops}
+              dispatch={dispatch}
+              editingPath={editingPath}
+              startPathEdit={startPathEdit}
+              cancelPathEdit={cancelPathEdit}
+              editTransformStep={(i, op) => {
+                if (isPathOp(op) || isBrushOp(op) || op.type !== "transform") return;
+                setEditingTransform(i);
+                setTransformDraft({ dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 });
+              }}
+            />
 
-            {editingPath != null ? (
-              <div className="field mask-preview-actions">
-                <span>{t("mask.anchorEditing")}</span>
-                <span className="slider-row">
-                  <button className="primary" onClick={commitPathEdit}>{t("mask.anchorDone")}</button>
-                  <button onClick={cancelPathEdit}>{t("mask.anchorCancel")}</button>
-                </span>
-                <small className="muted">{t("mask.anchorHint")}</small>
-              </div>
-            ) : null}
-            </section>
-
-            <section className="mask-panel">
-            <header>{t("mask.layers", { count: layers.length })}</header>
-            <div className="field">
-              <div className="mask-layer-list">
-                {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
-                  const layer = layers[i];
-                  return (
-                    <div
-                      key={layer.id}
-                      className={`mask-layer-row${i === state.current.active ? " active" : ""}${layer.visible ? "" : " hidden"}`}
-                      onClick={() => {
-                        if (editingPath != null) cancelPathEdit();
-                        dispatch({ type: "layer_active", index: i });
-                      }}
-                    >
-                      <button
-                        className="mask-layer-visible"
-                        title={layer.visible ? t("mask.layerHide") : t("mask.layerShow")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dispatch({ type: "layer_visible", index: i });
-                        }}
-                      >
-                        {layer.visible ? "👁" : "—"}
-                      </button>
-                      <span className="mask-layer-name" title={layer.name}>
-                        {layer.kind === "adjustment" ? "◐ " : ""}
-                        {layer.name}
-                      </span>
-                      {layer.kind === "adjustment" ? (
-                        <span className="mask-layer-blend muted">{t("mask.adjustmentBadge")}</span>
-                      ) : (
-                        <select
-                          className="mask-layer-blend"
-                          value={layer.blend}
-                          title={t("mask.layerBlend")}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => dispatch({ type: "layer_blend", index: i, blend: e.target.value as LayerBlend })}
-                        >
-                          <option value="normal">{t("mask.blendNormal")}</option>
-                          <option value="multiply">{t("mask.blendMultiply")}</option>
-                          <option value="screen">{t("mask.blendScreen")}</option>
-                        </select>
-                      )}
-                      <input
-                        className="mask-layer-opacity"
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={Math.round(layer.opacity * 100)}
-                        title={t("mask.layerOpacity")}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => dispatch({ type: "layer_opacity", index: i, opacity: Number(e.target.value) / 100 })}
-                      />
-                      <button
-                        className="mask-layer-delete"
-                        title={t("mask.layerDelete")}
-                        disabled={layers.length <= 1}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (editingPath != null) cancelPathEdit();
-                          dispatch({ type: "layer_remove", index: i });
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              <span className="slider-row">
-                <button onClick={() => dispatch({ type: "layer_add" })} title={t("mask.layerAddTitle")}>
-                  + {t("mask.layerAdd")}
-                </button>
-                <select
-                  className="mask-layer-blend"
-                  value=""
-                  title={t("mask.adjustmentAddTitle")}
-                  onChange={(e) => {
-                    const adjType = e.target.value as AdjustmentType | "";
-                    if (adjType) dispatch({ type: "layer_add_adjustment", adjType });
-                  }}
-                >
-                  <option value="" disabled>
-                    ◐ {t("mask.adjustmentAdd")}
-                  </option>
-                  <option value="levels">{t("mask.adjLevels")}</option>
-                  <option value="curve">{t("mask.adjCurve")}</option>
-                  <option value="brightness_contrast">{t("mask.adjBrightnessContrast")}</option>
-                </select>
-              </span>
-            </div>
-
-            {activeAdjustment ? (
-              <div className="field mask-preview-actions">
-                <span>
-                  {t(
-                    activeAdjustment.type === "levels"
-                      ? "mask.adjLevels"
-                      : activeAdjustment.type === "curve"
-                        ? "mask.adjCurve"
-                        : "mask.adjBrightnessContrast",
-                  )}{" "}
-                  <span className="muted">· {t("mask.adjustmentBadge")}</span>
-                </span>
-                {activeAdjustment.type === "levels" ? (
-                  (
-                    [
-                      ["in_black", "mask.adjInBlack", 0, 255, 1, 0],
-                      ["in_white", "mask.adjInWhite", 0, 255, 1, 255],
-                      ["gamma", "mask.adjGamma", 0.1, 3, 0.05, 1],
-                      ["out_black", "mask.adjOutBlack", 0, 255, 1, 0],
-                      ["out_white", "mask.adjOutWhite", 0, 255, 1, 255],
-                    ] as const
-                  ).map(([key, label, min, max, step, dflt]) => (
-                    <label key={key} className="slider-row">
-                      <span>{t(label)}</span>
-                      <input
-                        type="range"
-                        min={min}
-                        max={max}
-                        step={step}
-                        value={activeAdjustment[key] ?? dflt}
-                        onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
-                      />
-                      <output>{activeAdjustment[key] ?? dflt}</output>
-                    </label>
-                  ))
-                ) : activeAdjustment.type === "curve" ? (
-                  (
-                    [
-                      [0, "mask.adjShadows"],
-                      [1, "mask.adjMidtones"],
-                      [2, "mask.adjHighlights"],
-                    ] as const
-                  ).map(([slot, label]) => (
-                    <label key={slot} className="slider-row">
-                      <span>{t(label)}</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={255}
-                        value={curveY(slot)}
-                        onChange={(e) => setCurveY(slot, Number(e.target.value))}
-                      />
-                      <output>{curveY(slot)}</output>
-                    </label>
-                  ))
-                ) : (
-                  (
-                    [
-                      ["brightness", "mask.adjBrightness"],
-                      ["contrast", "mask.adjContrast"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="slider-row">
-                      <span>{t(label)}</span>
-                      <input
-                        type="range"
-                        min={-100}
-                        max={100}
-                        value={activeAdjustment[key] ?? 0}
-                        onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
-                      />
-                      <output>{activeAdjustment[key] ?? 0}</output>
-                    </label>
-                  ))
-                )}
-                <small className="muted">{t("mask.adjustmentHint")}</small>
-              </div>
-            ) : null}
-            </section>
-
-            <section className="mask-panel">
-            <header>{t("mask.history", { count: ops.length })}</header>
-            <div className="field">
-              <div className="mask-history-list">
-                {ops.length === 0 ? (
-                  <small className="muted">{t("mask.historyEmpty")}</small>
-                ) : (
-                  ops.map((op, i) => (
-                    <div
-                      key={i}
-                      className={`mask-history-row${op.disabled ? " disabled" : ""}${editingPath === i ? " editing" : ""}`}
-                    >
-                      <button
-                        className="mask-history-toggle"
-                        title={op.disabled ? t("mask.stepEnable") : t("mask.stepDisable")}
-                        onClick={() => dispatch({ type: "toggle_op", index: i })}
-                      >
-                        {op.disabled ? "◌" : "●"}
-                      </button>
-                      <span className="mask-history-label" title={opLabel(op)}>
-                        {i + 1}. {opLabel(op)}
-                      </span>
-                      {!isPathOp(op) && !isBrushOp(op) && op.amount != null ? (
-                        <input
-                          className="mask-history-amount"
-                          type="number"
-                          min={0}
-                          max={255}
-                          value={op.amount}
-                          title={t("mask.stepAmount")}
-                          onChange={(e) => dispatch({ type: "op_amount", index: i, amount: Number(e.target.value) })}
-                        />
-                      ) : null}
-                      {isPathOp(op) ? (
-                        <button
-                          className="mask-history-edit"
-                          title={t("mask.stepEditAnchors")}
-                          onClick={() => (editingPath === i ? cancelPathEdit() : startPathEdit(i))}
-                        >
-                          ✎
-                        </button>
-                      ) : null}
-                      {!isPathOp(op) && !isBrushOp(op) && op.type === "transform" ? (
-                        <button
-                          className="mask-history-edit"
-                          title={t("mask.stepEditTransform")}
-                          onClick={() => {
-                            setEditingTransform(i);
-                            setTransformDraft({ dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 });
-                          }}
-                        >
-                          ✎
-                        </button>
-                      ) : null}
-                      <button
-                        className="mask-history-delete"
-                        title={t("mask.stepDelete")}
-                        onClick={() => {
-                          if (editingPath === i) cancelPathEdit();
-                          dispatch({ type: "remove_op", index: i });
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-            </section>
-
-            <section className="mask-panel">
-            <header>{t("mask.panelInfo")}</header>
-            <div className="field">
-              <span>{t("mask.mattingBand", { count: matteStrokes.length })}</span>
-              <div className="mask-op-list">
-                {matteStrokes.length === 0 ? (
-                  <small className="muted">{t("mask.matteEmpty")}</small>
-                ) : (
-                  matteStrokes.map((s, i) => (
-                    <span key={s.id ?? i} className="mask-op-chip">
-                      {t("mask.bandRadius", { radius: s.radius })}
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="field">
-              <span>{t("mask.samPoints", { count: points.length })}</span>
-              <div className="mask-op-list">
-                {points.length === 0 ? (
-                  <small className="muted">{t("mask.pointsEmpty")}</small>
-                ) : (
-                  points.map((p, i) => (
-                    <span key={i} className={`mask-op-chip${p.label === 0 ? " negative" : ""}`}>
-                      {p.label === 0 ? "−" : "+"}#{i + 1} {p.x},{p.y}
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <small className="muted mask-edit-note">
-              {t("mask.notePrefix", { count })}
-              <code>edit_paths</code>
-              {t("mask.noteSuffix")}
-            </small>
-            </section>
+            <InfoPanel matteStrokes={matteStrokes} points={points} count={count} />
           </div>
         </div>
       </div>
