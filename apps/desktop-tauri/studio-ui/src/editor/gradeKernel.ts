@@ -175,7 +175,14 @@ export type GradeOp =
     }
   | { type: "contrast"; amount: number; pivot: number }
   | { type: "soft_clip"; high_start: number; low_start: number }
-  | { type: "white_balance_k"; temp_k: number; tint: number };
+  | { type: "white_balance_k"; temp_k: number; tint: number }
+  | {
+      type: "rgb_mixer";
+      red: [number, number, number];
+      green: [number, number, number];
+      blue: [number, number, number];
+      monochrome: boolean;
+    };
 
 /**
  * HSL qualifier: a per-pixel gate computed from the layer's input (hue band
@@ -425,6 +432,19 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       const gains = planckianGains(op.temp_k, op.tint);
       forEachRgbLinear(surface, (rgb) => {
         for (let c = 0; c < 3; c++) rgb[c] *= gains[c];
+      });
+      break;
+    }
+    case "rgb_mixer": {
+      const sane = (w: [number, number, number]): Rgb => w.map((v) => (Number.isFinite(v) ? v : 0)) as Rgb;
+      const rows: [Rgb, Rgb, Rgb] = op.monochrome
+        ? [sane(op.red), sane(op.red), sane(op.red)]
+        : [sane(op.red), sane(op.green), sane(op.blue)];
+      forEachRgbLinear(surface, (rgb) => {
+        const src: Rgb = [rgb[0], rgb[1], rgb[2]];
+        for (let c = 0; c < 3; c++) {
+          rgb[c] = rows[c][0] * src[0] + rows[c][1] * src[1] + rows[c][2] * src[2];
+        }
       });
       break;
     }

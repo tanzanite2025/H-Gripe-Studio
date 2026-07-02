@@ -96,6 +96,19 @@ fn all_ops() -> Vec<GradeOp> {
         GradeOp::WhiteBalanceK { temp_k: 0.0, tint: -100.0 },
         GradeOp::WhiteBalanceK { temp_k: 1e9, tint: 100.0 },
         GradeOp::WhiteBalanceK { temp_k: f32::NAN, tint: f32::NAN },
+        // Degenerate mixer: extreme, non-finite, all-zero weights.
+        GradeOp::RgbMixer {
+            red: [100.0, -100.0, 0.0],
+            green: [f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+            blue: [0.0, 0.0, 0.0],
+            monochrome: false,
+        },
+        GradeOp::RgbMixer {
+            red: [f32::NAN, f32::NAN, f32::NAN],
+            green: [0.0, 1.0, 0.0],
+            blue: [0.0, 0.0, 1.0],
+            monochrome: true,
+        },
     ]
 }
 

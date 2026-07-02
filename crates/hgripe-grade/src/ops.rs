@@ -110,6 +110,17 @@ pub enum GradeOp {
     /// normalised to preserve Rec.709 luma — so `temp_k < 6504` warms and
     /// `temp_k > 6504` cools. Neutral is `temp_k = 6504`, `tint = 0`.
     WhiteBalanceK { temp_k: f32, tint: f32 },
+    /// Resolve-style RGB mixer in linear light: each output channel is a
+    /// weighted sum of the input channels (`out_c = row_c · in`), rows are
+    /// `[from_red, from_green, from_blue]`. Neutral is the identity matrix.
+    /// `monochrome` uses the red row as a custom B&W mix for all three
+    /// channels. Non-finite weights read as 0.
+    RgbMixer {
+        red: [f32; 3],
+        green: [f32; 3],
+        blue: [f32; 3],
+        monochrome: bool,
+    },
 }
 
 /// Apply one op to every pixel's RGB (alpha untouched).
@@ -269,6 +280,25 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
             for_each_rgb_linear(surface, n, |rgb| {
                 for (c, g) in rgb.iter_mut().zip(gains) {
                     *c *= g;
+                }
+            });
+        }
+        GradeOp::RgbMixer {
+            red,
+            green,
+            blue,
+            monochrome,
+        } => {
+            let sane = |w: &[f32; 3]| w.map(|v| if v.is_finite() { v } else { 0.0 });
+            let rows = if *monochrome {
+                [sane(red), sane(red), sane(red)]
+            } else {
+                [sane(red), sane(green), sane(blue)]
+            };
+            for_each_rgb_linear(surface, n, |rgb| {
+                let src = *rgb;
+                for c in 0..3 {
+                    rgb[c] = rows[c][0] * src[0] + rows[c][1] * src[1] + rows[c][2] * src[2];
                 }
             });
         }
