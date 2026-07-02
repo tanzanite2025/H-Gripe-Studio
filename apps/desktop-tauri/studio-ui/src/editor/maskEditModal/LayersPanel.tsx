@@ -4,6 +4,7 @@
 import { useState, type DragEvent } from "react";
 import { useT } from "../../i18n";
 import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
+import { LAYER_BLENDS } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
 
 const LAYER_MIME = "application/x-hgripe-layer";
@@ -48,10 +49,20 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
           title={t("mask.layerBlend")}
           onChange={(e) => dispatch({ type: "layer_blend", index: active, blend: e.target.value as LayerBlend })}
         >
-          <option value="normal">{t("mask.blendNormal")}</option>
-          <option value="multiply">{t("mask.blendMultiply")}</option>
-          <option value="screen">{t("mask.blendScreen")}</option>
+          {LAYER_BLENDS.map((blend) => (
+            <option key={blend} value={blend}>
+              {t(`mask.blend.${blend}`)}
+            </option>
+          ))}
         </select>
+        <button
+          className={`mask-layer-lock${activeLayer?.locked ? " locked" : ""}`}
+          title={activeLayer?.locked ? t("mask.layerUnlock") : t("mask.layerLock")}
+          disabled={!activeLayer}
+          onClick={() => dispatch({ type: "layer_lock", index: active })}
+        >
+          🔒
+        </button>
         <label className="mask-layer-opacity-label">
           <span className="muted">{t("mask.layerOpacity")}</span>
           <input
@@ -73,7 +84,7 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
             <div
               key={layer.id}
               className={`mask-layer-row${i === active ? " active" : ""}${layer.visible ? "" : " hidden"}`}
-              draggable={renaming !== i}
+              draggable={renaming !== i && !layer.locked}
               onDragStart={(e) => {
                 e.dataTransfer.setData(LAYER_MIME, String(i));
                 e.dataTransfer.effectAllowed = "move";
@@ -117,6 +128,7 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
                   title={layer.name}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
+                    if (layer.locked) return;
                     setDraft(layer.name);
                     setRenaming(i);
                   }}
@@ -124,10 +136,15 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
                   {layer.name}
                 </span>
               )}
+              {layer.locked ? (
+                <span className="mask-layer-locked" title={t("mask.layerLocked")} aria-hidden="true">
+                  🔒
+                </span>
+              ) : null}
               <button
                 className="mask-layer-delete"
                 title={t("mask.layerDelete")}
-                disabled={layers.length <= 1}
+                disabled={layers.length <= 1 || layer.locked}
                 onClick={(e) => {
                   e.stopPropagation();
                   onBeforeLayerChange();
@@ -171,7 +188,7 @@ export function LayersPanel({ layers, active, dispatch, onBeforeLayerChange }: L
         <button
           className="mask-layer-action"
           title={t("mask.layerDelete")}
-          disabled={layers.length <= 1}
+          disabled={layers.length <= 1 || activeLayer?.locked}
           onClick={() => {
             onBeforeLayerChange();
             dispatch({ type: "layer_remove", index: active });

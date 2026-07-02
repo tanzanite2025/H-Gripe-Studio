@@ -24,6 +24,7 @@ import {
   setActiveLayer,
   setLayerBlend,
   setLayerOpacity,
+  toggleLayerLock,
   toggleLayerVisible,
   toggleOp,
   undo,
@@ -269,6 +270,35 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers[0].name).toBe("Sky mask");
     s = undo(s);
     expect(s.current.layers[0].name).toBe(original);
+  });
+
+  it("locks a layer (undoable): rejects new edits and deletion until unlocked", () => {
+    let s = initEditState();
+    s = addLayer(s, "B"); // active = 1 (B)
+    s = toggleLayerLock(s, 1);
+    expect(s.current.layers[1].locked).toBe(true);
+    expect(addBrushStroke(s, stroke("s1"))).toBe(s);
+    expect(addOperation(s, { type: "invert" })).toBe(s);
+    expect(removeLayer(s, 1)).toBe(s);
+    s = toggleLayerLock(s, 1);
+    expect(s.current.layers[1].locked).toBeFalsy();
+    s = addBrushStroke(s, stroke("s1"));
+    expect(editCount(s.current)).toBe(1);
+  });
+
+  it("normalizes the extended blend set and the locked flag from storage", () => {
+    const e = normalizeEditPaths({
+      version: 3,
+      layers: [
+        { name: "a", blend: "darken", locked: true, ops: [] },
+        { name: "b", blend: "bogus", locked: "yes", ops: [] },
+      ],
+      active: 0,
+    });
+    expect(e.layers[0].blend).toBe("darken");
+    expect(e.layers[0].locked).toBe(true);
+    expect(e.layers[1].blend).toBe("normal");
+    expect(e.layers[1].locked).toBeUndefined();
   });
 
   it("moves a layer within the stack, keeping the active layer by identity", () => {

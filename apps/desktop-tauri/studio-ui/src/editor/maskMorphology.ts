@@ -707,16 +707,32 @@ function applyAdjustment(dst: ProxyMask, adj: LayerAdjustment, opacity: number):
   }
 }
 
+// One blended sample per the layer blend mode (grayscale 0..255; mirrors the
+// Rust `blend_value` in `subject_mask.rs` so the preview cannot drift).
+function blendValue(d: number, s: number, blend: string): number {
+  switch (blend) {
+    case "multiply":
+      return (d * s) / 255;
+    case "screen":
+      return 255 - ((255 - d) * (255 - s)) / 255;
+    case "darken":
+      return Math.min(d, s);
+    case "lighten":
+      return Math.max(d, s);
+    case "difference":
+      return Math.abs(d - s);
+    default:
+      return s;
+  }
+}
+
 // Composite `src` onto `dst` in place per the layer's blend mode + opacity
 // (grayscale surfaces; mirrors the Rust compositor in `subject_mask.rs`).
 function blendInto(dst: ProxyMask, src: ProxyMask, blend: string, opacity: number): void {
   const a = clamp(opacity, 0, 1);
   for (let i = 0; i < dst.data.length; i++) {
     const d = dst.data[i];
-    const s = src.data[i];
-    const blended =
-      blend === "multiply" ? (d * s) / 255 : blend === "screen" ? 255 - ((255 - d) * (255 - s)) / 255 : s;
-    dst.data[i] = Math.round(d + (blended - d) * a);
+    dst.data[i] = Math.round(d + (blendValue(d, src.data[i], blend) - d) * a);
   }
 }
 
@@ -968,14 +984,7 @@ export class ProxyLayerCache {
         const row = y * w;
         for (let x = rect.x0; x < rect.x1; x++) {
           const d = mask.data[row + x];
-          const s = src.data[row + x];
-          const blended =
-            layer.blend === "multiply"
-              ? (d * s) / 255
-              : layer.blend === "screen"
-                ? 255 - ((255 - d) * (255 - s)) / 255
-                : s;
-          mask.data[row + x] = Math.round(d + (blended - d) * a);
+          mask.data[row + x] = Math.round(d + (blendValue(d, src.data[row + x], layer.blend) - d) * a);
         }
       }
     });

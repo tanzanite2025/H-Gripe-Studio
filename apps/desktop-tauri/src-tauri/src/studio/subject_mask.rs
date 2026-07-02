@@ -638,20 +638,30 @@ fn adjustment_lut(kind: &str, adjustment: &Value) -> Option<[u8; 256]> {
     Some(lut)
 }
 
-/// Composite the layer `surface` onto `dst` in place: `normal` replaces,
-/// `multiply` darkens, `screen` lightens, each lerped by the layer `opacity`.
-/// Grayscale surfaces (0..255); mirrors the proxy compositor in
-/// `maskMorphology.ts` so the preview cannot drift from the run.
+/// One blended sample per the layer blend mode (grayscale 0..255; mirrors the
+/// TS `blendValue` in `maskMorphology.ts` so the preview cannot drift).
+fn blend_value(dv: f64, sv: f64, blend: &str) -> f64 {
+    match blend {
+        "multiply" => dv * sv / 255.0,
+        "screen" => 255.0 - (255.0 - dv) * (255.0 - sv) / 255.0,
+        "darken" => dv.min(sv),
+        "lighten" => dv.max(sv),
+        "difference" => (dv - sv).abs(),
+        _ => sv,
+    }
+}
+
+/// Composite the layer `surface` onto `dst` in place per the layer blend mode,
+/// lerped by the layer `opacity`. Grayscale surfaces (0..255); mirrors the
+/// proxy compositor in `maskMorphology.ts` so the preview cannot drift from
+/// the run.
 fn blend_layer(dst: &mut GrayImage, src: &GrayImage, blend: &str, opacity: f64) {
     for (d, s) in dst.pixels_mut().zip(src.pixels()) {
         let dv = f64::from(d.0[0]);
         let sv = f64::from(s.0[0]);
-        let blended = match blend {
-            "multiply" => dv * sv / 255.0,
-            "screen" => 255.0 - (255.0 - dv) * (255.0 - sv) / 255.0,
-            _ => sv,
-        };
-        d.0[0] = (dv + (blended - dv) * opacity).round().clamp(0.0, 255.0) as u8;
+        d.0[0] = (dv + (blend_value(dv, sv, blend) - dv) * opacity)
+            .round()
+            .clamp(0.0, 255.0) as u8;
     }
 }
 
@@ -1664,10 +1674,16 @@ fn normalise_layer(layer: Value) -> Value {
     if let Some(name) = layer.get("name").and_then(Value::as_str) {
         out["name"] = json!(name);
     }
-    if let Some(blend @ ("normal" | "multiply" | "screen")) =
-        layer.get("blend").and_then(Value::as_str)
+    if let Some(
+        blend @ ("normal" | "multiply" | "screen" | "darken" | "lighten" | "difference"),
+    ) = layer.get("blend").and_then(Value::as_str)
     {
         out["blend"] = json!(blend);
+    }
+    if let Some(locked) = layer.get("locked").and_then(Value::as_bool) {
+        if locked {
+            out["locked"] = json!(true);
+        }
     }
     if let Some(opacity) = layer.get("opacity").and_then(Value::as_f64) {
         out["opacity"] = json!(opacity.clamp(0.0, 1.0));
@@ -2898,6 +2914,20 @@ mod tests {
         let mut mask = solid(4, 4, MASK_OFF);
         apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
         assert_eq!(mask.get_pixel(0, 0).0[0], 128);
+    }
+
+    #[test]
+    fn blend_value_covers_the_full_mode_set() {
+        assert_eq!(blend_value(100.0, 200.0, "normal"), 200.0);
+        assert_eq!(blend_value(102.0, 51.0, "multiply"), 102.0 * 51.0 / 255.0);
+        assert_eq!(
+            blend_value(102.0, 51.0, "screen"),
+            255.0 - (255.0 - 102.0) * (255.0 - 51.0) / 255.0
+        );
+        assert_eq!(blend_value(100.0, 200.0, "darken"), 100.0);
+        assert_eq!(blend_value(100.0, 200.0, "lighten"), 200.0);
+        assert_eq!(blend_value(100.0, 200.0, "difference"), 100.0);
+        assert_eq!(blend_value(100.0, 200.0, "unknown"), 200.0); // falls back to normal
     }
 
     #[test]

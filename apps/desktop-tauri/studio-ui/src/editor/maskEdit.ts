@@ -29,6 +29,7 @@ import {
   emptyMaskLayer,
   isMaskOperation,
   isPathOp,
+  LAYER_BLENDS,
 } from "../types/production";
 
 export interface EditState {
@@ -104,6 +105,7 @@ function normalizeLayer(value: unknown): MaskLayer | null {
     blend?: unknown;
     opacity?: unknown;
     visible?: unknown;
+    locked?: unknown;
     ops?: unknown;
     adjustment?: unknown;
   };
@@ -114,9 +116,10 @@ function normalizeLayer(value: unknown): MaskLayer | null {
     id: typeof v.id === "string" && v.id ? v.id : blank.id,
     name: typeof v.name === "string" && v.name ? v.name : blank.name,
     kind: isAdjustment ? "adjustment" : "mask",
-    blend: v.blend === "multiply" || v.blend === "screen" ? v.blend : "normal",
+    blend: LAYER_BLENDS.includes(v.blend as LayerBlend) ? (v.blend as LayerBlend) : "normal",
     opacity: typeof v.opacity === "number" ? Math.min(Math.max(v.opacity, 0), 1) : 1,
     visible: v.visible !== false,
+    ...(v.locked === true ? { locked: true } : null),
     ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
     ...(isAdjustment ? { adjustment } : null),
   };
@@ -169,6 +172,11 @@ export function activeOps(doc: MaskDocument): EditOp[] {
   return activeLayer(doc).ops;
 }
 
+/** Whether the layer receiving new edits is locked (PS "lock all"). */
+export function activeLayerLocked(doc: MaskDocument): boolean {
+  return activeLayer(doc).locked === true;
+}
+
 // Replace the active layer's ops (all sequential edits target the active layer).
 function withActiveOps(doc: MaskDocument, ops: EditOp[]): MaskDocument {
   const active = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
@@ -179,7 +187,7 @@ function withActiveOps(doc: MaskDocument, ops: EditOp[]): MaskDocument {
 }
 
 export function addBrushStroke(state: EditState, stroke: BrushStroke): EditState {
-  if (stroke.points.length === 0) return state;
+  if (stroke.points.length === 0 || activeLayerLocked(state.current)) return state;
   return commit(state, withActiveOps(state.current, [...activeOps(state.current), { ...stroke, type: "brush" }]));
 }
 
@@ -194,11 +202,12 @@ export function addMatteStroke(state: EditState, stroke: BrushStroke): EditState
 
 /** Append a closed pen / lasso vector path (rasterised by the backend on run). */
 export function addPath(state: EditState, path: EditPath): EditState {
-  if (path.points.length < 3) return state;
+  if (path.points.length < 3 || activeLayerLocked(state.current)) return state;
   return commit(state, withActiveOps(state.current, [...activeOps(state.current), { ...path, type: "path" }]));
 }
 
 export function addOperation(state: EditState, op: MaskOperation): EditState {
+  if (activeLayerLocked(state.current)) return state;
   return commit(state, withActiveOps(state.current, [...activeOps(state.current), op]));
 }
 
@@ -279,10 +288,10 @@ export function updateLayerAdjustment(state: EditState, index: number, adjustmen
   return withLayer(state, index, { adjustment });
 }
 
-/** Delete one layer (undoable). The last remaining layer cannot be deleted. */
+/** Delete one layer (undoable). The last remaining layer and locked layers cannot be deleted. */
 export function removeLayer(state: EditState, index: number): EditState {
   const { layers } = state.current;
-  if (layers.length <= 1 || index < 0 || index >= layers.length) return state;
+  if (layers.length <= 1 || index < 0 || index >= layers.length || layers[index].locked) return state;
   const next = layers.filter((_, i) => i !== index);
   const active = Math.min(state.current.active > index ? state.current.active - 1 : state.current.active, next.length - 1);
   return commit(state, { ...state.current, layers: next, active });
@@ -301,6 +310,13 @@ function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): 
     ...state.current,
     layers: state.current.layers.map((l, i) => (i === index ? { ...l, ...patch } : l)),
   });
+}
+
+/** Toggle a layer's PS "lock all" flag (undoable). Locked layers reject new edits and deletion. */
+export function toggleLayerLock(state: EditState, index: number): EditState {
+  const layer = state.current.layers[index];
+  if (!layer) return state;
+  return withLayer(state, index, layer.locked ? { locked: undefined } : { locked: true });
 }
 
 /** Toggle a layer's visibility (undoable); hidden layers skip compositing. */
