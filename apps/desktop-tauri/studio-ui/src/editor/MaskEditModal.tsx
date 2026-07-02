@@ -7,6 +7,8 @@ import {
   type MaskTool,
 } from "./maskTools";
 import { localizeTool } from "./maskToolsI18n";
+import { useShortcutScope, comboLabel, type ShortcutHandlers } from "./shortcuts";
+import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "./maskShortcuts";
 import { LangContext, useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, type ProxyMask } from "./maskMorphology";
@@ -145,23 +147,44 @@ export function MaskEditModal({
   const penPendingRef = useRef(false);
   penPendingRef.current = penAnchors.length > 0;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        // A pending pen path swallows the first Escape (cancel the path).
-        if (penPendingRef.current) setPenAnchors([]);
-        else onClose();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
-        e.preventDefault();
-        dispatch({ type: "undo" });
-      } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
-        e.preventDefault();
-        dispatch({ type: "redo" });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // PS-aligned shortcuts, registered into the mask-edit scope (shortcuts.ts):
+  // active only while this modal is mounted, shadowing the canvas shortcuts.
+  const selectTool = (id: string) => {
+    if (id !== "pen") setPenAnchors([]);
+    setToolId(id);
+  };
+  const shortcutHandlers: ShortcutHandlers = {
+    tool_brush: () => selectTool("brush"),
+    tool_eraser: () => selectTool("eraser"),
+    tool_wand: () => selectTool("wand"),
+    tool_pen: () => setToolId("pen"),
+    tool_lasso: () => selectTool("lasso"),
+    tool_rect: () => selectTool("rect"),
+    tool_ellipse: () => selectTool("ellipse"),
+    undo: () => dispatch({ type: "undo" }),
+    redo: () => dispatch({ type: "redo" }),
+    redo_alt: () => dispatch({ type: "redo" }),
+    clear: () => dispatch({ type: "clear" }),
+    invert: () => dispatch({ type: "op", op: { type: "invert" } }),
+    brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
+    brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),
+    swap_mode: () => {
+      if (toolId === "brush") setToolId("eraser");
+      else if (toolId === "eraser") setToolId("brush");
+      else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
+    },
+    close_path: () => {
+      if (!penPendingRef.current || penAnchors.length < 3) return false;
+      closePenPath();
+    },
+    cancel: () => {
+      // A pending pen path swallows the first Escape (cancel the path).
+      if (penPendingRef.current) setPenAnchors([]);
+      else onClose();
+    },
+    toggle_overlay: () => setOverlayOnly((v) => !v),
+  };
+  useShortcutScope(MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, shortcutHandlers);
 
   // Map a pointer event to image-pixel coordinates.
   const toImage = useCallback(
@@ -558,12 +581,14 @@ export function MaskEditModal({
           <div className="mask-edit-tools">
             {MASK_TOOLS.map((mt) => {
               const loc = localizeTool(mt, lang);
+              const combo = toolCombo(mt.id);
+              const hint = combo ? `${loc.hint} (${comboLabel(combo)})` : loc.hint;
               return (
                 <button
                   key={mt.id}
                   className={`mask-tool ${mt.status === "planned" ? "planned" : ""} ${toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id)) ? "active" : ""}`}
                   disabled={mt.status === "planned"}
-                  title={mt.status === "planned" ? `${loc.hint}（${t("mask.comingSoon")}）` : loc.hint}
+                  title={mt.status === "planned" ? `${hint}（${t("mask.comingSoon")}）` : hint}
                   onClick={() => onToolClick(mt)}
                 >
                   {loc.label}

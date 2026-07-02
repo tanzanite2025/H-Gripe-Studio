@@ -115,6 +115,23 @@ without a frontend rewrite.
 `planned` tools render greyed ("coming soon"); the registry lets a future tool
 ship stubbed before its backend lands.
 
+#### Keyboard shortcuts (mask-edit scope)
+
+The modal registers a Photoshop-aligned shortcut table into the central scoped
+shortcut system (`shortcuts.ts` — a scope stack: bindings are declarative,
+per-scope, and only the topmost scope receives keys, so PS-style keys here can
+never collide with the node canvas or a future clip-timeline scope's
+Premiere-style keys). `maskShortcuts.ts` is the frozen table for the
+`mask-edit` scope: `B` brush, `E` eraser, `W` wand, `P` pen, `L` lasso, `M` /
+`Shift+M` marquees, `[` / `]` brush size, `X` swap add/subtract, `Ctrl+Z` /
+`Ctrl+Shift+Z` / `Ctrl+Y` undo/redo, `Ctrl+D` clear, `Ctrl+Shift+I` invert,
+`Ctrl+H` mask-only view, `Enter` close pen path, `Esc` cancel path / close.
+Not-yet-implemented PS tools already *reserve* their combos as `planned`
+(`Z` zoom, `H` hand, `C` crop, `Q` quick mask, `Ctrl+T` free transform,
+`Shift+F6` feather dialog) — never dispatched, but a unit test fails CI if a
+new binding steals a reserved combo, and the zh coverage test guards the
+translations.
+
 ## Inputs (ports)
 
 | Port | Type | Required | Notes |
