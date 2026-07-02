@@ -5,10 +5,10 @@
 // renderer-agnostic and side-effect-free means it is unit-testable on its own
 // and the React component stays a thin view. The committed `EditPaths` is what
 // gets written back onto the node's `edit_paths` param; the Rust backend
-// rasterises it on run (pen/lasso `paths`, `brush_strokes`, `matte_strokes`
-// and the queued `operations`).
+// replays its ordered `ops` stack on run (vector paths, brush strokes and
+// queued operations, in recorded order), plus the `matte_strokes` band.
 
-import type { BrushStroke, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import type { BrushStroke, EditOp, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
 import { emptyEditPaths } from "../types/production";
 
 export interface EditState {
@@ -22,22 +22,47 @@ export interface EditState {
 
 const MAX_HISTORY = 100;
 
-export function initEditState(initial?: EditPaths | null): EditState {
+export function initEditState(initial?: unknown): EditState {
   return { current: normalizeEditPaths(initial), past: [], future: [] };
 }
 
-/** Coerce an arbitrary stored value into a well-formed `EditPaths`. */
+/**
+ * Coerce an arbitrary stored value into a well-formed version-2 `EditPaths`.
+ * A version-1 value (separate `paths` / `brush_strokes` / `operations`
+ * arrays) migrates onto one ordered `ops` stack in the legacy replay order —
+ * paths, then strokes, then operations — so old workflows rasterise
+ * identically.
+ */
 export function normalizeEditPaths(value: unknown): EditPaths {
   if (!value || typeof value !== "object") return emptyEditPaths();
-  const v = value as Partial<EditPaths>;
+  const v = value as {
+    ops?: unknown;
+    paths?: unknown;
+    brush_strokes?: unknown;
+    matte_strokes?: unknown;
+    operations?: unknown;
+    points?: unknown;
+  };
+  const ops: EditOp[] = Array.isArray(v.ops)
+    ? v.ops.filter(isEditOp)
+    : [
+        ...(Array.isArray(v.paths) ? v.paths : []).map((p: EditPath) => ({ ...p, type: "path" as const })),
+        ...(Array.isArray(v.brush_strokes) ? v.brush_strokes : []).map((s: BrushStroke) => ({
+          ...s,
+          type: "brush" as const,
+        })),
+        ...((Array.isArray(v.operations) ? v.operations : []) as MaskOperation[]),
+      ];
   return {
-    version: 1,
-    paths: Array.isArray(v.paths) ? v.paths : [],
-    brush_strokes: Array.isArray(v.brush_strokes) ? v.brush_strokes : [],
-    matte_strokes: Array.isArray(v.matte_strokes) ? v.matte_strokes : [],
-    operations: Array.isArray(v.operations) ? v.operations : [],
+    version: 2,
+    ops,
+    matte_strokes: Array.isArray(v.matte_strokes) ? v.matte_strokes as BrushStroke[] : [],
     points: Array.isArray(v.points) ? v.points.map(normalizePoint).filter((p): p is PointPrompt => p !== null) : [],
   };
+}
+
+function isEditOp(value: unknown): value is EditOp {
+  return !!value && typeof value === "object" && typeof (value as { type?: unknown }).type === "string";
 }
 
 /**
@@ -73,7 +98,7 @@ export function addBrushStroke(state: EditState, stroke: BrushStroke): EditState
   if (stroke.points.length === 0) return state;
   return commit(state, {
     ...state.current,
-    brush_strokes: [...state.current.brush_strokes, stroke],
+    ops: [...state.current.ops, { ...stroke, type: "brush" }],
   });
 }
 
@@ -91,14 +116,14 @@ export function addPath(state: EditState, path: EditPath): EditState {
   if (path.points.length < 3) return state;
   return commit(state, {
     ...state.current,
-    paths: [...state.current.paths, path],
+    ops: [...state.current.ops, { ...path, type: "path" }],
   });
 }
 
 export function addOperation(state: EditState, op: MaskOperation): EditState {
   return commit(state, {
     ...state.current,
-    operations: [...state.current.operations, op],
+    ops: [...state.current.ops, op],
   });
 }
 
@@ -137,22 +162,10 @@ export const canUndo = (state: EditState): boolean => state.past.length > 0;
 export const canRedo = (state: EditState): boolean => state.future.length > 0;
 
 export function isEmpty(edits: EditPaths): boolean {
-  return (
-    edits.paths.length === 0 &&
-    edits.brush_strokes.length === 0 &&
-    edits.matte_strokes.length === 0 &&
-    edits.operations.length === 0 &&
-    edits.points.length === 0
-  );
+  return edits.ops.length === 0 && edits.matte_strokes.length === 0 && edits.points.length === 0;
 }
 
 /** Count of applied edits, for the modal's status line. */
 export function editCount(edits: EditPaths): number {
-  return (
-    edits.paths.length +
-    edits.brush_strokes.length +
-    edits.matte_strokes.length +
-    edits.operations.length +
-    edits.points.length
-  );
+  return edits.ops.length + edits.matte_strokes.length + edits.points.length;
 }

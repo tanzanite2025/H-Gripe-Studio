@@ -16,6 +16,7 @@ import {
   undo,
 } from "./maskEdit";
 import type { BrushStroke } from "../types/production";
+import { editStackBrushStrokes, editStackOperations, editStackPaths } from "../types/production";
 
 const stroke = (id: string): BrushStroke => ({
   id,
@@ -31,16 +32,34 @@ describe("maskEdit normalizeEditPaths", () => {
   it("returns an empty, well-formed EditPaths for junk input", () => {
     for (const bad of [null, undefined, 42, "x", {}]) {
       const e = normalizeEditPaths(bad);
-      expect(e.version).toBe(1);
-      expect(e.paths).toEqual([]);
-      expect(e.brush_strokes).toEqual([]);
-      expect(e.operations).toEqual([]);
+      expect(e.version).toBe(2);
+      expect(e.ops).toEqual([]);
+      expect(e.matte_strokes).toEqual([]);
+      expect(e.points).toEqual([]);
     }
   });
 
-  it("preserves existing arrays", () => {
-    const e = normalizeEditPaths({ version: 1, brush_strokes: [stroke("s1")], paths: [], operations: [] });
-    expect(e.brush_strokes).toHaveLength(1);
+  it("migrates version-1 arrays onto the ops stack in legacy replay order", () => {
+    const e = normalizeEditPaths({
+      version: 1,
+      paths: [{ id: "p1", mode: "add", tool: "lasso", closed: true, points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }] }],
+      brush_strokes: [stroke("s1")],
+      matte_strokes: [stroke("m1")],
+      operations: [{ type: "feather", amount: 3 }],
+    });
+    expect(e.version).toBe(2);
+    expect(e.ops.map((op) => op.type)).toEqual(["path", "brush", "feather"]);
+    expect(e.matte_strokes).toHaveLength(1);
+  });
+
+  it("preserves an existing version-2 ops stack (recorded order)", () => {
+    const e = normalizeEditPaths({
+      version: 2,
+      ops: [{ type: "invert" }, { ...stroke("s1"), type: "brush" }],
+      matte_strokes: [],
+      points: [],
+    });
+    expect(e.ops.map((op) => op.type)).toEqual(["invert", "brush"]);
   });
 });
 
@@ -49,8 +68,9 @@ describe("maskEdit reducer-style helpers", () => {
     let s = initEditState();
     s = addBrushStroke(s, stroke("s1"));
     s = addOperation(s, { type: "feather", amount: 3 });
-    expect(s.current.brush_strokes).toHaveLength(1);
-    expect(s.current.operations).toHaveLength(1);
+    expect(editStackBrushStrokes(s.current)).toHaveLength(1);
+    expect(editStackOperations(s.current)).toHaveLength(1);
+    expect(s.current.ops.map((op) => op.type)).toEqual(["brush", "feather"]);
     expect(editCount(s.current)).toBe(2);
     expect(isEmpty(s.current)).toBe(false);
   });
@@ -59,7 +79,7 @@ describe("maskEdit reducer-style helpers", () => {
     let s = initEditState();
     s = addMatteStroke(s, stroke("m1"));
     expect(s.current.matte_strokes).toHaveLength(1);
-    expect(s.current.brush_strokes).toHaveLength(0);
+    expect(editStackBrushStrokes(s.current)).toHaveLength(0);
     expect(editCount(s.current)).toBe(1);
     expect(isEmpty(s.current)).toBe(false);
     s = undo(s);
@@ -93,11 +113,11 @@ describe("maskEdit reducer-style helpers", () => {
         { x: 10, y: 10 },
       ],
     });
-    expect(s.current.paths).toHaveLength(1);
+    expect(editStackPaths(s.current)).toHaveLength(1);
     expect(editCount(s.current)).toBe(1);
     expect(isEmpty(s.current)).toBe(false);
     s = undo(s);
-    expect(s.current.paths).toHaveLength(0);
+    expect(editStackPaths(s.current)).toHaveLength(0);
   });
 
   it("ignores degenerate paths with fewer than three anchors", () => {
@@ -112,7 +132,7 @@ describe("maskEdit reducer-style helpers", () => {
         { x: 10, y: 0 },
       ],
     });
-    expect(s.current.paths).toHaveLength(0);
+    expect(editStackPaths(s.current)).toHaveLength(0);
   });
 
   it("migrates legacy [x, y] points to positive prompts on load", () => {
@@ -130,7 +150,7 @@ describe("maskEdit reducer-style helpers", () => {
   it("ignores empty strokes", () => {
     let s = initEditState();
     s = addBrushStroke(s, { id: "x", mode: "add", radius: 4, points: [] });
-    expect(s.current.brush_strokes).toHaveLength(0);
+    expect(editStackBrushStrokes(s.current)).toHaveLength(0);
   });
 
   it("undo/redo walks the history and toggles availability", () => {
@@ -159,7 +179,7 @@ describe("maskEdit reducer-style helpers", () => {
     expect(canRedo(s)).toBe(true);
     s = addOperation(s, { type: "invert" });
     expect(canRedo(s)).toBe(false);
-    expect(s.current.operations).toHaveLength(1);
+    expect(editStackOperations(s.current)).toHaveLength(1);
   });
 
   it("clear is undoable and a no-op when already empty", () => {
@@ -172,8 +192,9 @@ describe("maskEdit reducer-style helpers", () => {
     expect(editCount(s.current)).toBe(1);
   });
 
-  it("seeds from an initial EditPaths", () => {
-    const s = initEditState({ version: 1, paths: [], brush_strokes: [stroke("s0")], matte_strokes: [], operations: [], points: [] });
+  it("seeds from an initial EditPaths (including a legacy version-1 value)", () => {
+    const legacy = { version: 1, paths: [], brush_strokes: [stroke("s0")], matte_strokes: [], operations: [], points: [] };
+    const s = initEditState(legacy);
     expect(editCount(s.current)).toBe(1);
     expect(canUndo(s)).toBe(false);
   });

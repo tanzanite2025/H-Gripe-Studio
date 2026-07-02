@@ -28,6 +28,7 @@ import {
   type EditState,
 } from "./maskEdit";
 import type { BrushStroke, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import { editStackBrushStrokes, editStackOperations, editStackPaths } from "../types/production";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -286,8 +287,8 @@ export function MaskEditModal({
     // brush strokes (transformed), so skip the raw stroke overlay to avoid a
     // confusing double-draw; matte strokes / points / marquee still render.
     if (!previewing) {
-      state.current.brush_strokes.forEach((s) => paintStroke(s));
-      state.current.paths.forEach(paintPath);
+      editStackBrushStrokes(state.current).forEach((s) => paintStroke(s));
+      editStackPaths(state.current).forEach(paintPath);
     }
     state.current.matte_strokes.forEach((s) => paintStroke(s, "matte"));
     const live = drawing.current;
@@ -386,7 +387,7 @@ export function MaskEditModal({
       }
       ctx.setLineDash([]);
     }
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.brush_strokes, state.current.matte_strokes, state.current.paths, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, previewing, preview]);
+  }, [dims.w, dims.h, underlay, overlayOnly, state.current.ops, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, penAnchors, previewing, preview]);
 
   useEffect(() => {
     redraw();
@@ -538,10 +539,10 @@ export function MaskEditModal({
   };
 
   const count = editCount(state.current);
-  const ops = state.current.operations;
+  const ops = editStackOperations(state.current);
   const points = state.current.points;
   const matteStrokes = state.current.matte_strokes;
-  const paths = state.current.paths;
+  const paths = editStackPaths(state.current);
   const showAmount = useMemo(
     () => tool.kind === "global" || ["grow", "shrink", "feather", "smooth"].includes(toolId),
     [tool.kind, toolId],

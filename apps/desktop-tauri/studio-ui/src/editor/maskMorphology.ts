@@ -15,6 +15,7 @@
 // and does the canvas rasterisation of the result overlay separately.
 
 import type { BrushStroke, EditPath, EditPaths, MaskOperation } from "../types/production";
+import { isBrushOp, isPathOp } from "../types/production";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
 export interface ProxyMask {
@@ -328,10 +329,12 @@ export function buildProxyMask(
   const w = Math.max(1, Math.round((dims.w || proxyWidth) * scale));
   const h = Math.max(1, Math.round((dims.h || proxyWidth) * scale));
   let mask = createProxyMask(w, h);
-  for (const path of edits.paths) fillPath(mask, path, scale);
-  for (const stroke of edits.brush_strokes) stampStroke(mask, stroke, scale);
-  for (const op of edits.operations) {
-    if (op.type === "rect" || op.type === "ellipse") {
+  for (const op of edits.ops) {
+    if (isPathOp(op)) {
+      fillPath(mask, op, scale);
+    } else if (isBrushOp(op)) {
+      stampStroke(mask, op, scale);
+    } else if (op.type === "rect" || op.type === "ellipse") {
       fillMarquee(mask, op, scale);
     } else if (op.type === "wand") {
       // Needs the real image; not previewable on the proxy.

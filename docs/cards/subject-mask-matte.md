@@ -219,29 +219,37 @@ is the no-points path).
 
 ```json
 {
-  "version": 1,
-  "paths": [
+  "version": 2,
+  "ops": [
     {
+      "type": "path",
       "id": "path_1", "mode": "add", "tool": "pen", "closed": true,
       "points": [ { "x": 100, "y": 120, "in": [90, 110], "out": [110, 130] } ]
-    }
-  ],
-  "brush_strokes": [
-    { "id": "stroke_1", "mode": "subtract", "radius": 18, "points": [[100, 120], [105, 124]] }
+    },
+    { "type": "brush", "id": "stroke_1", "mode": "subtract", "radius": 18, "points": [[100, 120], [105, 124]] },
+    { "type": "feather", "amount": 2 }
   ],
   "matte_strokes": [
     { "id": "matte_1", "radius": 16, "points": [[300, 200], [312, 214]] }
   ],
-  "operations": [ { "type": "feather", "amount": 2 } ],
   "points": [ { "x": 420, "y": 360, "label": 1 }, { "x": 690, "y": 540, "label": 0 } ]
 }
 ```
 
-`paths` (pen / lasso) are **rasterised on run**: the backend flattens each
+Version 2 records the edits as **one ordered `ops` stack** (see
+`docs/design/ps-editor-architecture.md`, M1), replayed in recorded order on
+run. `type: "path"` / `type: "brush"` carry the vector-path / brush-stroke
+shapes; any other `type` is a queued selection / morphology operation (`wand` /
+`rect` / `ellipse` / `invert` / `fill_holes` / `grow` / `shrink` / `feather` /
+`smooth`, with optional `amount` / `region`). A version-1 record (separate
+`paths` / `brush_strokes` / `operations` arrays) is migrated automatically on
+load — folded onto `ops` in the legacy replay order (paths, then strokes, then
+operations) so old workflows rasterise identically.
+
+`path` ops (pen / lasso) are **rasterised on run**: the backend flattens each
 closed anchor loop (cubic bezier segments where `in` / `out` control handles are
 present), fills it with an even-odd scanline rasteriser and boolean-combines it
-with the mask per `mode` (`add` / `subtract` / `intersect`).
-`brush_strokes` and the morphology `operations` are applied. `matte_strokes` are
+with the mask per `mode` (`add` / `subtract` / `intersect`). `matte_strokes` are
 trimap *unknown-band* strokes painted by the **Matting** tool: the backend
 stamps them as the unknown level on top of the auto `matting_band_px` ring, and
 their presence runs matting even when the `alpha_matting` flag is off. `points`

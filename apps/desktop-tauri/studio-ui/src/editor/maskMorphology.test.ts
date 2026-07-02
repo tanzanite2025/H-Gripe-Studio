@@ -104,7 +104,7 @@ describe("buildProxyMask", () => {
   it("rasterises a brush stroke into a downscaled proxy", () => {
     const edits: EditPaths = {
       ...emptyEditPaths(),
-      brush_strokes: [{ id: "s1", mode: "add", radius: 40, points: [[480, 320]] }],
+      ops: [{ type: "brush", id: "s1", mode: "add", radius: 40, points: [[480, 320]] }],
     };
     const { mask, scale } = buildProxyMask(edits, { w: 960, h: 640 }, { proxyWidth: 320 });
     expect(mask.w).toBe(320);
@@ -114,12 +114,11 @@ describe("buildProxyMask", () => {
   });
 
   it("applies queued morphology operations in order on top of strokes", () => {
-    const stroke = { id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
-    const baseEdits: EditPaths = { ...emptyEditPaths(), brush_strokes: [stroke] };
+    const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
+    const baseEdits: EditPaths = { ...emptyEditPaths(), ops: [stroke] };
     const grownEdits: EditPaths = {
       ...emptyEditPaths(),
-      brush_strokes: [stroke],
-      operations: [{ type: "grow", amount: 12 }],
+      ops: [stroke, { type: "grow", amount: 12 }],
     };
     const base = buildProxyMask(baseEdits, { w: 960, h: 640 });
     const grown = buildProxyMask(grownEdits, { w: 960, h: 640 });
@@ -135,7 +134,7 @@ describe("buildProxyMask", () => {
     ];
     const added: EditPaths = {
       ...emptyEditPaths(),
-      paths: [{ id: "p1", mode: "add", tool: "lasso", closed: true, points: square(120, 120, 840, 520) }],
+      ops: [{ type: "path", id: "p1", mode: "add", tool: "lasso", closed: true, points: square(120, 120, 840, 520) }],
     };
     const { mask, scale } = buildProxyMask(added, { w: 960, h: 640 }, { proxyWidth: 320 });
     const at = (x: number, y: number) => mask.data[Math.round(y * scale) * mask.w + Math.round(x * scale)];
@@ -144,9 +143,9 @@ describe("buildProxyMask", () => {
 
     const subtracted: EditPaths = {
       ...added,
-      paths: [
-        ...added.paths,
-        { id: "p2", mode: "subtract", tool: "pen", closed: true, points: square(400, 250, 560, 390) },
+      ops: [
+        ...added.ops,
+        { type: "path", id: "p2", mode: "subtract", tool: "pen", closed: true, points: square(400, 250, 560, 390) },
       ],
     };
     const sub = buildProxyMask(subtracted, { w: 960, h: 640 }, { proxyWidth: 320 });
@@ -156,9 +155,9 @@ describe("buildProxyMask", () => {
 
     const intersected: EditPaths = {
       ...added,
-      paths: [
-        ...added.paths,
-        { id: "p3", mode: "intersect", tool: "lasso", closed: true, points: square(120, 120, 480, 320) },
+      ops: [
+        ...added.ops,
+        { type: "path", id: "p3", mode: "intersect", tool: "lasso", closed: true, points: square(120, 120, 480, 320) },
       ],
     };
     const inter = buildProxyMask(intersected, { w: 960, h: 640 }, { proxyWidth: 320 });
@@ -168,14 +167,14 @@ describe("buildProxyMask", () => {
   });
 
   it("skips wand ops (no source pixels on the proxy)", () => {
+    const brush = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
     const edits: EditPaths = {
       ...emptyEditPaths(),
-      brush_strokes: [{ id: "s1", mode: "add", radius: 40, points: [[480, 320]] }],
-      operations: [{ type: "wand", amount: 30, region: [10, 10] }],
+      ops: [brush, { type: "wand", amount: 30, region: [10, 10] }],
     };
     const withWand = buildProxyMask(edits, { w: 960, h: 640 });
     const withoutWand = buildProxyMask(
-      { ...edits, operations: [] },
+      { ...edits, ops: [brush] },
       { w: 960, h: 640 },
     );
     expect(area(withWand.mask)).toBe(area(withoutWand.mask));
