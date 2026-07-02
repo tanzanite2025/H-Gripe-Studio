@@ -134,6 +134,13 @@ feather preview lane (set the radius on the amount slider, preview, Apply)
 recording the existing revisable `feather` op. Both combos flip from
 `planned` to `ready`.
 
+**M12 — Viewport polish.** `R` rotate-view tool: dragging rotates the view
+around the canvas centre — a screen-space CSS transform on top of the M8
+zoom/pan (`CanvasView.rotate`), never part of the document; Esc resets,
+`Ctrl+0` fits and resets. `F` cycles screen modes: full UI → right panels
+hidden → canvas only (PS full-screen cycle). Both combos flip from `planned`
+to `ready`.
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product
