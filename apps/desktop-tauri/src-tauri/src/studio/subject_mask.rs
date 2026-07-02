@@ -1182,7 +1182,11 @@ fn heal_region(mask: &mut GrayImage, coverage: &GrayImage) {
         let left = if x > 0 { buf[i - 1] } else { buf[i] };
         let right = if x < w - 1 { buf[i + 1] } else { buf[i] };
         let up = if y > 0 { buf[i - w as usize] } else { buf[i] };
-        let down = if y < h - 1 { buf[i + w as usize] } else { buf[i] };
+        let down = if y < h - 1 {
+            buf[i + w as usize]
+        } else {
+            buf[i]
+        };
         buf[i] = (left + right + up + down) / 4.0;
     };
     for it in 0..iters {
@@ -1236,11 +1240,7 @@ fn dodge_burn_region(mask: &mut GrayImage, coverage: &GrayImage, burn: bool) {
 /// layer's pre-edit state `base`. Mirrors the proxy `historyStroke` in
 /// `maskMorphology.ts`.
 fn history_region(mask: &mut GrayImage, base: &GrayImage, coverage: &GrayImage) {
-    for ((m, b), c) in mask
-        .pixels_mut()
-        .zip(base.pixels())
-        .zip(coverage.pixels())
-    {
+    for ((m, b), c) in mask.pixels_mut().zip(base.pixels()).zip(coverage.pixels()) {
         if c.0[0] != 0 {
             m.0[0] = b.0[0];
         }
