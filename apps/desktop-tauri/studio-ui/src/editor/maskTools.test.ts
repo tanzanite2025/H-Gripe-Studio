@@ -6,6 +6,7 @@ import {
   PLANNED_TOOLS,
   READY_TOOLS,
   maskTool,
+  toolTargets,
 } from "./maskTools";
 
 describe("mask tool registry", () => {
@@ -58,6 +59,13 @@ describe("mask tool registry", () => {
   it("paint tools carry an add/subtract mode", () => {
     expect(maskTool("brush")?.mode).toBe("add");
     expect(maskTool("eraser")?.mode).toBe("subtract");
+  });
+
+  it("decouples paint tools from a single target (M4)", () => {
+    expect(toolTargets(maskTool("brush")!)).toEqual(["layer", "matte"]);
+    expect(toolTargets(maskTool("eraser")!)).toEqual(["layer"]);
+    expect(toolTargets(maskTool("matting")!)).toEqual(["matte"]);
+    expect(toolTargets(maskTool("pen")!)).toEqual(["layer"]);
   });
 
   it("tags every tool with an execution lane", () => {

@@ -66,13 +66,24 @@ export function canonicalCombo(combo: string): string {
   return `${c.ctrl ? "ctrl+" : ""}${c.shift ? "shift+" : ""}${c.alt ? "alt+" : ""}${c.key}`;
 }
 
+// With Shift held, punctuation keys report their shifted character
+// (`Shift+[` → `"{"`); map those back so combos are written with the
+// unshifted key (`"shift+["`), matching how letter combos are written.
+const SHIFTED_KEYS: Readonly<Record<string, string>> = {
+  "{": "[",
+  "}": "]",
+  "+": "=",
+  _: "-",
+};
+
 /** `ctrl` matches Ctrl on Windows/Linux and ⌘ on macOS. */
 export function comboMatchesEvent(combo: Combo, e: KeyboardEvent): boolean {
+  const key = e.key.toLowerCase();
   return (
     combo.ctrl === (e.ctrlKey || e.metaKey) &&
     combo.shift === e.shiftKey &&
     combo.alt === e.altKey &&
-    combo.key === e.key.toLowerCase()
+    combo.key === ((e.shiftKey && SHIFTED_KEYS[key]) || key)
   );
 }
 

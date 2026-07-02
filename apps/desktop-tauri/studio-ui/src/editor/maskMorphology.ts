@@ -59,14 +59,63 @@ export function stampDisc(mask: ProxyMask, cx: number, cy: number, radius: numbe
   }
 }
 
+/**
+ * Stamp a soft disc: full coverage inside `hardness * r`, falling linearly to
+ * 0 at the rim, capped by `flow`. `subtract` multiplies the mask down by the
+ * coverage; `add` max-composites it up (mirrors the Rust soft stamp).
+ */
+export function stampSoftDisc(
+  mask: ProxyMask,
+  cx: number,
+  cy: number,
+  radius: number,
+  hardness: number,
+  flow: number,
+  subtract: boolean,
+): void {
+  const r = Math.max(0.5, radius);
+  const hard = clamp(hardness, 0, 1) * r;
+  const x0 = Math.max(0, Math.floor(cx - r));
+  const x1 = Math.min(mask.w - 1, Math.ceil(cx + r));
+  const y0 = Math.max(0, Math.floor(cy - r));
+  const y1 = Math.min(mask.h - 1, Math.ceil(cy + r));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const d = Math.hypot(x - cx, y - cy);
+      if (d > r) continue;
+      const falloff = d <= hard ? 1 : (r - d) / Math.max(r - hard, 1e-6);
+      const cov = clamp(flow, 0, 1) * falloff;
+      const idx = y * mask.w + x;
+      const v = mask.data[idx];
+      mask.data[idx] = subtract
+        ? Math.round(v * (1 - cov))
+        : Math.max(v, Math.round(cov * 255));
+    }
+  }
+}
+
+const isSoft = (s: BrushStroke): boolean => (s.hardness ?? 1) < 1 || (s.flow ?? 1) < 1;
+
 /** Stamp discs along a polyline so a brush stroke reads as a continuous band. */
 function stampStroke(mask: ProxyMask, stroke: BrushStroke, scale: number): void {
+  const soft = isSoft(stroke);
   const value = stroke.mode === "subtract" ? 0 : 255;
   const radius = Math.max(1, Math.round(stroke.radius * scale));
+  const hardness = clamp(stroke.hardness ?? 1, 0, 1);
+  const flow = clamp(stroke.flow ?? 1, 0, 1);
+  // Soft stamps step at the recorded spacing (fraction of the diameter);
+  // hard stamps keep the legacy half-radius step.
+  const step = soft
+    ? Math.max(1, clamp(stroke.spacing ?? 0.25, 0.01, 1) * radius * 2)
+    : Math.max(1, radius / 2);
+  const stamp = (x: number, y: number) =>
+    soft
+      ? stampSoftDisc(mask, x, y, radius, hardness, flow, stroke.mode === "subtract")
+      : stampDisc(mask, x, y, radius, value);
   const pts = stroke.points;
   if (pts.length === 0) return;
   if (pts.length === 1) {
-    stampDisc(mask, pts[0][0] * scale, pts[0][1] * scale, radius, value);
+    stamp(pts[0][0] * scale, pts[0][1] * scale);
     return;
   }
   for (let i = 1; i < pts.length; i++) {
@@ -77,10 +126,10 @@ function stampStroke(mask: ProxyMask, stroke: BrushStroke, scale: number): void 
     const x1 = bx * scale;
     const y1 = by * scale;
     const dist = Math.hypot(x1 - x0, y1 - y0);
-    const steps = Math.max(1, Math.ceil(dist / Math.max(1, radius / 2)));
+    const steps = Math.max(1, Math.ceil(dist / step));
     for (let s = 0; s <= steps; s++) {
       const tt = s / steps;
-      stampDisc(mask, x0 + (x1 - x0) * tt, y0 + (y1 - y0) * tt, radius, value);
+      stamp(x0 + (x1 - x0) * tt, y0 + (y1 - y0) * tt);
     }
   }
 }
