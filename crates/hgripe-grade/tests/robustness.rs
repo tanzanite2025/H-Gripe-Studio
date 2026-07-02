@@ -4,7 +4,9 @@
 // "never NaN, never panic" contract — the golden vectors pin exact values,
 // this pins graceful degradation.
 
-use hgripe_grade::{apply_op, composite_over, BlendMode, CurveChannel, GradeOp, GradeSpace, GradeSurface, HslQualifier};
+use hgripe_grade::{
+    apply_op, composite_over, BlendMode, CurveChannel, GradeOp, GradeSpace, GradeSurface, HslQualifier, WarpPoint,
+};
 
 fn hostile_surface(space: GradeSpace) -> GradeSurface {
     GradeSurface {
@@ -108,6 +110,28 @@ fn all_ops() -> Vec<GradeOp> {
             green: [0.0, 1.0, 0.0],
             blue: [0.0, 0.0, 1.0],
             monochrome: true,
+        },
+        // Degenerate warper points: non-finite, zero radii, extreme shifts.
+        GradeOp::ColorWarper { points: vec![] },
+        GradeOp::ColorWarper {
+            points: vec![
+                WarpPoint {
+                    hue: f32::NAN,
+                    sat: f32::INFINITY,
+                    hue_shift: 1e6,
+                    sat_scale: -1e6,
+                    hue_radius: 0.0,
+                    sat_radius: -1.0,
+                },
+                WarpPoint {
+                    hue: -720.0,
+                    sat: 10.0,
+                    hue_shift: 3600.0,
+                    sat_scale: 100.0,
+                    hue_radius: 1e6,
+                    sat_radius: 1e6,
+                },
+            ],
         },
         // Degenerate 1D LUTs: minimal size, inverted/out-of-range entries.
         GradeOp::Lut1d {

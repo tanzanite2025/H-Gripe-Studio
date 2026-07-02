@@ -183,7 +183,18 @@ export type GradeOp =
       green: [number, number, number];
       blue: [number, number, number];
       monochrome: boolean;
-    };
+    }
+  | { type: "color_warper"; points: WarpPoint[] };
+
+/** One colour-warper control point (mirrors Rust `WarpPoint`). */
+export interface WarpPoint {
+  hue: number;
+  sat: number;
+  hue_shift: number;
+  sat_scale: number;
+  hue_radius: number;
+  sat_radius: number;
+}
 
 /**
  * HSL qualifier: a per-pixel gate computed from the layer's input (hue band
@@ -455,6 +466,28 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
         for (let c = 0; c < 3; c++) {
           rgb[c] = rows[c][0] * src[0] + rows[c][1] * src[1] + rows[c][2] * src[2];
         }
+      });
+      break;
+    }
+    case "color_warper": {
+      const points = op.points.filter((p) =>
+        [p.hue, p.sat, p.hue_shift, p.sat_scale, p.hue_radius, p.sat_radius].every((v) => Number.isFinite(v)),
+      );
+      forEachHsl(surface, (h, s, l) => {
+        let hueShift = 0;
+        let satFactor = 1;
+        for (const p of points) {
+          const dRaw = (((h - p.hue) % 360) + 360) % 360;
+          const dh = Math.min(dRaw, 360 - dRaw);
+          const ds = s - clamp01(p.sat);
+          const d = Math.sqrt(
+            (dh / Math.max(p.hue_radius, 1e-3)) ** 2 + (ds / Math.max(p.sat_radius, 1e-3)) ** 2,
+          );
+          const w = smoothstep(1 - d);
+          hueShift += w * p.hue_shift;
+          satFactor *= 1 + w * (p.sat_scale - 1);
+        }
+        return [(((h + hueShift) % 360) + 360) % 360, clamp01(s * Math.max(satFactor, 0)), l];
       });
       break;
     }
