@@ -193,26 +193,47 @@ export interface MaskOperation {
   region?: number[];
 }
 
+/** An `EditPath` entry on the ordered edit stack. */
+export type PathOp = EditPath & { type: "path" };
+
+/** A `BrushStroke` entry on the ordered edit stack. */
+export type BrushOp = BrushStroke & { type: "brush" };
+
+/**
+ * One step of the ordered edit stack (see
+ * `docs/design/ps-editor-architecture.md`, M1): a vector path, a brush /
+ * eraser stroke, or a queued morphology / selection operation. The
+ * discriminant is `type` — `"path"` / `"brush"` are the geometry ops, every
+ * other value is a `MaskOperation` kind (`wand` / `invert` / `feather` / …).
+ */
+export type EditOp = PathOp | BrushOp | MaskOperation;
+
 /**
  * Re-editable record of all manual edits for the Subject Mask card. Stored on
  * the node as the `edit_paths` param and round-tripped through the workflow
- * file. Mirrors the Rust `EditPaths` struct.
+ * file. Mirrors the Rust `EditPaths` schema.
+ *
+ * Version 2: the edits are one ordered `ops` stack (replayed in recorded
+ * order) instead of per-kind arrays. A version-1 value (separate `paths` /
+ * `brush_strokes` / `operations` arrays) is migrated on load by
+ * `normalizeEditPaths`, preserving the legacy replay order (paths, then
+ * strokes, then operations).
  */
 export interface EditPaths {
-  version: 1;
-  paths: EditPath[];
-  brush_strokes: BrushStroke[];
+  version: 2;
+  /** The ordered edit stack, replayed by the backend in recorded order. */
+  ops: EditOp[];
   /**
-   * Trimap "unknown band" strokes for alpha matting (same shape as
-   * `brush_strokes`). When present, the backend paints these regions as the
-   * trimap *unknown* level on top of the auto `matting_band_px` ring, so the
-   * matter (ViTMatte / builtin guided filter) resolves soft alpha exactly where
-   * the user marked hair / fur / glass. Non-empty ⇒ matting runs even if the
+   * Trimap "unknown band" strokes for alpha matting (same shape as brush
+   * strokes). When present, the backend paints these regions as the trimap
+   * *unknown* level on top of the auto `matting_band_px` ring, so the matter
+   * (ViTMatte / builtin guided filter) resolves soft alpha exactly where the
+   * user marked hair / fur / glass. Non-empty ⇒ matting runs even if the
    * node's `alpha_matting` toggle is off. Read as `edit_paths.matte_strokes`.
+   * Not on the `ops` stack: they parameterise the matting pass, they are not
+   * a sequential mask edit.
    */
   matte_strokes: BrushStroke[];
-  /** Ordered morphology / selection operations applied by the backend. */
-  operations: MaskOperation[];
   /**
    * SAM 2 point prompts in image-pixel space. When an auto mode runs with at
    * least one *positive* point, the backend routes to the interactive SAM 2
@@ -237,7 +258,34 @@ export interface PointPrompt {
 }
 
 export function emptyEditPaths(): EditPaths {
-  return { version: 1, paths: [], brush_strokes: [], matte_strokes: [], operations: [], points: [] };
+  return { version: 2, ops: [], matte_strokes: [], points: [] };
+}
+
+export function isPathOp(op: EditOp): op is PathOp {
+  return op.type === "path";
+}
+
+export function isBrushOp(op: EditOp): op is BrushOp {
+  return op.type === "brush";
+}
+
+export function isMaskOperation(op: EditOp): op is MaskOperation {
+  return op.type !== "path" && op.type !== "brush";
+}
+
+/** The vector paths on the edit stack, in stack order. */
+export function editStackPaths(edits: EditPaths): EditPath[] {
+  return edits.ops.filter(isPathOp);
+}
+
+/** The brush / eraser strokes on the edit stack, in stack order. */
+export function editStackBrushStrokes(edits: EditPaths): BrushStroke[] {
+  return edits.ops.filter(isBrushOp);
+}
+
+/** The queued morphology / selection operations on the edit stack, in stack order. */
+export function editStackOperations(edits: EditPaths): MaskOperation[] {
+  return edits.ops.filter(isMaskOperation);
 }
 
 /** A subject detected by a Phase 2 model (empty in Phase 1). */

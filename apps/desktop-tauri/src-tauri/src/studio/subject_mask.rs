@@ -367,12 +367,13 @@ fn load_mask_sized(
 
 // --- pure mask operations (unit-tested without disk) -----------------------
 
-/// Apply the manual edits recorded in `edit_paths`: pen / lasso vector paths
-/// (rasterised and boolean-combined), magic-wand flood selections, brush /
-/// eraser strokes, and the queued marquee / morphology operations. Unknown
-/// entries are ignored. Order mirrors the Mask-Edit modal's proxy preview
-/// (`buildProxyMask`): geometry first (paths, then strokes), then the queued
-/// `operations` in the order they were recorded.
+/// Apply the manual edits recorded in `edit_paths` by replaying the ordered
+/// `ops` stack (see `docs/design/ps-editor-architecture.md`, M1): pen / lasso
+/// vector paths (rasterised and boolean-combined), brush / eraser strokes, and
+/// the queued magic-wand / marquee / morphology operations, in recorded order.
+/// A version-1 value (separate per-kind arrays) is migrated first, preserving
+/// the legacy replay order, so old workflows rasterise identically. Unknown
+/// entries are ignored.
 fn apply_edit_paths(
     image: &RgbaImage,
     mask: &mut GrayImage,
@@ -383,15 +384,7 @@ fn apply_edit_paths(
     let Some(value) = parse_edit_paths(edit_paths) else {
         return;
     };
-
-    for path in parse_mask_paths(&value) {
-        apply_mask_path(mask, &path);
-        operations.push(json!({
-            "type": format!("path_{}", path.mode.as_str()),
-            "tool": path.tool,
-            "points": path.polygon.len(),
-        }));
-    }
+    let value = migrate_edit_paths(value);
 
     for op in value
         .get("ops")
@@ -400,61 +393,42 @@ fn apply_edit_paths(
         .flatten()
     {
         match op.get("type").and_then(Value::as_str) {
-            Some("wand") => {
-                let (Some(x), Some(y)) = (json_u32(op.get("x")), json_u32(op.get("y"))) else {
+            Some("path") => {
+                let Some(path) = parse_mask_path(op) else {
                     continue;
                 };
-                let tolerance = op
-                    .get("tolerance")
-                    .and_then(Value::as_i64)
-                    .map(|t| t.clamp(0, 255) as i32)
-                    .unwrap_or(default_tolerance);
-                wand_select(image, mask, x, y, tolerance);
-                operations.push(json!({ "type": "wand", "tolerance": tolerance }));
+                apply_mask_path(mask, &path);
+                operations.push(json!({
+                    "type": format!("path_{}", path.mode.as_str()),
+                    "tool": path.tool,
+                    "points": path.polygon.len(),
+                }));
             }
-            Some("invert") => {
-                invert(mask);
-                operations.push(json!({ "type": "invert" }));
+            Some("brush") => {
+                let subtract = op.get("mode").and_then(Value::as_str) == Some("subtract");
+                let radius = op
+                    .get("radius")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(8.0)
+                    .max(0.0) as u32;
+                let points = parse_points(op.get("points"));
+                if points.is_empty() {
+                    continue;
+                }
+                stamp_stroke(
+                    mask,
+                    &points,
+                    radius,
+                    if subtract { MASK_OFF } else { MASK_ON },
+                );
+                operations.push(json!({
+                    "type": if subtract { "brush_subtract" } else { "brush_add" },
+                    "radius": radius,
+                }));
             }
-            _ => {}
+            Some(_) => apply_queued_operation(image, mask, op, default_tolerance, operations),
+            None => {}
         }
-    }
-
-    for stroke in value
-        .get("brush_strokes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let subtract = stroke.get("mode").and_then(Value::as_str) == Some("subtract");
-        let radius = stroke
-            .get("radius")
-            .and_then(Value::as_f64)
-            .unwrap_or(8.0)
-            .max(0.0) as u32;
-        let points = parse_points(stroke.get("points"));
-        if points.is_empty() {
-            continue;
-        }
-        stamp_stroke(
-            mask,
-            &points,
-            radius,
-            if subtract { MASK_OFF } else { MASK_ON },
-        );
-        operations.push(json!({
-            "type": if subtract { "brush_subtract" } else { "brush_add" },
-            "radius": radius,
-        }));
-    }
-
-    for op in value
-        .get("operations")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        apply_queued_operation(image, mask, op, default_tolerance, operations);
     }
 }
 
@@ -815,11 +789,69 @@ fn parse_edit_paths(value: Option<&Value>) -> Option<Value> {
 }
 
 /// The object echoed onto the `edit_paths` output / written to disk: the parsed
-/// input when present, else an empty versioned envelope.
+/// input migrated to the version-2 ordered-ops envelope, else an empty one.
 fn normalise_edit_paths(value: Option<&Value>) -> Value {
-    parse_edit_paths(value).unwrap_or_else(
-        || json!({ "version": 1, "paths": [], "brush_strokes": [], "matte_strokes": [] }),
-    )
+    migrate_edit_paths(parse_edit_paths(value).unwrap_or_else(|| json!({})))
+}
+
+/// Migrate an `edit_paths` value to the version-2 envelope: one ordered `ops`
+/// stack plus the non-sequential `matte_strokes` / `points`. A version-2 value
+/// passes through (missing arrays filled in). A version-1 value's per-kind
+/// arrays are folded onto `ops` in the legacy replay order — `paths`, then the
+/// legacy inline `ops` (wand / invert, rewritten to the queued-operation
+/// shape), then `brush_strokes`, then `operations` — so replaying the migrated
+/// stack rasterises identically to the version-1 semantics.
+fn migrate_edit_paths(value: Value) -> Value {
+    let arr = |key: &str| -> Vec<Value> {
+        value
+            .get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let version = value.get("version").and_then(Value::as_u64).unwrap_or(1);
+    let ops: Vec<Value> = if version >= 2 {
+        arr("ops")
+    } else {
+        let mut ops: Vec<Value> = Vec::new();
+        for mut path in arr("paths") {
+            if let Some(obj) = path.as_object_mut() {
+                obj.insert("type".into(), json!("path"));
+            }
+            ops.push(path);
+        }
+        for op in arr("ops") {
+            match op.get("type").and_then(Value::as_str) {
+                // Legacy inline wand: `{ x, y, tolerance? }` → queued shape.
+                Some("wand") => {
+                    let (Some(x), Some(y)) = (json_u32(op.get("x")), json_u32(op.get("y"))) else {
+                        continue;
+                    };
+                    let mut wand = json!({ "type": "wand", "region": [x, y] });
+                    if let Some(tolerance) = op.get("tolerance").and_then(Value::as_i64) {
+                        wand["amount"] = json!(tolerance.clamp(0, 255));
+                    }
+                    ops.push(wand);
+                }
+                Some("invert") => ops.push(json!({ "type": "invert" })),
+                _ => {}
+            }
+        }
+        for mut stroke in arr("brush_strokes") {
+            if let Some(obj) = stroke.as_object_mut() {
+                obj.insert("type".into(), json!("brush"));
+            }
+            ops.push(stroke);
+        }
+        ops.extend(arr("operations"));
+        ops
+    };
+    json!({
+        "version": 2,
+        "ops": ops,
+        "matte_strokes": arr("matte_strokes"),
+        "points": arr("points"),
+    })
 }
 
 /// Optional point prompts for the auto-subject segmenter, read from a top-level
@@ -889,44 +921,36 @@ struct PathAnchor {
     handle_out: Option<(f32, f32)>,
 }
 
-/// Parse `edit_paths.paths` (pen / lasso vector paths) into flattened closed
-/// polygons ready to rasterise. A path needs at least 3 anchors to enclose an
-/// area; the polygon is always closed for the fill (a lasso releases into a
-/// closed loop, a pen path closes back to its first anchor).
-fn parse_mask_paths(value: &Value) -> Vec<MaskPath> {
-    value
-        .get("paths")
+/// Parse one pen / lasso vector path entry into a flattened closed polygon
+/// ready to rasterise. A path needs at least 3 anchors to enclose an area; the
+/// polygon is always closed for the fill (a lasso releases into a closed loop,
+/// a pen path closes back to its first anchor).
+fn parse_mask_path(path: &Value) -> Option<MaskPath> {
+    let anchors: Vec<PathAnchor> = path
+        .get("points")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|path| {
-            let anchors: Vec<PathAnchor> = path
-                .get("points")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(parse_path_anchor)
-                .collect();
-            if anchors.len() < 3 {
-                return None;
-            }
-            let mode = match path.get("mode").and_then(Value::as_str) {
-                Some("subtract") => PathMode::Subtract,
-                Some("intersect") => PathMode::Intersect,
-                _ => PathMode::Add,
-            };
-            let tool = path
-                .get("tool")
-                .and_then(Value::as_str)
-                .unwrap_or("pen")
-                .to_string();
-            Some(MaskPath {
-                mode,
-                tool,
-                polygon: flatten_path(&anchors),
-            })
-        })
-        .collect()
+        .filter_map(parse_path_anchor)
+        .collect();
+    if anchors.len() < 3 {
+        return None;
+    }
+    let mode = match path.get("mode").and_then(Value::as_str) {
+        Some("subtract") => PathMode::Subtract,
+        Some("intersect") => PathMode::Intersect,
+        _ => PathMode::Add,
+    };
+    let tool = path
+        .get("tool")
+        .and_then(Value::as_str)
+        .unwrap_or("pen")
+        .to_string();
+    Some(MaskPath {
+        mode,
+        tool,
+        polygon: flatten_path(&anchors),
+    })
 }
 
 fn parse_path_anchor(value: &Value) -> Option<PathAnchor> {
@@ -1567,7 +1591,86 @@ mod tests {
     #[test]
     fn normalise_edit_paths_defaults_to_versioned_envelope() {
         let value = normalise_edit_paths(None);
-        assert_eq!(value.get("version").and_then(Value::as_i64), Some(1));
+        assert_eq!(value.get("version").and_then(Value::as_i64), Some(2));
+        assert_eq!(value["ops"], json!([]));
+        assert_eq!(value["matte_strokes"], json!([]));
+        assert_eq!(value["points"], json!([]));
+    }
+
+    #[test]
+    fn migrate_edit_paths_folds_version1_arrays_in_legacy_replay_order() {
+        let legacy = json!({
+            "version": 1,
+            "paths": [{ "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
+                        "points": [{ "x": 0, "y": 0 }, { "x": 4, "y": 0 }, { "x": 4, "y": 4 }] }],
+            "ops": [{ "type": "wand", "x": 1, "y": 2, "tolerance": 300 }, { "type": "invert" }],
+            "brush_strokes": [{ "id": "s1", "mode": "add", "radius": 3, "points": [[1, 1]] }],
+            "matte_strokes": [{ "mode": "add", "radius": 2, "points": [[5, 5]] }],
+            "operations": [{ "type": "feather", "amount": 2 }],
+            "points": [[10, 20]]
+        });
+        let migrated = migrate_edit_paths(legacy);
+        assert_eq!(migrated["version"], json!(2));
+        let kinds: Vec<&str> = migrated["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|op| op["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["path", "wand", "invert", "brush", "feather"]);
+        // The legacy inline wand is rewritten to the queued shape (clamped).
+        assert_eq!(migrated["ops"][1]["region"], json!([1, 2]));
+        assert_eq!(migrated["ops"][1]["amount"], json!(255));
+        // Non-sequential fields survive unchanged.
+        assert_eq!(migrated["matte_strokes"].as_array().unwrap().len(), 1);
+        assert_eq!(migrated["points"], json!([[10, 20]]));
+    }
+
+    #[test]
+    fn migrated_version1_replays_identically_to_legacy_semantics() {
+        // Golden: a v1 record and its migrated v2 form must rasterise the same.
+        let legacy = json!({
+            "version": 1,
+            "paths": [{ "id": "p1", "mode": "add", "tool": "lasso", "closed": true,
+                        "points": [{ "x": 2, "y": 2 }, { "x": 8, "y": 2 },
+                                   { "x": 8, "y": 7 }, { "x": 2, "y": 7 }] }],
+            "brush_strokes": [{ "id": "s1", "mode": "subtract", "radius": 1, "points": [[4, 4]] }],
+            "operations": [{ "type": "invert" }]
+        });
+        let image = RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255]));
+        let mut legacy_mask = solid(10, 10, MASK_OFF);
+        apply_edit_paths(&image, &mut legacy_mask, Some(&legacy), 24, &mut Vec::new());
+        let migrated = migrate_edit_paths(legacy);
+        let mut migrated_mask = solid(10, 10, MASK_OFF);
+        apply_edit_paths(
+            &image,
+            &mut migrated_mask,
+            Some(&migrated),
+            24,
+            &mut Vec::new(),
+        );
+        assert_eq!(legacy_mask.as_raw(), migrated_mask.as_raw());
+    }
+
+    #[test]
+    fn version2_ops_replay_in_recorded_order() {
+        // invert *then* brush must differ from brush *then* invert: the stack
+        // is ordered, unlike the v1 per-kind arrays.
+        let image = RgbaImage::from_pixel(5, 5, Rgba([0, 0, 0, 255]));
+        let brush = json!({ "type": "brush", "mode": "add", "radius": 0, "points": [[2, 2]] });
+        let invert_first = json!({ "version": 2, "ops": [{ "type": "invert" }, brush.clone()] });
+        let mut mask = solid(5, 5, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&invert_first), 24, &mut Vec::new());
+        // Everything on (inverted), the brush re-adds inside it.
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_ON);
+
+        let brush_first = json!({ "version": 2, "ops": [brush, { "type": "invert" }] });
+        let mut mask = solid(5, 5, MASK_OFF);
+        apply_edit_paths(&image, &mut mask, Some(&brush_first), 24, &mut Vec::new());
+        // Brush dot then invert: the dot is off, the rest on.
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_OFF);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
     }
 
     #[test]
