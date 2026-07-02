@@ -744,17 +744,16 @@ fn for_each_rgb_linear(surface: &mut GradeSurface, n: usize, mut f: impl FnMut(&
     let space = surface.space;
     let clamp_in = space != crate::surface::GradeSpace::LinearRec709;
     let load = |v: f32| if clamp_in { v.clamp(0.0, 1.0) } else { v };
-    for px in 0..n {
-        let i = px * 4;
+    for px in surface.data[..n * 4].chunks_exact_mut(4) {
         let mut rgb = [
-            trc_decode(space, load(surface.data[i])),
-            trc_decode(space, load(surface.data[i + 1])),
-            trc_decode(space, load(surface.data[i + 2])),
+            trc_decode(space, load(px[0])),
+            trc_decode(space, load(px[1])),
+            trc_decode(space, load(px[2])),
         ];
         f(&mut rgb);
-        surface.data[i] = trc_encode(space, rgb[0]);
-        surface.data[i + 1] = trc_encode(space, rgb[1]);
-        surface.data[i + 2] = trc_encode(space, rgb[2]);
+        px[0] = trc_encode(space, rgb[0]);
+        px[1] = trc_encode(space, rgb[1]);
+        px[2] = trc_encode(space, rgb[2]);
     }
 }
 
