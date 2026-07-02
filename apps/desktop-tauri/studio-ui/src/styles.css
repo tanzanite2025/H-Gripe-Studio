@@ -927,24 +927,32 @@ button:disabled { opacity: 0.6; cursor: default; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 44px 1fr 240px;
+  grid-template-columns: auto 1fr 240px;
   gap: 10px;
   padding: 10px;
 }
+/* PS toolbar rail: a flat dark column of borderless icon buttons. It never
+   scrolls — when the modal is too short for one column, groups wrap into a
+   second column (PS's double-column mode). */
 .mask-edit-tools {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  overflow-y: auto;
-  overflow-x: visible;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0 4px;
+  overflow: visible;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 3px;
 }
 /* PS-style toolbar sections: selection / paint / vector / ops / navigation,
    separated by a rule so tools sit where a PS user expects them. */
 .mask-tool-group {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 5px 0;
+  gap: 2px;
+  padding: 4px 0;
   border-bottom: 1px solid var(--border);
 }
 .mask-tool-group:first-child { padding-top: 0; }
@@ -953,19 +961,20 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-tool-slot { position: relative; }
 .mask-tool {
   position: relative;
-  width: 38px;
-  height: 34px;
+  width: 28px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--panel-2);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
   cursor: pointer;
 }
 .mask-tool:hover:not(:disabled) { background: #2a2f3d; }
-.mask-tool.active { border-color: var(--accent); color: var(--accent); }
+.mask-tool.active { background: #1f2c44; color: var(--accent); }
 .mask-tool-icon { display: block; }
 /* PS's tiny corner triangle marking a slot that hides more variants. */
 .mask-tool .flyout-corner {
