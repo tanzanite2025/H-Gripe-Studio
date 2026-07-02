@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import blendSeparable from "../../../../../crates/hgripe-grade/goldens/blend_separable.json";
 import opsCore from "../../../../../crates/hgripe-grade/goldens/ops_core.json";
 import opsHdr from "../../../../../crates/hgripe-grade/goldens/ops_hdr.json";
+import opsLut1d from "../../../../../crates/hgripe-grade/goldens/ops_lut1d.json";
 import opsMixer from "../../../../../crates/hgripe-grade/goldens/ops_mixer.json";
 import opsPro from "../../../../../crates/hgripe-grade/goldens/ops_pro.json";
 import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json";
@@ -81,6 +82,7 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
     ["ops_pro.json", opsPro],
     ["ops_hdr.json", opsHdr],
     ["ops_mixer.json", opsMixer],
+    ["ops_lut1d.json", opsLut1d],
   ] as const) {
     for (const c of (json as { cases: DocCase[] }).cases) {
       it(`${file}: ${c.name}`, () => {

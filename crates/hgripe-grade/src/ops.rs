@@ -121,6 +121,12 @@ pub enum GradeOp {
         blue: [f32; 3],
         monochrome: bool,
     },
+    /// 1D LUT on encoded values: per-channel linear interpolation over
+    /// `size` RGB triples (the `.cube` `LUT_1D_SIZE` layout — row `i` is
+    /// the output for input `i/(size−1)` on each channel). Used standalone
+    /// as a tone LUT, or chained before a [`GradeOp::Lut3d`] as its shaper.
+    /// Build one from a file with [`parse_cube`].
+    Lut1d { size: u32, table: Vec<f32> },
 }
 
 /// Apply one op to every pixel's RGB (alpha untouched).
@@ -301,6 +307,15 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                     rgb[c] = rows[c][0] * src[0] + rows[c][1] * src[1] + rows[c][2] * src[2];
                 }
             });
+        }
+        GradeOp::Lut1d { size, table } => {
+            let lut = Lut1d::new(*size, table);
+            for px in 0..n {
+                let i = px * 4;
+                for c in 0..3 {
+                    surface.data[i + c] = lut.sample(c, surface.data[i + c].clamp(0.0, 1.0));
+                }
+            }
         }
         GradeOp::Lut3d { size, table } => {
             let lut = Lut3d::new(*size, table);
@@ -495,6 +510,31 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
     [r + m, g + m, b + m]
 }
 
+/// A 1D LUT view over a `.cube` `LUT_1D_SIZE` table (`size` RGB triples),
+/// sampled per channel with linear interpolation.
+struct Lut1d<'a> {
+    size: usize,
+    table: &'a [f32],
+}
+
+impl<'a> Lut1d<'a> {
+    fn new(size: u32, table: &'a [f32]) -> Self {
+        let size = size as usize;
+        assert!(size >= 2, "LUT size must be at least 2");
+        assert_eq!(table.len(), size * 3, "LUT table length");
+        Self { size, table }
+    }
+
+    fn sample(&self, channel: usize, v: f32) -> f32 {
+        let pos = v * (self.size - 1) as f32;
+        let i0 = (pos as usize).min(self.size - 2);
+        let f = pos - i0 as f32;
+        let a = self.table[i0 * 3 + channel];
+        let b = self.table[(i0 + 1) * 3 + channel];
+        a + (b - a) * f
+    }
+}
+
 /// A 3D LUT view over a `.cube`-layout table (red varies fastest), sampled
 /// with trilinear interpolation.
 struct Lut3d<'a> {
@@ -555,13 +595,14 @@ impl<'a> Lut3d<'a> {
     }
 }
 
-/// Parse a `.cube` 3D LUT (Adobe/Resolve format) into a [`GradeOp::Lut3d`].
-/// Supports `TITLE`, `LUT_3D_SIZE`, `DOMAIN_MIN`/`DOMAIN_MAX` (input is
-/// rescaled from the domain to `0..1`… only the standard `0 0 0` / `1 1 1`
-/// domain is accepted), comments, and blank lines. Written in-crate per the
-/// design doc's dependency policy.
+/// Parse a `.cube` LUT (Adobe/Resolve format) into a [`GradeOp::Lut3d`]
+/// (`LUT_3D_SIZE`) or [`GradeOp::Lut1d`] (`LUT_1D_SIZE`). Supports `TITLE`,
+/// `DOMAIN_MIN`/`DOMAIN_MAX` (only the standard `0 0 0` / `1 1 1` domain is
+/// accepted), comments, and blank lines. Written in-crate per the design
+/// doc's dependency policy.
 pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
     let mut size: Option<u32> = None;
+    let mut size_1d: Option<u32> = None;
     let mut table: Vec<f32> = Vec::new();
     for (lineno, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -596,7 +637,17 @@ pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
                     }
                 }
             }
-            "LUT_1D_SIZE" => return Err(format!("line {}: 1D LUTs are not supported", lineno + 1)),
+            "LUT_1D_SIZE" => {
+                let v: u32 = parts
+                    .next()
+                    .ok_or_else(|| format!("line {}: LUT_1D_SIZE missing value", lineno + 1))?
+                    .parse()
+                    .map_err(|e| format!("line {}: bad LUT_1D_SIZE: {e}", lineno + 1))?;
+                if v < 2 {
+                    return Err(format!("line {}: LUT_1D_SIZE must be >= 2", lineno + 1));
+                }
+                size_1d = Some(v);
+            }
             _ => {
                 // A data row: three floats (red varies fastest).
                 let mut row = [0.0f32; 3];
@@ -614,12 +665,24 @@ pub fn parse_cube(text: &str) -> Result<GradeOp, String> {
             }
         }
     }
-    let size = size.ok_or("missing LUT_3D_SIZE")?;
-    let expect = (size as usize).pow(3) * 3;
-    if table.len() != expect {
-        return Err(format!("expected {expect} table values, got {}", table.len()));
+    match (size, size_1d) {
+        (Some(_), Some(_)) => Err("both LUT_3D_SIZE and LUT_1D_SIZE present; split the shaper into its own file".into()),
+        (Some(size), None) => {
+            let expect = (size as usize).pow(3) * 3;
+            if table.len() != expect {
+                return Err(format!("expected {expect} table values, got {}", table.len()));
+            }
+            Ok(GradeOp::Lut3d { size, table })
+        }
+        (None, Some(size)) => {
+            let expect = size as usize * 3;
+            if table.len() != expect {
+                return Err(format!("expected {expect} table values, got {}", table.len()));
+            }
+            Ok(GradeOp::Lut1d { size, table })
+        }
+        (None, None) => Err("missing LUT_3D_SIZE or LUT_1D_SIZE".into()),
     }
-    Ok(GradeOp::Lut3d { size, table })
 }
 
 // Decode RGB to linear light, run `f`, re-encode. The encode clamps to
@@ -845,10 +908,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_cube_reads_a_1d_lut() {
+        let text = "TITLE \"shaper\"\nLUT_1D_SIZE 3\n0 0 0\n0.4 0.5 0.6\n1 1 1\n";
+        let op = parse_cube(text).expect("parse");
+        match &op {
+            GradeOp::Lut1d { size, table } => {
+                assert_eq!(*size, 3);
+                assert_eq!(table.len(), 9);
+            }
+            other => panic!("unexpected op {other:?}"),
+        }
+        let mut s = one_px([0.25, 0.5, 0.75]);
+        apply_op(&mut s, &op);
+        assert!((s.data[0] - 0.2).abs() < 1e-6); // lerp(0, 0.4, 0.5)
+        assert!((s.data[1] - 0.5).abs() < 1e-6); // exactly the middle row
+        assert!((s.data[2] - 0.8).abs() < 1e-6); // lerp(0.6, 1, 0.5)
+    }
+
+    #[test]
     fn parse_cube_rejects_bad_input() {
         assert!(parse_cube("LUT_3D_SIZE 2\n0 0 0\n").is_err()); // short table
         assert!(parse_cube("0 0 0\n").is_err()); // no size
-        assert!(parse_cube("LUT_1D_SIZE 2\n").is_err()); // 1D unsupported
+        assert!(parse_cube("LUT_1D_SIZE 2\n0 0 0\n").is_err()); // short 1D table
+        assert!(parse_cube("LUT_1D_SIZE 2\nLUT_3D_SIZE 2\n").is_err()); // both sizes
     }
 
     #[test]

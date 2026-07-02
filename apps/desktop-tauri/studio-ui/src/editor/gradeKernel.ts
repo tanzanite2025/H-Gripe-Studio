@@ -161,6 +161,7 @@ export type GradeOp =
   | { type: "lift_gamma_gain"; lift: [number, number, number]; gamma: [number, number, number]; gain: [number, number, number] }
   | { type: "hsl_adjust"; hue: number; saturation: number; lightness: number }
   | { type: "lut3d"; size: number; table: number[] }
+  | { type: "lut1d"; size: number; table: number[] }
   | { type: "hue_vs_hue"; points: [number, number][] }
   | { type: "hue_vs_sat"; points: [number, number][] }
   | { type: "lum_vs_sat"; points: [number, number][] }
@@ -406,6 +407,15 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       }
       break;
     }
+    case "lut1d": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        for (let c = 0; c < 3; c++) {
+          surface.data[i + c] = lut1dSample(op.size, op.table, c, clamp01(surface.data[i + c]));
+        }
+      }
+      break;
+    }
     case "lut3d": {
       for (let px = 0; px < n; px++) {
         const i = px * 4;
@@ -572,6 +582,17 @@ function hslToRgb(h: number, s: number, l: number): Rgb {
   return [r + m, g + m, b + m];
 }
 
+// Per-channel linear 1D-LUT sample; `table` is size RGB triples (the .cube
+// LUT_1D_SIZE layout), mirroring Rust `Lut1d::sample`.
+function lut1dSample(size: number, table: number[], channel: number, v: number): number {
+  const pos = v * (size - 1);
+  const i0 = Math.min(Math.floor(pos), size - 2);
+  const f = pos - i0;
+  const a = table[i0 * 3 + channel];
+  const b = table[(i0 + 1) * 3 + channel];
+  return a + (b - a) * f;
+}
+
 // Tetrahedral 3D-LUT sample (the design doc's single LUT-sampling
 // definition); `table` is size³ × 3 with red varying fastest (the .cube
 // convention), mirroring Rust `Lut3d::sample`.
@@ -601,11 +622,13 @@ function lut3dSample(size: number, table: number[], rgb: Rgb): Rgb {
 }
 
 /**
- * Parse a `.cube` 3D LUT into a `lut3d` op (mirrors Rust `parse_cube`).
- * Supports TITLE, LUT_3D_SIZE, the standard 0..1 DOMAIN, comments.
+ * Parse a `.cube` LUT into a `lut3d` (LUT_3D_SIZE) or `lut1d` (LUT_1D_SIZE)
+ * op (mirrors Rust `parse_cube`). Supports TITLE, the standard 0..1 DOMAIN,
+ * comments.
  */
 export function parseCube(text: string): GradeOp {
   let size: number | null = null;
+  let size1d: number | null = null;
   const table: number[] = [];
   const lines = text.split(/\r?\n/);
   for (let lineno = 0; lineno < lines.length; lineno++) {
@@ -624,7 +647,9 @@ export function parseCube(text: string): GradeOp {
         if (Number(parts[k]) !== want) throw new Error(`line ${lineno + 1}: only the standard 0..1 domain is supported`);
       }
     } else if (head === "LUT_1D_SIZE") {
-      throw new Error(`line ${lineno + 1}: 1D LUTs are not supported`);
+      const v = Number(parts[1]);
+      if (!Number.isInteger(v) || v < 2) throw new Error(`line ${lineno + 1}: bad LUT_1D_SIZE`);
+      size1d = v;
     } else {
       if (parts.length < 3) throw new Error(`line ${lineno + 1}: expected 3 values`);
       for (let k = 0; k < 3; k++) {
@@ -634,11 +659,22 @@ export function parseCube(text: string): GradeOp {
       }
     }
   }
-  if (size === null) throw new Error("missing LUT_3D_SIZE");
-  if (table.length !== size * size * size * 3) {
-    throw new Error(`expected ${size * size * size * 3} table values, got ${table.length}`);
+  if (size !== null && size1d !== null) {
+    throw new Error("both LUT_3D_SIZE and LUT_1D_SIZE present; split the shaper into its own file");
   }
-  return { type: "lut3d", size, table };
+  if (size !== null) {
+    if (table.length !== size * size * size * 3) {
+      throw new Error(`expected ${size * size * size * 3} table values, got ${table.length}`);
+    }
+    return { type: "lut3d", size, table };
+  }
+  if (size1d !== null) {
+    if (table.length !== size1d * 3) {
+      throw new Error(`expected ${size1d * 3} table values, got ${table.length}`);
+    }
+    return { type: "lut1d", size: size1d, table };
+  }
+  throw new Error("missing LUT_3D_SIZE or LUT_1D_SIZE");
 }
 
 /**
