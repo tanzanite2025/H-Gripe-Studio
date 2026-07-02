@@ -126,11 +126,14 @@ Premiere-style keys). `src/shortcuts/scopes/maskEdit.ts` is the frozen table for
 `Shift+M` marquees, `[` / `]` brush size, `X` swap add/subtract, `Ctrl+Z` /
 `Ctrl+Shift+Z` / `Ctrl+Y` undo/redo, `Ctrl+D` clear, `Ctrl+Shift+I` invert,
 `Ctrl+H` mask-only view, `Enter` close pen path, `Esc` cancel path / close.
-Not-yet-implemented PS tools already *reserve* their combos as `planned`
-(`Z` zoom, `H` hand, `C` crop, `Q` quick mask, `Ctrl+T` free transform,
-`Shift+F6` feather dialog) — never dispatched, but a unit test fails CI if a
-new binding steals a reserved combo, and the zh coverage test guards the
-translations.
+Not-yet-implemented PS tools and commands already *reserve* their combos as
+`planned` — the full PS default tool letter map (`V/C/K/I/J/S/Y/G/O/T/A/U/H/R/Z`
+plus `D/Q/F`) and common commands (`Ctrl+A` select all, `Ctrl+Shift+D`
+reselect, `Ctrl+T` transform, `Ctrl+J` duplicate, `Alt+Ctrl+Z` step backward,
+`Shift+F5`/`Shift+F6` fill/feather dialogs, `Delete`, `Space` pan,
+`Ctrl+0/1/=/−` zoom, `Shift+[`/`Shift+]` brush hardness). Reserved bindings are
+never dispatched, but a unit test fails CI if a new binding steals a reserved
+combo, and the zh coverage test guards the translations.
 
 ## Inputs (ports)
 

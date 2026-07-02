@@ -48,10 +48,14 @@ export interface ShortcutBinding {
 export type ShortcutHandler = (e: KeyboardEvent) => void | false;
 export type ShortcutHandlers = Readonly<Record<string, ShortcutHandler>>;
 
-/** Parse `"ctrl+shift+z"` → a `Combo`. Order-insensitive, case-insensitive. */
+/**
+ * Parse `"ctrl+shift+z"` → a `Combo`. Order-insensitive, case-insensitive.
+ * `"space"` names the space bar (`KeyboardEvent.key === " "`).
+ */
 export function parseCombo(combo: string): Combo {
   const parts = combo.split("+").map((p) => p.trim().toLowerCase());
-  const key = parts[parts.length - 1];
+  const raw = parts[parts.length - 1];
+  const key = raw === "space" ? " " : raw;
   const mods = new Set(parts.slice(0, -1));
   return { ctrl: mods.has("ctrl"), shift: mods.has("shift"), alt: mods.has("alt"), key };
 }
