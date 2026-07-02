@@ -116,6 +116,9 @@ export function MaskEditModal({
   // Dodge / burn direction of the in-progress stroke (Alt at pointer-down
   // burns — darkens — instead of dodging).
   const dodgeBurnMode = useRef<"dodge" | "burn">("dodge");
+  // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
+  // null until sampled (or when there is no underlay to read from).
+  const [sampledColor, setSampledColor] = useState<string | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
@@ -318,6 +321,7 @@ export function MaskEditModal({
     tool_clone: () => selectTool("clone"),
     tool_history_brush: () => selectTool("history_brush"),
     tool_dodge_burn: () => selectTool("dodge_burn"),
+    tool_eyedropper: () => selectTool("eyedropper"),
     tool_hand: () => selectTool("hand"),
     tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
@@ -383,6 +387,30 @@ export function MaskEditModal({
       return [Math.round(x), Math.round(y)];
     },
     [dims.w, dims.h],
+  );
+
+  // Eyedropper: read the underlay pixel at an image-space point by drawing
+  // the thumbnail onto an offscreen canvas at document size. Async (the data
+  // URL decodes first); a no-op when there is no underlay to read from.
+  const sampleUnderlay = useCallback(
+    (pt: [number, number]) => {
+      if (!underlay) return;
+      const img = new Image();
+      img.onload = () => {
+        const off = document.createElement("canvas");
+        off.width = dims.w;
+        off.height = dims.h;
+        const ctx = off.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, dims.w, dims.h);
+        const x = Math.min(dims.w - 1, Math.max(0, Math.round(pt[0])));
+        const y = Math.min(dims.h - 1, Math.max(0, Math.round(pt[1])));
+        const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
+        setSampledColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
+      };
+      img.src = underlay;
+    },
+    [underlay, dims.w, dims.h],
   );
 
   // Redraw the overlay: underlay (optional), committed brush strokes, and the
@@ -847,6 +875,10 @@ export function MaskEditModal({
     } else if (tool.kind === "click") {
       // Magic-wand: record a seeded flood-fill op for the backend.
       dispatch({ type: "op", op: { type: "wand", amount: tolerance, region: pt } });
+    } else if (tool.kind === "sample") {
+      // Eyedropper: read the underlay colour under the click — a pure view
+      // read, nothing is recorded on the document.
+      sampleUnderlay(pt);
     } else if (tool.kind === "point") {
       // SAM 2 point prompt: left button includes (positive), right button
       // excludes (negative). Right-click's context menu is suppressed below.
@@ -1111,6 +1143,7 @@ export function MaskEditModal({
               brushFlow={brushFlow}
               setBrushFlow={setBrushFlow}
               brushSpacing={brushSpacing}
+              sampledColor={sampledColor}
               setBrushSpacing={setBrushSpacing}
               paintTarget={paintTarget}
               setPaintTarget={setPaintTarget}

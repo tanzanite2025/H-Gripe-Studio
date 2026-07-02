@@ -29,7 +29,7 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   tool_move: { hint: "移动工具（拖拽移动蒙版；Ctrl+T 打开自由变换）。" },
   tool_crop: { hint: "裁剪工具（拖出裁剪框；框外蒙版被清除）。" },
   tool_frame: { hint: "图框工具（规划中）。" },
-  tool_eyedropper: { hint: "吸管工具（规划中）。" },
+  tool_eyedropper: { hint: "吸管工具（点击取样光标下的图像颜色）。" },
   tool_healing: { hint: "污点修复画笔（涂抹区域，由周围蒙版重建）。" },
   tool_clone: { hint: "仿制图章工具（Alt+点击设定源点，涂抹时从源点复制）。" },
   tool_history_brush: { hint: "历史记录画笔（把区域涂抹回图层初始状态）。" },

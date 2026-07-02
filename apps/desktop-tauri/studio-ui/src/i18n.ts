@@ -441,6 +441,8 @@ export const messages = {
   "mask.quickMaskTitle": { en: "Toggle the quick-mask (ruby) overlay (Q)", zh: "切换快速蒙版（宝石红）叠加（Q）" },
   "mask.amount": { en: "Amount (px)", zh: "数量（px）" },
   "mask.wandTolerance": { en: "Wand tolerance", zh: "魔棒容差" },
+  "mask.sampledColor": { en: "Sampled colour", zh: "取样颜色" },
+  "mask.sampledNone": { en: "click to sample", zh: "点击取样" },
   "mask.pathMode": { en: "Path mode", zh: "路径模式" },
   "mask.pathAdd": { en: "Add", zh: "添加" },
   "mask.pathSubtract": { en: "Subtract", zh: "减去" },
