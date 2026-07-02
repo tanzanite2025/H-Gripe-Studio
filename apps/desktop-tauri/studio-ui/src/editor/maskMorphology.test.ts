@@ -128,6 +128,28 @@ describe("maskMorphology preview primitives", () => {
     expect(area(applyOp(base, "wand", 4))).toBe(area(base)); // pixels needed → identity
   });
 
+  it("gradient op composites a linear ramp: add unions, subtract cuts (M10)", () => {
+    const dims = { w: 32, h: 32 };
+    const at1 = { proxyWidth: 32 }; // scale 1: proxy px ≡ image px
+    // Left-to-right ramp across the full width: full at x=0, none at x=w.
+    const add = buildProxyMask(doc([{ type: "gradient", region: [0, 16, 32, 16] }]), dims, at1).mask;
+    expect(add.data[0]).toBeGreaterThan(240);
+    expect(add.data[31]).toBeLessThan(15);
+    expect(add.data[16]).toBeGreaterThan(100);
+    expect(add.data[16]).toBeLessThan(155);
+    expect(add.data[31 * 32]).toBe(add.data[0]); // constant down each column
+    // Subtract cuts the ramp out of a full mask (complement of add).
+    const sub = buildProxyMask(
+      doc([{ type: "select_all" }, { type: "gradient", region: [0, 16, 32, 16], mode: "subtract" }]),
+      dims,
+      at1,
+    ).mask;
+    for (let x = 0; x < 32; x++) expect(sub.data[x]).toBe(255 - add.data[x]);
+    // Degenerate (zero-length) drags are a no-op.
+    const none = buildProxyMask(doc([{ type: "gradient", region: [3, 16, 3, 16] }]), dims, at1).mask;
+    expect(area(none)).toBe(0);
+  });
+
   it("applyOp select_all fills the canvas and delete clears it (M9)", () => {
     const base = filledSquare(30, 10);
     expect(area(applyOp(base, "select_all", 0))).toBe(30 * 30);

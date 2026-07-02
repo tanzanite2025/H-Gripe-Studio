@@ -109,6 +109,13 @@ describe("mask-edit M9 bindings", () => {
   });
 });
 
+describe("mask-edit M10 bindings", () => {
+  it("flips the gradient tool combo to ready", () => {
+    const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === "tool_gradient");
+    expect(b?.status).toBe("ready");
+  });
+});
+
 describe("scope stack dispatch", () => {
   const bindings = (id: string): ShortcutBinding[] => [
     { id, combo: "b", status: "ready", hint: "" },

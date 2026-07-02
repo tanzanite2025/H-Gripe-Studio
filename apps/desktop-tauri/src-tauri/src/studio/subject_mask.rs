@@ -777,6 +777,14 @@ fn apply_queued_operation(
             crop_mask(mask, &region);
             operations.push(json!({ "type": "crop" }));
         }
+        Some("gradient") => {
+            if region.len() < 4 {
+                return;
+            }
+            let subtract = op.get("mode").and_then(Value::as_str) == Some("subtract");
+            fill_gradient(mask, &region, subtract);
+            operations.push(json!({ "type": "gradient" }));
+        }
         Some("transform") => {
             let field =
                 |key: &str, default: f64| op.get(key).and_then(Value::as_f64).unwrap_or(default);
@@ -900,6 +908,36 @@ fn fill_marquee(mask: &mut GrayImage, kind: &str, region: &[f64]) {
                 }
             }
             mask.put_pixel(x, y, Luma([MASK_ON]));
+        }
+    }
+}
+
+/// Composite a linear gradient ramp (M10): full selection at the drag start
+/// fading to none at the end (`region: [x1, y1, x2, y2]` image-space). `add`
+/// unions the ramp into the mask; `subtract` cuts it away. Mirrors the proxy
+/// `fillGradient` in `maskMorphology.ts`.
+fn fill_gradient(mask: &mut GrayImage, region: &[f64], subtract: bool) {
+    let ax = region[0];
+    let ay = region[1];
+    let dx = region[2] - ax;
+    let dy = region[3] - ay;
+    let len2 = dx * dx + dy * dy;
+    if len2 < 1e-6 {
+        return;
+    }
+    let (w, h) = mask.dimensions();
+    for y in 0..h {
+        for x in 0..w {
+            let t =
+                (((x as f64 + 0.5 - ax) * dx + (y as f64 + 0.5 - ay) * dy) / len2).clamp(0.0, 1.0);
+            let ramp = (255.0 * (1.0 - t)).round() as i32;
+            let px = &mut mask.get_pixel_mut(x, y).0[0];
+            let v = *px as i32;
+            *px = if subtract {
+                (v - ramp).max(0) as u8
+            } else {
+                v.max(ramp) as u8
+            };
         }
     }
 }
@@ -1999,6 +2037,47 @@ mod tests {
         assert!(operations
             .iter()
             .any(|op| op.get("type").and_then(Value::as_str) == Some("delete")));
+    }
+
+    #[test]
+    fn gradient_op_composites_a_linear_ramp() {
+        let image = RgbaImage::from_pixel(32, 32, Rgba([0, 0, 0, 255]));
+        // Left-to-right ramp across the full width: full at x=0, none at x=w.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "gradient", "region": [0, 16, 32, 16] }] }
+        ]});
+        let mut add = solid(32, 32, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut add, Some(&doc), 24, &mut operations);
+        assert!(add.get_pixel(0, 0).0[0] > 240);
+        assert!(add.get_pixel(31, 0).0[0] < 15);
+        let mid = add.get_pixel(16, 0).0[0];
+        assert!(mid > 100 && mid < 155);
+        assert_eq!(add.get_pixel(0, 31).0[0], add.get_pixel(0, 0).0[0]);
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("gradient")));
+
+        // Subtract cuts the ramp out of a full mask (complement of add).
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [
+                { "type": "select_all" },
+                { "type": "gradient", "region": [0, 16, 32, 16], "mode": "subtract" }
+            ] }
+        ]});
+        let mut sub = solid(32, 32, MASK_OFF);
+        apply_edit_paths(&image, &mut sub, Some(&doc), 24, &mut Vec::new());
+        for x in 0..32 {
+            assert_eq!(sub.get_pixel(x, 0).0[0], 255 - add.get_pixel(x, 0).0[0]);
+        }
+
+        // Degenerate (zero-length) drags are a no-op.
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "gradient", "region": [3, 16, 3, 16] }] }
+        ]});
+        let mut none = solid(32, 32, MASK_OFF);
+        apply_edit_paths(&image, &mut none, Some(&doc), 24, &mut Vec::new());
+        assert!(none.as_raw().iter().all(|&px| px == MASK_OFF));
     }
 
     #[test]
