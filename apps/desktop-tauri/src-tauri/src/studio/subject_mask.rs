@@ -909,6 +909,26 @@ fn apply_queued_operation(
             clone_region(mask, &coverage, dx, dy);
             operations.push(json!({ "type": "clone", "radius": radius, "dx": dx, "dy": dy }));
         }
+        Some("dodge_burn") => {
+            // Dodge / burn (M13): lighten or darken the mask under the stroke
+            // coverage. `amount` is the brush radius; `points` the stroke
+            // polyline; `mode` picks the direction (absent ⇒ dodge).
+            let radius = amount.unwrap_or(8.0).max(1.0) as u32;
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let burn = op.get("mode").and_then(Value::as_str) == Some("burn");
+            let (w, h) = mask.dimensions();
+            let mut coverage = GrayImage::new(w, h);
+            stamp_stroke(&mut coverage, &points, radius, MASK_ON);
+            dodge_burn_region(mask, &coverage, burn);
+            operations.push(json!({
+                "type": "dodge_burn",
+                "radius": radius,
+                "mode": if burn { "burn" } else { "dodge" },
+            }));
+        }
         Some("grow") => {
             let px = amount.unwrap_or(0.0).max(0.0) as u32;
             if px > 0 {
@@ -1186,6 +1206,29 @@ fn heal_region(mask: &mut GrayImage, coverage: &GrayImage) {
                 mask.put_pixel(x, y, Luma([buf[idx(x, y)].round().clamp(0.0, 255.0) as u8]));
             }
         }
+    }
+}
+
+/// Per-stroke exposure of the dodge / burn tool: each pass moves the covered
+/// pixels half-way toward on (dodge) or off (burn).
+const DODGE_BURN_EXPOSURE: f64 = 0.5;
+
+/// Dodge / burn (PS O on a mask): locally lighten (dodge) or darken (burn)
+/// the mask inside `coverage` — each covered pixel is lerped toward 255 / 0
+/// by the fixed exposure. Mirrors the proxy `dodgeBurnStroke` in
+/// `maskMorphology.ts`.
+fn dodge_burn_region(mask: &mut GrayImage, coverage: &GrayImage, burn: bool) {
+    for (m, c) in mask.pixels_mut().zip(coverage.pixels()) {
+        if c.0[0] == 0 {
+            continue;
+        }
+        let v = f64::from(m.0[0]);
+        let out = if burn {
+            v * (1.0 - DODGE_BURN_EXPOSURE)
+        } else {
+            v + (255.0 - v) * DODGE_BURN_EXPOSURE
+        };
+        m.0[0] = out.round().clamp(0.0, 255.0) as u8;
     }
 }
 
@@ -2181,6 +2224,20 @@ mod tests {
         let mut mask = solid(5, 5, MASK_OFF);
         fill_holes(&mut mask);
         assert_eq!(mask_coverage(&mask), 0.0);
+    }
+
+    #[test]
+    fn dodge_burn_region_lightens_and_darkens_under_coverage() {
+        // A mid-grey mask: dodging lightens the covered pixels toward on,
+        // burning darkens them toward off; outside the stroke is untouched.
+        let mut mask = solid(21, 21, 128);
+        let mut coverage = GrayImage::new(21, 21);
+        stamp_stroke(&mut coverage, &[(10.0, 10.0)], 3, MASK_ON);
+        dodge_burn_region(&mut mask, &coverage, false);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 192); // 128 + 127 * 0.5
+        assert_eq!(mask.get_pixel(0, 0).0[0], 128); // outside the stroke
+        dodge_burn_region(&mut mask, &coverage, true);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 96); // 192 * 0.5
     }
 
     #[test]

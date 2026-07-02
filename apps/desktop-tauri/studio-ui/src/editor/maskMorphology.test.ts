@@ -6,6 +6,7 @@ import {
   cloneStroke,
   createProxyMask,
   dilate,
+  dodgeBurnStroke,
   erode,
   feather,
   fillHoles,
@@ -96,6 +97,22 @@ describe("maskMorphology preview primitives", () => {
     // An empty stroke is a no-op.
     const before = new Uint8Array(mask.data);
     historyStroke(mask, base, { type: "history_brush", amount: 3, points: [] }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("dodgeBurnStroke lightens and darkens under the stroke", () => {
+    // A mid-grey mask: dodging lightens the covered pixels toward on,
+    // burning darkens them toward off; outside the stroke is untouched.
+    const mask = createProxyMask(21, 21);
+    mask.data.fill(128);
+    dodgeBurnStroke(mask, { type: "dodge_burn", amount: 3, points: [[10, 10]] }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(192); // 128 + 127 * 0.5
+    expect(mask.data[0]).toBe(128); // outside the stroke untouched
+    dodgeBurnStroke(mask, { type: "dodge_burn", amount: 3, points: [[10, 10]], mode: "burn" }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(96); // 192 * 0.5
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    dodgeBurnStroke(mask, { type: "dodge_burn", amount: 3, points: [] }, 1);
     expect(mask.data).toEqual(before);
   });
 

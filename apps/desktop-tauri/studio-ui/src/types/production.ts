@@ -198,15 +198,15 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn`. */
   type: string;
-  /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone` / `history_brush`: brush radius px), when relevant. */
+  /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone` / `history_brush` / `dodge_burn`: brush radius px), when relevant. */
   amount?: number;
   /** `[x, y]` seed for `wand`, or `[x1, y1, x2, y2]` for marquee / `crop` ops (for `gradient`: the drag vector start → end). */
   region?: number[];
-  /** `heal` / `clone` / `history_brush`: the stroke polyline in image px. `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset; `history_brush` restores the region to the layer's initial (pre-edit) state. */
+  /** `heal` / `clone` / `history_brush` / `dodge_burn`: the stroke polyline in image px. `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset; `history_brush` restores the region to the layer's initial (pre-edit) state; `dodge_burn` lightens (`mode: "dodge"`) or darkens (`mode: "burn"`) the region. */
   points?: [number, number][];
-  /** `gradient` / `fill` only: `add` unions in, `subtract` cuts away. Absent ⇒ `add`. */
+  /** `gradient` / `fill`: `add` unions in, `subtract` cuts away (absent ⇒ `add`). `dodge_burn`: `dodge` lightens, `burn` darkens (absent ⇒ `dodge`). */
   mode?: string;
   // --- `transform` op params (M5 free transform / move) -----------------
   // A `transform` step moves the mask by `dx`/`dy` px and scales / rotates

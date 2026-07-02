@@ -47,7 +47,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_clone", combo: "s", status: "ready", hint: "Clone-stamp tool (Alt+click picks the source, then paint copies from it)." },
   { id: "tool_history_brush", combo: "y", status: "ready", hint: "History brush (paint a region back to the layer's initial state)." },
   { id: "tool_gradient", combo: "g", status: "ready", hint: "Gradient tool (drag start → end: a linear selection ramp as a revisable step; Alt-drag subtracts)." },
-  { id: "tool_dodge_burn", combo: "o", status: "planned", hint: "Dodge / burn / sponge tool (planned)." },
+  { id: "tool_dodge_burn", combo: "o", status: "ready", hint: "Dodge / burn tool (paint lightens the mask, Alt-drag darkens)." },
   { id: "tool_type", combo: "t", status: "planned", hint: "Type tool (planned)." },
   { id: "tool_shape", combo: "u", status: "planned", hint: "Shape tools (planned)." },
   { id: "tool_hand", combo: "h", status: "ready", hint: "Hand tool (drag to pan the zoomed view; hold Space with any tool)." },

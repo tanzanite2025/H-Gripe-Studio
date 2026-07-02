@@ -151,7 +151,10 @@ the proxy `healStroke` and the Rust `heal_region`); `S` clone stamp
 source offset — a revisable `clone` op, proxy `cloneStroke` / Rust
 `clone_region`); `Y` history brush (paint a region back to the layer's
 initial pre-edit state — a revisable `history_brush` op, proxy
-`historyStroke` / Rust `history_region`); then `O` dodge / burn.
+`historyStroke` / Rust `history_region`); `O` dodge / burn (paint lightens
+the mask toward on, Alt-drag burns it toward off, each pass at a fixed 50%
+exposure — a revisable `dodge_burn` op, proxy `dodgeBurnStroke` / Rust
+`dodge_burn_region`).
 
 ## 5. Explicitly deferred / out of scope
 

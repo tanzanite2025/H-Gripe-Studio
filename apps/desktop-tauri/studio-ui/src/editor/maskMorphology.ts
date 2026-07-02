@@ -302,6 +302,30 @@ export function historyStroke(mask: ProxyMask, base: Uint8Array, op: MaskOperati
   }
 }
 
+// Per-stroke exposure of the dodge / burn tool: each pass moves the covered
+// pixels half-way toward on (dodge) or off (burn).
+const DODGE_BURN_EXPOSURE = 0.5;
+
+/**
+ * Dodge / burn (PS O on a mask): locally lighten (`mode: "dodge"`) or darken
+ * (`mode: "burn"`) the mask under a painted stroke — each covered pixel is
+ * lerped toward 255 / 0 by the fixed exposure. Mirrors the Rust
+ * `dodge_burn_region`.
+ */
+export function dodgeBurnStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const burn = op.mode === "burn";
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "dodge_burn", mode: "add", radius, points }, scale);
+  for (let i = 0; i < mask.data.length; i++) {
+    if (coverage.data[i] === 0) continue;
+    const v = mask.data[i];
+    mask.data[i] = Math.round(burn ? v * (1 - DODGE_BURN_EXPOSURE) : v + (255 - v) * DODGE_BURN_EXPOSURE);
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -602,6 +626,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       cloneStroke(mask, op, scale);
     } else if (op.type === "history_brush") {
       if (base) historyStroke(mask, base, op, scale);
+    } else if (op.type === "dodge_burn") {
+      dodgeBurnStroke(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {

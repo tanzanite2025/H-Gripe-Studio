@@ -45,7 +45,7 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   heal: { label: "污点修复", hint: "污点修复画笔：涂抹瑕疵区域，由周围蒙版平滑重建（可随时改参的一步）。" },
   clone: { label: "仿制图章", hint: "仿制图章：Alt+点击设定源点，涂抹时按源点偏移复制蒙版（可随时改参的一步）。" },
   history_brush: { label: "历史画笔", hint: "历史记录画笔：把区域涂抹回图层初始状态——所有编辑步骤之前的蒙版（可随时改参的一步）。" },
-  dodge_burn: { label: "减淡/加深", hint: "局部提亮（减淡）或压暗（加深）蒙版（规划中）。" },
+  dodge_burn: { label: "减淡/加深", hint: "减淡/加深：涂抹局部提亮蒙版（按住 Alt 拖拽为压暗）——可随时改参的一步。" },
 };
 
 /** Return the tool's `label` / `hint` translated into `lang` (English fallback). */

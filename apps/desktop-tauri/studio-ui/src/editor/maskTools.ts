@@ -55,7 +55,10 @@ export type ToolKind =
   // Freehand paint that records a `history_brush` op: the painted region is
   // restored to the layer's initial state — the mask as it was before any
   // edit steps (PS history brush with the source set to the opening state).
-  | "history";
+  | "history"
+  // Freehand paint that records a `dodge_burn` op: the painted region is
+  // locally lightened (dodge) or, with Alt held, darkened (burn).
+  | "dodge";
 
 export interface MaskTool {
   id: string;
@@ -104,6 +107,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "heal", label: "Heal", status: "ready", kind: "heal", lane: "preview", hint: "Spot-healing brush: paint over a blemish — the region is rebuilt smoothly from the surrounding mask (a revisable step)." },
   { id: "clone", label: "Clone", status: "ready", kind: "clone", lane: "preview", hint: "Clone stamp: Alt+click picks a source point, then paint copies the mask from the source offset (a revisable step)." },
   { id: "history_brush", label: "History brush", status: "ready", kind: "history", lane: "preview", hint: "History brush: paint a region back to the layer's initial state — the mask before any edit steps (a revisable step)." },
+  { id: "dodge_burn", label: "Dodge / burn", status: "ready", kind: "dodge", lane: "preview", hint: "Dodge / burn: paint to locally lighten the mask (Alt-drag darkens) — a revisable step." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
@@ -115,7 +119,6 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
   { id: "eyedropper", label: "Eyedropper", status: "planned", kind: "click", lane: "render", hint: "Sample the image colour under the cursor (planned)." },
-  { id: "dodge_burn", label: "Dodge / burn", status: "planned", kind: "paint", lane: "interactive", hint: "Locally lighten (dodge) or darken (burn) the mask (planned)." },
 ] as const;
 
 /**
