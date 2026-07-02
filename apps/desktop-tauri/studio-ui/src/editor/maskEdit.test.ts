@@ -10,11 +10,13 @@ import {
   canRedo,
   canUndo,
   clearEdits,
+  duplicateLayer,
   editCount,
   initEditState,
   normalizeEditPaths,
   isEmpty,
   redo,
+  reselect,
   removeLayer,
   removeOp,
   setActiveLayer,
@@ -227,6 +229,32 @@ describe("maskEdit reducer-style helpers", () => {
     expect(isEmpty(s.current)).toBe(true);
     s = undo(s);
     expect(editCount(s.current)).toBe(1);
+  });
+
+  it("reselect restores the last non-empty snapshot only when empty (undoable)", () => {
+    let s = initEditState();
+    expect(reselect(s)).toBe(s); // nothing to reselect
+    s = addBrushStroke(s, stroke("s1"));
+    expect(reselect(s)).toBe(s); // live document: no-op
+    s = clearEdits(s);
+    s = reselect(s);
+    expect(editCount(s.current)).toBe(1);
+    s = undo(s);
+    expect(isEmpty(s.current)).toBe(true);
+  });
+
+  it("duplicates the active layer above itself with a fresh id (undoable)", () => {
+    let s = initEditState();
+    s = addOperation(s, { type: "invert" });
+    s = duplicateLayer(s);
+    expect(s.current.layers).toHaveLength(2);
+    expect(s.current.active).toBe(1);
+    expect(s.current.layers[1].name).toBe(`${s.current.layers[0].name} copy`);
+    expect(s.current.layers[1].id).not.toBe(s.current.layers[0].id);
+    expect(s.current.layers[1].ops.map((op) => op.type)).toEqual(["invert"]);
+    expect(s.current.layers[1].ops[0]).not.toBe(s.current.layers[0].ops[0]);
+    s = undo(s);
+    expect(s.current.layers).toHaveLength(1);
   });
 
   it("removes a history step (undoable)", () => {

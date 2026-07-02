@@ -27,9 +27,11 @@ import {
   canRedo,
   canUndo,
   clearEdits,
+  duplicateLayer,
   editCount,
   initEditState,
   redo,
+  reselect,
   removeLayer,
   removeOp,
   setActiveLayer,
@@ -75,6 +77,8 @@ type Action =
   | { type: "undo" }
   | { type: "redo" }
   | { type: "clear" }
+  | { type: "reselect" }
+  | { type: "layer_duplicate" }
   | { type: "remove_op"; index: number }
   | { type: "toggle_op"; index: number }
   | { type: "op_amount"; index: number; amount: number }
@@ -107,6 +111,10 @@ function reducer(state: EditState, action: Action): EditState {
       return redo(state);
     case "clear":
       return clearEdits(state);
+    case "reselect":
+      return reselect(state);
+    case "layer_duplicate":
+      return duplicateLayer(state);
     case "remove_op":
       return removeOp(state, action.index);
     case "toggle_op":
@@ -360,6 +368,10 @@ export function MaskEditModal({
     redo_alt: () => dispatch({ type: "redo" }),
     step_backward: () => dispatch({ type: "undo" }),
     clear: () => dispatch({ type: "clear" }),
+    select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
+    delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
+    reselect: () => dispatch({ type: "reselect" }),
+    duplicate: () => dispatch({ type: "layer_duplicate" }),
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
     brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
     brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),

@@ -112,6 +112,13 @@ tool, `Z` zoom tool (click in / Alt+click out, cursor-anchored), Space-hold
 pan with any tool, `Ctrl+=` / `Ctrl+-` / `Ctrl+0` (fit) / `Ctrl+1` (100%).
 Follows M7 so 100% zoom on 8K images lands on an interaction that stays cheap.
 
+**M9 — Selection commands.** `Ctrl+A` select all and `Delete` as recorded ops
+(`select_all` / `delete` — history steps, replayed identically by the proxy
+and the Rust run, unlike `Ctrl+D` clear which wipes the stack itself);
+`Ctrl+Shift+D` reselect (restores the last snapshot a clear dropped, itself
+undoable); `Ctrl+J` duplicate the active layer via copy (fresh id, "… copy"
+name, active above the source).
+
 ## 5. Explicitly deferred / out of scope
 
 - Type tool `T`, shape tools `U`, frame tool `K`: weakly related to the product

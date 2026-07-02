@@ -128,6 +128,12 @@ describe("maskMorphology preview primitives", () => {
     expect(area(applyOp(base, "wand", 4))).toBe(area(base)); // pixels needed → identity
   });
 
+  it("applyOp select_all fills the canvas and delete clears it (M9)", () => {
+    const base = filledSquare(30, 10);
+    expect(area(applyOp(base, "select_all", 0))).toBe(30 * 30);
+    expect(area(applyOp(base, "delete", 0))).toBe(0);
+  });
+
   it("transformMask translates the mask by dx/dy", () => {
     const mask = createProxyMask(9, 9);
     mask.data[2 * 9 + 2] = 255;

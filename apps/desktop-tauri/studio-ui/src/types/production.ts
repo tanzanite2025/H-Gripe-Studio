@@ -198,7 +198,7 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete`. */
   type: string;
   /** Operation-specific scalar (tolerance / px / radius), when relevant. */
   amount?: number;

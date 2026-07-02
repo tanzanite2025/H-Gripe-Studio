@@ -100,6 +100,15 @@ describe("mask-edit M8 bindings", () => {
   });
 });
 
+describe("mask-edit M9 bindings", () => {
+  it("flips the selection-command combos to ready", () => {
+    for (const id of ["select_all", "delete_selection", "reselect", "duplicate"]) {
+      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      expect(b?.status, id).toBe("ready");
+    }
+  });
+});
+
 describe("scope stack dispatch", () => {
   const bindings = (id: string): ShortcutBinding[] => [
     { id, combo: "b", status: "ready", hint: "" },

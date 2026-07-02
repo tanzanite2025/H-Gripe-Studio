@@ -342,6 +342,38 @@ export function clearEdits(state: EditState): EditState {
   return commit(state, emptyMaskDocument());
 }
 
+/**
+ * PS Reselect (Ctrl+Shift+D; M9): when the document is empty (after a clear),
+ * restore the most recent non-empty snapshot from the undo stack as a new
+ * undoable step. A no-op when there is a live document or no snapshot.
+ */
+export function reselect(state: EditState): EditState {
+  if (!isEmpty(state.current)) return state;
+  for (let i = state.past.length - 1; i >= 0; i--) {
+    if (!isEmpty(state.past[i])) return commit(state, state.past[i]);
+  }
+  return state;
+}
+
+/**
+ * PS duplicate-via-copy (Ctrl+J; M9): copy the active layer (fresh id,
+ * "… copy" name) directly above itself and make the copy active (undoable).
+ * Adjustment layers duplicate too — the copy re-tone-maps the composite.
+ */
+export function duplicateLayer(state: EditState): EditState {
+  const doc = state.current;
+  const index = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
+  const source = doc.layers[index];
+  const copy: MaskLayer = {
+    ...source,
+    id: emptyMaskLayer().id,
+    name: `${source.name} copy`,
+    ops: source.ops.map((op) => ({ ...op })),
+  };
+  const layers = [...doc.layers.slice(0, index + 1), copy, ...doc.layers.slice(index + 1)];
+  return commit(state, { ...doc, layers, active: index + 1 });
+}
+
 export function undo(state: EditState): EditState {
   if (state.past.length === 0) return state;
   const past = [...state.past];
