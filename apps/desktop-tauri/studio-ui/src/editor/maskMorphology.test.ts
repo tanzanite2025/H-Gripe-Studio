@@ -11,7 +11,10 @@ import {
   invert,
   isPreviewableOp,
   PREVIEWABLE_OP_IDS,
+  PROXY_TILE_SIZE,
+  ProxyLayerCache,
   sharpen,
+  tileRects,
   smooth,
   stampDisc,
   stampSoftDisc,
@@ -376,5 +379,126 @@ describe("buildProxyMask", () => {
     const migrated = normalizeEditPaths({ version: 2, ops, matte_strokes: [], points: [] });
     const replayed = buildProxyMask(migrated, { w: 960, h: 640 }).mask;
     expect(Array.from(single.data)).toEqual(Array.from(replayed.data));
+  });
+});
+
+describe("ProxyLayerCache (M7)", () => {
+  const brush = (id: string, x: number, y: number, radius = 300): EditOp => ({
+    type: "brush",
+    id,
+    mode: "add",
+    radius,
+    points: [[x, y]],
+  });
+
+  /** An 8K-canvas document: background strokes + an upper multiply layer + an adjustment. */
+  const bigDoc = (): MaskDocument => {
+    const d = doc([brush("s1", 1200, 1200), { type: "grow", amount: 64 }]);
+    d.layers.push({
+      id: "l2",
+      name: "Layer 2",
+      kind: "mask",
+      blend: "screen",
+      opacity: 0.75,
+      visible: true,
+      ops: [brush("s2", 6800, 6800)],
+    });
+    d.layers.push({
+      id: "adj",
+      name: "Levels",
+      kind: "adjustment",
+      blend: "normal",
+      opacity: 1,
+      visible: true,
+      ops: [],
+      adjustment: { type: "levels", gamma: 1.4 },
+    });
+    return d;
+  };
+  const dims = { w: 8192, h: 8192 };
+  const options = { proxyWidth: 512 };
+
+  it("tileRects covers the surface with clamped 256px tiles", () => {
+    expect(PROXY_TILE_SIZE).toBe(256);
+    const rects = tileRects(512, 300);
+    expect(rects).toHaveLength(4); // 2 cols x 2 rows
+    expect(rects[3]).toEqual({ x0: 256, y0: 256, x1: 512, y1: 300 });
+  });
+
+  it("a cached build is byte-identical to an uncached build", () => {
+    const cache = new ProxyLayerCache();
+    const d = bigDoc();
+    const cached = buildProxyMask(d, dims, { ...options, cache }).mask;
+    const plain = buildProxyMask(d, dims, options).mask;
+    expect(Array.from(cached.data)).toEqual(Array.from(plain.data));
+    // A no-change rebuild reuses every layer and recomposites nothing.
+    const again = buildProxyMask(d, dims, { ...options, cache }).mask;
+    expect(cache.stats.layersReused).toBe(2);
+    expect(cache.stats.layersReplayed).toBe(0);
+    expect(cache.stats.tilesComposited).toBe(0);
+    expect(Array.from(again.data)).toEqual(Array.from(plain.data));
+  });
+
+  it("appending a stroke resumes the layer replay and recomposites dirty tiles only", () => {
+    const cache = new ProxyLayerCache();
+    const d = bigDoc();
+    buildProxyMask(d, dims, { ...options, cache });
+    // Append a stroke near the top-left corner of the upper layer (immutably,
+    // as maskEdit's commit() does).
+    const edited: MaskDocument = {
+      ...d,
+      layers: d.layers.map((l) => (l.id === "l2" ? { ...l, ops: [...l.ops, brush("s3", 400, 400)] } : l)),
+    };
+    const cached = buildProxyMask(edited, dims, { ...options, cache }).mask;
+    expect(cache.stats.layersResumed).toBe(1); // only the new stroke replayed
+    expect(cache.stats.layersReused).toBe(1); // background untouched
+    expect(cache.stats.layersReplayed).toBe(0);
+    expect(cache.stats.tilesTotal).toBe(4); // 512x512 proxy = 2x2 tiles
+    expect(cache.stats.tilesComposited).toBe(1); // stroke confined to one tile
+    const plain = buildProxyMask(edited, dims, options).mask;
+    expect(Array.from(cached.data)).toEqual(Array.from(plain.data));
+  });
+
+  it("changing adjustment params or layer shape forces a full recomposite but reuses surfaces", () => {
+    const cache = new ProxyLayerCache();
+    const d = bigDoc();
+    buildProxyMask(d, dims, { ...options, cache });
+    const edited: MaskDocument = {
+      ...d,
+      layers: d.layers.map((l) =>
+        l.id === "adj" ? { ...l, adjustment: { type: "levels" as const, gamma: 0.6 } } : l,
+      ),
+    };
+    const cached = buildProxyMask(edited, dims, { ...options, cache }).mask;
+    expect(cache.stats.layersReused).toBe(2); // mask surfaces untouched
+    expect(cache.stats.tilesComposited).toBe(4); // composite key changed
+    const plain = buildProxyMask(edited, dims, options).mask;
+    expect(Array.from(cached.data)).toEqual(Array.from(plain.data));
+  });
+
+  it("editing an earlier op invalidates the prefix and replays the layer", () => {
+    const cache = new ProxyLayerCache();
+    const d = bigDoc();
+    buildProxyMask(d, dims, { ...options, cache });
+    const edited: MaskDocument = {
+      ...d,
+      layers: d.layers.map((l, i) =>
+        i === 0 ? { ...l, ops: [l.ops[0], { type: "grow", amount: 96 }] } : l,
+      ),
+    };
+    const cached = buildProxyMask(edited, dims, { ...options, cache }).mask;
+    expect(cache.stats.layersReplayed).toBe(1); // prefix broken at the edited op
+    const plain = buildProxyMask(edited, dims, options).mask;
+    expect(Array.from(cached.data)).toEqual(Array.from(plain.data));
+  });
+
+  it("a proxy size change resets the cache", () => {
+    const cache = new ProxyLayerCache();
+    const d = bigDoc();
+    buildProxyMask(d, dims, { ...options, cache });
+    const smaller = buildProxyMask(d, dims, { proxyWidth: 320, cache }).mask;
+    expect(cache.stats.layersReplayed).toBe(2); // everything rebuilt at the new size
+    const plain = buildProxyMask(d, dims, { proxyWidth: 320 }).mask;
+    expect(Array.from(smaller.data)).toEqual(Array.from(plain.data));
   });
 });

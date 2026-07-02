@@ -385,6 +385,13 @@ export function applyOp(mask: ProxyMask, type: string, radius: number): ProxyMas
 export interface ProxyBuildOptions {
   /** Target proxy width in px (height derives from the image aspect). */
   proxyWidth?: number;
+  /**
+   * Optional persistent cache (M7). When provided, per-layer surfaces are
+   * reused across builds (exact / ops-prefix hits) and the composite is
+   * recomputed for dirty tiles only. Output is byte-identical to an
+   * uncached build.
+   */
+  cache?: ProxyLayerCache;
 }
 
 const DEFAULT_PROXY_WIDTH = 320;
@@ -546,6 +553,7 @@ export function buildProxyMask(
   const scale = proxyWidth / Math.max(1, dims.w);
   const w = Math.max(1, Math.round((dims.w || proxyWidth) * scale));
   const h = Math.max(1, Math.round((dims.h || proxyWidth) * scale));
+  if (options.cache) return { mask: options.cache.build(doc, w, h, scale), scale };
   let mask = createProxyMask(w, h);
   doc.layers.forEach((layer, i) => {
     if (!layer.visible) return;
@@ -561,6 +569,232 @@ export function buildProxyMask(
     blendInto(mask, surface, layer.blend, layer.opacity);
   });
   return { mask, scale };
+}
+
+// ---------------------------------------------------------------------------
+// M7 — performance layer: per-layer surface cache + dirty-tile compositor.
+// ---------------------------------------------------------------------------
+
+/** Tile edge (px) for dirty-region compositing (M7, per the architecture doc). */
+export const PROXY_TILE_SIZE = 256;
+
+/** A half-open tile rect: `x0 <= x < x1`, `y0 <= y < y1`. */
+export interface TileRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** Cover a `w x h` surface with `tile`-sized rects (edge tiles clamp). */
+export function tileRects(w: number, h: number, tile: number = PROXY_TILE_SIZE): TileRect[] {
+  const rects: TileRect[] = [];
+  for (let y = 0; y < h; y += tile) {
+    for (let x = 0; x < w; x += tile) {
+      rects.push({ x0: x, y0: y, x1: Math.min(x + tile, w), y1: Math.min(y + tile, h) });
+    }
+  }
+  return rects;
+}
+
+/** Per-build reuse counters (reset by every `build`); read by tests / tuning. */
+export interface ProxyCacheStats {
+  /** Layers replayed from scratch (cache miss). */
+  layersReplayed: number;
+  /** Layers resumed from a cached ops-prefix surface (only new ops replayed). */
+  layersResumed: number;
+  /** Layers served verbatim from cache (ops unchanged). */
+  layersReused: number;
+  /** Tiles recomposited this build. */
+  tilesComposited: number;
+  /** Total tiles covering the proxy. */
+  tilesTotal: number;
+}
+
+interface LayerCacheEntry {
+  ops: EditOp[];
+  surface: ProxyMask;
+}
+
+interface CompositeCacheEntry {
+  key: string;
+  surfaces: (ProxyMask | null)[];
+  mask: ProxyMask;
+}
+
+// Longest count of leading ops shared (by reference) between the cached replay
+// and the layer's current stack. maskEdit state is immutable — an edited op is
+// a fresh object — so reference equality is an exact "unchanged" test.
+function sharedOpsPrefix(cached: EditOp[], ops: EditOp[]): number {
+  const n = Math.min(cached.length, ops.length);
+  let i = 0;
+  while (i < n && cached[i] === ops[i]) i++;
+  return i;
+}
+
+function tileDiffers(a: ProxyMask, b: ProxyMask, rect: TileRect): boolean {
+  for (let y = rect.y0; y < rect.y1; y++) {
+    const row = y * a.w;
+    for (let x = rect.x0; x < rect.x1; x++) {
+      if (a.data[row + x] !== b.data[row + x]) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Persistent proxy render cache (M7): keeps each layer's replayed surface
+ * keyed by layer id, resumes replay from the longest unchanged ops prefix
+ * (a brush drag replays only the new stroke), and recomposites only the
+ * 256 px tiles whose inputs actually changed. Hold one per open modal and
+ * pass it via `ProxyBuildOptions.cache`.
+ */
+export class ProxyLayerCache {
+  private w = 0;
+  private h = 0;
+  private layers = new Map<string, LayerCacheEntry>();
+  private composite: CompositeCacheEntry | null = null;
+  stats: ProxyCacheStats = { layersReplayed: 0, layersResumed: 0, layersReused: 0, tilesComposited: 0, tilesTotal: 0 };
+
+  /** Drop everything (proxy size changed, or the modal reopened). */
+  reset(): void {
+    this.layers.clear();
+    this.composite = null;
+  }
+
+  build(doc: MaskDocument, w: number, h: number, scale: number): ProxyMask {
+    if (w !== this.w || h !== this.h) {
+      this.reset();
+      this.w = w;
+      this.h = h;
+    }
+    this.stats = { layersReplayed: 0, layersResumed: 0, layersReused: 0, tilesComposited: 0, tilesTotal: 0 };
+
+    const seen = new Set<string>();
+    const surfaces = doc.layers.map((layer) => {
+      if (!layer.visible || layer.kind === "adjustment") return null;
+      seen.add(layer.id);
+      return this.layerSurface(layer, w, h, scale);
+    });
+    // Evict layers no longer in the document so the map cannot grow unbounded.
+    for (const id of [...this.layers.keys()]) {
+      if (!seen.has(id)) this.layers.delete(id);
+    }
+
+    // The composite key captures everything the per-tile composite reads
+    // besides the surfaces themselves; any change forces a full recomposite.
+    const key = doc.layers
+      .map(
+        (l) =>
+          `${l.id}:${l.kind}:${l.visible ? 1 : 0}:${l.blend}:${l.opacity}:` +
+          (l.kind === "adjustment" && l.adjustment ? JSON.stringify(l.adjustment) : ""),
+      )
+      .join("|");
+    const luts = doc.layers.map((l) =>
+      l.visible && l.kind === "adjustment" && l.adjustment ? adjustmentLut(l.adjustment) : null,
+    );
+
+    const tiles = tileRects(w, h);
+    this.stats.tilesTotal = tiles.length;
+    const prev = this.composite;
+    let mask: ProxyMask;
+    let dirty: TileRect[];
+    if (prev && prev.key === key && prev.surfaces.length === surfaces.length) {
+      mask = prev.mask;
+      dirty = tiles.filter((t) =>
+        surfaces.some((s, i) => {
+          const old = prev.surfaces[i];
+          if (s === old) return false;
+          if (!s || !old) return true;
+          return tileDiffers(s, old, t);
+        }),
+      );
+    } else {
+      mask = createProxyMask(w, h);
+      dirty = tiles;
+    }
+    for (const rect of dirty) this.compositeTile(mask, doc, surfaces, luts, rect);
+    this.stats.tilesComposited = dirty.length;
+    this.composite = { key, surfaces, mask };
+    // Hand out a copy: the cached composite is reused as the next build's
+    // base and must not be mutated by the caller.
+    return cloneMask(mask);
+  }
+
+  private layerSurface(layer: { id: string; ops: EditOp[] }, w: number, h: number, scale: number): ProxyMask {
+    const entry = this.layers.get(layer.id);
+    if (entry && entry.ops === layer.ops) {
+      this.stats.layersReused++;
+      return entry.surface;
+    }
+    if (entry && entry.ops.length > 0 && sharedOpsPrefix(entry.ops, layer.ops) === entry.ops.length) {
+      // Replay is strictly sequential, so resuming from a cached prefix
+      // surface and applying only the appended ops is always exact.
+      const surface = replayOps(cloneMask(entry.surface), layer.ops.slice(entry.ops.length), scale);
+      this.layers.set(layer.id, { ops: layer.ops, surface });
+      this.stats.layersResumed++;
+      return surface;
+    }
+    const surface = replayOps(createProxyMask(w, h), layer.ops, scale);
+    this.layers.set(layer.id, { ops: layer.ops, surface });
+    this.stats.layersReplayed++;
+    return surface;
+  }
+
+  // Recompute one tile of the composite from the cached layer surfaces —
+  // the same per-pixel math as the uncached path, restricted to `rect`.
+  private compositeTile(
+    mask: ProxyMask,
+    doc: MaskDocument,
+    surfaces: (ProxyMask | null)[],
+    luts: (Uint8Array | null)[],
+    rect: TileRect,
+  ): void {
+    const { w } = mask;
+    for (let y = rect.y0; y < rect.y1; y++) {
+      mask.data.fill(0, y * w + rect.x0, y * w + rect.x1);
+    }
+    doc.layers.forEach((layer, i) => {
+      if (!layer.visible) return;
+      if (layer.kind === "adjustment") {
+        const lut = luts[i];
+        if (!lut) return;
+        const a = clamp(layer.opacity, 0, 1);
+        for (let y = rect.y0; y < rect.y1; y++) {
+          const row = y * w;
+          for (let x = rect.x0; x < rect.x1; x++) {
+            const d = mask.data[row + x];
+            mask.data[row + x] = Math.round(d + (lut[d] - d) * a);
+          }
+        }
+        return;
+      }
+      const src = surfaces[i];
+      if (!src) return;
+      if (i === 0) {
+        for (let y = rect.y0; y < rect.y1; y++) {
+          const row = y * w;
+          for (let x = rect.x0; x < rect.x1; x++) mask.data[row + x] = src.data[row + x];
+        }
+        return;
+      }
+      const a = clamp(layer.opacity, 0, 1);
+      for (let y = rect.y0; y < rect.y1; y++) {
+        const row = y * w;
+        for (let x = rect.x0; x < rect.x1; x++) {
+          const d = mask.data[row + x];
+          const s = src.data[row + x];
+          const blended =
+            layer.blend === "multiply"
+              ? (d * s) / 255
+              : layer.blend === "screen"
+                ? 255 - ((255 - d) * (255 - s)) / 255
+                : s;
+          mask.data[row + x] = Math.round(d + (blended - d) * a);
+        }
+      }
+    });
+  }
 }
 
 function clamp(v: number, lo: number, hi: number): number {
