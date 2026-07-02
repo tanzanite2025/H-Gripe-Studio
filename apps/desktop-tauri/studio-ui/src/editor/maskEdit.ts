@@ -318,6 +318,29 @@ export function setLayerOpacity(state: EditState, index: number, opacity: number
   return withLayer(state, index, { opacity: next });
 }
 
+/** Rename a layer (undoable; PS double-click rename). Blank names are ignored. */
+export function renameLayer(state: EditState, index: number, name: string): EditState {
+  const layer = state.current.layers[index];
+  const next = name.trim();
+  if (!layer || !next || layer.name === next) return state;
+  return withLayer(state, index, { name: next });
+}
+
+/**
+ * Move a layer to another stack position (undoable; PS drag-reorder). The
+ * active layer stays active by identity, wherever it lands.
+ */
+export function moveLayer(state: EditState, from: number, to: number): EditState {
+  const { layers } = state.current;
+  if (from === to || from < 0 || from >= layers.length || to < 0 || to >= layers.length) return state;
+  const next = [...layers];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  const activeId = layers[state.current.active]?.id;
+  const active = Math.max(next.findIndex((l) => l.id === activeId), 0);
+  return commit(state, { ...state.current, layers: next, active });
+}
+
 /** Set a layer's blend mode (undoable). */
 export function setLayerBlend(state: EditState, index: number, blend: LayerBlend): EditState {
   const layer = state.current.layers[index];
