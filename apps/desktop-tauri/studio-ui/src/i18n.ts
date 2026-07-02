@@ -530,9 +530,10 @@ export const messages = {
   "mask.adjGamma": { en: "Gamma", zh: "灰度系数" },
   "mask.adjOutBlack": { en: "Output black", zh: "输出黑场" },
   "mask.adjOutWhite": { en: "Output white", zh: "输出白场" },
-  "mask.adjShadows": { en: "Shadows", zh: "暗部" },
-  "mask.adjMidtones": { en: "Midtones", zh: "中间调" },
-  "mask.adjHighlights": { en: "Highlights", zh: "亮部" },
+  "mask.curveHint": {
+    en: "Click the grid to add a point, drag to shape the curve, drag a point off the grid (or double-click it) to remove.",
+    zh: "点击网格添加控制点，拖动调整曲线；把点拖出网格（或双击）可删除。",
+  },
   "mask.adjBrightness": { en: "Brightness", zh: "亮度" },
   "mask.adjContrast": { en: "Contrast", zh: "对比度" },
   "mask.mattingBand": { en: "Matting band ({count})", zh: "抠像带（{count}）" },

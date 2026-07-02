@@ -386,6 +386,48 @@
   border: 1px solid rgba(86, 168, 255, 0.28);
 }
 .mask-preview-actions .slider-row { gap: 6px; }
+
+/* PS-style tone-curve editor (curve adjustment layer). */
+.mask-curve { margin-top: 6px; }
+.mask-curve-grid {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--ps-dock-border);
+  cursor: crosshair;
+  touch-action: none;
+}
+.mask-curve-gridline line {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-identity {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-line {
+  fill: none;
+  stroke: #d8dbe2;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-point {
+  fill: #d8dbe2;
+  stroke: var(--ps-dock-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-point.active { fill: #56a8ff; }
+.mask-curve-readout {
+  min-height: 1.2em;
+  margin-top: 4px;
+  font-size: 11px;
+  text-align: right;
+}
 .mask-preview-actions small { display: block; margin-top: 6px; line-height: 1.4; }
 .mask-edit-note { line-height: 1.5; }
 .mask-edit-note code {
