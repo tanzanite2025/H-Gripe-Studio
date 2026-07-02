@@ -100,6 +100,25 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
 ] as const;
 
+/**
+ * Toolbar groups in Photoshop's toolbar order (selection → paint → vector →
+ * whole-mask operations → navigation), rendered with separators between
+ * groups so tools sit where a PS user expects them. Every `MASK_TOOLS` id
+ * appears in exactly one group (pinned by a registry test).
+ */
+export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = [
+  // Selection: move, marquees, lasso, wand / point prompts, crop.
+  ["move", "rect", "ellipse", "lasso", "wand", "point", "crop"],
+  // Paint: brush, eraser, matting band, gradient.
+  ["brush", "eraser", "matting", "gradient"],
+  // Vector: pen.
+  ["pen"],
+  // Whole-mask operations (PS menu commands; toolbar buttons here).
+  ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"],
+  // Navigation: hand, zoom.
+  ["hand", "zoom"],
+] as const;
+
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
 export const PLANNED_TOOLS = MASK_TOOLS.filter((t) => t.status === "planned");
 
