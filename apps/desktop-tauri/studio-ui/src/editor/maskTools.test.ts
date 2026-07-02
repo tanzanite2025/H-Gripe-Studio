@@ -4,6 +4,7 @@ import {
   DEFAULT_TOOL_ID,
   MASK_TOOLS,
   MASK_TOOL_GROUPS,
+  MASK_TOOL_SLOTS,
   PLANNED_TOOLS,
   READY_TOOLS,
   maskTool,
@@ -66,6 +67,12 @@ describe("mask tool registry", () => {
     const grouped = MASK_TOOL_GROUPS.flat();
     expect(new Set(grouped).size).toBe(grouped.length);
     expect([...grouped].sort()).toEqual(MASK_TOOLS.map((t) => t.id).sort());
+  });
+
+  it("toolbar slots cover every tool exactly once (PS flyout layout)", () => {
+    const slotted = MASK_TOOL_SLOTS.flat(2);
+    expect(new Set(slotted).size).toBe(slotted.length);
+    expect([...slotted].sort()).toEqual(MASK_TOOLS.map((t) => t.id).sort());
   });
 
   it("the default tool is ready and selectable", () => {

@@ -149,6 +149,29 @@ export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = [
   ["hand", "rotate_view", "zoom"],
 ] as const;
 
+/**
+ * PS-style toolbar slots: each section (rendered with a separator) is a list
+ * of slots, and each slot holds one or more tool variants sharing a single
+ * icon button. Multi-tool slots show the last-used variant's icon and open a
+ * flyout card (long-press / right-click, like PS) listing the variants.
+ * Every `MASK_TOOLS` id appears in exactly one slot (pinned by a registry
+ * test); `MASK_TOOL_GROUPS` above stays the flat per-section view.
+ */
+export const MASK_TOOL_SLOTS: readonly (readonly (readonly string[])[])[] = [
+  // Selection: move | marquees (rect/ellipse) | lasso | wand + SAM point |
+  // crop | eyedropper.
+  [["move"], ["rect", "ellipse"], ["lasso"], ["wand", "point"], ["crop"], ["eyedropper"]],
+  // Paint / retouch: heal | brush + matting band | clone | history brush |
+  // eraser | gradient | dodge/burn.
+  [["heal"], ["brush", "matting"], ["clone"], ["history_brush"], ["eraser"], ["gradient"], ["dodge_burn"]],
+  // Vector: pen | shape.
+  [["pen"], ["shape"]],
+  // Whole-mask operations (PS menu commands) folded into one flyout slot.
+  [["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"]],
+  // Navigation: hand + rotate view | zoom.
+  [["hand", "rotate_view"], ["zoom"]],
+] as const;
+
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
 export const PLANNED_TOOLS = MASK_TOOLS.filter((t) => t.status === "planned");
 
