@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useReducer, useRef, useSta
 import { generateThumbnail } from "../bridge/tauri";
 import {
   MASK_TOOLS,
+  MASK_TOOL_GROUPS,
   maskTool,
   toolTargets,
   DEFAULT_TOOL_ID,
@@ -1058,23 +1059,28 @@ export function MaskEditModal({
 
         <div className="mask-edit-body">
           <div className="mask-edit-tools">
-            {MASK_TOOLS.map((mt) => {
-              const loc = localizeTool(mt, lang);
-              const combo = toolCombo(mt.id);
-              const hint = combo ? `${loc.hint} (${comboLabel(combo)})` : loc.hint;
-              return (
-                <button
-                  key={mt.id}
-                  className={`mask-tool ${mt.status === "planned" ? "planned" : ""} ${toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id)) ? "active" : ""}`}
-                  disabled={mt.status === "planned"}
-                  title={mt.status === "planned" ? `${hint}（${t("mask.comingSoon")}）` : hint}
-                  onClick={() => onToolClick(mt)}
-                >
-                  {loc.label}
-                  {mt.status === "planned" ? <em className="soon">{t("mask.soon")}</em> : null}
-                </button>
-              );
-            })}
+            {MASK_TOOL_GROUPS.map((group, gi) => (
+              <div key={gi} className="mask-tool-group">
+                {group.map((id) => maskTool(id)).filter((mt): mt is MaskTool => mt != null).map((mt) => {
+                  const loc = localizeTool(mt, lang);
+                  const combo = toolCombo(mt.id);
+                  const hint = combo ? `${loc.hint} (${comboLabel(combo)})` : loc.hint;
+                  return (
+                    <button
+                      key={mt.id}
+                      className={`mask-tool ${mt.status === "planned" ? "planned" : ""} ${toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id)) ? "active" : ""}`}
+                      disabled={mt.status === "planned"}
+                      title={mt.status === "planned" ? `${hint}（${t("mask.comingSoon")}）` : hint}
+                      onClick={() => onToolClick(mt)}
+                    >
+                      {loc.label}
+                      {combo ? <em className="combo">{comboLabel(combo)}</em> : null}
+                      {mt.status === "planned" ? <em className="soon">{t("mask.soon")}</em> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
           <div className="mask-edit-stage">
@@ -1096,6 +1102,8 @@ export function MaskEditModal({
           </div>
 
           <div className="mask-edit-controls">
+            <section className="mask-panel">
+            <header>{t("mask.panelOptions")}</header>
             <label className="field">
               <span>{t("mask.brushSize")}</span>
               <span className="slider-row">
@@ -1318,9 +1326,11 @@ export function MaskEditModal({
                 <small className="muted">{t("mask.anchorHint")}</small>
               </div>
             ) : null}
+            </section>
 
+            <section className="mask-panel">
+            <header>{t("mask.layers", { count: layers.length })}</header>
             <div className="field">
-              <span>{t("mask.layers", { count: layers.length })}</span>
               <div className="mask-layer-list">
                 {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
                   const layer = layers[i];
@@ -1489,9 +1499,11 @@ export function MaskEditModal({
                 <small className="muted">{t("mask.adjustmentHint")}</small>
               </div>
             ) : null}
+            </section>
 
+            <section className="mask-panel">
+            <header>{t("mask.history", { count: ops.length })}</header>
             <div className="field">
-              <span>{t("mask.history", { count: ops.length })}</span>
               <div className="mask-history-list">
                 {ops.length === 0 ? (
                   <small className="muted">{t("mask.historyEmpty")}</small>
@@ -1558,7 +1570,10 @@ export function MaskEditModal({
                 )}
               </div>
             </div>
+            </section>
 
+            <section className="mask-panel">
+            <header>{t("mask.panelInfo")}</header>
             <div className="field">
               <span>{t("mask.mattingBand", { count: matteStrokes.length })}</span>
               <div className="mask-op-list">
@@ -1594,6 +1609,7 @@ export function MaskEditModal({
               <code>edit_paths</code>
               {t("mask.noteSuffix")}
             </small>
+            </section>
           </div>
         </div>
       </div>

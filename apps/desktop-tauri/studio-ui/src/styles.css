@@ -934,9 +934,20 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-edit-tools {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   overflow-y: auto;
 }
+/* PS-style toolbar groups: selection / paint / vector / ops / navigation,
+   separated by a rule so tools sit where a PS user expects them. */
+.mask-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mask-tool-group:first-child { padding-top: 0; }
+.mask-tool-group:last-child { border-bottom: none; padding-bottom: 0; }
 .mask-tool {
   position: relative;
   text-align: left;
@@ -951,6 +962,15 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-tool:hover:not(:disabled) { background: #2a2f3d; }
 .mask-tool.active { border-color: var(--accent); color: var(--accent); }
 .mask-tool.planned { opacity: 0.45; cursor: not-allowed; }
+.mask-tool .combo {
+  position: absolute;
+  right: 6px;
+  font-style: normal;
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.8;
+}
 .mask-tool .soon {
   position: absolute;
   right: 6px;
@@ -985,6 +1005,24 @@ button:disabled { opacity: 0.6; cursor: default; }
   overflow-y: auto;
 }
 .mask-edit-controls .field { margin-top: 6px; }
+/* PS-style panel blocks on the right rail (tool options / layers / history / info). */
+.mask-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 0 8px 8px;
+}
+.mask-panel > header {
+  margin: 0 -8px 2px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background: #11131a;
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+}
 .mask-op-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .mask-op-chip {
   font-size: 11px;

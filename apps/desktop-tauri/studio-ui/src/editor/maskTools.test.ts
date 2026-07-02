@@ -3,6 +3,7 @@ import { EXEC_LANES } from "./execLanes";
 import {
   DEFAULT_TOOL_ID,
   MASK_TOOLS,
+  MASK_TOOL_GROUPS,
   PLANNED_TOOLS,
   READY_TOOLS,
   maskTool,
@@ -58,6 +59,12 @@ describe("mask tool registry", () => {
       const lastReady = MASK_TOOLS.map((t) => t.status).lastIndexOf("ready");
       expect(lastReady).toBeLessThan(firstPlanned);
     }
+  });
+
+  it("toolbar groups cover every tool exactly once (PS layout)", () => {
+    const grouped = MASK_TOOL_GROUPS.flat();
+    expect(new Set(grouped).size).toBe(grouped.length);
+    expect([...grouped].sort()).toEqual(MASK_TOOLS.map((t) => t.id).sort());
   });
 
   it("the default tool is ready and selectable", () => {

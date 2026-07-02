@@ -464,6 +464,8 @@ export const messages = {
   "mask.anchorEditing": { en: "Editing path anchors", zh: "正在编辑路径锚点" },
   "mask.anchorDone": { en: "Done", zh: "完成" },
   "mask.anchorCancel": { en: "Cancel", zh: "取消" },
+  "mask.panelOptions": { en: "Tool options", zh: "工具选项" },
+  "mask.panelInfo": { en: "Mask info", zh: "蒙版信息" },
   "mask.fillDialog": { en: "Fill", zh: "填充" },
   "mask.fillAdd": { en: "Add", zh: "添加" },
   "mask.fillSubtract": { en: "Subtract", zh: "减去" },
