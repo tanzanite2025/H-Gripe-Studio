@@ -907,3 +907,90 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: warperCases }, null, 2) + "\n",
 );
 console.log(`wrote ${warperCases.length} warper cases`);
+
+// ---- Scope cases (wave 3): read-only analysers over a surface ----
+// Scope maths is f64 on both ends (Rust widens to f64), so the integer
+// counts here are exact — no tolerance.
+
+const sane01 = (v) => (Number.isFinite(v) ? clamp01(v) : 0);
+const bucket = (v, k) => Math.min(Math.floor(v * k), k - 1);
+
+function histogramScope(surface, bins) {
+  const k = Math.max(bins, 1);
+  const out = { bins: k, r: zeros(k), g: zeros(k), b: zeros(k), luma: zeros(k) };
+  for (let px = 0; px < surface.w * surface.h; px++) {
+    const i = px * 4;
+    const [r, g, b] = [0, 1, 2].map((c) => sane01(surface.data[i + c]));
+    out.r[bucket(r, k)]++;
+    out.g[bucket(g, k)]++;
+    out.b[bucket(b, k)]++;
+    out.luma[bucket(LUMA[0] * r + LUMA[1] * g + LUMA[2] * b, k)]++;
+  }
+  return out;
+}
+
+function waveformScope(surface, cols, rows) {
+  const kc = Math.max(cols, 1);
+  const kr = Math.max(rows, 1);
+  const out = { cols: kc, rows: kr, r: zeros(kc * kr), g: zeros(kc * kr), b: zeros(kc * kr) };
+  const planes = [out.r, out.g, out.b];
+  for (let py = 0; py < surface.h; py++) {
+    for (let px = 0; px < surface.w; px++) {
+      const col = Math.floor((px * kc) / surface.w);
+      const i = (py * surface.w + px) * 4;
+      for (let c = 0; c < 3; c++) {
+        planes[c][bucket(sane01(surface.data[i + c]), kr) * kc + col]++;
+      }
+    }
+  }
+  return out;
+}
+
+function vectorscopeScope(surface, size) {
+  const k = Math.max(size, 1);
+  const out = { size: k, counts: zeros(k * k) };
+  for (let px = 0; px < surface.w * surface.h; px++) {
+    const i = px * 4;
+    const [r, g, b] = [0, 1, 2].map((c) => sane01(surface.data[i + c]));
+    const y = LUMA[0] * r + LUMA[1] * g + LUMA[2] * b;
+    out.counts[bucket((r - y) / 1.5748 + 0.5, k) * k + bucket((b - y) / 1.8556 + 0.5, k)]++;
+  }
+  return out;
+}
+
+const zeros = (n) => new Array(n).fill(0);
+
+// A 6x2 ramp with per-channel offsets: exercises column mapping and spread.
+const rampInput = {
+  w: 6, h: 2, space: "srgb",
+  data: Array.from({ length: 12 }, (_, px) => {
+    const v = (px % 6) / 5;
+    return [v, clamp01(v * 0.5 + 0.2), clamp01(1 - v), 1.0];
+  }).flat(),
+};
+// Colour bars: primaries, secondaries, black, white.
+const barsInput = {
+  w: 4, h: 2, space: "srgb",
+  data: [
+    1, 0, 0, 1,   0, 1, 0, 1,   0, 0, 1, 1,   1, 1, 0, 1,
+    0, 1, 1, 1,   1, 0, 1, 1,   0, 0, 0, 1,   1, 1, 1, 1,
+  ],
+};
+
+const scopeCases = [
+  { name: "histogram: 8 bins over the core input", scope: { type: "histogram", bins: 8 }, input: opsInput, expected: histogramScope(opsInput, 8) },
+  { name: "histogram: black and white land in the end bins", scope: { type: "histogram", bins: 4 }, input: barsInput, expected: histogramScope(barsInput, 4) },
+  { name: "histogram: HDR input clamps into range", scope: { type: "histogram", bins: 4 }, input: hdrInput, expected: histogramScope(hdrInput, 4) },
+  { name: "waveform: ramp columns map proportionally", scope: { type: "waveform", cols: 3, rows: 4 }, input: rampInput, expected: waveformScope(rampInput, 3, 4) },
+  { name: "waveform: one column per image column", scope: { type: "waveform", cols: 4, rows: 5 }, input: barsInput, expected: waveformScope(barsInput, 4, 5) },
+  { name: "waveform: HDR input clamps into range", scope: { type: "waveform", cols: 3, rows: 4 }, input: hdrInput, expected: waveformScope(hdrInput, 3, 4) },
+  { name: "vectorscope: neutral grays hit the centre cell", scope: { type: "vectorscope", size: 9 }, input: { w: 2, h: 1, space: "srgb", data: [0.5, 0.5, 0.5, 1, 0.2, 0.2, 0.2, 1] }, expected: vectorscopeScope({ w: 2, h: 1, space: "srgb", data: [0.5, 0.5, 0.5, 1, 0.2, 0.2, 0.2, 1] }, 9) },
+  { name: "vectorscope: colour bars spread across the plane", scope: { type: "vectorscope", size: 9 }, input: barsInput, expected: vectorscopeScope(barsInput, 9) },
+  { name: "vectorscope: HDR input clamps into range", scope: { type: "vectorscope", size: 5 }, input: hdrInput, expected: vectorscopeScope(hdrInput, 5) },
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/scopes.json", import.meta.url),
+  JSON.stringify({ kind: "scopes", cases: scopeCases }, null, 2) + "\n",
+);
+console.log(`wrote ${scopeCases.length} scope cases`);

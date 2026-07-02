@@ -14,6 +14,7 @@ mod doc;
 mod ops;
 mod surface;
 mod qualifier;
+mod scopes;
 mod trc;
 
 pub use blend::{blend_channel, blend_rgb, BlendMode};
@@ -23,5 +24,6 @@ pub use doc::apply_parallel;
 pub use doc::{apply, GradeDoc, GradeLayer};
 pub use ops::{apply_op, parse_cube, CurveChannel, GradeOp, MonotoneSpline, WarpPoint};
 pub use qualifier::HslQualifier;
+pub use scopes::{histogram, vectorscope, waveform, Histogram, Vectorscope, Waveform};
 pub use surface::{GradeSpace, GradeSurface};
 pub use trc::{trc_decode, trc_encode};

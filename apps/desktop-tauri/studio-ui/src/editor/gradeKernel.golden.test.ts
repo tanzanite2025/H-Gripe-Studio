@@ -13,9 +13,13 @@ import opsMixer from "../../../../../crates/hgripe-grade/goldens/ops_mixer.json"
 import opsPro from "../../../../../crates/hgripe-grade/goldens/ops_pro.json";
 import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json";
 import opsWarper from "../../../../../crates/hgripe-grade/goldens/ops_warper.json";
+import scopes from "../../../../../crates/hgripe-grade/goldens/scopes.json";
 import {
   applyDoc,
   compositeOver,
+  histogramScope,
+  vectorscopeScope,
+  waveformScope,
   type GradeBlendMode,
   type GradeDoc,
   type GradeSpace,
@@ -46,6 +50,16 @@ interface DocCase {
   input: GoldenSurface;
   expected: number[];
   tolerance: number;
+}
+
+interface ScopeCase {
+  name: string;
+  scope:
+    | { type: "histogram"; bins: number }
+    | { type: "waveform"; cols: number; rows: number }
+    | { type: "vectorscope"; size: number };
+  input: GoldenSurface;
+  expected: Record<string, number | number[] | undefined>;
 }
 
 const surface = (g: GoldenSurface): GradeSurface => ({
@@ -93,5 +107,23 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
         assertClose(dst.data, c.expected, c.tolerance);
       });
     }
+  }
+
+  // Scope counts are integers and the maths is f64 on both ends: exact.
+  for (const c of (scopes as { cases: ScopeCase[] }).cases) {
+    it(`scopes.json: ${c.name}`, () => {
+      const input = surface(c.input);
+      const got =
+        c.scope.type === "histogram"
+          ? histogramScope(input, c.scope.bins)
+          : c.scope.type === "waveform"
+            ? waveformScope(input, c.scope.cols, c.scope.rows)
+            : vectorscopeScope(input, c.scope.size);
+      for (const [key, want] of Object.entries(c.expected)) {
+        const val = (got as unknown as Record<string, number | Uint32Array>)[key];
+        if (typeof want === "number") expect(val).toBe(want);
+        else if (want) expect(Array.from(val as Uint32Array)).toEqual(want);
+      }
+    });
   }
 });
