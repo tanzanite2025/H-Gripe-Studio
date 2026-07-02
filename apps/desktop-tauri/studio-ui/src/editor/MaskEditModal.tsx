@@ -99,6 +99,10 @@ export function MaskEditModal({
   // Fill dialog (M11, Shift+F5): a draft of mode + opacity; Apply records a
   // revisable `fill` op.
   const [fillDraft, setFillDraft] = useState<FillDraft | null>(null);
+  // PS-style right rail: two stacked tabbed panel groups (top: properties /
+  // info, bottom: layers / history — mirroring PS's 属性 and 图层 groups).
+  const [topTab, setTopTab] = useState<"options" | "info">("options");
+  const [bottomTab, setBottomTab] = useState<"layers" | "history">("layers");
 
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
@@ -1178,6 +1182,25 @@ export function MaskEditModal({
           />
 
           <div className="mask-edit-controls">
+            <div className="mask-panel-group">
+              <div className="mask-panel-tabs" role="tablist">
+                <button
+                  role="tab"
+                  className={topTab === "options" ? "active" : ""}
+                  onClick={() => setTopTab("options")}
+                >
+                  {t("mask.panelOptions")}
+                </button>
+                <button
+                  role="tab"
+                  className={topTab === "info" ? "active" : ""}
+                  onClick={() => setTopTab("info")}
+                >
+                  {t("mask.panelInfo")}
+                </button>
+              </div>
+              <div className="mask-panel-group-body">
+                {topTab === "options" ? (
             <ToolOptionsPanel
               tool={tool}
               toolId={toolId}
@@ -1219,7 +1242,31 @@ export function MaskEditModal({
               commitPathEdit={commitPathEdit}
               cancelPathEdit={cancelPathEdit}
             />
+                ) : (
+                  <InfoPanel matteStrokes={matteStrokes} points={points} count={count} />
+                )}
+              </div>
+            </div>
 
+            <div className="mask-panel-group grow">
+              <div className="mask-panel-tabs" role="tablist">
+                <button
+                  role="tab"
+                  className={bottomTab === "layers" ? "active" : ""}
+                  onClick={() => setBottomTab("layers")}
+                >
+                  {t("mask.layers", { count: layers.length })}
+                </button>
+                <button
+                  role="tab"
+                  className={bottomTab === "history" ? "active" : ""}
+                  onClick={() => setBottomTab("history")}
+                >
+                  {t("mask.history", { count: ops.length })}
+                </button>
+              </div>
+              <div className="mask-panel-group-body">
+                {bottomTab === "layers" ? (
             <LayersPanel
               layers={layers}
               active={state.current.active}
@@ -1232,7 +1279,7 @@ export function MaskEditModal({
               curveY={curveY}
               setCurveY={setCurveY}
             />
-
+                ) : (
             <HistoryPanel
               ops={ops}
               dispatch={dispatch}
@@ -1245,8 +1292,9 @@ export function MaskEditModal({
                 setTransformDraft({ dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 });
               }}
             />
-
-            <InfoPanel matteStrokes={matteStrokes} points={points} count={count} />
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

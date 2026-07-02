@@ -1061,6 +1061,51 @@ button:disabled { opacity: 0.6; cursor: default; }
 .mask-edit.mask-screen-1 .mask-edit-controls { display: none; }
 .mask-edit.mask-screen-2 .mask-edit-controls,
 .mask-edit.mask-screen-2 .mask-edit-tools { display: none; }
+/* PS-style right rail: two stacked tabbed panel groups, like PS's 属性 (top)
+   and 图层 (bottom) docks — a dark tab strip on top of each group, one panel
+   visible at a time. */
+.mask-panel-group {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.mask-panel-group.grow { flex: 1; }
+.mask-panel-tabs {
+  display: flex;
+  background: #11131a;
+  border-bottom: 1px solid var(--border);
+}
+.mask-panel-tabs button {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  cursor: pointer;
+}
+.mask-panel-tabs button:hover { color: var(--text); }
+.mask-panel-tabs button.active { background: var(--panel-2); color: var(--text); }
+.mask-panel-group-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Panels inside a tab group lose their own chrome — the group's tab strip
+   replaces the per-panel header. */
+.mask-panel-group .mask-panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.mask-panel-group .mask-panel > header { display: none; }
 /* PS-style panel blocks on the right rail (tool options / layers / history / info). */
 .mask-panel {
   border: 1px solid var(--border);
