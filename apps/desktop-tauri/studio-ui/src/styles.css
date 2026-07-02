@@ -927,7 +927,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 128px 1fr 240px;
+  grid-template-columns: 44px 1fr 240px;
   gap: 10px;
   padding: 10px;
 }
@@ -936,49 +936,90 @@ button:disabled { opacity: 0.6; cursor: default; }
   flex-direction: column;
   gap: 0;
   overflow-y: auto;
+  overflow-x: visible;
 }
-/* PS-style toolbar groups: selection / paint / vector / ops / navigation,
+/* PS-style toolbar sections: selection / paint / vector / ops / navigation,
    separated by a rule so tools sit where a PS user expects them. */
 .mask-tool-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px 0;
+  gap: 3px;
+  padding: 5px 0;
   border-bottom: 1px solid var(--border);
 }
 .mask-tool-group:first-child { padding-top: 0; }
 .mask-tool-group:last-child { border-bottom: none; padding-bottom: 0; }
+/* One PS toolbar slot: an icon button; multi-variant slots anchor a flyout. */
+.mask-tool-slot { position: relative; }
 .mask-tool {
   position: relative;
-  text-align: left;
-  padding: 6px 8px;
+  width: 38px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
 }
 .mask-tool:hover:not(:disabled) { background: #2a2f3d; }
 .mask-tool.active { border-color: var(--accent); color: var(--accent); }
-.mask-tool.planned { opacity: 0.45; cursor: not-allowed; }
-.mask-tool .combo {
+.mask-tool-icon { display: block; }
+/* PS's tiny corner triangle marking a slot that hides more variants. */
+.mask-tool .flyout-corner {
   position: absolute;
-  right: 6px;
+  right: 2px;
+  bottom: 2px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-bottom: 4px solid currentColor;
+  opacity: 0.7;
+}
+/* Flyout card of a slot's tool variants (long-press / right-click). */
+.mask-flyout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+}
+.mask-flyout {
+  position: fixed;
+  z-index: 40;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.mask-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.mask-flyout-item:hover { background: #2a2f3d; }
+.mask-flyout-item.active { border-color: var(--accent); color: var(--accent); }
+.mask-flyout-item .label { flex: 1; }
+.mask-flyout-item .combo {
   font-style: normal;
   font-size: 9px;
   text-transform: uppercase;
   color: var(--muted);
   opacity: 0.8;
-}
-.mask-tool .soon {
-  position: absolute;
-  right: 6px;
-  font-style: normal;
-  font-size: 9px;
-  text-transform: uppercase;
-  color: var(--running);
-  opacity: 0.9;
 }
 .mask-edit-stage {
   min-width: 0;
