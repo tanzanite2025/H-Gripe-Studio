@@ -313,6 +313,7 @@ export function MaskEditModal({
     quick_mask: () => setQuickMask((v) => !v),
     tool_healing: () => selectTool("heal"),
     tool_clone: () => selectTool("clone"),
+    tool_history_brush: () => selectTool("history_brush"),
     tool_hand: () => selectTool("hand"),
     tool_rotate_view: () => selectTool("rotate_view"),
     tool_zoom: () => selectTool("zoom"),
@@ -497,11 +498,12 @@ export function MaskEditModal({
         live.points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
         ctx.stroke();
         ctx.setLineDash([]);
-      } else if (tool.kind === "heal" || tool.kind === "clone") {
+      } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history") {
         // Live retouch band: a translucent band marking the painted region
         // (green: rebuilt from its surroundings; violet: cloned from the
-        // source offset on release).
-        const band = tool.kind === "heal" ? "rgba(120,220,140,0.45)" : "rgba(190,140,255,0.45)";
+        // source offset; amber: restored to the layer's initial state).
+        const band =
+          tool.kind === "heal" ? "rgba(120,220,140,0.45)" : tool.kind === "clone" ? "rgba(190,140,255,0.45)" : "rgba(255,196,90,0.45)";
         ctx.strokeStyle = band;
         ctx.fillStyle = band;
         ctx.lineWidth = brushSize * 2;
@@ -816,7 +818,7 @@ export function MaskEditModal({
       if (!cloneSource.current) return;
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
-    } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal") {
+    } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal" || tool.kind === "history") {
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "transform") {
@@ -899,6 +901,13 @@ export function MaskEditModal({
         // Spot-heal (M13): the stroke records a `heal` op — the painted
         // region is rebuilt from its surroundings on replay.
         dispatch({ type: "op", op: { type: "heal", amount: brushSize, points: pts } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.kind === "history") {
+        // History brush (M13): the stroke records a `history_brush` op — the
+        // painted region is restored to the layer's pre-edit state on replay.
+        dispatch({ type: "op", op: { type: "history_brush", amount: brushSize, points: pts } });
         forceRedraw((n) => n + 1);
         return;
       }

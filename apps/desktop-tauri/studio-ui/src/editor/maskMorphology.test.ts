@@ -10,6 +10,7 @@ import {
   feather,
   fillHoles,
   healStroke,
+  historyStroke,
   invert,
   isPreviewableOp,
   PREVIEWABLE_OP_IDS,
@@ -80,6 +81,21 @@ describe("maskMorphology preview primitives", () => {
     // An empty stroke is a no-op.
     const before = new Uint8Array(mask.data);
     cloneStroke(mask, { type: "clone", amount: 3, points: [], dx: 1, dy: 1 }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("historyStroke restores the base state under the stroke", () => {
+    // Base is empty; the current mask is fully on: brushing restores the
+    // covered pixels to the empty base and leaves the rest on.
+    const mask = createProxyMask(21, 21);
+    mask.data.fill(255);
+    const base = new Uint8Array(21 * 21);
+    historyStroke(mask, base, { type: "history_brush", amount: 3, points: [[10, 10]] }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(0); // restored
+    expect(mask.data[0]).toBe(255); // outside the stroke untouched
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    historyStroke(mask, base, { type: "history_brush", amount: 3, points: [] }, 1);
     expect(mask.data).toEqual(before);
   });
 

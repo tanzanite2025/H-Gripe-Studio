@@ -17,6 +17,7 @@ function opLabel(op: EditOp): string {
   if (op.type === "fill") return `fill ${op.mode === "subtract" ? "subtract" : "add"} ${op.amount ?? 100}%`;
   if (op.type === "heal") return `heal r${op.amount ?? 8} (${op.points?.length ?? 0})`;
   if (op.type === "clone") return `clone r${op.amount ?? 8} Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}`;
+  if (op.type === "history_brush") return `history r${op.amount ?? 8} (${op.points?.length ?? 0})`;
   return op.type;
 }
 
