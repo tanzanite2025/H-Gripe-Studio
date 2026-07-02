@@ -85,14 +85,16 @@ function blendRgb(mode, cb, cs) {
 function composite(backdrop, source, mode, opacity, mask) {
   const out = backdrop.data.slice();
   const n = backdrop.w * backdrop.h;
+  // Scene-referred linear + Normal passes values through unclamped.
+  const load = backdrop.space === "linear_rec709" && mode === "normal" ? (v) => v : clamp01;
   for (let px = 0; px < n; px++) {
     const i = px * 4;
     const gate = mask ? clamp01(mask[px]) : 1;
     const sa = clamp01(source.data[i + 3]) * clamp01(opacity) * gate;
     const ba = clamp01(backdrop.data[i + 3]);
     const oa = sa + ba * (1 - sa);
-    const cb = [0, 1, 2].map((c) => clamp01(backdrop.data[i + c]));
-    const cs = [0, 1, 2].map((c) => clamp01(source.data[i + c]));
+    const cb = [0, 1, 2].map((c) => load(backdrop.data[i + c]));
+    const cs = [0, 1, 2].map((c) => load(source.data[i + c]));
     const blended = blendRgb(mode, cb, cs);
     for (let c = 0; c < 3; c++) {
       out[i + c] = oa === 0 ? 0 : (sa * (1 - ba) * cs[c] + sa * ba * blended[c] + (1 - sa) * ba * cb[c]) / oa;
@@ -105,10 +107,13 @@ function composite(backdrop, source, mode, opacity, mask) {
 // ---- G2 op maths (float64 spec mirrors of crates/hgripe-grade/src/ops.rs) ----
 
 const trcDecode = (space, c) =>
-  space === "srgb"
-    ? c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-    : c < 0.03125 ? c / 16 : Math.pow(c, 1.8);
+  space === "linear_rec709"
+    ? c
+    : space === "srgb"
+      ? c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+      : c < 0.03125 ? c / 16 : Math.pow(c, 1.8);
 const trcEncode = (space, l) => {
+  if (space === "linear_rec709") return l;
   const v = clamp01(l);
   return space === "srgb"
     ? v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055
@@ -148,9 +153,10 @@ function monotoneSpline(points) {
 }
 
 function forEachRgbLinear(surface, f) {
+  const load = surface.space === "linear_rec709" ? (v) => v : clamp01;
   for (let px = 0; px < surface.w * surface.h; px++) {
     const i = px * 4;
-    const rgb = [0, 1, 2].map((c) => trcDecode(surface.space, clamp01(surface.data[i + c])));
+    const rgb = [0, 1, 2].map((c) => trcDecode(surface.space, load(surface.data[i + c])));
     f(rgb);
     for (let c = 0; c < 3; c++) surface.data[i + c] = trcEncode(surface.space, rgb[c]);
   }
@@ -274,7 +280,63 @@ function applyOp(surface, op) {
       }
       break;
     }
+    case "soft_clip": {
+      const hs = Math.min(Math.max(op.high_start, 0), 1 - 1e-4);
+      const ls = Math.min(Math.max(op.low_start, 0), hs);
+      forEachRgbLinear(surface, (rgb) => {
+        for (let c = 0; c < 3; c++) rgb[c] = softClip(rgb[c], hs, ls);
+      });
+      break;
+    }
+    case "white_balance_k": {
+      const gains = planckianGains(op.temp_k, op.tint);
+      forEachRgbLinear(surface, (rgb) => { for (let c = 0; c < 3; c++) rgb[c] *= gains[c]; });
+      break;
+    }
   }
+}
+
+function softClip(v, hs, ls) {
+  if (v > hs) {
+    const t = (v - hs) / (1 - hs);
+    return hs + ((1 - hs) * t) / (1 + t);
+  }
+  if (v < ls) {
+    if (ls <= 0) return 0;
+    const t = (ls - v) / ls;
+    return ls - (ls * t) / (1 + t);
+  }
+  return v;
+}
+
+// Planckian-locus white balance gains (Kim et al. CCT→xy fit, xy→XYZ→Rec.709,
+// relative to the 6504 K neutral, Rec.709-luma-normalised).
+function planckianGains(tempK, tint) {
+  const ref = planckianRgb(6504, 0);
+  const target = planckianRgb(tempK, tint);
+  const raw = [target[0] / ref[0], target[1] / ref[1], target[2] / ref[2]];
+  const luma = LUMA[0] * raw[0] + LUMA[1] * raw[1] + LUMA[2] * raw[2];
+  return raw.map((g) => g / luma);
+}
+
+function planckianRgb(tempK, tint) {
+  const t = Number.isFinite(tempK) ? Math.min(Math.max(tempK, 1667), 25000) : 6504;
+  const x = t <= 4000
+    ? -0.2661239e9 / (t * t * t) - 0.2343589e6 / (t * t) + 0.8776956e3 / t + 0.17991
+    : -3.0258469e9 / (t * t * t) + 2.1070379e6 / (t * t) + 0.2226347e3 / t + 0.24039;
+  const yLocus = t <= 2222
+    ? ((-1.1063814 * x - 1.3481102) * x + 2.18555832) * x - 0.20219683
+    : t <= 4000
+      ? ((-0.9549476 * x - 1.37418593) * x + 2.09137015) * x - 0.16748867
+      : ((3.081758 * x - 5.8733867) * x + 3.75112997) * x - 0.37001483;
+  const tt = Number.isFinite(tint) ? Math.min(Math.max(tint, -1), 1) : 0;
+  const y = Math.max(yLocus + 0.05 * tt, 1e-4);
+  const bigX = x / y;
+  const bigZ = (1 - x - y) / y;
+  const r = 3.2404542 * bigX - 1.5371385 - 0.4985314 * bigZ;
+  const g = -0.969266 * bigX + 1.8760108 + 0.041556 * bigZ;
+  const b = 0.0556434 * bigX - 0.2040259 + 1.0572252 * bigZ;
+  return [Math.max(r, 1e-4), Math.max(g, 1e-4), Math.max(b, 1e-4)];
 }
 
 const smoothstep = (t) => {
@@ -613,3 +675,66 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: proCases }, null, 2) + "\n",
 );
 console.log(`wrote ${proCases.length} pro cases`);
+
+// ---- HDR / scene-referred cases: unbounded linear working space ----
+
+// Scene-referred linear input with HDR headroom and a negative excursion.
+const hdrInput = {
+  w: 3, h: 2, space: "linear_rec709",
+  data: [
+    0.0, 0.18, 0.5, 1.0,
+    4.0, 2.5, 1.2, 1.0, // HDR highlights
+    -0.1, 0.05, 0.95, 0.5, // negative excursion
+    12.0, 8.0, 6.0, 0.8, // speculars
+    0.6, 0.4, 0.0, 0.25,
+    1.0, 1.0, 1.0, 1.0,
+  ],
+};
+
+// HDR magnitudes (up to ~48 after +2 EV) need an absolute tolerance scaled
+// for f32's relative precision.
+const hdrCases = [
+  docCase("linear: exposure +2 EV keeps HDR headroom unclamped", {
+    layers: [layer([{ type: "exposure", ev: 2.0 }])],
+  }, hdrInput, 5e-4),
+  docCase("linear: exposure then saturation, negatives survive", {
+    layers: [layer([{ type: "exposure", ev: -1.0 }, { type: "saturation", amount: 0.5 }])],
+  }, hdrInput, 5e-4),
+  docCase("linear: two normal layers keep headroom across compositing", {
+    layers: [
+      layer([{ type: "exposure", ev: 1.0 }], { opacity: 0.6, mask }),
+      layer([{ type: "exposure", ev: 0.5 }]),
+    ],
+  }, hdrInput, 5e-4),
+  docCase("soft_clip: rolls HDR into display range", {
+    layers: [layer([{ type: "soft_clip", high_start: 0.8, low_start: 0.0 }])],
+  }, hdrInput, 5e-4),
+  docCase("soft_clip: shadow toe with low_start", {
+    layers: [layer([{ type: "soft_clip", high_start: 0.9, low_start: 0.1 }])],
+  }, hdrInput, 5e-4),
+  docCase("soft_clip: neutral inside the knees", {
+    layers: [layer([{ type: "soft_clip", high_start: 0.999, low_start: 0.0 }])],
+  }, opsInput),
+  docCase("white_balance_k: 6504 K is neutral", {
+    layers: [layer([{ type: "white_balance_k", temp_k: 6504, tint: 0 }])],
+  }, opsInput),
+  docCase("white_balance_k: warm to 3200 K tungsten", {
+    layers: [layer([{ type: "white_balance_k", temp_k: 3200, tint: 0 }])],
+  }, opsInput),
+  docCase("white_balance_k: cool to 10000 K with magenta tint", {
+    layers: [layer([{ type: "white_balance_k", temp_k: 10000, tint: -0.3 }])],
+  }, hdrInput),
+  docCase("hdr chain: exposure, planckian warm, soft clip", {
+    layers: [layer([
+      { type: "exposure", ev: 1.5 },
+      { type: "white_balance_k", temp_k: 4500, tint: 0.1 },
+      { type: "soft_clip", high_start: 0.75, low_start: 0.02 },
+    ])],
+  }, hdrInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_hdr.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: hdrCases }, null, 2) + "\n",
+);
+console.log(`wrote ${hdrCases.length} hdr cases`);

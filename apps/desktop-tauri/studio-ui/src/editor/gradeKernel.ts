@@ -4,7 +4,7 @@
 // `crates/hgripe-grade/goldens/`, executed here by `gradeKernel.golden.test.ts`
 // and in Rust by `cargo test -p hgripe-grade`. See docs/design/grade-kernel.md.
 
-export type GradeSpace = "srgb" | "pro_photo";
+export type GradeSpace = "srgb" | "pro_photo" | "linear_rec709";
 
 export const BLEND_MODES = [
   "normal",
@@ -134,12 +134,17 @@ export function blendRgb(mode: GradeBlendMode, cb: Rgb, cs: Rgb): Rgb {
 
 /** Decode a gamma-encoded sample (`0..=1`) to linear light (mirrors Rust `trc_decode`). */
 export function trcDecode(space: GradeSpace, c: number): number {
+  if (space === "linear_rec709") return c;
   if (space === "srgb") return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   return c < 0.03125 ? c / 16 : Math.pow(c, 1.8);
 }
 
-/** Encode linear light back to a gamma-encoded sample, clamping to `0..=1`. */
+/**
+ * Encode linear light back to a gamma-encoded sample, clamping to `0..=1` —
+ * except the scene-referred linear space, which stays unbounded.
+ */
 export function trcEncode(space: GradeSpace, l: number): number {
+  if (space === "linear_rec709") return l;
   const v = clamp01(l);
   if (space === "srgb") return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
   return v < 0.001953125 ? 16 * v : Math.pow(v, 1 / 1.8);
@@ -168,7 +173,9 @@ export type GradeOp =
       low_pivot: number;
       high_pivot: number;
     }
-  | { type: "contrast"; amount: number; pivot: number };
+  | { type: "contrast"; amount: number; pivot: number }
+  | { type: "soft_clip"; high_start: number; low_start: number }
+  | { type: "white_balance_k"; temp_k: number; tint: number };
 
 /**
  * HSL qualifier: a per-pixel gate computed from the layer's input (hue band
@@ -251,15 +258,17 @@ export function monotoneSpline(points: [number, number][]): (x: number) => numbe
   };
 }
 
-// Decode RGB to linear light, run `f`, re-encode (alpha untouched).
+// Decode RGB to linear light, run `f`, re-encode (alpha untouched). The
+// scene-referred linear space passes values through unclamped and unbounded.
 function forEachRgbLinear(surface: GradeSurface, f: (rgb: [number, number, number]) => void): void {
   const n = surface.w * surface.h;
+  const load = surface.space === "linear_rec709" ? (v: number) => v : clamp01;
   for (let px = 0; px < n; px++) {
     const i = px * 4;
     const rgb: [number, number, number] = [
-      trcDecode(surface.space, clamp01(surface.data[i])),
-      trcDecode(surface.space, clamp01(surface.data[i + 1])),
-      trcDecode(surface.space, clamp01(surface.data[i + 2])),
+      trcDecode(surface.space, load(surface.data[i])),
+      trcDecode(surface.space, load(surface.data[i + 1])),
+      trcDecode(surface.space, load(surface.data[i + 2])),
     ];
     f(rgb);
     surface.data[i] = trcEncode(surface.space, rgb[0]);
@@ -404,7 +413,70 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       }
       break;
     }
+    case "soft_clip": {
+      const hs = Math.min(Math.max(op.high_start, 0), 1 - 1e-4);
+      const ls = Math.min(Math.max(op.low_start, 0), hs);
+      forEachRgbLinear(surface, (rgb) => {
+        for (let c = 0; c < 3; c++) rgb[c] = softClip(rgb[c], hs, ls);
+      });
+      break;
+    }
+    case "white_balance_k": {
+      const gains = planckianGains(op.temp_k, op.tint);
+      forEachRgbLinear(surface, (rgb) => {
+        for (let c = 0; c < 3; c++) rgb[c] *= gains[c];
+      });
+      break;
+    }
   }
+}
+
+// Soft clip in linear light: asymptotic roll-off toward 1 above `hs` and
+// toward 0 below `ls` (mirrors Rust `soft_clip`).
+function softClip(v: number, hs: number, ls: number): number {
+  if (v > hs) {
+    const t = (v - hs) / (1 - hs);
+    return hs + ((1 - hs) * t) / (1 + t);
+  }
+  if (v < ls) {
+    if (ls <= 0) return 0;
+    const t = (ls - v) / ls;
+    return ls - (ls * t) / (1 + t);
+  }
+  return v;
+}
+
+// Planckian-locus white balance gains (Kim et al. CCT→xy fit,
+// xy→XYZ→Rec.709, relative to the 6504 K neutral, luma-normalised;
+// mirrors Rust `planckian_gains`).
+export function planckianGains(tempK: number, tint: number): Rgb {
+  const ref = planckianRgb(6504, 0);
+  const target = planckianRgb(tempK, tint);
+  const raw: Rgb = [target[0] / ref[0], target[1] / ref[1], target[2] / ref[2]];
+  const luma = LUMA[0] * raw[0] + LUMA[1] * raw[1] + LUMA[2] * raw[2];
+  return [raw[0] / luma, raw[1] / luma, raw[2] / luma];
+}
+
+function planckianRgb(tempK: number, tint: number): Rgb {
+  const t = Number.isFinite(tempK) ? Math.min(Math.max(tempK, 1667), 25000) : 6504;
+  const x =
+    t <= 4000
+      ? -0.2661239e9 / (t * t * t) - 0.2343589e6 / (t * t) + 0.8776956e3 / t + 0.17991
+      : -3.0258469e9 / (t * t * t) + 2.1070379e6 / (t * t) + 0.2226347e3 / t + 0.24039;
+  const yLocus =
+    t <= 2222
+      ? ((-1.1063814 * x - 1.3481102) * x + 2.18555832) * x - 0.20219683
+      : t <= 4000
+        ? ((-0.9549476 * x - 1.37418593) * x + 2.09137015) * x - 0.16748867
+        : ((3.081758 * x - 5.8733867) * x + 3.75112997) * x - 0.37001483;
+  const tt = Number.isFinite(tint) ? Math.min(Math.max(tint, -1), 1) : 0;
+  const y = Math.max(yLocus + 0.05 * tt, 1e-4);
+  const bigX = x / y;
+  const bigZ = (1 - x - y) / y;
+  const r = 3.2404542 * bigX - 1.5371385 - 0.4985314 * bigZ;
+  const g = -0.969266 * bigX + 1.8760108 + 0.041556 * bigZ;
+  const b = 0.0556434 * bigX - 0.2040259 + 1.0572252 * bigZ;
+  return [Math.max(r, 1e-4), Math.max(g, 1e-4), Math.max(b, 1e-4)];
 }
 
 const smoothstep = (t: number) => {
@@ -609,6 +681,11 @@ export function compositeOver(
   if (dst.space !== src.space) throw new Error("surface space");
   if (mask && mask.length !== dst.w * dst.h) throw new Error("mask length");
   const op = clamp01(opacity);
+  // The blend-mode formulas are defined on 0..=1 values. In the
+  // scene-referred linear space, Normal passes values through unclamped so
+  // HDR headroom and negatives survive across layers; every other mode
+  // still works on the clamped display window.
+  const load = dst.space === "linear_rec709" && mode === "normal" ? (v: number) => v : clamp01;
 
   for (let px = 0; px < dst.w * dst.h; px++) {
     const i = px * 4;
@@ -616,8 +693,8 @@ export function compositeOver(
     const sa = clamp01(src.data[i + 3]) * op * gate;
     const ba = clamp01(dst.data[i + 3]);
     const oa = sa + ba * (1 - sa);
-    const cb: Rgb = [clamp01(dst.data[i]), clamp01(dst.data[i + 1]), clamp01(dst.data[i + 2])];
-    const cs: Rgb = [clamp01(src.data[i]), clamp01(src.data[i + 1]), clamp01(src.data[i + 2])];
+    const cb: Rgb = [load(dst.data[i]), load(dst.data[i + 1]), load(dst.data[i + 2])];
+    const cs: Rgb = [load(src.data[i]), load(src.data[i + 1]), load(src.data[i + 2])];
     const blended = blendRgb(mode, cb, cs);
     for (let c = 0; c < 3; c++) {
       dst.data[i + c] = oa === 0 ? 0 : (sa * (1 - ba) * cs[c] + sa * ba * blended[c] + (1 - sa) * ba * cb[c]) / oa;

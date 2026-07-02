@@ -88,6 +88,14 @@ fn all_ops() -> Vec<GradeOp> {
         },
         GradeOp::Contrast { amount: -100.0, pivot: 10.0 },
         GradeOp::Contrast { amount: 100.0, pivot: -10.0 },
+        // Degenerate soft clip: knees off-range / inverted.
+        GradeOp::SoftClip { high_start: 2.0, low_start: -1.0 },
+        GradeOp::SoftClip { high_start: 0.0, low_start: 1.0 },
+        GradeOp::SoftClip { high_start: 0.8, low_start: 0.1 },
+        // Off-range colour temperatures and tints clamp to the locus fit.
+        GradeOp::WhiteBalanceK { temp_k: 0.0, tint: -100.0 },
+        GradeOp::WhiteBalanceK { temp_k: 1e9, tint: 100.0 },
+        GradeOp::WhiteBalanceK { temp_k: f32::NAN, tint: f32::NAN },
     ]
 }
 
@@ -101,7 +109,7 @@ fn assert_sane(name: &str, s: &GradeSurface) {
 
 #[test]
 fn every_op_survives_hostile_inputs() {
-    for space in [GradeSpace::Srgb, GradeSpace::ProPhoto] {
+    for space in [GradeSpace::Srgb, GradeSpace::ProPhoto, GradeSpace::LinearRec709] {
         for op in all_ops() {
             let mut s = hostile_surface(space);
             apply_op(&mut s, &op);
@@ -166,13 +174,15 @@ fn every_blend_mode_survives_hostile_inputs() {
         BlendMode::Luminosity,
     ];
     for mode in modes {
-        let mut dst = hostile_surface(GradeSpace::Srgb);
-        let src = hostile_surface(GradeSpace::Srgb);
-        composite_over(&mut dst, &src, mode, 0.7, Some(&[1.0, 0.5, 0.0, 2.0, -1.0, 0.25]));
-        for (i, &v) in dst.data.iter().enumerate() {
-            assert!(v.is_finite(), "{mode:?}: sample {i} is {v}");
-            if i % 4 == 3 {
-                assert!((0.0..=1.0).contains(&v), "{mode:?}: alpha {i} = {v}");
+        for space in [GradeSpace::Srgb, GradeSpace::LinearRec709] {
+            let mut dst = hostile_surface(space);
+            let src = hostile_surface(space);
+            composite_over(&mut dst, &src, mode, 0.7, Some(&[1.0, 0.5, 0.0, 2.0, -1.0, 0.25]));
+            for (i, &v) in dst.data.iter().enumerate() {
+                assert!(v.is_finite(), "{mode:?} in {space:?}: sample {i} is {v}");
+                if i % 4 == 3 {
+                    assert!((0.0..=1.0).contains(&v), "{mode:?} in {space:?}: alpha {i} = {v}");
+                }
             }
         }
     }

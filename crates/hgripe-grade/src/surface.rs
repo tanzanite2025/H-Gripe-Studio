@@ -12,6 +12,11 @@ use serde::{Deserialize, Serialize};
 pub enum GradeSpace {
     Srgb,
     ProPhoto,
+    /// Scene-referred linear light with Rec.709 primaries: no transfer
+    /// curve, values are unbounded mid-chain (negatives and HDR headroom
+    /// survive until soft clip or egress). Display-domain ops still work
+    /// on the clamped `0..=1` window.
+    LinearRec709,
 }
 
 /// An f32 RGBA working surface: interleaved `[R, G, B, A]`, row-major,
