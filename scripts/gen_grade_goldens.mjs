@@ -15,6 +15,7 @@ const MODES = [
   "color_dodge", "color_burn", "hard_light", "soft_light",
   "difference", "exclusion", "linear_dodge", "linear_burn",
 ];
+const NON_SEPARABLE = ["hue", "saturation", "color", "luminosity"];
 
 function blend(mode, cb, cs) {
   switch (mode) {
@@ -46,6 +47,41 @@ function blend(mode, cb, cs) {
   }
 }
 
+// W3C compositing-1 non-separable helpers.
+const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+const satOf = (c) => Math.max(...c) - Math.min(...c);
+function clipColor(c) {
+  const l = lum(c);
+  const n = Math.min(...c);
+  const x = Math.max(...c);
+  let out = c;
+  if (n < 0) out = out.map((v) => l + ((v - l) * l) / (l - n));
+  if (x > 1) out = out.map((v) => l + ((v - l) * (1 - l)) / (x - l));
+  return out;
+}
+const setLum = (c, l) => {
+  const d = l - lum(c);
+  return clipColor([c[0] + d, c[1] + d, c[2] + d]);
+};
+function setSat(c, s) {
+  const [lo, mid, hi] = [0, 1, 2].sort((a, b) => c[a] - c[b]);
+  const out = [0, 0, 0];
+  if (c[hi] > c[lo]) {
+    out[mid] = ((c[mid] - c[lo]) * s) / (c[hi] - c[lo]);
+    out[hi] = s;
+  }
+  return out;
+}
+function blendRgb(mode, cb, cs) {
+  switch (mode) {
+    case "hue": return setLum(setSat(cs, satOf(cb)), lum(cb));
+    case "saturation": return setLum(setSat(cb, satOf(cs)), lum(cb));
+    case "color": return setLum(cs, lum(cb));
+    case "luminosity": return setLum(cb, lum(cs));
+    default: return [blend(mode, cb[0], cs[0]), blend(mode, cb[1], cs[1]), blend(mode, cb[2], cs[2])];
+  }
+}
+
 function composite(backdrop, source, mode, opacity, mask) {
   const out = backdrop.data.slice();
   const n = backdrop.w * backdrop.h;
@@ -55,10 +91,11 @@ function composite(backdrop, source, mode, opacity, mask) {
     const sa = clamp01(source.data[i + 3]) * clamp01(opacity) * gate;
     const ba = clamp01(backdrop.data[i + 3]);
     const oa = sa + ba * (1 - sa);
+    const cb = [0, 1, 2].map((c) => clamp01(backdrop.data[i + c]));
+    const cs = [0, 1, 2].map((c) => clamp01(source.data[i + c]));
+    const blended = blendRgb(mode, cb, cs);
     for (let c = 0; c < 3; c++) {
-      const cb = clamp01(backdrop.data[i + c]);
-      const cs = clamp01(source.data[i + c]);
-      out[i + c] = oa === 0 ? 0 : (sa * (1 - ba) * cs + sa * ba * blend(mode, cb, cs) + (1 - sa) * ba * cb) / oa;
+      out[i + c] = oa === 0 ? 0 : (sa * (1 - ba) * cs[c] + sa * ba * blended[c] + (1 - sa) * ba * cb[c]) / oa;
     }
     out[i + 3] = oa;
   }
@@ -161,7 +198,77 @@ function applyOp(surface, op) {
       });
       break;
     }
+    case "lift_gamma_gain": {
+      const invGamma = op.gamma.map((g) => 1 / Math.max(g, 1e-6));
+      forEachRgbLinear(surface, (rgb) => {
+        for (let c = 0; c < 3; c++) {
+          const v = Math.max((rgb[c] + op.lift[c] * (1 - rgb[c])) * op.gain[c], 0);
+          rgb[c] = Math.pow(v, invGamma[c]);
+        }
+      });
+      break;
+    }
+    case "hsl_adjust": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        const [h, s, l] = rgbToHsl([0, 1, 2].map((c) => clamp01(surface.data[i + c])));
+        const out = hslToRgb(
+          (((h + op.hue) % 360) + 360) % 360,
+          clamp01(s * (1 + op.saturation)),
+          clamp01(l * (1 + op.lightness)),
+        );
+        for (let c = 0; c < 3; c++) surface.data[i + c] = out[c];
+      }
+      break;
+    }
+    case "lut3d": {
+      for (let px = 0; px < n; px++) {
+        const i = px * 4;
+        const out = lut3dSample(op.size, op.table, [0, 1, 2].map((c) => clamp01(surface.data[i + c])));
+        for (let c = 0; c < 3; c++) surface.data[i + c] = out[c];
+      }
+      break;
+    }
   }
+}
+
+function rgbToHsl(rgb) {
+  const max = Math.max(...rgb);
+  const min = Math.min(...rgb);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d <= 0) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === rgb[0]) h = 60 * (((((rgb[1] - rgb[2]) / d) % 6) + 6) % 6);
+  else if (max === rgb[1]) h = 60 * ((rgb[2] - rgb[0]) / d + 2);
+  else h = 60 * ((rgb[0] - rgb[1]) / d + 4);
+  return [h, s, l];
+}
+
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((((hp % 2) + 2) % 2) - 1));
+  const seg = Math.min(Math.floor(hp), 5);
+  const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][seg];
+  const m = l - c / 2;
+  return [r + m, g + m, b + m];
+}
+
+function lut3dSample(size, table, rgb) {
+  const nMax = size - 1;
+  const pos = rgb.map((v) => v * nMax);
+  const i0 = pos.map((p) => Math.min(Math.floor(p), size - 2));
+  const f = pos.map((p, c) => p - i0[c]);
+  const out = [0, 0, 0];
+  for (let corner = 0; corner < 8; corner++) {
+    const dr = corner & 1, dg = (corner >> 1) & 1, db = (corner >> 2) & 1;
+    const w = (dr ? f[0] : 1 - f[0]) * (dg ? f[1] : 1 - f[1]) * (db ? f[2] : 1 - f[2]);
+    const e = (((i0[2] + db) * size + (i0[1] + dg)) * size + (i0[0] + dr)) * 3;
+    for (let c = 0; c < 3; c++) out[c] += w * table[e + c];
+  }
+  return out;
 }
 
 function applyDoc(doc, input) {
@@ -204,7 +311,7 @@ const source = {
 const mask = [1.0, 0.5, 0.0, 0.25, 1.0, 0.75];
 
 const cases = [];
-for (const mode of MODES) {
+for (const mode of [...MODES, ...NON_SEPARABLE]) {
   cases.push({
     name: `${mode}: full opacity, no mask`,
     mode, opacity: 1.0, mask: null, backdrop, source,
@@ -300,3 +407,41 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: docCases }, null, 2) + "\n",
 );
 console.log(`wrote ${docCases.length} doc cases`);
+
+// ---- G3 video-op cases ----
+
+// A warm-shift LUT (size 2): lifts red, drops blue at the corners.
+const warmLut = { type: "lut3d", size: 2, table: [] };
+for (let b = 0; b < 2; b++) {
+  for (let g = 0; g < 2; g++) {
+    for (let r = 0; r < 2; r++) {
+      warmLut.table.push(Math.min(r + 0.1, 1), g, Math.max(b - 0.1, 0));
+    }
+  }
+}
+
+const videoCases = [
+  docCase("lift_gamma_gain: neutral is a no-op", {
+    layers: [layer([{ type: "lift_gamma_gain", lift: [0, 0, 0], gamma: [1, 1, 1], gain: [1, 1, 1] }])],
+  }, opsInput),
+  docCase("lift_gamma_gain: warm shadows, cool gain, mid gamma", {
+    layers: [layer([{ type: "lift_gamma_gain", lift: [0.05, 0.0, -0.05], gamma: [1.1, 1.0, 0.9], gain: [1.1, 1.0, 0.9] }])],
+  }, opsInput),
+  docCase("hsl_adjust: hue +90", { layers: [layer([{ type: "hsl_adjust", hue: 90, saturation: 0, lightness: 0 }])] }, opsInput),
+  docCase("hsl_adjust: desaturate and lighten", {
+    layers: [layer([{ type: "hsl_adjust", hue: 0, saturation: -0.4, lightness: 0.2 }])],
+  }, opsInput),
+  docCase("lut3d: warm-shift 2^3 LUT", { layers: [layer([warmLut])] }, opsInput),
+  docCase("non-separable blend: color grade layer over backdrop", {
+    layers: [layer([{ type: "hsl_adjust", hue: 180, saturation: 0.3, lightness: 0 }], { blend: "color", opacity: 0.8 })],
+  }, opsInput),
+  docCase("non-separable blend: luminosity with mask", {
+    layers: [layer([{ type: "exposure", ev: 1.2 }], { blend: "luminosity", mask })],
+  }, opsInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_video.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: videoCases }, null, 2) + "\n",
+);
+console.log(`wrote ${videoCases.length} video-op cases`);
