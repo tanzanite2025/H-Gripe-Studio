@@ -330,7 +330,9 @@ export function buildProxyMask(
   const h = Math.max(1, Math.round((dims.h || proxyWidth) * scale));
   let mask = createProxyMask(w, h);
   for (const op of edits.ops) {
-    if (isPathOp(op)) {
+    if (op.disabled) {
+      // Disabled history steps stay recorded but are skipped on replay.
+    } else if (isPathOp(op)) {
       fillPath(mask, op, scale);
     } else if (isBrushOp(op)) {
       stampStroke(mask, op, scale);

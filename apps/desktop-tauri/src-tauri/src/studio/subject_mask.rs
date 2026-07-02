@@ -392,6 +392,10 @@ fn apply_edit_paths(
         .into_iter()
         .flatten()
     {
+        // Disabled history steps stay recorded but are skipped on replay.
+        if op.get("disabled").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
         match op.get("type").and_then(Value::as_str) {
             Some("path") => {
                 let Some(path) = parse_mask_path(op) else {
@@ -1671,6 +1675,25 @@ mod tests {
         // Brush dot then invert: the dot is off, the rest on.
         assert_eq!(mask.get_pixel(2, 2).0[0], MASK_OFF);
         assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
+    }
+
+    #[test]
+    fn disabled_ops_are_skipped_on_replay() {
+        // A `disabled: true` step stays recorded (history panel) but must not
+        // affect the rasterised mask.
+        let image = RgbaImage::from_pixel(5, 5, Rgba([0, 0, 0, 255]));
+        let value = json!({
+            "version": 2,
+            "ops": [
+                { "type": "brush", "mode": "add", "radius": 0, "points": [[2, 2]], "disabled": true },
+                { "type": "invert", "disabled": true }
+            ]
+        });
+        let mut mask = solid(5, 5, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&value), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
+        assert!(operations.is_empty());
     }
 
     #[test]

@@ -8,8 +8,8 @@
 // replays its ordered `ops` stack on run (vector paths, brush strokes and
 // queued operations, in recorded order), plus the `matte_strokes` band.
 
-import type { BrushStroke, EditOp, EditPath, EditPaths, MaskOperation, PointPrompt } from "../types/production";
-import { emptyEditPaths } from "../types/production";
+import type { BrushStroke, EditOp, EditPath, EditPathPoint, EditPaths, MaskOperation, PointPrompt } from "../types/production";
+import { emptyEditPaths, isMaskOperation, isPathOp } from "../types/production";
 
 export interface EditState {
   /** The committed edits. */
@@ -124,6 +124,53 @@ export function addOperation(state: EditState, op: MaskOperation): EditState {
   return commit(state, {
     ...state.current,
     ops: [...state.current.ops, op],
+  });
+}
+
+// --- history-panel step revision (M2: every recorded step stays revisable) ---
+
+/** Delete one step from the edit stack (undoable). */
+export function removeOp(state: EditState, index: number): EditState {
+  if (index < 0 || index >= state.current.ops.length) return state;
+  return commit(state, {
+    ...state.current,
+    ops: state.current.ops.filter((_, i) => i !== index),
+  });
+}
+
+/**
+ * Toggle a step's `disabled` flag (undoable). Disabled steps stay recorded
+ * and visible in the history panel but are skipped on replay.
+ */
+export function toggleOp(state: EditState, index: number): EditState {
+  const op = state.current.ops[index];
+  if (!op) return state;
+  const next: EditOp = { ...op, disabled: !op.disabled };
+  if (!next.disabled) delete next.disabled;
+  return commit(state, {
+    ...state.current,
+    ops: state.current.ops.map((o, i) => (i === index ? next : o)),
+  });
+}
+
+/** Revise the scalar parameter of a queued operation step (undoable). */
+export function updateOpAmount(state: EditState, index: number, amount: number): EditState {
+  const op = state.current.ops[index];
+  if (!op || !isMaskOperation(op)) return state;
+  if (op.amount === amount) return state;
+  return commit(state, {
+    ...state.current,
+    ops: state.current.ops.map((o, i) => (i === index ? { ...o, amount } : o)),
+  });
+}
+
+/** Replace a committed path step's anchors (undoable; anchor re-editing). */
+export function updatePathAnchors(state: EditState, index: number, points: EditPathPoint[]): EditState {
+  const op = state.current.ops[index];
+  if (!op || !isPathOp(op) || points.length < 3) return state;
+  return commit(state, {
+    ...state.current,
+    ops: state.current.ops.map((o, i) => (i === index ? { ...op, points } : o)),
   });
 }
 

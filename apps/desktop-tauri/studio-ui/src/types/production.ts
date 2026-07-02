@@ -193,11 +193,20 @@ export interface MaskOperation {
   region?: number[];
 }
 
+/**
+ * Fields shared by every entry on the ordered edit stack. `disabled` steps
+ * stay recorded (visible in the history panel, re-enable at any time) but are
+ * skipped on replay by both the proxy preview and the backend.
+ */
+export interface EditOpBase {
+  disabled?: boolean;
+}
+
 /** An `EditPath` entry on the ordered edit stack. */
-export type PathOp = EditPath & { type: "path" };
+export type PathOp = EditPath & EditOpBase & { type: "path" };
 
 /** A `BrushStroke` entry on the ordered edit stack. */
-export type BrushOp = BrushStroke & { type: "brush" };
+export type BrushOp = BrushStroke & EditOpBase & { type: "brush" };
 
 /**
  * One step of the ordered edit stack (see
@@ -206,7 +215,7 @@ export type BrushOp = BrushStroke & { type: "brush" };
  * discriminant is `type` — `"path"` / `"brush"` are the geometry ops, every
  * other value is a `MaskOperation` kind (`wand` / `invert` / `feather` / …).
  */
-export type EditOp = PathOp | BrushOp | MaskOperation;
+export type EditOp = PathOp | BrushOp | (MaskOperation & EditOpBase);
 
 /**
  * Re-editable record of all manual edits for the Subject Mask card. Stored on

@@ -13,7 +13,11 @@ import {
   isEmpty,
   normalizeEditPaths,
   redo,
+  removeOp,
+  toggleOp,
   undo,
+  updateOpAmount,
+  updatePathAnchors,
 } from "./maskEdit";
 import type { BrushStroke } from "../types/production";
 import { editStackBrushStrokes, editStackOperations, editStackPaths } from "../types/production";
@@ -190,6 +194,64 @@ describe("maskEdit reducer-style helpers", () => {
     expect(isEmpty(s.current)).toBe(true);
     s = undo(s);
     expect(editCount(s.current)).toBe(1);
+  });
+
+  it("removes a history step (undoable)", () => {
+    let s = initEditState();
+    s = addBrushStroke(s, stroke("s1"));
+    s = addOperation(s, { type: "feather", amount: 3 });
+    s = removeOp(s, 0);
+    expect(s.current.ops.map((op) => op.type)).toEqual(["feather"]);
+    s = undo(s);
+    expect(s.current.ops.map((op) => op.type)).toEqual(["brush", "feather"]);
+    expect(removeOp(s, 99)).toBe(s); // out of range: no-op
+  });
+
+  it("toggles a step's disabled flag without dropping it from history", () => {
+    let s = initEditState();
+    s = addOperation(s, { type: "invert" });
+    s = toggleOp(s, 0);
+    expect(s.current.ops[0].disabled).toBe(true);
+    s = toggleOp(s, 0);
+    expect(s.current.ops[0].disabled).toBeUndefined();
+    expect(toggleOp(s, 5)).toBe(s);
+  });
+
+  it("revises a queued operation's amount (undoable, ops-only)", () => {
+    let s = initEditState();
+    s = addOperation(s, { type: "feather", amount: 3 });
+    s = addBrushStroke(s, stroke("s1"));
+    s = updateOpAmount(s, 0, 8);
+    expect(editStackOperations(s.current)[0].amount).toBe(8);
+    expect(updateOpAmount(s, 0, 8)).toBe(s); // unchanged value: no-op
+    expect(updateOpAmount(s, 1, 8)).toBe(s); // brush step: no-op
+    s = undo(s);
+    expect(editStackOperations(s.current)[0].amount).toBe(3);
+  });
+
+  it("replaces a path step's anchors (undoable, path-only)", () => {
+    let s = initEditState();
+    s = addPath(s, {
+      id: "p1",
+      mode: "add",
+      tool: "pen",
+      closed: true,
+      points: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+      ],
+    });
+    const moved = [
+      { x: 2, y: 2 },
+      { x: 12, y: 2 },
+      { x: 12, y: 12 },
+    ];
+    s = updatePathAnchors(s, 0, moved);
+    expect(editStackPaths(s.current)[0].points).toEqual(moved);
+    expect(updatePathAnchors(s, 0, moved.slice(0, 2))).toBe(s); // degenerate: no-op
+    s = undo(s);
+    expect(editStackPaths(s.current)[0].points[0]).toEqual({ x: 0, y: 0 });
   });
 
   it("seeds from an initial EditPaths (including a legacy version-1 value)", () => {

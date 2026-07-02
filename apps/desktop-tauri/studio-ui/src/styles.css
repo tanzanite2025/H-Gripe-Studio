@@ -999,6 +999,57 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: #f46262;
   border-color: rgba(244, 98, 98, 0.4);
 }
+/* History panel (M2): one row per edit-stack step. */
+.mask-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.mask-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(91, 140, 255, 0.08);
+  border: 1px solid rgba(91, 140, 255, 0.2);
+  color: var(--accent);
+}
+.mask-history-row.disabled { opacity: 0.45; }
+.mask-history-row.editing {
+  border-color: rgba(120, 230, 140, 0.6);
+  background: rgba(120, 230, 140, 0.1);
+}
+.mask-history-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-history-row button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.mask-history-row button:hover { color: #fff; }
+.mask-history-amount {
+  width: 44px;
+  font-size: 11px;
+  padding: 0 4px;
+  background: #11131a;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+}
+
 .mask-preview-actions {
   padding: 8px;
   border-radius: 8px;
