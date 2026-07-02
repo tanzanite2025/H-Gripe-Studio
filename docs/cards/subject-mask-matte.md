@@ -118,10 +118,10 @@ ship stubbed before its backend lands.
 #### Keyboard shortcuts (mask-edit scope)
 
 The modal registers a Photoshop-aligned shortcut table into the central scoped
-shortcut system (`shortcuts.ts` — a scope stack: bindings are declarative,
+shortcut system (`src/shortcuts/core.ts` — a scope stack: bindings are declarative,
 per-scope, and only the topmost scope receives keys, so PS-style keys here can
 never collide with the node canvas or a future clip-timeline scope's
-Premiere-style keys). `maskShortcuts.ts` is the frozen table for the
+Premiere-style keys). `src/shortcuts/scopes/maskEdit.ts` is the frozen table for the
 `mask-edit` scope: `B` brush, `E` eraser, `W` wand, `P` pen, `L` lasso, `M` /
 `Shift+M` marquees, `[` / `]` brush size, `X` swap add/subtract, `Ctrl+Z` /
 `Ctrl+Shift+Z` / `Ctrl+Y` undo/redo, `Ctrl+D` clear, `Ctrl+Shift+I` invert,

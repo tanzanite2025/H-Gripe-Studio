@@ -11,9 +11,9 @@ import {
   parseCombo,
   useShortcutScope,
   type ShortcutBinding,
-} from "./shortcuts";
-import { MASK_EDIT_SHORTCUTS } from "./maskShortcuts";
-import { MASK_SHORTCUT_ZH } from "./maskShortcutsI18n";
+} from "./core";
+import { MASK_EDIT_SHORTCUTS } from "./scopes/maskEdit";
+import { MASK_SHORTCUT_ZH } from "./scopes/maskEditI18n";
 
 const key = (init: KeyboardEventInit) => new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
 

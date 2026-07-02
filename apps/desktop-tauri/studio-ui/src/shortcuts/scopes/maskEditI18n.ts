@@ -1,11 +1,11 @@
 // Simplified-Chinese overlay for the Mask-Edit shortcut table
-// (maskShortcuts.ts). MASK_EDIT_SHORTCUTS stays the English source of truth;
+// (maskEdit.ts). MASK_EDIT_SHORTCUTS stays the English source of truth;
 // this map holds only the zh hint per binding id; `localizeShortcut` blends
 // them, falling back to English. A coverage test asserts every binding has an
 // entry.
 
-import type { Lang } from "../i18n";
-import type { ShortcutBinding } from "./shortcuts";
+import type { Lang } from "../../i18n";
+import type { ShortcutBinding } from "../core";
 
 export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   tool_brush: { hint: "画笔工具。" },
