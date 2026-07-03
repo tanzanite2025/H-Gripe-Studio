@@ -24,7 +24,7 @@ pub(crate) use model_paths::*;
 pub(crate) use repaint::*;
 /// The Tauri resource directory captured at startup (see `set_resource_dir`).
 /// When the installer bundles the `h-gripe.project.json` marker together with
-/// the `python/bridge`, `custom_nodes` and `third_party` subtree under
+/// the `python/bridge` and `third_party/psd_tools` subtree under
 /// `bundle.resources`, this directory *is* a self-contained project root, so the
 /// PSD nodes keep working in a packaged build without the user pointing at a
 /// separate source checkout.

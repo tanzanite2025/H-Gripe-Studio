@@ -20,7 +20,8 @@ from typing import Any
 
 # Prefer the vendored ``psd_tools`` (third_party/) over any pip-installed copy so
 # our local modifications (e.g. smart-object content replacement) are used.
-_VENDOR_DIR = Path(__file__).resolve().parent.parent / "third_party"
+# This file lives at <root>/python/bridge/.
+_VENDOR_DIR = Path(__file__).resolve().parents[2] / "third_party"
 if _VENDOR_DIR.is_dir() and str(_VENDOR_DIR) not in sys.path:
     sys.path.insert(0, str(_VENDOR_DIR))
 

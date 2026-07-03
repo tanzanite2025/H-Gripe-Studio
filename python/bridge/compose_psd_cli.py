@@ -6,8 +6,8 @@ a *generated image on disk*, composes the image into the template's placeholder
 -- using true smart-object content replacement when the placeholder is a smart
 object -- and writes ``<name>.psd`` + ``<name>_preview.png`` + ``<name>_metadata.json``.
 
-It deliberately reuses the proven logic from ``custom_nodes/hgripe_psd_nodes.py``
-(placeholder resolution, fit math, smart-object detection) but reads the
+It deliberately reuses the proven logic from ``hgripe_psd_nodes.py`` (placeholder
+resolution, fit math, smart-object detection) but reads the
 generated image from a file via PIL instead of from a ComfyUI tensor, so it runs
 without ``torch`` -- meaning it can be exercised by CI / a plain Python with just
 ``Pillow`` + the vendored ``psd_tools`` + ``attrs``.
@@ -44,19 +44,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Resolve the repo root (this file lives at <root>/python/bridge/) and make both
-# the root (for ``custom_nodes``) and the vendored ``third_party`` importable,
-# exactly like the ComfyUI nodes and the offline examples do.
+# Resolve the repo root (this file lives at <root>/python/bridge/) and make the
+# vendored ``third_party`` importable, exactly like the other bridge CLIs do.
 _ROOT_DIR = Path(__file__).resolve().parents[2]
-for _candidate in (_ROOT_DIR, _ROOT_DIR / "third_party"):
-    if _candidate.is_dir() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
+_VENDOR_DIR = _ROOT_DIR / "third_party"
+if _VENDOR_DIR.is_dir() and str(_VENDOR_DIR) not in sys.path:
+    sys.path.insert(0, str(_VENDOR_DIR))
 
 # These helpers import cleanly without torch (heavy imports inside hgripe_psd_nodes
 # are deferred to call time), so reusing them keeps this CLI a single source of
-# truth with the ComfyUI nodes for the tricky placeholder / fit / smart-object
-# logic.
-from custom_nodes.hgripe_psd_nodes import (  # noqa: E402
+# truth for the tricky placeholder / fit / smart-object logic.
+from hgripe_psd_nodes import (  # noqa: E402
     HGripePsdCompose,
     _fit_into_box,
     _is_smart_object,

@@ -399,11 +399,29 @@ opt-in `engine` values only. The engines have now been moved out of
 Remaining work for later phases: stop bundling the rest of `python/bridge`
 (P5) and delete the worker host once no engine needs it (Phase 7).
 
-### P5 — Packaging (pending)
+### P5 — Packaging (partially done; remainder blocked on P3)
 
-`tauri.conf.json` still bundles `python/bridge/`, `custom_nodes/` and
-`third_party/`; `project_python()` still prefers a bundled
-`python_embeded`. These can only be removed after P3/P4, per "Phase 7".
+Done (the parts that could be split off early):
+
+- `custom_nodes/` is gone. Its only remaining file, `hgripe_psd_nodes.py`
+  (the torch-free PSD placeholder/fit/smart-object helpers the PSD CLIs
+  reuse), moved into `python/bridge/hgripe_psd_nodes.py`; the three PSD
+  CLIs import it directly. The ComfyUI custom-node directory is no longer
+  bundled or part of the repo layout.
+- `tauri.conf.json` no longer bundles all of `third_party/` (which pulled
+  the multi-hundred-MB `cargo-vendor` crate mirror, the `ffmpeg` build
+  tree and `moxcms` sources into every installer). Only
+  `third_party/psd_tools/` — the sole third_party piece used at runtime,
+  by the Python PSD path — is bundled. The vendored FFmpeg DLLs were
+  never loaded from resources: `build.rs` copies them next to the binary.
+
+Remaining (blocked on P3, per "Phase 7"):
+
+- `python/bridge/` and `third_party/psd_tools/` stay bundled while the
+  PSD path still requires Python; `project_python()` still prefers a
+  bundled `python_embeded`.
+- ComfyUI launcher/updater remnants under `.ci/` are repo files, not
+  bundled resources; delete them alongside the Phase 7 cleanup.
 
 ## Suggested Migration Matrix
 

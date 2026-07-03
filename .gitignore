@@ -5,8 +5,6 @@ __pycache__/
 !/input/example.png
 /models/
 /temp/
-/custom_nodes/*
-!custom_nodes/hgripe_api_nodes.py
 extra_model_paths.yaml
 /.vs
 .vscode/

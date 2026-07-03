@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 # The CLI lives one directory up (``python/bridge``); importing it also wires up
-# the repo root + vendored ``third_party`` onto ``sys.path`` (for ``psd_tools``
-# and ``custom_nodes``), so this single insert is enough.
+# the vendored ``third_party`` onto ``sys.path`` (for ``psd_tools``), so this
+# single insert is enough.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import compose_psd_cli as cli  # noqa: E402
