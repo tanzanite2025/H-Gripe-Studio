@@ -838,6 +838,13 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "detect likely text lines as protected text layer candidates (heuristic edge-density detector) — desktop runtime only; every region is flagged for review",
       },
       {
+        key: "detect_shadow",
+        label: "Detect shadow",
+        control: "checkbox",
+        defaultValue: false,
+        hint: "detect a cast-shadow candidate next to the subject (background regions darker than the background baseline) as its own layer — desktop runtime only; flagged for review",
+      },
+      {
         key: "output_dir",
         label: "Output dir",
         control: "path",

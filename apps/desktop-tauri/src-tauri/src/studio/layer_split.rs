@@ -1,5 +1,5 @@
 //! `smartLayerSplit` compute node: subject/background separation plus optional
-//! multi-object instancing and text region detection
+//! multi-object instancing, text region detection and shadow candidates
 //! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phases 1–3).
 //!
 //! Splits a flat image into a `LayeredImageAsset` — a locked original layer
@@ -246,6 +246,17 @@ pub(crate) fn execute_studio_smart_layer_split(
     };
 
     let subject_bbox = mask_bbox(&subject_mask);
+
+    // Phase 3 shadow candidate: a background region darker than the
+    // background baseline next to the subject, kept as its own layer so it
+    // can be preserved or regenerated separately.
+    let detect_shadow = bool_param(node, "detect_shadow", false);
+    let shadow_region = if detect_shadow {
+        super::shadow_regions::shadow_region_mask(&srgb, &background_mask, subject_bbox)
+    } else {
+        None
+    };
+
     let is_builtin = provider == BUILTIN_PROVIDER;
     // The weight-free fallback is a colour heuristic — keep its candidates
     // low-confidence and flagged for review; a model matte is trusted more.
@@ -370,6 +381,35 @@ pub(crate) fn execute_studio_smart_layer_split(
     }
     if detect_text && text_regions.is_empty() {
         warnings.push(json!("text detection found no text-like regions"));
+    }
+    // The shadow candidate is a weight-free luminance heuristic: low
+    // confidence and always flagged for review.
+    if let Some(shadow_mask) = &shadow_region {
+        let layer_id = "layer_shadow";
+        let mask_path = dir.join(format!("{base}_shadow_mask.png"));
+        let rgba_path = dir.join(format!("{base}_shadow.png"));
+        save_mask(shadow_mask, &mask_path)?;
+        let rgba = pixel_ops::apply_alpha_mask_working(&working, shadow_mask);
+        studio_image::write_working_output(&rgba_path, &rgba)?;
+        layers.push(json!({
+            "id": layer_id,
+            "name": "shadow candidate",
+            "kind": "shadow",
+            "bbox": mask_bbox(shadow_mask),
+            "mask": { "path": mask_path.to_string_lossy(), "width": width, "height": height },
+            "rgba": { "path": rgba_path.to_string_lossy(), "width": width, "height": height },
+            "confidence": 0.3,
+            "source": "algorithm",
+            "visible": true,
+            "notes": ["cast-shadow candidate — keep with the subject or regenerate separately"],
+        }));
+        suggested_review.push(review(
+            layer_id,
+            "heuristic shadow region — verify it belongs to the subject",
+        ));
+    }
+    if detect_shadow && shadow_region.is_none() {
+        warnings.push(json!("shadow detection found no shadow-like region next to the subject"));
     }
     if instancing == "auto" && instances.is_empty() {
         warnings.push(json!(
@@ -651,6 +691,79 @@ mod tests {
         let out = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap();
         let layers = out["layered_asset"]["layers"].as_array().unwrap();
         assert!(layers.iter().all(|layer| layer["kind"] != "text"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_shadow_emits_a_shadow_candidate_layer() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hgripe_layer_split_shadow_{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        // A light scene with a saturated red subject block and a mid-dark
+        // patch right beside it: the builtin segmenter picks the block as the
+        // subject, the luminance heuristic picks the patch as its shadow.
+        let image_path = root.join("scene.png");
+        let mut image = RgbaImage::from_pixel(64, 64, Rgba([220, 220, 220, 255]));
+        for y in 20..40 {
+            for x in 20..32 {
+                image.put_pixel(x, y, Rgba([200, 40, 40, 255]));
+            }
+        }
+        for y in 34..42 {
+            for x in 33..48 {
+                image.put_pixel(x, y, Rgba([110, 110, 110, 255]));
+            }
+        }
+        image.save(&image_path).unwrap();
+        let mut inputs = BTreeMap::new();
+        inputs.insert("image".to_string(), json!(image_path.to_string_lossy()));
+        let out = execute_studio_smart_layer_split(
+            &node(&root, &[("detect_shadow", json!(true))]),
+            &inputs,
+        )
+        .unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap().clone();
+        let shadows: Vec<_> = layers
+            .iter()
+            .filter(|layer| layer["kind"] == "shadow")
+            .collect();
+        let warnings = out["layered_asset"]["split_report"]["warnings"]
+            .as_array()
+            .unwrap()
+            .clone();
+        if let [shadow] = shadows.as_slice() {
+            assert_eq!(shadow["id"], "layer_shadow");
+            assert_eq!(shadow["source"], "algorithm");
+            let mask = shadow["mask"]["path"].as_str().unwrap();
+            let rgba = shadow["rgba"]["path"].as_str().unwrap();
+            assert!(Path::new(mask).is_file(), "missing mask {mask}");
+            assert!(Path::new(rgba).is_file(), "missing rgba {rgba}");
+            let review = out["layered_asset"]["split_report"]["suggested_review"]
+                .as_array()
+                .unwrap()
+                .clone();
+            assert!(
+                review.iter().any(|issue| issue["layer_id"] == "layer_shadow"),
+                "no review issue for the shadow layer"
+            );
+        } else {
+            // The builtin segmenter may claim the dark patch as subject; the
+            // node must then report the empty detection instead of a layer.
+            assert!(shadows.is_empty());
+            assert!(
+                warnings
+                    .iter()
+                    .any(|w| w.as_str().unwrap_or_default().contains("shadow detection")),
+                "no shadow warning in {warnings:?}"
+            );
+        }
+        // Without the param, no shadow layer and no shadow warning.
+        let out = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap();
+        assert!(layers.iter().all(|layer| layer["kind"] != "shadow"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
