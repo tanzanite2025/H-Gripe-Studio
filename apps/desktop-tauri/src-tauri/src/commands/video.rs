@@ -145,10 +145,15 @@ fn video_probe_oneshot(
     no_window(&mut cmd);
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "legacy PyAV fallback failed to launch {}: {err} (the default video path decodes natively via FFmpeg)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("video probe failed: {}", stderr.trim()));
+        return Err(format!("legacy PyAV video probe failed: {}", stderr.trim()));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: VideoProbeCli = serde_json::from_str(stdout.trim()).map_err(|err| {

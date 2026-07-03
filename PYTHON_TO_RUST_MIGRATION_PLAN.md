@@ -294,6 +294,90 @@ Final check:
 Run the desktop app, execute image, PSD, mask, video, and API workflows on a
 machine with no Python installed. That is the real zero-Python milestone.
 
+## Runtime Call-Site Inventory & Status (updated 2026-07-03)
+
+This section tracks the P0–P5 mainline. Update it whenever a step lands.
+
+### P0 — Remaining Python runtime call sites (done)
+
+Every Rust site that can spawn a Python process today
+(`apps/desktop-tauri/src-tauri/src/...`):
+
+| Rust call site | Python entry point | Node / feature |
+| --- | --- | --- |
+| `psd/compose.rs` (`compose_psd`) | `compose_psd_cli.py` | PSD Export |
+| `psd/compose.rs` (`inspect_psd`) | `inspect_psd_cli.py` | PSD template validation |
+| `psd/compose.rs` (`analyze_psd_context`) | `analyze_psd_cli.py` | PSD Context Analyze |
+| `psd/cards.rs` (`match_light_color`) | `color_match_cli.py` | Light & Color Match (legacy engines) |
+| `psd/cards.rs` (`refine_mask_edge`) | `edge_refine_cli.py` | Refine Mask Edge (legacy engines) |
+| `psd/cards.rs` (`enhance_image` via `run_torch_cli`) | `image_enhance_cli.py` | Image Enhance (legacy engines) |
+| `psd/cards.rs` (`detect_quality_issues`) | `detail_watchdog_cli.py` | Detail Watchdog (legacy engines) |
+| `psd/repaint.rs` (`prepare_repaint_regions` / `composite_repaint`) | `detail_repaint_cli.py prepare/composite` | Detail Repaint (fallback) |
+| `psd/repaint.rs` (`local_repaint_regions` via `run_torch_cli`) | `detail_repaint_cli.py repaint` | Detail Repaint local engines |
+| `psd/engines.rs` (`run_device_probe`) | `device_probe_cli.py` | Engine capability report |
+| `psd/engines.rs` (`run_engine_probe`) | card CLIs `--probe-engines` | Engine capability report |
+| `psd.rs` (`run_bridge_oneshot`) | any bridge CLI (one-shot fallback) | torch CLI fallback |
+| `studio/torch_worker.rs` | `torch_worker.py` | warm worker for legacy torch engines |
+| `studio/video_worker.rs` | `video_worker.py` | PyAV worker (non-default builds only) |
+| `commands/video.rs` (`video_probe_oneshot`) | `video_probe_cli.py` | video probe/scrub fallback |
+| `studio/video_trim.rs` / `studio/video_assemble.rs` | `video_worker.py` | only without `native-ffmpeg` feature |
+
+`python/bridge/hgripe_api_bridge.py` has no Rust call site (dead legacy shim).
+
+### P1 — Default path per call site (done)
+
+Rust-default (Python only as optional legacy engine or fallback):
+
+- Image Enhance / Light & Color Match / Refine Mask Edge / Detail Watchdog:
+  the default `cpu`/`rules` engine runs in-process native Rust
+  (`image_enhance_cpu.rs`, `color_match_cpu.rs`, `edge_refine_cpu.rs`,
+  `detail_watchdog_cpu.rs`); Python serves only opt-in legacy engines or
+  sources the Rust loader cannot decode.
+- Detail Repaint prepare/composite: native Rust fast path
+  (`detail_repaint_cpu.rs`); Python only when the loader cannot decode.
+- Video probe / scrub / trim / assemble: native FFmpeg (`ffmpeg_native.rs`,
+  `native-ffmpeg` is a default feature); PyAV only in
+  `--no-default-features` builds or as the one-shot fallback.
+- Subject Mask / Matte: fully native Rust (`ort` ONNX), no Python at all.
+
+Python-default (no Rust path yet):
+
+- PSD compose / inspect / analyze (`psd_tools`) — migrate last (P3 below).
+- Torch/Diffusers engines (`realesrgan`, `ccsr`, `supir`, `sd_inpaint`,
+  `sdxl_inpaint`, `flux_fill`) and the ONNX legacy backends behind the
+  bridge — opt-in only, never a default (P4 below).
+- Engine/device capability probe — probes only the legacy Python engines;
+  a box without Python simply reports them unavailable.
+
+### P2 — UI / node report wording (done)
+
+Bridge launch failures no longer read as a bare "python cli failed": every
+spawn site now states the lane — "optional legacy Python bridge …
+(the default engine runs natively in Rust)" for Rust-default cards,
+"legacy PyAV …" for video fallbacks, and "PSD … still requires the Python
+bridge; a native Rust PSD path is planned" for the PSD commands. The
+`Executor` doc in `nodeSpecs.ts` describes `local` as native-Rust default +
+optional legacy bridge.
+
+### P3 — PSD (pending, migrate last)
+
+`compose_psd_cli.py` / `inspect_psd_cli.py` / `analyze_psd_cli.py` +
+`third_party/psd_tools` stay the only production PSD path. See
+"Phase 5: Replace PSD Python Last" for the staged plan.
+
+### P4 — Torch/Diffusers out of core (pending)
+
+No default path depends on torch/diffusers today (verified in P1); they are
+opt-in `engine` values only. Remaining work: move them behind an external
+engine/plugin lifecycle instead of `python/bridge/*_backends`, per
+"Phase 6".
+
+### P5 — Packaging (pending)
+
+`tauri.conf.json` still bundles `python/bridge/`, `custom_nodes/` and
+`third_party/`; `project_python()` still prefers a bundled
+`python_embeded`. These can only be removed after P3/P4, per "Phase 7".
+
 ## Suggested Migration Matrix
 
 | Current Python path | Rust target | Priority |

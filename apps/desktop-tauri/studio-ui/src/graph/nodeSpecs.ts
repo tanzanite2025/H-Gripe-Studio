@@ -41,7 +41,9 @@ export interface ParamSpec {
 /**
  * Where a node runs — the routing/grouping discriminator.
  * - `graph`  pure in-process node (no backend call).
- * - `local`  always a `python/bridge` CLI; must not touch the network.
+ * - `local`  a local card; the default engines run in native Rust, with the
+ *   optional legacy `python/bridge` CLI serving only opt-in legacy engines and
+ *   the Python-only PSD paths; must not touch the network.
  * - `compute` in-process native-Rust image/model work; must not touch the network.
  * - `api`    always a provider call (needs a profile + credentials_ref).
  * - `hybrid` user picks per-node via a `mode` param (e.g. `promptOptimize`).

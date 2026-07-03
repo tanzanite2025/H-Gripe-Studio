@@ -165,7 +165,12 @@ fn run_device_probe(python: &Path, dir: &Path) -> Result<DeviceProbe, String> {
     }
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python device probe failed to launch {}: {err} (only opt-in legacy engines need Python)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("device probe failed: {}", stderr.trim()));
@@ -202,7 +207,12 @@ fn run_engine_probe(python: &Path, dir: &Path, cli_name: &str) -> Result<CliEngi
     }
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python engine probe failed to launch {}: {err} (only opt-in legacy engines need Python)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(

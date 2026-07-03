@@ -194,10 +194,18 @@ pub(crate) fn match_light_color(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python bridge failed to launch {}: {err} (the default engine runs natively in Rust)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("match_light_color failed: {}", stderr.trim()));
+        return Err(format!(
+            "match_light_color legacy bridge failed: {}",
+            stderr.trim()
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str::<ColorMatchResult>(stdout.trim()).map_err(|err| {
@@ -384,10 +392,18 @@ pub(crate) fn refine_mask_edge(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python bridge failed to launch {}: {err} (the default engine runs natively in Rust)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("refine_mask_edge failed: {}", stderr.trim()));
+        return Err(format!(
+            "refine_mask_edge legacy bridge failed: {}",
+            stderr.trim()
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str::<RefineEdgeResult>(stdout.trim()).map_err(|err| {
@@ -723,10 +739,18 @@ pub(crate) fn detect_quality_issues(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python bridge failed to launch {}: {err} (the default engine runs natively in Rust)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("detect_quality_issues failed: {}", stderr.trim()));
+        return Err(format!(
+            "detect_quality_issues legacy bridge failed: {}",
+            stderr.trim()
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str::<DetectQualityResult>(stdout.trim()).map_err(|err| {

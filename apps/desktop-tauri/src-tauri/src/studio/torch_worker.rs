@@ -150,7 +150,10 @@ fn spawn(python: &Path, dir: &Path) -> Result<Worker, String> {
 
     let mut child = cmd
         .spawn()
-        .map_err(|err| format!("failed to launch torch worker {}: {err}", python.display()))?;
+        .map_err(|err| format!(
+                "failed to launch legacy Python torch worker {}: {err} (only opt-in legacy engines need Python)",
+                python.display()
+            ))?;
     let stdin = child
         .stdin
         .take()
