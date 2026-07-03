@@ -41,29 +41,29 @@ use super::studio_image::{self, DEFAULT_MAX_DECODE_PIXELS};
 use crate::psd::{reject_unsafe_output_name, EnhanceImageResult, EnhanceReport};
 
 /// Resolved node parameters for one enhance run, mirroring the CLI arguments.
-pub(super) struct CpuEnhanceParams {
-    pub(super) image_path: String,
-    pub(super) output_dir: String,
-    pub(super) output_name: Option<String>,
-    pub(super) mode: Option<String>,
-    pub(super) target_bounds: Option<String>,
-    pub(super) target_width: i64,
-    pub(super) target_height: i64,
-    pub(super) target_dpi: i64,
-    pub(super) max_pixels: i64,
-    pub(super) scale: f64,
-    pub(super) denoise_strength: f64,
-    pub(super) texture_strength: f64,
-    pub(super) preserve_text_logo: bool,
-    pub(super) device_requested: String,
-    pub(super) precision_requested: String,
+pub(crate) struct CpuEnhanceParams {
+    pub(crate) image_path: String,
+    pub(crate) output_dir: String,
+    pub(crate) output_name: Option<String>,
+    pub(crate) mode: Option<String>,
+    pub(crate) target_bounds: Option<String>,
+    pub(crate) target_width: i64,
+    pub(crate) target_height: i64,
+    pub(crate) target_dpi: i64,
+    pub(crate) max_pixels: i64,
+    pub(crate) scale: f64,
+    pub(crate) denoise_strength: f64,
+    pub(crate) texture_strength: f64,
+    pub(crate) preserve_text_logo: bool,
+    pub(crate) device_requested: String,
+    pub(crate) precision_requested: String,
 }
 
 /// Run the CPU enhance pipeline in-process. Returns `Ok(Some(result))` on the
 /// fast path, or `Ok(None)` when the input cannot be reproduced faithfully
 /// in-process (an unmarked CMYK JPEG or float source, or any decode failure)
 /// and the caller should defer to the colour-managed Python bridge.
-pub(super) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageResult>, String> {
+pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageResult>, String> {
     let path = Path::new(&p.image_path);
     if !path.is_file() {
         // Let the Python path surface the canonical "base image not found".

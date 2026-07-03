@@ -11,9 +11,8 @@
 //! the other production nodes.
 //!
 //! The two pixel halves (prepare / composite) run in-process on the
-//! native-Rust fast path ([`super::detail_repaint_cpu`]) when the candidate
-//! decodes through the shared hardened loader; a source it cannot decode
-//! defers to the Python bridge, which surfaces the canonical errors.
+//! native-Rust path ([`super::detail_repaint_cpu`]); a source the shared
+//! hardened loader cannot decode is an error.
 
 use std::collections::BTreeMap;
 
@@ -27,7 +26,6 @@ use super::detail_repaint_cpu::{self, CpuCompositeParams, CpuPrepareParams};
 use super::graph::{studio_non_empty, studio_output_map, studio_value_to_string, StudioGraphNode};
 use super::run_cancel::StudioRunCancels;
 use super::run_events::{studio_api_error_detail, StudioNodeErrorDetail, StudioRunLogger};
-use crate::psd::{composite_repaint, prepare_repaint_regions};
 
 pub(super) async fn execute_studio_detail_repaint(
     node: &StudioGraphNode,
@@ -96,8 +94,6 @@ pub(super) async fn execute_studio_detail_repaint(
         }
     };
 
-    // In-process fast path first (shared hardened loader); a candidate the
-    // loader cannot decode falls through to the Python bridge.
     let cpu_prepare = CpuPrepareParams {
         image_path: image.clone(),
         quality_report: quality_report.clone(),
@@ -109,21 +105,9 @@ pub(super) async fn execute_studio_detail_repaint(
         output_dir: output_dir.clone(),
         output_name: None,
     };
-    let prepared = match detail_repaint_cpu::try_prepare(&cpu_prepare)? {
-        Some(prepared) => prepared,
-        None => prepare_repaint_regions(
-            None,
-            image.clone(),
-            quality_report,
-            repaint_actions,
-            min_confidence,
-            padding,
-            max_regions,
-            Some(false),
-            Some(output_dir.clone()),
-            None,
-        )?,
-    };
+    let prepared = detail_repaint_cpu::try_prepare(&cpu_prepare)?.ok_or_else(|| {
+        format!("Detail Repaint could not decode {image}: unsupported source for the native repaint path")
+    })?;
     let manifest = serde_json::to_string(&prepared)
         .map_err(|err| format!("failed to encode repaint manifest: {err}"))?;
 
@@ -271,19 +255,9 @@ pub(super) async fn execute_studio_detail_repaint(
         output_dir: output_dir.clone(),
         output_name: output_name.clone(),
     };
-    let composed = match detail_repaint_cpu::try_composite(&cpu_composite)? {
-        Some(composed) => composed,
-        None => composite_repaint(
-            None,
-            image,
-            manifest,
-            repainted_json,
-            feather_px,
-            blend,
-            Some(output_dir),
-            output_name,
-        )?,
-    };
+    let composed = detail_repaint_cpu::try_composite(&cpu_composite)?.ok_or_else(|| {
+        format!("Detail Repaint could not decode {image}: unsupported source for the native repaint path")
+    })?;
 
     let report = serde_json::to_value(&composed.repaint_report)
         .map_err(|err| format!("failed to encode RepaintReport: {err}"))?;

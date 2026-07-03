@@ -92,7 +92,7 @@ jobs:
         # to the test binaries).
         run: cargo test
 
-      - name: cargo test (no native-ffmpeg, legacy PyAV paths)
+      - name: cargo test (no native-ffmpeg)
         working-directory: apps/desktop-tauri/src-tauri
         run: cargo test --no-default-features
 
@@ -134,170 +134,24 @@ jobs:
         working-directory: apps/desktop-tauri/src-tauri
         run: cargo test vitmatte_inference_when_weight_present -- --nocapture
 
-  realesrgan-e2e:
-    name: python bridge (realesrgan e2e)
-    # Only on manual dispatch (like the ViTMatte e2e): fetches the ~64 MB
-    # Real-ESRGAN weight, installs the optional torch stack (CPU wheels), and
-    # runs the gated real-inference test that skips on every normal run. This
-    # is the roadmap's "real-inference CI" lane for the Image Enhance SR seam.
-    if: github.event_name == 'workflow_dispatch'
+  no-python-spawn:
+    name: no python spawn (grep gate)
+    # Phase 7 gate: the runtime is native-only, so no Rust source may spawn a
+    # Python interpreter and the deleted python/bridge / third_party/psd_tools
+    # trees must not reappear.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          # basicsr 1.4.2 (the realesrgan dep) needs torchvision < 0.17
-          # (functional_tensor was removed) and therefore torch 2.0.x, whose
-          # wheels stop at Python 3.11 — so this lane pins 3.10.
-          python-version: '3.10'
-
-      - name: Install runtime + test deps
-        run: pip install Pillow numpy pytest attrs
-
-      - name: Install torch stack (CPU wheels)
-        run: pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install Real-ESRGAN
-        run: pip install basicsr==1.4.2 realesrgan==0.3.0
-
-      # Fetches into resources/models/RealESRGAN_x4plus.pth (sha256-checked),
-      # which the backend's default weight resolution picks up in-repo so the
-      # gated test stops skipping.
-      - name: Fetch Real-ESRGAN weight
-        run: bash scripts/fetch-realesrgan.sh
-
-      - name: Run bridge tests (gated real inference active)
-        run: python -m pytest python/bridge/tests -q
-
-  diffusers-inference:
-    name: python bridge (diffusers inference)
-    # Only on manual dispatch (the torch + diffusers install is heavy for the
-    # per-PR matrix): runs the gated Detail Repaint (sd_inpaint / sdxl_inpaint /
-    # flux_fill) and Image Enhance diffusion SR (ccsr / supir) real-inference
-    # tests, which synthesise tiny random-weight snapshots in diffusers format
-    # (no weight download, mirroring the synthesised-ONNX lane) and exercise
-    # the real from_pretrained -> denoise-loop -> VAE-decode paths through the
-    # CLI `repaint` / enhance subcommands. Skips on every normal run.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install runtime + test deps
-        run: pip install Pillow numpy pytest attrs
-
-      - name: Install torch stack (CPU wheels)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install diffusers stack
-        run: pip install diffusers transformers accelerate
-
-      - name: Run bridge tests (gated diffusers inference active)
-        run: python -m pytest python/bridge/tests -q
-
-  matting-e2e:
-    name: python bridge (vitmatte matting e2e)
-    # Only on manual dispatch (like the Rust ViTMatte e2e): fetches the same
-    # ~104 MB sha256-checked ViTMatte ONNX weight and runs the gated
-    # real-*trained-weight* inference test for the Refine Mask Edge
-    # `onnx_matting` engine end-to-end through the CLI. Skips on every normal
-    # run (the per-PR `python bridge (onnx inference)` lane covers the session
-    # path with a synthesised model only).
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install runtime + test deps (incl. ONNX runtime)
-        run: pip install Pillow numpy pytest attrs onnx onnxruntime
-
-      # Same weight + checksum the Rust vitmatte-e2e lane uses; fetched into
-      # resources/models/vitmatte.onnx and pointed at explicitly (the Python
-      # backend's default name is matting.onnx).
-      - name: Fetch ViTMatte weight
-        run: bash scripts/fetch-vitmatte.sh
-
-      - name: Run bridge tests (gated real matting inference active)
-        env:
-          HGRIPE_MATTING_MODEL: apps/desktop-tauri/src-tauri/resources/models/vitmatte.onnx
-        run: python -m pytest python/bridge/tests -q
-
-  watchdog-text-e2e:
-    name: python bridge (watchdog text e2e)
-    # Only on manual dispatch (like the matting e2e): fetches the sha256-checked
-    # PP-OCRv3 text-detection ONNX weight (~2.4 MB, plus its label-map sidecar)
-    # and runs the gated real-*trained-weight* inference test for the Detail
-    # Watchdog `onnx_defect` engine end-to-end through the CLI (the `text`
-    # watch target graduates from `skipped` to real findings). Skips on every
-    # normal run (the per-PR `python bridge (onnx inference)` lane covers the
-    # session path with a synthesised model only).
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install runtime + test deps (incl. ONNX runtime)
-        run: pip install Pillow numpy pytest attrs onnx onnxruntime
-
-      # Fetches into resources/models/watchdog_defect.onnx (+ the .labels.json
-      # sidecar declaring `text` coverage and ImageNet normalisation).
-      - name: Fetch PP-OCRv3 text-detection weight
-        run: bash scripts/fetch-watchdog-text.sh
-
-      - name: Run bridge tests (gated real text detection active)
-        env:
-          HGRIPE_WATCHDOG_MODEL: apps/desktop-tauri/src-tauri/resources/models/watchdog_defect.onnx
-        run: python -m pytest python/bridge/tests -q
-
-  python-bridge:
-    name: python bridge (pytest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install runtime + test deps
-        run: pip install Pillow numpy pytest attrs
-
-      - name: Run bridge tests
-        run: python -m pytest python/bridge/tests -q
-
-  python-bridge-onnx:
-    name: python bridge (onnx inference)
-    # Real-inference lane for the opt-in ONNX engines (matting / colour
-    # harmonise / defect): the per-engine `requires_onnx` tests synthesise a
-    # tiny ONNX model and exercise the actual `ort` session path (incl.
-    # `sr_backends.onnx_providers` execution-provider selection), so they only
-    # run where `onnx` + `onnxruntime` are importable. The default
-    # `python-bridge` lane installs neither, so they skip there; this lane adds
-    # them. Unlike the ViTMatte e2e job it needs no weight download (the model
-    # is synthesised), so it stays in the per-PR matrix rather than dispatch.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install runtime + test deps (incl. ONNX)
-        run: pip install Pillow numpy pytest attrs onnx onnxruntime
-
-      - name: Run bridge tests (gated ONNX inference active)
-        run: python -m pytest python/bridge/tests -q
+      - name: Check for Python runtime remnants
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e python ] || [ -e third_party/psd_tools ] || [ -e pyproject.toml ]; then
+            echo 'Python runtime trees must stay deleted (python/, third_party/psd_tools, pyproject.toml)'
+            exit 1
+          fi
+          if grep -rnE 'Command::new\([^)]*python' apps crates plugins --include='*.rs'; then
+            echo 'Rust source must not spawn a Python interpreter'
+            exit 1
+          fi

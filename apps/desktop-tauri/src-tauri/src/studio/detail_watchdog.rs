@@ -1,10 +1,9 @@
-//! The `detailWatchdog` node executor. The default `rules` engine runs the
-//! in-process native-Rust rule layer ([`super::detail_watchdog_cpu`]); a
-//! learned detector — or a source the fast path cannot decode — is served by
-//! the Python bridge (`crate::psd::detect_quality_issues`). Both paths scan a
-//! candidate image for local breakdowns (blur, halos, colour mismatch,
-//! missing resolution) and expose the (Phase 1 unchanged) image, the quality
-//! report, and the issue overlay as flat output ports.
+//! The `detailWatchdog` node executor. The `rules` engine runs the in-process
+//! native-Rust rule layer ([`super::detail_watchdog_cpu`]) — the only
+//! supported backend. It scans a candidate image for local breakdowns (blur,
+//! halos, colour mismatch, missing resolution) and exposes the (Phase 1
+//! unchanged) image, the quality report, and the issue overlay as flat output
+//! ports.
 
 use std::collections::BTreeMap;
 
@@ -14,7 +13,7 @@ use super::detail_watchdog_cpu::{self, CpuDetailWatchdogParams};
 use super::graph::{
     optional, resolve_output_dir, studio_output_map, studio_value_to_string, StudioGraphNode,
 };
-use crate::psd::{detect_quality_issues, DetectQualityResult};
+use crate::psd::DetectQualityResult;
 
 /// Encode an optional connected JSON input ({...}) as a string for the CLI.
 fn encode_input(inputs: &BTreeMap<String, Value>, key: &str) -> Result<Option<String>, String> {
@@ -53,46 +52,34 @@ pub(super) fn execute_studio_detail_watchdog(
     let device = optional(studio_value_to_string(node.params.get("device")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
 
-    // The default `rules` engine runs in-process; a learned detector — or a
-    // source the fast path cannot decode — falls through to Python.
     let engine_is_rules = engine
         .as_deref()
         .map(|e| e.trim().eq_ignore_ascii_case("rules"))
         .unwrap_or(true);
-    if engine_is_rules {
-        let cpu_params = CpuDetailWatchdogParams {
-            image_path: image.clone(),
-            visual_context: visual_context.clone(),
-            target_bounds: target_bounds.clone(),
-            watch_targets: watch_targets.clone(),
-            mode: mode.clone(),
-            output_dir: output_dir.clone(),
-            output_name: output_name.clone(),
-            device_requested: device.clone().unwrap_or_else(|| "auto".to_string()),
-        };
-        if let Some(result) = detail_watchdog_cpu::try_watch(&cpu_params)? {
-            return to_output_map(result);
-        }
+    if !engine_is_rules {
+        return Err(format!(
+            "Detail Watchdog engine `{}` is no longer available; only the native `rules` engine is supported",
+            engine.as_deref().unwrap_or_default().trim()
+        ));
     }
 
-    let result = detect_quality_issues(
-        None,
-        image,
+    let cpu_params = CpuDetailWatchdogParams {
+        image_path: image.clone(),
         visual_context,
         target_bounds,
         watch_targets,
         mode,
-        engine,
-        device,
-        Some(output_dir),
+        output_dir,
         output_name,
-    )?;
-
+        device_requested: device.unwrap_or_else(|| "auto".to_string()),
+    };
+    let result = detail_watchdog_cpu::try_watch(&cpu_params)?.ok_or_else(|| {
+        format!("Detail Watchdog could not decode {image}: unsupported source for the native path")
+    })?;
     to_output_map(result)
 }
 
-/// Encode a [`DetectQualityResult`] into the node's flat output ports. Shared
-/// by the in-process and Python paths so both emit an identical output shape.
+/// Encode a [`DetectQualityResult`] into the node's flat output ports.
 fn to_output_map(result: DetectQualityResult) -> Result<BTreeMap<String, Value>, String> {
     let report = serde_json::to_value(&result.quality_report)
         .map_err(|err| format!("failed to encode QualityReport: {err}"))?;
@@ -122,8 +109,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_image_input() {
-        // No connected `image` input: must fail fast before shelling out to the
-        // python bridge, with a clear message.
+        // No connected `image` input: must fail fast with a clear message.
         let err = execute_studio_detail_watchdog(&node(), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("connected image input"), "{err}");
     }
@@ -138,8 +124,8 @@ mod tests {
 
     #[test]
     fn watchdog_report_parses_hardening_fields() {
-        // The new v1 hardening fields must deserialize from the python bridge
-        // JSON (and `mask_consumed` reflects the advisory Phase 1 mask).
+        // The v1 hardening fields must deserialize from stored report JSON
+        // (and `mask_consumed` reflects the advisory Phase 1 mask).
         let value = json!({
             "mode": "balanced",
             "watch_targets": ["face", "product_edges"],

@@ -23,8 +23,8 @@
 //! - [`psd_analyze`]: the `psdContextAnalyze` node executor (PSD context bridge).
 //! - [`color_match`]: the `matchLightColor` node executor (light/colour match).
 //! - [`edge_refine`]: the `refineMaskEdge` node executor (mask edge refine).
-//! - [`image_enhance`]: the `imageEnhance` node executor (routes the default
-//!   `cpu` engine to the in-process fast path, other engines to Python).
+//! - [`image_enhance`]: the `imageEnhance` node executor (in-process native
+//!   `cpu` engine).
 //! - [`image_enhance_cpu`]: native-Rust replica of the CLI's `--engine cpu`
 //!   pipeline, run in-process for common 8-bit inputs.
 //! - [`detail_watchdog`]: the `detailWatchdog` node executor (CPU quality scan).
@@ -40,10 +40,10 @@
 //! - [`subject_mask`]: the `subjectMask` node executor (native-Rust matte).
 //! - [`subject_matte`]: continuous alpha matting (ViTMatte / trimap, Compute lane).
 //! - [`subject_sam2`]: SAM 2 interactive point-prompt segmenter (Compute lane).
-//! - [`video_assemble`]: the `videoAssemble` node executor (FFmpeg-backed
-//!   frame-sequence -> video encode via the PyAV worker's `assemble` command).
+//! - [`video_assemble`]: the `videoAssemble` node executor (native FFmpeg
+//!   frame-sequence -> video encode).
 //! - [`video_trim`]: the `videoTrim` node executor (frame-accurate cut of a
-//!   time range via the PyAV worker's `trim` command).
+//!   time range via the native FFmpeg path).
 //! - [`persist`]: on-disk autosave, workflow files, recents, and pickers.
 //! - [`history`]: project-scoped snapshot / run-history JSON stores.
 //!
@@ -53,14 +53,14 @@
 mod api_call;
 mod color;
 mod color_match;
-mod color_match_cpu;
+pub(crate) mod color_match_cpu;
 mod crop;
 mod detail_repaint;
-mod detail_repaint_cpu;
+pub(crate) mod detail_repaint_cpu;
 mod detail_watchdog;
-mod detail_watchdog_cpu;
+pub(crate) mod detail_watchdog_cpu;
 mod edge_refine;
-mod edge_refine_cpu;
+pub(crate) mod edge_refine_cpu;
 mod exec;
 #[cfg(feature = "native-ffmpeg")]
 mod ffmpeg_native;
@@ -72,7 +72,7 @@ pub(crate) mod heif_decode;
 mod history;
 pub(crate) mod image_buffer;
 mod image_enhance;
-mod image_enhance_cpu;
+pub(crate) mod image_enhance_cpu;
 mod media_index;
 mod node_registry;
 mod onnx_pool;
@@ -91,12 +91,9 @@ mod subject_model;
 mod subject_sam2;
 mod subject_segment;
 mod timeline_export;
-pub(crate) mod torch_worker;
 mod video_assemble;
 pub(crate) mod video_engine;
 mod video_trim;
-#[cfg(not(feature = "native-ffmpeg"))]
-pub(crate) mod video_worker;
 mod write_skip;
 
 // The colour layers keep their original `crate::studio::<layer>` paths so the

@@ -7,10 +7,10 @@
 
 H-Gripe Studio is a local-first [Tauri](https://tauri.app) desktop app with no
 H-Gripe account/login system: a single
-React front end (an in-house React Flow node editor as the whole UI) over a Rust
-backend (the `hgripe-api` broker, Tauri commands, native compute cards, and
-resource scheduling) plus a Python bridge for PSD/image helpers and opt-in model
-backends. You orchestrate remote provider calls (image / text / audio generation
+React front end (an in-house React Flow node editor as the whole UI) over a
+fully native Rust backend (the `hgripe-api` broker, Tauri commands, native
+compute cards, and resource scheduling) — no Python runtime is required or
+bundled. You orchestrate remote provider calls (image / text / audio generation
 and editing) and local PSD production steps as a node-based DAG, with
 credentials, provider profiles, task history, and outputs all stored in one
 local workspace.
@@ -18,8 +18,8 @@ local workspace.
 > **ComfyUI has been removed.** H-Gripe began as a ComfyUI source branch, but the
 > ComfyUI engine, frontend, and "Advanced Canvas" escape hatch are no longer part
 > of the product — H-Gripe's own Rust/Tauri desktop app and node graph are the
-> only surface. The `python/bridge` runtime is decoupled from ComfyUI's `main.py`
-> (see `h-gripe.project.json`).
+> only surface. The Python bridge runtime has also been removed: every card
+> runs in-process in Rust.
 
 ## Architecture
 
@@ -29,7 +29,6 @@ H-Gripe Studio (Tauri desktop)
     studio-ui/     React + TS front end: the React Flow node editor (the whole UI)
     src-tauri/     Rust backend: Tauri commands, Studio graph runner, PSD chain
   crates/hgripe-api/  API broker: provider adapters, retry/cache, task state, history
-  python/bridge/      Pillow/numpy CLIs plus opt-in model backend seams
   docs/cards/         per-card contracts (inputs, params, outputs, boundaries)
   docs/design/        architecture & design notes (executor split, resource model, roadmap)
 ```
@@ -37,9 +36,9 @@ H-Gripe Studio (Tauri desktop)
 - **API execution** runs through the `hgripe-api` broker (`run_task_json` /
   `run_studio_graph`): `openai_compatible`, `custom_http`, `replicate`, and a
   `mock` provider, with retry / caching / cancellation and local history.
-- **PSD production** runs through Tauri commands, native Rust compute cards, and
-  `python/bridge` CLIs. A CPU-safe baseline is always available; opt-in local
-  model/GPU engines run only when their dependencies and weights are present.
+- **PSD production** runs through Tauri commands and native Rust compute cards.
+  A CPU-safe baseline is always available; opt-in local model/GPU engines run
+  only when their weights are present.
 - The node editor is renderer-agnostic (a typed `WorkflowGraph` model + DAG
   runtime); see [`apps/desktop-tauri/studio-ui/README.md`](apps/desktop-tauri/studio-ui/README.md)
   and [`apps/desktop-tauri/README.md`](apps/desktop-tauri/README.md).
@@ -47,19 +46,18 @@ H-Gripe Studio (Tauri desktop)
 ## PSD production cards
 
 The PSD chain is a set of focused local cards with frozen contracts under
-[`docs/cards/`](docs/cards/). Most bridge to `python/bridge/*_cli.py`; native
-Rust cards are used where in-process memory, scheduling, or model reuse matter.
+[`docs/cards/`](docs/cards/). Every card runs in-process in native Rust.
 
-| Card | Bridge CLI | What it does |
-| --- | --- | --- |
-| [PSD Context Analyze](docs/cards/psd-context-analyze.md) | `analyze_psd_cli.py` | Extract a `VisualContext` (lighting, bounds, masks) from a PSD. |
-| [Match Light & Color](docs/cards/match-light-color.md) | `color_match_cli.py` | Match a generated image's light / colour to the scene. |
-| [Subject Mask / Matte Editor](docs/cards/subject-mask-matte.md) | native Rust | Identify the subject and produce / hand-edit a mask, cutout and alpha. Manual magic-wand + brush, auto modes via an in-process model cascade (BiRefNet / U2-Netp, point-prompt SAM 2, `builtin-cpu` fallback), and continuous-alpha matting via ViTMatte or a guided-filter fallback. |
-| [Refine Mask Edge](docs/cards/refine-mask-edge.md) | `edge_refine_cli.py` | Clean / feather a subject matte. |
-| [Image Enhance](docs/cards/image-enhance.md) | `image_enhance_cli.py` | Global sharpen / tone enhancement. |
-| [Detail Watchdog](docs/cards/detail-watchdog.md) | `detail_watchdog_cli.py` | Detect-only quality analysis (blur / halo / colour mismatch) → `QualityReport`. |
-| [Detail Repaint](docs/cards/detail-repaint.md) | `detail_repaint_cli.py` | Two-stage localized repaint of flagged regions (prepare → provider `image.edit` → composite). |
-| [PSD Export](docs/cards/psd-export.md) | `compose_psd_cli.py` | Compose the generated image into the template placeholder (smart-object replacement) and export the `.psd` + preview + metadata triplet. |
+| Card | What it does |
+| --- | --- |
+| [PSD Context Analyze](docs/cards/psd-context-analyze.md) | Extract a `VisualContext` (lighting, bounds, masks) from a PSD. |
+| [Match Light & Color](docs/cards/match-light-color.md) | Match a generated image's light / colour to the scene. |
+| [Subject Mask / Matte Editor](docs/cards/subject-mask-matte.md) | Identify the subject and produce / hand-edit a mask, cutout and alpha. Manual magic-wand + brush, auto modes via an in-process model cascade (BiRefNet / U2-Netp, point-prompt SAM 2, `builtin-cpu` fallback), and continuous-alpha matting via ViTMatte or a guided-filter fallback. |
+| [Refine Mask Edge](docs/cards/refine-mask-edge.md) | Clean / feather a subject matte. |
+| [Image Enhance](docs/cards/image-enhance.md) | Global sharpen / tone enhancement. |
+| [Detail Watchdog](docs/cards/detail-watchdog.md) | Detect-only quality analysis (blur / halo / colour mismatch) → `QualityReport`. |
+| [Detail Repaint](docs/cards/detail-repaint.md) | Two-stage localized repaint of flagged regions (prepare → provider `image.edit` → composite). |
+| [PSD Export](docs/cards/psd-export.md) | Compose the generated image into the template placeholder (smart-object replacement) and export the `.psd` + preview + metadata triplet. |
 
 These cards are **input-hardened**: candidate decodes normalise CMYK via
 embedded ICC when present, apply EXIF orientation, tone-scale high-bit sources at
@@ -69,8 +67,7 @@ model/API boundaries, and refuse oversized inputs before decoding
 The colour working space, bit depth, ICC handling, and the manual-vs-model split
 are defined once in [`docs/design/colour-pipeline.md`](docs/design/colour-pipeline.md):
 the manual path now preserves a 16-bit ProPhoto canonical surface for
-wide-gamut sources, while model/API/Python bridge ingress uses a colour-managed
-sRGB egress.
+wide-gamut sources, while model/API ingress uses a colour-managed sRGB egress.
 For a consolidated view of what is implemented today versus still planned, see
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
@@ -83,7 +80,6 @@ Use these commands from the repository root unless a command says otherwise.
 - Rust stable MSVC toolchain on Windows.
 - Visual Studio Build Tools 2022 with the C++ workload and Windows SDK.
 - Node.js 20.
-- Python 3.10+ for the bridge tests.
 - WebView2 runtime for the Tauri desktop window.
 
 ### First-Time Setup
@@ -91,9 +87,6 @@ Use these commands from the repository root unless a command says otherwise.
 ```powershell
 # Front end dependencies
 npm --prefix apps/desktop-tauri/studio-ui ci
-
-# Python bridge test/runtime dependencies
-python -m pip install Pillow numpy pytest attrs ruff
 
 # Optional: initialize local H-Gripe config/history/output folders
 cargo build -p hgripe-api --bins
@@ -169,26 +162,6 @@ Useful local CLIs after `cargo build -p hgripe-api --bins`:
 .\target\debug\hgripe-api-history.exe cleanup --keep-latest 100 --apply
 ```
 
-### Python Bridge
-
-The bridge is a local image/PSD runtime used by Tauri commands. It is not a
-ComfyUI runtime.
-
-```powershell
-ruff check python/bridge
-python -m pytest python/bridge/tests
-```
-
-Run an individual bridge test while working on one card:
-
-```powershell
-python -m pytest python/bridge/tests/test_color_match_cli.py -q
-python -m pytest python/bridge/tests/test_edge_refine_cli.py -q
-python -m pytest python/bridge/tests/test_image_enhance_cli.py -q
-python -m pytest python/bridge/tests/test_detail_watchdog_cli.py -q
-python -m pytest python/bridge/tests/test_detail_repaint_cli.py -q
-```
-
 ### Full Local Check
 
 This is the practical pre-PR check:
@@ -200,7 +173,6 @@ npm --prefix apps/desktop-tauri/studio-ui test
 npm --prefix apps/desktop-tauri/studio-ui run build
 cargo test -p hgripe-api
 cargo test -p hgripe-desktop
-python -m pytest python/bridge/tests
 ```
 
 ## Local Workspace Mode
@@ -305,10 +277,6 @@ for the front-end / backend boundary and editor features.
 ```sh
 # Rust: broker + desktop backend (Studio runner, PSD chain)
 cargo test
-
-# Python bridge: image/PSD CLIs and opt-in backend seams
-ruff check python/bridge
-python -m pytest python/bridge/tests
 
 # Front end: DAG runtime unit tests + typecheck
 npm --prefix apps/desktop-tauri/studio-ui test

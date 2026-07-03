@@ -1,11 +1,8 @@
-//! The `imageEnhance` node executor. The default `cpu` engine runs the
-//! in-process native-Rust pipeline ([`super::image_enhance_cpu`]); a learned
-//! engine (`realesrgan`, …) — or an input the fast path cannot reproduce
-//! faithfully (a CMYK JPEG or float source) — is served by the colour-managed
-//! Python bridge (`crate::psd::enhance_image`). Both paths upscale/sharpen a
-//! low-resolution subject to a PSD placeholder's pixel target and expose the
-//! enhanced image, the applied scale factor, and an enhance report as flat
-//! output ports with identical shape.
+//! The `imageEnhance` node executor. The `cpu` engine runs the in-process
+//! native-Rust pipeline ([`super::image_enhance_cpu`]) — the only supported
+//! backend. It upscales/sharpens a low-resolution subject to a PSD
+//! placeholder's pixel target and exposes the enhanced image, the applied
+//! scale factor, and an enhance report as flat output ports.
 
 use std::collections::BTreeMap;
 
@@ -16,7 +13,7 @@ use super::graph::{
     studio_value_to_string, StudioGraphNode,
 };
 use super::image_enhance_cpu::{self, CpuEnhanceParams};
-use crate::psd::{enhance_image, EnhanceImageResult};
+use crate::psd::EnhanceImageResult;
 
 pub(super) fn execute_studio_image_enhance(
     node: &StudioGraphNode,
@@ -56,60 +53,41 @@ pub(super) fn execute_studio_image_enhance(
     let precision = optional(studio_value_to_string(node.params.get("precision")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
 
-    // The default `cpu` engine runs in-process; a learned engine — or an input
-    // the fast path cannot reproduce faithfully — falls through to Python.
     let engine_is_cpu = engine
         .as_deref()
         .map(|e| e.trim().eq_ignore_ascii_case("cpu"))
         .unwrap_or(true);
-    if engine_is_cpu {
-        let cpu_params = CpuEnhanceParams {
-            image_path: image.clone(),
-            output_dir: output_dir.clone(),
-            output_name: output_name.clone(),
-            mode: mode.clone(),
-            target_bounds: target_bounds.clone(),
-            target_width,
-            target_height,
-            target_dpi,
-            max_pixels,
-            scale,
-            denoise_strength,
-            texture_strength,
-            preserve_text_logo,
-            device_requested: device.clone().unwrap_or_else(|| "auto".to_string()),
-            precision_requested: precision.clone().unwrap_or_else(|| "auto".to_string()),
-        };
-        if let Some(result) = image_enhance_cpu::try_enhance(&cpu_params)? {
-            return to_output_map(result);
-        }
+    if !engine_is_cpu {
+        return Err(format!(
+            "Image Enhance engine `{}` is no longer available; only the native `cpu` engine is supported",
+            engine.as_deref().unwrap_or_default().trim()
+        ));
     }
 
-    let result = enhance_image(
-        None,
-        image,
-        target_bounds,
-        mode,
-        Some(target_width),
-        Some(target_height),
-        Some(target_dpi),
-        Some(max_pixels),
-        Some(scale),
-        Some(denoise_strength),
-        Some(texture_strength),
-        Some(preserve_text_logo),
-        engine,
-        device,
-        precision,
-        Some(output_dir),
+    let cpu_params = CpuEnhanceParams {
+        image_path: image.clone(),
+        output_dir,
         output_name,
-    )?;
-
+        mode,
+        target_bounds,
+        target_width,
+        target_height,
+        target_dpi,
+        max_pixels,
+        scale,
+        denoise_strength,
+        texture_strength,
+        preserve_text_logo,
+        device_requested: device.unwrap_or_else(|| "auto".to_string()),
+        precision_requested: precision.unwrap_or_else(|| "auto".to_string()),
+    };
+    let result = image_enhance_cpu::try_enhance(&cpu_params)?.ok_or_else(|| {
+        format!("Image Enhance could not process {image}: unsupported source for the native path")
+    })?;
     to_output_map(result)
 }
 
-/// Encode an [`EnhanceImageResult`] into the node's flat output ports. Shared
-/// by the in-process and Python paths so both emit an identical output shape.
+/// Encode an [`EnhanceImageResult`] into the node's flat output ports.
 fn to_output_map(result: EnhanceImageResult) -> Result<BTreeMap<String, Value>, String> {
     let report = serde_json::to_value(&result.enhance_report)
         .map_err(|err| format!("failed to encode EnhanceReport: {err}"))?;
@@ -135,8 +113,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_image_input() {
-        // No connected `image` input: must fail fast before shelling out to the
-        // python bridge, with a clear message.
+        // No connected `image` input: must fail fast with a clear message.
         let err = execute_studio_image_enhance(&node(), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("connected image input"), "{err}");
     }

@@ -272,22 +272,26 @@ These engines are not the core competitive advantage. H-Gripe's advantage is the
 production workflow: PSD-aware generation, mask/manual correction, colour,
 timeline, node reproducibility, and API compatibility.
 
-## Phase 7: Delete Python Runtime
+## Phase 7: Delete Python Runtime (done, 2026-07-03)
 
-Only start this phase when all replacement paths are default and tested.
+Executed as a full deletion: the Python bridge, `third_party/psd_tools`, the
+torch plugin engines, and every legacy Python fallback are gone. All cards run
+on the native Rust baselines only.
 
 Tasks:
 
-- Remove Python bridge resource bundling from Tauri config.
-- Remove `python/bridge`.
-- Remove `third_party/psd_tools`.
-- Remove Python ComfyUI/update/custom-node remnants if no longer referenced.
-- Remove Rust modules whose only job is to launch Python workers.
-- Remove Python-related CI, pytest, ruff, and bridge docs.
-- Remove references to `python_embeded`, `python`, and `python3` as runtime
+- [x] Remove Python bridge resource bundling from Tauri config.
+- [x] Remove `python/bridge`.
+- [x] Remove `third_party/psd_tools`.
+- [x] Remove Python ComfyUI/update/custom-node remnants (`.ci/`,
+  `plugins/torch-engines`).
+- [x] Remove Rust modules whose only job is to launch Python workers
+  (`torch_worker.rs`, `video_worker.rs`, the bridge CLI runners).
+- [x] Remove Python-related CI, pytest, ruff, and `pyproject.toml`.
+- [x] Remove references to `python_embeded`, `python`, and `python3` as runtime
   requirements.
-- Add a CI check that fails if app runtime code reintroduces a Python process
-  launch.
+- [x] Add a CI check (`no-python-spawn`) that fails if runtime code
+  reintroduces a Python process launch or the deleted trees reappear.
 
 Final check:
 

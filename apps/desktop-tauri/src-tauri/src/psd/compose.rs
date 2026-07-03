@@ -1,7 +1,6 @@
-//! PSD template operations: list exported PSD triplets and shell out to the
-//! vendored `compose_psd_cli.py` / `inspect_psd_cli.py` / analyze helpers via
-//! the project's bundled Python. Split out of `psd.rs`; the command names and
-//! result shapes are unchanged.
+//! PSD template operations: list exported PSD triplets and run the native
+//! Rust compose / inspect / analyze pipelines. Split out of `psd.rs`; the
+//! command names and result shapes are unchanged.
 
 use std::fs;
 use std::path::Path;
@@ -12,7 +11,6 @@ use crate::contracts::VisualContext;
 use crate::modified_ms;
 use crate::studio::studio_reject_unsafe_basename;
 
-use super::{project_python, resolve_project_dir};
 #[derive(Serialize)]
 pub(crate) struct PsdOutputFile {
     /// Base name shared by the triplet (e.g. `final` for `final.psd`).
@@ -107,8 +105,7 @@ pub(crate) fn list_psd_outputs(dir: String) -> Result<Vec<PsdOutputFile>, String
     Ok(outputs)
 }
 
-/// Result of a `compose_psd` run, mirroring the JSON printed by the
-/// `compose_psd_cli.py` helper.
+/// Result of a `compose_psd` run.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ComposePsdResult {
     pub(crate) status: String,
@@ -127,11 +124,9 @@ pub(crate) struct ComposePsdResult {
 /// image is inserted as a new pixel layer inside a `03_GENERATED` group — or,
 /// for `replace_content` on an embedded smart object, written inside the
 /// object (`super::smart`) — splicing the template's own bytes so everything
-/// else round-trips untouched. If the native writer rejects the job
-/// (externally linked smart objects, non-PNG or colour-managed sources,
-/// non-8-bit/RGB templates), the optional legacy Python bridge
-/// (`compose_psd_cli.py`) is tried as a fallback. `dir` is the project root
-/// (defaults to the process working dir).
+/// else round-trips untouched. Jobs the native writer rejects (externally
+/// linked smart objects, non-PNG or colour-managed sources, non-8-bit/RGB
+/// templates) surface as errors.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compose_psd(
@@ -155,7 +150,8 @@ pub(crate) fn compose_psd(
     let filename_value = filename.as_deref().unwrap_or("final");
     studio_reject_unsafe_basename(filename_value)?;
 
-    let native_err = match super::write::compose_psd_native(&super::write::ComposeArgs {
+    let _ = dir;
+    super::write::compose_psd_native(&super::write::ComposeArgs {
         template: &template,
         image: &image,
         mask: mask.as_deref().unwrap_or(""),
@@ -168,120 +164,11 @@ pub(crate) fn compose_psd(
         hide_placeholder: hide_placeholder.as_deref().unwrap_or("enable") == "enable",
         metadata: metadata.as_deref().unwrap_or("{}"),
         save_preview: save_preview.unwrap_or(true),
-    }) {
-        Ok(result) => return Ok(result),
-        Err(err) => err,
-    };
-
-    compose_psd_legacy(
-        dir,
-        template,
-        image,
-        mask,
-        output_dir,
-        filename_value,
-        placeholder,
-        fit_mode,
-        z_order,
-        smart_object_mode,
-        hide_placeholder,
-        metadata,
-        save_preview,
-    )
-    .map_err(|legacy_err| format!("native PSD compose failed: {native_err}; {legacy_err}"))
-}
-
-/// The optional legacy Python bridge behind [`compose_psd`]: shells out to
-/// `python/bridge/compose_psd_cli.py` using the project's bundled Python,
-/// reusing the vendored psd-tools + Pillow pipeline (including true
-/// smart-object content replacement). Only tried when the native writer
-/// rejects the job.
-#[allow(clippy::too_many_arguments)]
-fn compose_psd_legacy(
-    dir: Option<String>,
-    template: String,
-    image: String,
-    mask: Option<String>,
-    output_dir: String,
-    filename: &str,
-    placeholder: Option<String>,
-    fit_mode: Option<String>,
-    z_order: Option<String>,
-    smart_object_mode: Option<String>,
-    hide_placeholder: Option<String>,
-    metadata: Option<String>,
-    save_preview: Option<bool>,
-) -> Result<ComposePsdResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir.join("python").join("bridge").join("compose_psd_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "compose_psd_cli.py not found at {}",
-            script.display()
-        ));
-    }
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("--template")
-        .arg(&template)
-        .arg("--image")
-        .arg(&image)
-        .arg("--mask")
-        .arg(mask.as_deref().unwrap_or(""))
-        .arg("--output-dir")
-        .arg(&output_dir)
-        .arg("--filename")
-        .arg(filename)
-        .arg("--placeholder")
-        .arg(placeholder.as_deref().unwrap_or("{}"))
-        .arg("--fit-mode")
-        .arg(fit_mode.as_deref().unwrap_or("contain"))
-        .arg("--z-order")
-        .arg(z_order.as_deref().unwrap_or("above_background"))
-        .arg("--smart-object-mode")
-        .arg(smart_object_mode.as_deref().unwrap_or("disable"))
-        .arg("--hide-placeholder")
-        .arg(hide_placeholder.as_deref().unwrap_or("enable"))
-        .arg("--metadata")
-        .arg(metadata.as_deref().unwrap_or("{}"))
-        .arg("--save-preview")
-        .arg(if save_preview.unwrap_or(true) {
-            "enable"
-        } else {
-            "disable"
-        })
-        .current_dir(&dir);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default compose path runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("compose_psd failed: {}", stderr.trim()));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<ComposePsdResult>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse compose_psd output: {err} (raw: {})",
-            stdout.trim()
-        )
     })
+    .map_err(|err| format!("native PSD compose failed: {err}"))
 }
 
-/// A single PSD layer, mirroring the rows printed by `inspect_psd_cli.py`.
+/// A single PSD layer.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct PsdLayerInfo {
     name: String,
@@ -289,8 +176,7 @@ pub(crate) struct PsdLayerInfo {
     kind: String,
 }
 
-/// Result of an `inspect_psd` run, mirroring the JSON printed by the
-/// `inspect_psd_cli.py` helper.
+/// Result of an `inspect_psd` run.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct InspectPsdResult {
     status: String,
@@ -311,18 +197,16 @@ pub(crate) struct InspectPsdResult {
 /// (file present, placeholder layer name actually exists) instead of only
 /// surfacing the problem mid-compose.
 ///
-/// The default path runs natively in Rust (`super::inspect`), reading only the
-/// header + layer records — no Python involved. If native parsing fails (an
-/// exotic PSD variant), the optional legacy Python bridge
-/// (`inspect_psd_cli.py`) is tried as a fallback, keeping the previous
-/// behaviour available.
+/// Runs natively in Rust (`super::inspect`), reading only the header + layer
+/// records — no Python involved.
 #[tauri::command]
 pub(crate) fn inspect_psd(
     dir: Option<String>,
     template: String,
     names: Option<Vec<String>>,
 ) -> Result<InspectPsdResult, String> {
-    let requested = names.clone().unwrap_or_default();
+    let _ = dir;
+    let requested = names.unwrap_or_default();
     let template_trimmed = template.trim();
     let template_path = Path::new(template_trimmed);
     if template_trimmed.is_empty() || !template_path.is_file() {
@@ -337,7 +221,7 @@ pub(crate) fn inspect_psd(
         });
     }
 
-    let native_err = match super::inspect::inspect_psd_file(template_path) {
+    match super::inspect::inspect_psd_file(template_path) {
         Ok(parsed) => {
             let layers: Vec<PsdLayerInfo> = parsed
                 .layers
@@ -351,76 +235,17 @@ pub(crate) fn inspect_psd(
                 .into_iter()
                 .filter(|name| !name.is_empty() && !layers.iter().any(|row| &row.name == name))
                 .collect();
-            return Ok(InspectPsdResult {
+            Ok(InspectPsdResult {
                 status: "succeeded".to_string(),
                 exists: true,
                 width: parsed.width,
                 height: parsed.height,
                 layers,
                 missing,
-            });
+            })
         }
-        Err(err) => err,
-    };
-
-    inspect_psd_legacy(dir, template, names)
-        .map_err(|legacy_err| format!("native PSD inspect failed: {native_err}; {legacy_err}"))
-}
-
-/// The optional legacy Python bridge behind [`inspect_psd`]: shells out to
-/// `python/bridge/inspect_psd_cli.py` using the project's bundled Python,
-/// reusing the vendored psd-tools pipeline. Only tried when the native parser
-/// rejects the file.
-fn inspect_psd_legacy(
-    dir: Option<String>,
-    template: String,
-    names: Option<Vec<String>>,
-) -> Result<InspectPsdResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir.join("python").join("bridge").join("inspect_psd_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "inspect_psd_cli.py not found at {}",
-            script.display()
-        ));
+        Err(err) => Err(format!("native PSD inspect failed: {err}")),
     }
-    let names_json =
-        serde_json::to_string(&names.unwrap_or_default()).map_err(|err| err.to_string())?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("--template")
-        .arg(&template)
-        .arg("--names")
-        .arg(&names_json)
-        .current_dir(&dir);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default inspect path runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("inspect_psd failed: {}", stderr.trim()));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<InspectPsdResult>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse inspect_psd output: {err} (raw: {})",
-            stdout.trim()
-        )
-    })
 }
 
 /// Analyze a PSD template into a machine-usable [`VisualContext`]: background
@@ -430,11 +255,10 @@ fn inspect_psd_legacy(
 /// Match, etc.) consume the returned context so the user never hand-describes
 /// the template's lighting/colour.
 ///
-/// The default path runs natively in Rust (`super::analyze`), decoding only
-/// the pixels it needs from the template. If the native analyzer rejects the
-/// file (non-RGB/8-bit modes, zip-compressed channels, a group/masked
-/// background layer that needs real re-compositing), the optional legacy
-/// Python bridge (`analyze_psd_cli.py`) is tried as a fallback.
+/// Runs natively in Rust (`super::analyze`), decoding only the pixels it
+/// needs from the template. Files the native analyzer rejects (non-RGB/8-bit
+/// modes, zip-compressed channels, a group/masked background layer that needs
+/// real re-compositing) surface as errors.
 /// `background_layer` / `target_placeholder` may be empty (auto: whole-canvas
 /// placeholder, full composite background); `output_dir` is where the
 /// placeholder mask and background preview PNGs are written.
@@ -448,88 +272,12 @@ pub(crate) fn analyze_psd_context(
     reference_layers: Option<Vec<String>>,
     output_dir: Option<String>,
 ) -> Result<VisualContext, String> {
-    let native_err = match super::analyze::analyze_psd_native(
+    let _ = (dir, reference_layers);
+    super::analyze::analyze_psd_native(
         template.trim(),
         background_layer.as_deref().unwrap_or(""),
         target_placeholder.as_deref().unwrap_or(""),
         output_dir.as_deref().unwrap_or(""),
-    ) {
-        Ok(context) => return Ok(context),
-        Err(err) => err,
-    };
-
-    analyze_psd_context_legacy(
-        dir,
-        template,
-        background_layer,
-        target_placeholder,
-        reference_layers,
-        output_dir,
     )
-    .map_err(|legacy_err| format!("native PSD analyze failed: {native_err}; {legacy_err}"))
-}
-
-/// The optional legacy Python bridge behind [`analyze_psd_context`]: shells
-/// out to `python/bridge/analyze_psd_cli.py` using the project's bundled
-/// Python, reusing the vendored psd-tools + Pillow pipeline. Only tried when
-/// the native analyzer rejects the file.
-fn analyze_psd_context_legacy(
-    dir: Option<String>,
-    template: String,
-    background_layer: Option<String>,
-    target_placeholder: Option<String>,
-    reference_layers: Option<Vec<String>>,
-    output_dir: Option<String>,
-) -> Result<VisualContext, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir.join("python").join("bridge").join("analyze_psd_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "analyze_psd_cli.py not found at {}",
-            script.display()
-        ));
-    }
-    let references_json = serde_json::to_string(&reference_layers.unwrap_or_default())
-        .map_err(|err| err.to_string())?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("--template")
-        .arg(&template)
-        .arg("--background-layer")
-        .arg(background_layer.as_deref().unwrap_or(""))
-        .arg("--target-placeholder")
-        .arg(target_placeholder.as_deref().unwrap_or(""))
-        .arg("--reference-layers")
-        .arg(&references_json)
-        .arg("--output-dir")
-        .arg(output_dir.as_deref().unwrap_or(""))
-        .current_dir(&dir);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default analyze path runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("analyze_psd_context failed: {}", stderr.trim()));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<VisualContext>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse analyze_psd_context output: {err} (raw: {})",
-            stdout.trim()
-        )
-    })
+    .map_err(|err| format!("native PSD analyze failed: {err}"))
 }

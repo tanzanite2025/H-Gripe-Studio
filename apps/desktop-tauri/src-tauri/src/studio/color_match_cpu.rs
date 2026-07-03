@@ -38,20 +38,20 @@ const RATIO_MAX: f64 = 2.0;
 const CHROMA_NORM: f64 = 110.0;
 
 /// Resolved node parameters for one match run, mirroring the CLI arguments.
-pub(super) struct CpuColorMatchParams {
-    pub(super) image_path: String,
-    pub(super) background_path: Option<String>,
-    pub(super) mask_path: Option<String>,
-    pub(super) context: Option<String>,
-    pub(super) mode: Option<String>,
-    pub(super) strength: f64,
-    pub(super) shadow_strength: f64,
-    pub(super) highlight_strength: f64,
-    pub(super) protect_saturation: bool,
-    pub(super) protect_brand_color: bool,
-    pub(super) output_dir: String,
-    pub(super) output_name: Option<String>,
-    pub(super) device_requested: String,
+pub(crate) struct CpuColorMatchParams {
+    pub(crate) image_path: String,
+    pub(crate) background_path: Option<String>,
+    pub(crate) mask_path: Option<String>,
+    pub(crate) context: Option<String>,
+    pub(crate) mode: Option<String>,
+    pub(crate) strength: f64,
+    pub(crate) shadow_strength: f64,
+    pub(crate) highlight_strength: f64,
+    pub(crate) protect_saturation: bool,
+    pub(crate) protect_brand_color: bool,
+    pub(crate) output_dir: String,
+    pub(crate) output_name: Option<String>,
+    pub(crate) device_requested: String,
 }
 
 /// A loaded surface split into the pipeline's working planes.
@@ -90,7 +90,7 @@ fn load_planes(path: &Path) -> Result<Planes, String> {
 /// fast path, or `Ok(None)` when a source cannot be decoded here and the
 /// caller should defer to the Python bridge, which surfaces the canonical
 /// error message.
-pub(super) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResult>, String> {
+pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResult>, String> {
     let image_path = p.image_path.trim();
     if image_path.is_empty() || !Path::new(image_path).is_file() {
         // Let the Python path surface the canonical "subject image not found".

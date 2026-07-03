@@ -5,9 +5,9 @@ desktop workflow editor for AI image generation and PSD production. This
 document is a high-level overview of how to get involved.
 
 > H-Gripe began as a ComfyUI source branch, but ComfyUI has been removed from the
-> product. Contributions target H-Gripe's own desktop app (`apps/desktop-tauri`),
-> the `hgripe-api` broker (`crates/hgripe-api`), and the Python bridge
-> (`python/bridge`).
+> product. Contributions target H-Gripe's own desktop app (`apps/desktop-tauri`)
+> and the `hgripe-api` broker (`crates/hgripe-api`). The backend is fully
+> native Rust — there is no Python runtime.
 
 ## Reporting issues and feature requests
 
@@ -43,10 +43,6 @@ Run the checks for the area you touched and keep changes focused:
 cargo test
 cargo clippy --all-targets
 
-# Python bridge (CPU-only image/PSD CLIs)
-ruff check python/bridge
-python -m pytest python/bridge/tests
-
 # Front end
 npm --prefix apps/desktop-tauri/studio-ui test
 npm --prefix apps/desktop-tauri/studio-ui run typecheck
@@ -55,9 +51,9 @@ npm --prefix apps/desktop-tauri/studio-ui run typecheck
 Guidelines:
 
 - Match the surrounding style and conventions; prefer minimal, scoped edits.
-- Add or update tests for behaviour changes. New PSD cards should ship a
-  `python/bridge/*_cli.py` helper, tests under `python/bridge/tests/`, the
-  matching Rust report/struct, and a contract doc under [`docs/cards/`](docs/cards/).
+- Add or update tests for behaviour changes. New PSD cards should ship the
+  native Rust implementation with tests, the matching report/struct, and a
+  contract doc under [`docs/cards/`](docs/cards/).
 - Don't commit secrets (`credentials.json`, API keys) or build artifacts
   (`apps/desktop-tauri/dist/`, `target/`).
 - Write a clear PR description: what changed and why. CI must be green before review.

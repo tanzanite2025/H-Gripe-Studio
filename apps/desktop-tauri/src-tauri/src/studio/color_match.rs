@@ -1,9 +1,8 @@
-//! The `matchLightColor` node executor. The default `cpu` engine runs the
-//! in-process native-Rust heuristic ([`super::color_match_cpu`]); a learned
-//! matcher — or a source the fast path cannot decode — is served by the
-//! Python bridge (`crate::psd::match_light_color`). Both paths nudge a
-//! connected subject image toward a PSD background and expose the matched
-//! image, the match report, and a prompt suffix as flat output ports.
+//! The `matchLightColor` node executor. The `cpu` engine runs the in-process
+//! native-Rust heuristic ([`super::color_match_cpu`]) — the only supported
+//! backend. It nudges a connected subject image toward a PSD background and
+//! exposes the matched image, the match report, and a prompt suffix as flat
+//! output ports.
 
 use std::collections::BTreeMap;
 
@@ -14,7 +13,7 @@ use super::graph::{
     bool_param, number_param, optional, resolve_output_dir, studio_output_map,
     studio_value_to_string, StudioGraphNode,
 };
-use crate::psd::{match_light_color, ColorMatchResult};
+use crate::psd::ColorMatchResult;
 
 pub(super) fn execute_studio_match_light_color(
     node: &StudioGraphNode,
@@ -44,64 +43,48 @@ pub(super) fn execute_studio_match_light_color(
     let highlight_strength = number_param(node, "highlight_strength", 0.0);
     let protect_saturation = bool_param(node, "protect_saturation", false);
     let protect_brand_color = bool_param(node, "protect_brand_color", true);
-    // `engine` selects the opt-in learned matcher (default `cpu`); the bridge
-    // falls back to the always-on CPU heuristic when it is unavailable.
+    // `engine` must be the native `cpu` heuristic (the default).
     let engine = optional(studio_value_to_string(node.params.get("engine")));
     // `device` selects the ONNX execution provider for the learned matcher
     // (default `auto`); ignored by the CPU heuristic.
     let device = optional(studio_value_to_string(node.params.get("device")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
 
-    // The default `cpu` engine runs in-process; a learned matcher — or a
-    // source the fast path cannot decode — falls through to Python.
     let engine_is_cpu = engine
         .as_deref()
         .map(|e| e.trim().eq_ignore_ascii_case("cpu"))
         .unwrap_or(true);
-    if engine_is_cpu {
-        let cpu_params = CpuColorMatchParams {
-            image_path: image.clone(),
-            background_path: background.clone(),
-            mask_path: mask.clone(),
-            context: context.clone(),
-            mode: mode.clone(),
-            strength,
-            shadow_strength,
-            highlight_strength,
-            protect_saturation,
-            protect_brand_color,
-            output_dir: output_dir.clone(),
-            output_name: output_name.clone(),
-            device_requested: device.clone().unwrap_or_else(|| "auto".to_string()),
-        };
-        if let Some(result) = color_match_cpu::try_match(&cpu_params)? {
-            return to_output_map(result);
-        }
+    if !engine_is_cpu {
+        return Err(format!(
+            "Light & Color Match engine `{}` is no longer available; only the native `cpu` engine is supported",
+            engine.as_deref().unwrap_or_default().trim()
+        ));
     }
 
-    let result = match_light_color(
-        None,
-        image,
-        background,
-        mask,
+    let cpu_params = CpuColorMatchParams {
+        image_path: image.clone(),
+        background_path: background,
+        mask_path: mask,
         context,
         mode,
-        Some(strength),
-        Some(shadow_strength),
-        Some(highlight_strength),
-        Some(protect_saturation),
-        Some(protect_brand_color),
-        engine,
-        device,
-        Some(output_dir),
+        strength,
+        shadow_strength,
+        highlight_strength,
+        protect_saturation,
+        protect_brand_color,
+        output_dir,
         output_name,
-    )?;
-
+        device_requested: device.unwrap_or_else(|| "auto".to_string()),
+    };
+    let result = color_match_cpu::try_match(&cpu_params)?.ok_or_else(|| {
+        format!(
+            "Light & Color Match could not decode {image}: unsupported source for the native path"
+        )
+    })?;
     to_output_map(result)
 }
 
-/// Encode a [`ColorMatchResult`] into the node's flat output ports. Shared by
-/// the in-process and Python paths so both emit an identical output shape.
+/// Encode a [`ColorMatchResult`] into the node's flat output ports.
 fn to_output_map(result: ColorMatchResult) -> Result<BTreeMap<String, Value>, String> {
     let report = serde_json::to_value(&result.match_report)
         .map_err(|err| format!("failed to encode MatchReport: {err}"))?;
@@ -127,8 +110,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_image_input() {
-        // No connected `image` input: must fail fast before shelling out to the
-        // python bridge, with a clear message.
+        // No connected `image` input: must fail fast with a clear message.
         let err = execute_studio_match_light_color(&node(), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("connected image"), "{err}");
     }
@@ -143,8 +125,7 @@ mod tests {
 
     #[test]
     fn number_and_bool_params_fall_back_to_defaults() {
-        // Mirrors the defaults the executor passes to the python bridge so a
-        // change to either side is caught here.
+        // The documented node defaults; keep them stable across releases.
         let node = node();
         assert_eq!(number_param(&node, "strength", 0.6), 0.6);
         assert!(!bool_param(&node, "protect_saturation", false));

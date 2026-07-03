@@ -1,14 +1,12 @@
-//! Cross-card engine capability probe (the `doctor`-style report): which opt-in
-//! ML `engine` values each card CLI can run on this box, plus the machine
-//! device probe. Split out of `psd.rs`; command names and result shapes are
-//! unchanged.
+//! Cross-card engine capability probe (the `doctor`-style report): which
+//! `engine` values each card can run on this box. Split out of `psd.rs`;
+//! command names and result shapes are unchanged. With the Python bridge
+//! removed, only the always-on native CPU/rule baselines are reported.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::{apply_model_env, project_python, resolve_project_dir};
 /// Cached-weight inventory for one engine: the non-bundled weight it would load
 /// and whether it is already present on this box. Lets the UI show what is
 /// downloaded vs still missing instead of only "engine unavailable". A directory
@@ -129,157 +127,49 @@ pub(crate) struct EngineProbeReport {
     pub(crate) runtime: Option<DeviceProbe>,
 }
 
-/// Shape of a single CLI's `--probe-engines` JSON. `engines` carries extra
-/// per-engine fields (e.g. `native_scale`) that the UI does not need, so we
-/// only pull `available` + `reason`.
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct CliEngineProbe {
-    #[serde(default)]
-    pub(crate) engines: BTreeMap<String, EngineAvailability>,
-    #[serde(default)]
-    pub(crate) model_cache_dir: Option<String>,
-}
-
-/// Run the one-shot device probe CLI and parse its machine-capability JSON.
-/// Unlike the per-card probes this is the same for every card, so it is run
-/// once; a failure leaves `runtime` `None` rather than failing the report.
-fn run_device_probe(python: &Path, dir: &Path) -> Result<DeviceProbe, String> {
-    let script = dir
-        .join("python")
-        .join("bridge")
-        .join("device_probe_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "device_probe_cli.py not found at {}",
-            script.display()
-        ));
-    }
-    let mut cmd = std::process::Command::new(python);
-    cmd.arg(&script).current_dir(dir);
-    apply_model_env(&mut cmd);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python device probe failed to launch {}: {err} (only opt-in legacy engines need Python)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("device probe failed: {}", stderr.trim()));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<DeviceProbe>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse device probe: {err} (raw: {})",
-            stdout.trim()
-        )
-    })
-}
-
-/// Run one card CLI's `--probe-engines` and parse its JSON.
-fn run_engine_probe(python: &Path, dir: &Path, cli_name: &str) -> Result<CliEngineProbe, String> {
-    let script = dir.join("python").join("bridge").join(cli_name);
-    if !script.is_file() {
-        return Err(format!("{cli_name} not found at {}", script.display()));
-    }
-    let mut cmd = std::process::Command::new(python);
-    // Every card CLI requires `--image`; the probe short-circuits before the
-    // image is read, so a placeholder satisfies argparse without touching disk.
-    cmd.arg(&script)
-        .arg("--image")
-        .arg("__engine_probe__")
-        .arg("--probe-engines")
-        .current_dir(dir);
-    apply_model_env(&mut cmd);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python engine probe failed to launch {}: {err} (only opt-in legacy engines need Python)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "{cli_name} --probe-engines failed: {}",
-            stderr.trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<CliEngineProbe>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse {cli_name} probe: {err} (raw: {})",
-            stdout.trim()
-        )
-    })
-}
-
-/// Probe the opt-in ML `engine` seams across the local cards (the `doctor`
-/// cross-card capability report). The CPU/rule baseline is always available; a
-/// learned engine reports `available=false` with a reason when its optional
-/// dependency or weight is missing, which the inspector uses to grey out the
-/// option (and fall back to the baseline). A card whose probe fails to run
-/// returns an `error` and no engines, so the UI leaves its select untouched.
+/// Probe the `engine` seams across the local cards (the `doctor` cross-card
+/// capability report). With the Python bridge removed, only the built-in
+/// native Rust baselines exist: each card reports its always-available
+/// CPU/rule engine and nothing else.
 #[tauri::command]
 pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
+    let _ = dir;
 
-    // (node kind, CLI) for every card that exposes an `engine` param.
+    // (node kind, baseline engine id) for every card that exposes an `engine`
+    // param. Every baseline runs in-process in Rust.
     const CARDS: [(&str, &str); 5] = [
-        ("matchLightColor", "color_match_cli.py"),
-        ("imageEnhance", "image_enhance_cli.py"),
-        ("detailWatchdog", "detail_watchdog_cli.py"),
-        ("detailRepaint", "detail_repaint_cli.py"),
-        ("refineMaskEdge", "edge_refine_cli.py"),
+        ("matchLightColor", "cpu"),
+        ("imageEnhance", "cpu"),
+        ("detailWatchdog", "rules"),
+        ("detailRepaint", "provider"),
+        ("refineMaskEdge", "cpu"),
     ];
 
-    let mut cards = Vec::with_capacity(CARDS.len());
-    let mut model_cache_dir = None;
-    for (node_kind, cli_name) in CARDS {
-        let probe = run_engine_probe(&python, &dir, cli_name);
-        let card = match probe {
-            Ok(parsed) => {
-                if model_cache_dir.is_none() {
-                    model_cache_dir = parsed.model_cache_dir.clone();
-                }
-                CardEngineProbe {
-                    node_kind: node_kind.to_string(),
-                    cli: cli_name.to_string(),
-                    engines: parsed.engines,
-                    error: None,
-                }
-            }
-            Err(err) => CardEngineProbe {
+    let cards = CARDS
+        .iter()
+        .map(|(node_kind, baseline)| {
+            let mut engines = BTreeMap::new();
+            engines.insert(
+                baseline.to_string(),
+                EngineAvailability {
+                    available: true,
+                    reason: "built-in native Rust path".to_string(),
+                    accelerated: false,
+                    weight: None,
+                },
+            );
+            CardEngineProbe {
                 node_kind: node_kind.to_string(),
-                cli: cli_name.to_string(),
-                engines: BTreeMap::new(),
-                error: Some(err),
-            },
-        };
-        cards.push(card);
-    }
-
-    let runtime = run_device_probe(&python, &dir).ok();
+                cli: String::new(),
+                engines,
+                error: None,
+            }
+        })
+        .collect();
 
     Ok(EngineProbeReport {
         cards,
-        model_cache_dir,
-        runtime,
+        model_cache_dir: super::load_model_paths_config().model_cache_dir,
+        runtime: None,
     })
 }

@@ -36,8 +36,6 @@
     ],
     "resources": {
       "../../../h-gripe.project.json": "h-gripe.project.json",
-      "../../../python/bridge/": "python/bridge/",
-      "../../../third_party/psd_tools/": "third_party/psd_tools/",
       "resources/models/": "resources/models/"
     }
   }

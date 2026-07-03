@@ -1,15 +1,14 @@
-//! Local card processors that shell out to their Python bridge CLIs (colour
-//! match, mask edge refine, image enhance, detail watchdog). Split out of
-//! `psd.rs`; command names and result shapes are unchanged.
+//! Local card processor commands (colour match, mask edge refine, image
+//! enhance, detail watchdog) and their result/report types. The processors
+//! run natively in Rust (`crate::studio::*_cpu`); command names and result
+//! shapes are unchanged.
 
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::QualityReport;
 
-use super::{
-    apply_model_env, project_python, reject_unsafe_output_name, resolve_project_dir,
-    run_bridge_oneshot, run_torch_cli,
-};
+use super::reject_unsafe_output_name;
+
 /// Mean colour / colour temperature / contrast of the corrected region, before
 /// or after matching. Mirrors the Python bridge's `_appearance`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -111,16 +110,11 @@ pub(crate) struct ColorMatchResult {
 
 /// Match a generated subject image's light & colour toward a PSD background so
 /// the composite stops looking pasted-on. This is the **Light & Color Match**
-/// node's backend (the second PSD production node): it consumes the upstream
-/// image, the background preview, and optionally the [`VisualContext`] from PSD
-/// Context Analyze.
-///
-/// Like the other PSD commands it shells out to `python/bridge/color_match_cli.py`
-/// using the project's bundled Python (Pillow + numpy, no OpenCV in Phase 1).
-/// `mode` is `prompt_only | color_transfer | histogram_match | hybrid`; the
-/// correction is weighted toward shadows/highlights and (when
-/// `protect_brand_color`) spares high-chroma pixels. `context` is the
-/// serialized `VisualContext` JSON used for the prompt suffix.
+/// node's backend: it consumes the upstream image, the background preview, and
+/// optionally the serialized `VisualContext` JSON from PSD Context Analyze.
+/// Runs in-process on the native `cpu` heuristic
+/// ([`crate::studio::color_match_cpu`]); `mode` is
+/// `prompt_only | color_transfer | histogram_match | hybrid`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn match_light_color(
@@ -140,83 +134,40 @@ pub(crate) fn match_light_color(
     output_dir: Option<String>,
     output_name: Option<String>,
 ) -> Result<ColorMatchResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir.join("python").join("bridge").join("color_match_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "color_match_cli.py not found at {}",
-            script.display()
-        ));
-    }
+    let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("--image")
-        .arg(&image)
-        .arg("--background")
-        .arg(background.as_deref().unwrap_or(""))
-        .arg("--mask")
-        .arg(mask.as_deref().unwrap_or(""))
-        .arg("--context")
-        .arg(context.as_deref().unwrap_or(""))
-        .arg("--mode")
-        .arg(mode.as_deref().unwrap_or("color_transfer"))
-        .arg("--strength")
-        .arg(strength.unwrap_or(0.6).to_string())
-        .arg("--shadow-strength")
-        .arg(shadow_strength.unwrap_or(0.0).to_string())
-        .arg("--highlight-strength")
-        .arg(highlight_strength.unwrap_or(0.0).to_string())
-        .arg("--engine")
-        .arg(engine.as_deref().unwrap_or("cpu"))
-        .arg("--device")
-        .arg(device.as_deref().unwrap_or("auto"))
-        .arg("--output-dir")
-        .arg(output_dir.as_deref().unwrap_or(""))
-        .arg("--output-name")
-        .arg(output_name.as_deref().unwrap_or(""))
-        .current_dir(&dir);
-    if protect_saturation.unwrap_or(false) {
-        cmd.arg("--protect-saturation");
-    }
-    if protect_brand_color.unwrap_or(false) {
-        cmd.arg("--protect-brand-color");
-    }
-    apply_model_env(&mut cmd);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default engine runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let engine = engine.unwrap_or_default();
+    let engine = engine.trim();
+    if !(engine.is_empty() || engine.eq_ignore_ascii_case("cpu")) {
         return Err(format!(
-            "match_light_color legacy bridge failed: {}",
-            stderr.trim()
+            "Light & Color Match engine `{engine}` is no longer available; only the native `cpu` engine is supported"
         ));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<ColorMatchResult>(stdout.trim()).map_err(|err| {
+    let params = crate::studio::color_match_cpu::CpuColorMatchParams {
+        image_path: image.clone(),
+        background_path: background.filter(|s| !s.trim().is_empty()),
+        mask_path: mask.filter(|s| !s.trim().is_empty()),
+        context: context.filter(|s| !s.trim().is_empty()),
+        mode,
+        strength: strength.unwrap_or(0.6),
+        shadow_strength: shadow_strength.unwrap_or(0.0),
+        highlight_strength: highlight_strength.unwrap_or(0.0),
+        protect_saturation: protect_saturation.unwrap_or(false),
+        protect_brand_color: protect_brand_color.unwrap_or(false),
+        output_dir: output_dir.unwrap_or_default(),
+        output_name: output_name.filter(|s| !s.trim().is_empty()),
+        device_requested: device
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "auto".to_string()),
+    };
+    crate::studio::color_match_cpu::try_match(&params)?.ok_or_else(|| {
         format!(
-            "could not parse match_light_color output: {err} (raw: {})",
-            stdout.trim()
+            "Light & Color Match could not decode {image}: unsupported source for the native path"
         )
     })
 }
 
-/// What `refine_mask_edge` did: the resolved preset/morphology parameters, the
+/// What the mask edge refine pass did: the resolved preset/morphology parameters, the
 /// edge-band size and the mask coverage before/after. Fields are `snake_case`
 /// to match the `edge_refine_cli.py` JSON.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -304,16 +255,11 @@ pub(crate) struct RefineEdgeResult {
     pub(crate) edge_report: EdgeReport,
 }
 
-/// Clean up a cut-out subject's matte so it drops into a PSD placeholder without
-/// white halos, fringing or jagged semi-transparent edges. This is the **Mask
-/// Edge Refine** node's backend (the third PSD production node): it consumes the
-/// subject image, an optional explicit matte (defaults to the image's alpha),
-/// and an optional target background for edge colour blending.
-///
-/// Like the other PSD commands it shells out to `python/bridge/edge_refine_cli.py`
-/// using the project's bundled Python (Pillow + numpy, no OpenCV in Phase 1).
-/// `preset` is `clean | natural | soft | custom`; the numeric morphology
-/// parameters apply only when `preset` is `custom`.
+/// Clean up a cut-out subject's matte so it drops into a PSD placeholder
+/// without white halos, fringing or jagged semi-transparent edges. This is the
+/// **Mask Edge Refine** node's backend. Runs in-process on the native `cpu`
+/// heuristic ([`crate::studio::edge_refine_cpu`]); `preset` is
+/// `clean | natural | soft | custom`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_mask_edge(
@@ -335,86 +281,39 @@ pub(crate) fn refine_mask_edge(
     engine: Option<String>,
     device: Option<String>,
 ) -> Result<RefineEdgeResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir.join("python").join("bridge").join("edge_refine_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "edge_refine_cli.py not found at {}",
-            script.display()
-        ));
-    }
+    let _ = (dir, placeholder_mask);
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("--image")
-        .arg(&image)
-        .arg("--mask")
-        .arg(mask.as_deref().unwrap_or(""))
-        .arg("--background")
-        .arg(background.as_deref().unwrap_or(""))
-        .arg("--placeholder-mask")
-        .arg(placeholder_mask.as_deref().unwrap_or(""))
-        .arg("--trimap")
-        .arg(trimap.as_deref().unwrap_or(""))
-        .arg("--preset")
-        .arg(preset.as_deref().unwrap_or("natural"))
-        .arg("--erode-px")
-        .arg(erode_px.unwrap_or(1).to_string())
-        .arg("--dilate-px")
-        .arg(dilate_px.unwrap_or(0).to_string())
-        .arg("--feather-px")
-        .arg(feather_px.unwrap_or(4.0).to_string())
-        .arg("--guided-radius")
-        .arg(guided_radius.unwrap_or(8).to_string())
-        .arg("--background-blend-strength")
-        .arg(background_blend_strength.unwrap_or(0.4).to_string())
-        .arg("--output-dir")
-        .arg(output_dir.as_deref().unwrap_or(""))
-        .arg("--output-name")
-        .arg(output_name.as_deref().unwrap_or(""))
-        .arg("--engine")
-        .arg(engine.as_deref().unwrap_or("cpu"))
-        .arg("--device")
-        .arg(device.as_deref().unwrap_or("auto"))
-        .current_dir(&dir);
-    if edge_decontaminate.unwrap_or(false) {
-        cmd.arg("--edge-decontaminate");
-    }
-    apply_model_env(&mut cmd);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default engine runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let engine = engine.unwrap_or_default();
+    let engine = engine.trim();
+    if !(engine.is_empty() || engine.eq_ignore_ascii_case("cpu")) {
         return Err(format!(
-            "refine_mask_edge legacy bridge failed: {}",
-            stderr.trim()
+            "Mask Edge Refine engine `{engine}` is no longer available; only the native `cpu` engine is supported"
         ));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<RefineEdgeResult>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse refine_mask_edge output: {err} (raw: {})",
-            stdout.trim()
-        )
+    let params = crate::studio::edge_refine_cpu::CpuEdgeRefineParams {
+        image_path: image.clone(),
+        mask_path: mask.filter(|s| !s.trim().is_empty()),
+        background_path: background.filter(|s| !s.trim().is_empty()),
+        trimap_path: trimap.filter(|s| !s.trim().is_empty()),
+        preset,
+        erode_px: erode_px.unwrap_or(1),
+        dilate_px: dilate_px.unwrap_or(0),
+        feather_px: feather_px.unwrap_or(4.0),
+        guided_radius: guided_radius.unwrap_or(8),
+        edge_decontaminate: edge_decontaminate.unwrap_or(false),
+        background_blend_strength: background_blend_strength.unwrap_or(0.4),
+        output_dir: output_dir.unwrap_or_default(),
+        output_name: output_name.filter(|s| !s.trim().is_empty()),
+        device_requested: device
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "auto".to_string()),
+    };
+    crate::studio::edge_refine_cpu::try_refine(&params)?.ok_or_else(|| {
+        format!("Mask Edge Refine could not decode {image}: unsupported source for the native path")
     })
 }
 
-/// What `enhance_image` did: the resolved mode, source/output/target sizes, the
+/// What the image enhance pass did: the resolved mode, source/output/target sizes, the
 /// applied scale factor and the per-step strengths. Fields are `snake_case` to
 /// match the `image_enhance_cli.py` JSON.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -489,16 +388,11 @@ pub(crate) struct EnhanceImageResult {
     pub(crate) enhance_report: EnhanceReport,
 }
 
-/// Upscale and sharpen a low-resolution subject so it fills a PSD placeholder at
-/// the target DPI without going soft. This is the **Image Enhance / Super
-/// Resolution** node's backend (the fourth PSD production node): it consumes the
-/// base image plus an optional target size (explicit pixels or a connected
-/// placeholder-bounds object) and returns the enhanced image and a report.
-///
-/// Like the other PSD commands it shells out to `python/bridge/image_enhance_cli.py`
-/// using the project's bundled Python (Pillow + numpy; CPU-only in Phase 1, no
-/// GPU super-resolution). `mode` is `conservative | texture_rebuild | print_ready
-/// | custom`; the numeric strengths and `scale` apply only when `mode` is `custom`.
+/// Upscale and sharpen a low-resolution subject so it fills a PSD placeholder
+/// at the target DPI without going soft. This is the **Image Enhance / Super
+/// Resolution** node's backend. Runs in-process on the native `cpu` pipeline
+/// ([`crate::studio::image_enhance_cpu`]); `mode` is
+/// `conservative | texture_rebuild | print_ready | custom`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn enhance_image(
@@ -520,84 +414,43 @@ pub(crate) fn enhance_image(
     output_dir: Option<String>,
     output_name: Option<String>,
 ) -> Result<EnhanceImageResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir
-        .join("python")
-        .join("bridge")
-        .join("image_enhance_cli.py");
-    if !script.is_file() {
+    let _ = dir;
+    reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
+    let engine = engine.unwrap_or_default();
+    let engine = engine.trim();
+    if !(engine.is_empty() || engine.eq_ignore_ascii_case("cpu")) {
         return Err(format!(
-            "image_enhance_cli.py not found at {}",
-            script.display()
+            "Image Enhance engine `{engine}` is no longer available; only the native `cpu` engine is supported"
         ));
     }
-    reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let engine = engine.as_deref().unwrap_or("cpu");
-    let mut argv: Vec<String> = vec![
-        "--image".into(),
-        image,
-        "--mode".into(),
-        mode.as_deref().unwrap_or("conservative").into(),
-        "--target-width".into(),
-        target_width.unwrap_or(0).to_string(),
-        "--target-height".into(),
-        target_height.unwrap_or(0).to_string(),
-        "--target-bounds-json".into(),
-        target_bounds.as_deref().unwrap_or("").into(),
-        "--target-dpi".into(),
-        target_dpi.unwrap_or(300).to_string(),
-        "--max-pixels".into(),
-        max_pixels.unwrap_or(48_000_000).to_string(),
-        "--scale".into(),
-        scale.unwrap_or(2.0).to_string(),
-        "--denoise-strength".into(),
-        denoise_strength.unwrap_or(0.3).to_string(),
-        "--texture-strength".into(),
-        texture_strength.unwrap_or(0.25).to_string(),
-        "--engine".into(),
-        engine.into(),
-        "--device".into(),
-        device.as_deref().unwrap_or("auto").into(),
-        "--precision".into(),
-        precision.as_deref().unwrap_or("auto").into(),
-        "--output-dir".into(),
-        output_dir.as_deref().unwrap_or("").into(),
-        "--output-name".into(),
-        output_name.as_deref().unwrap_or("").into(),
-    ];
-    if preserve_text_logo.unwrap_or(true) {
-        argv.push("--preserve-text-logo".into());
-    }
-
-    // Only the torch engine (`realesrgan`) reloads a heavy model per call, so
-    // only it is routed through the warm worker; the always-available CPU path
-    // stays a one-shot and never spawns a worker.
-    let stdout = if engine == "realesrgan" {
-        run_torch_cli(
-            &python,
-            &dir,
-            "image_enhance_cli.py",
-            "image_enhance",
-            &argv,
-        )
-    } else {
-        run_bridge_oneshot(&python, &dir, "image_enhance_cli.py", &argv)
-    }
-    .map_err(|err| format!("enhance_image failed: {err}"))?;
-    serde_json::from_str::<EnhanceImageResult>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse enhance_image output: {err} (raw: {})",
-            stdout.trim()
-        )
+    let params = crate::studio::image_enhance_cpu::CpuEnhanceParams {
+        image_path: image.clone(),
+        output_dir: output_dir.unwrap_or_default(),
+        output_name: output_name.filter(|s| !s.trim().is_empty()),
+        mode,
+        target_bounds: target_bounds.filter(|s| !s.trim().is_empty()),
+        target_width: target_width.unwrap_or(0),
+        target_height: target_height.unwrap_or(0),
+        target_dpi: target_dpi.unwrap_or(300),
+        max_pixels: max_pixels.unwrap_or(48_000_000),
+        scale: scale.unwrap_or(2.0),
+        denoise_strength: denoise_strength.unwrap_or(0.3),
+        texture_strength: texture_strength.unwrap_or(0.25),
+        preserve_text_logo: preserve_text_logo.unwrap_or(true),
+        device_requested: device
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "auto".to_string()),
+        precision_requested: precision
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "auto".to_string()),
+    };
+    crate::studio::image_enhance_cpu::try_enhance(&params)?.ok_or_else(|| {
+        format!("Image Enhance could not process {image}: unsupported source for the native path")
     })
 }
 
 /// Diagnostic summary of a Detail Watchdog run: the resolved mode, which watch
-/// targets ran, which were skipped (CPU Phase 1 cannot do hands/text/logo), and
-/// the measured global sharpness. Fields are `snake_case` to match the
-/// `detail_watchdog_cli.py` JSON.
+/// targets ran, which were skipped, and the measured global sharpness.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct WatchdogReport {
     #[serde(default)]
@@ -673,13 +526,10 @@ pub(crate) struct DetectQualityResult {
 
 /// Scan a candidate image for local quality breakdowns (blur, halos, colour
 /// mismatch, missing resolution) and emit a [`QualityReport`]. This is the
-/// **Detail Watchdog** node's backend (the fifth PSD production node).
-///
-/// Phase 1 is **detect + report only** (no automatic repaint) and shells out to
-/// `python/bridge/detail_watchdog_cli.py` using the project's bundled Python
-/// (Pillow + numpy; no OpenCV, no ML). `mode` is `strict | balanced | lenient`;
-/// `watch_targets` is a comma list of `face,hands,text,logo,product_edges`
-/// (hands/text/logo need the later GPU/VLM backend and are reported as skipped).
+/// **Detail Watchdog** node's backend. Detect + report only (no automatic
+/// repaint); runs in-process on the native `rules` engine
+/// ([`crate::studio::detail_watchdog_cpu`]). `mode` is
+/// `strict | balanced | lenient`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn detect_quality_issues(
@@ -694,69 +544,28 @@ pub(crate) fn detect_quality_issues(
     output_dir: Option<String>,
     output_name: Option<String>,
 ) -> Result<DetectQualityResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = dir
-        .join("python")
-        .join("bridge")
-        .join("detail_watchdog_cli.py");
-    if !script.is_file() {
-        return Err(format!(
-            "detail_watchdog_cli.py not found at {}",
-            script.display()
-        ));
-    }
+    let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("--image")
-        .arg(&image)
-        .arg("--mode")
-        .arg(mode.as_deref().unwrap_or("balanced"))
-        .arg("--watch-targets")
-        .arg(watch_targets.as_deref().unwrap_or(""))
-        .arg("--engine")
-        .arg(engine.as_deref().unwrap_or("rules"))
-        .arg("--device")
-        .arg(device.as_deref().unwrap_or("auto"))
-        .arg("--visual-context")
-        .arg(visual_context.as_deref().unwrap_or(""))
-        .arg("--target-bounds")
-        .arg(target_bounds.as_deref().unwrap_or(""))
-        .arg("--output-dir")
-        .arg(output_dir.as_deref().unwrap_or(""))
-        .arg("--output-name")
-        .arg(output_name.as_deref().unwrap_or(""))
-        .current_dir(&dir);
-    apply_model_env(&mut cmd);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: don't pop a console window for the child.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default engine runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let engine = engine.unwrap_or_default();
+    let engine = engine.trim();
+    if !(engine.is_empty() || engine.eq_ignore_ascii_case("rules")) {
         return Err(format!(
-            "detect_quality_issues legacy bridge failed: {}",
-            stderr.trim()
+            "Detail Watchdog engine `{engine}` is no longer available; only the native `rules` engine is supported"
         ));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<DetectQualityResult>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse detect_quality_issues output: {err} (raw: {})",
-            stdout.trim()
-        )
+    let params = crate::studio::detail_watchdog_cpu::CpuDetailWatchdogParams {
+        image_path: image.clone(),
+        visual_context: visual_context.filter(|s| !s.trim().is_empty()),
+        target_bounds: target_bounds.filter(|s| !s.trim().is_empty()),
+        watch_targets: watch_targets.filter(|s| !s.trim().is_empty()),
+        mode,
+        output_dir: output_dir.unwrap_or_default(),
+        output_name: output_name.filter(|s| !s.trim().is_empty()),
+        device_requested: device
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "auto".to_string()),
+    };
+    crate::studio::detail_watchdog_cpu::try_watch(&params)?.ok_or_else(|| {
+        format!("Detail Watchdog could not decode {image}: unsupported source for the native path")
     })
 }

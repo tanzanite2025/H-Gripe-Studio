@@ -6,10 +6,9 @@
 //! never stalls on an inference job (and vice-versa):
 //!
 //! * [`FrameSource`] — the **decoder seam**. Any backend that can probe a clip
-//!   and render a frame at a timestamp fits behind it. The default impl is the
-//!   in-process libav decoder ([`super::ffmpeg_native`]); the legacy
-//!   [`PyAvFrameSource`] (the long-lived PyAV worker, [`super::video_worker`])
-//!   remains behind `--no-default-features` builds only.
+//!   and render a frame at a timestamp fits behind it. The impl is the
+//!   in-process libav decoder ([`super::ffmpeg_native`]); builds without the
+//!   `native-ffmpeg` feature surface an error from every call.
 //! * [`super::frame_cache::FrameCache`] — a small LRU of recently decoded frame
 //!   PNGs, so scrubbing back over a timestamp is a cache hit, not a re-decode.
 //! * [`PlaybackEngine`] — a **dedicated decode thread** fed by a channel. Seek
@@ -20,16 +19,13 @@
 //!
 //! The engine only produces frame *paths* (PNGs the video card already renders
 //! through the thumbnail pipeline); it does not itself paint, so it stays off
-//! the UI thread entirely. Any decoder failure surfaces as `Err` to the caller,
-//! which falls back to the one-shot `video_probe_cli.py`.
+//! the UI thread entirely. Any decoder failure surfaces as `Err` to the caller.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use serde::Deserialize;
-#[cfg(not(feature = "native-ffmpeg"))]
-use serde_json::json;
 
 use super::frame_cache::{frame_key, FrameCache};
 
@@ -37,7 +33,7 @@ use super::frame_cache::{frame_key, FrameCache};
 /// a short neighbourhood of the playhead back and forth without re-decoding.
 const SCRUB_CACHE_FRAMES: usize = 24;
 
-/// Metadata about a probed clip (mirrors `video_worker`'s `probe` payload).
+/// Metadata about a probed clip.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct VideoMeta {
     #[serde(default)]
@@ -70,87 +66,44 @@ pub(crate) trait FrameSource: Send {
     ) -> Result<PathBuf, String>;
 }
 
-/// [`FrameSource`] backed by the long-lived PyAV worker. Holds the `(python,
-/// dir)` context the worker needs; the worker itself keeps the ffmpeg container
-/// open across calls, so this struct is a thin request builder.
+/// [`FrameSource`] for builds without the vendored libav decoder: every call
+/// errors, pointing at the `native-ffmpeg` build.
 #[cfg(not(feature = "native-ffmpeg"))]
-pub(crate) struct PyAvFrameSource {
-    python: PathBuf,
-    dir: PathBuf,
-}
+struct UnavailableFrameSource;
 
 #[cfg(not(feature = "native-ffmpeg"))]
-impl PyAvFrameSource {
-    pub(crate) fn new(python: PathBuf, dir: PathBuf) -> Self {
-        Self { python, dir }
-    }
-}
-
-/// Shape of the worker's `frame` payload; only the written path is needed here.
-#[cfg(not(feature = "native-ffmpeg"))]
-#[derive(Debug, Deserialize)]
-struct FramePayload {
-    #[serde(default)]
-    poster_path: String,
-}
-
-#[cfg(not(feature = "native-ffmpeg"))]
-impl FrameSource for PyAvFrameSource {
-    fn probe(&mut self, video: &Path) -> Result<VideoMeta, String> {
-        let args = json!({ "video": video.to_string_lossy() });
-        let stdout = super::video_worker::run(&self.python, &self.dir, "probe", &args)?;
-        serde_json::from_str::<VideoMeta>(stdout.trim()).map_err(|err| {
-            format!(
-                "could not parse video probe: {err} (raw: {})",
-                stdout.trim()
-            )
-        })
+impl FrameSource for UnavailableFrameSource {
+    fn probe(&mut self, _video: &Path) -> Result<VideoMeta, String> {
+        Err(
+            "video decoding requires the `native-ffmpeg` build (vendored libav decoders)"
+                .to_string(),
+        )
     }
 
     fn decode_frame(
         &mut self,
-        video: &Path,
-        timestamp_sec: f64,
-        poster_out: &Path,
+        _video: &Path,
+        _timestamp_sec: f64,
+        _poster_out: &Path,
     ) -> Result<PathBuf, String> {
-        let args = json!({
-            "video": video.to_string_lossy(),
-            "timestamp": timestamp_sec,
-            "poster_out": poster_out.to_string_lossy(),
-        });
-        let stdout = super::video_worker::run(&self.python, &self.dir, "frame", &args)?;
-        let payload: FramePayload = serde_json::from_str(stdout.trim()).map_err(|err| {
-            format!(
-                "could not parse video frame: {err} (raw: {})",
-                stdout.trim()
-            )
-        })?;
-        if payload.poster_path.is_empty() {
-            return Ok(poster_out.to_path_buf());
-        }
-        Ok(PathBuf::from(payload.poster_path))
+        Err(
+            "video decoding requires the `native-ffmpeg` build (vendored libav decoders)"
+                .to_string(),
+        )
     }
 }
 
-/// Build the decoder backend for `(python, dir)`.
-///
-/// Default build: the in-process libav decoder ([`super::ffmpeg_native`]) —
-/// no Python in the loop, decode errors surface as `Err` to the caller.
-/// Without `native-ffmpeg` (legacy/testing builds): the PyAV worker
-/// ([`PyAvFrameSource`]). Either way the returned box is what the playback
-/// thread and the one-shot poster path decode through.
-pub(crate) fn make_frame_source(python: &Path, dir: &Path) -> Box<dyn FrameSource> {
+/// Build the decoder backend: the in-process libav decoder
+/// ([`super::ffmpeg_native`]) — decode errors surface as `Err` to the caller.
+/// Without `native-ffmpeg`, a stub source whose every call errors.
+pub(crate) fn make_frame_source() -> Box<dyn FrameSource> {
     #[cfg(feature = "native-ffmpeg")]
     {
-        let _ = (python, dir);
         Box::new(super::ffmpeg_native::NativeFfmpegFrameSource::new())
     }
     #[cfg(not(feature = "native-ffmpeg"))]
     {
-        Box::new(PyAvFrameSource::new(
-            python.to_path_buf(),
-            dir.to_path_buf(),
-        ))
+        Box::new(UnavailableFrameSource)
     }
 }
 
@@ -202,24 +155,16 @@ fn coalesce_latest(first: ScrubRequest, rx: &Receiver<ScrubRequest>) -> ScrubReq
     newest
 }
 
-/// A dedicated decode thread + its warm frame cache. Pinned to the `(python,
-/// dir)` its source was built for, so a project/interpreter change respawns it.
+/// A dedicated decode thread + its warm frame cache.
 pub(crate) struct PlaybackEngine {
-    python: PathBuf,
-    dir: PathBuf,
     tx: Option<Sender<ScrubRequest>>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl PlaybackEngine {
     /// Spawn the decode thread around `source`, keeping up to `cache_frames`
-    /// decoded frames warm. `python`/`dir` are recorded only for [`matches`].
-    fn spawn(
-        source: Box<dyn FrameSource>,
-        cache_frames: usize,
-        python: PathBuf,
-        dir: PathBuf,
-    ) -> Self {
+    /// decoded frames warm.
+    fn spawn(source: Box<dyn FrameSource>, cache_frames: usize) -> Self {
         let (tx, rx) = mpsc::channel::<ScrubRequest>();
         let handle = std::thread::spawn(move || {
             let mut source = source;
@@ -238,15 +183,9 @@ impl PlaybackEngine {
             }
         });
         Self {
-            python,
-            dir,
             tx: Some(tx),
             handle: Some(handle),
         }
-    }
-
-    fn matches(&self, python: &Path, dir: &Path) -> bool {
-        self.python == python && self.dir == dir
     }
 
     /// Queue a seek and block until the decode thread answers. Returns the frame
@@ -298,12 +237,9 @@ fn engine_cell() -> &'static Mutex<Option<PlaybackEngine>> {
 }
 
 /// Scrub to `timestamp_sec` in `video` and return the decoded frame's path,
-/// (re)spawning the playback engine for `(python, dir)` on demand and reusing
-/// its warm frame cache across calls. Errors are the caller's cue to fall back
-/// to the one-shot poster extraction.
+/// spawning the playback engine on demand and reusing its warm frame cache
+/// across calls.
 pub(crate) fn scrub_frame(
-    python: &Path,
-    dir: &Path,
     poster_dir: &Path,
     video: &Path,
     timestamp_sec: f64,
@@ -311,15 +247,9 @@ pub(crate) fn scrub_frame(
     let mut guard = engine_cell()
         .lock()
         .map_err(|_| "playback engine mutex poisoned".to_string())?;
-    if !guard.as_ref().is_some_and(|e| e.matches(python, dir)) {
-        *guard = None; // drop (join) any engine bound to a different project
-        let source = make_frame_source(python, dir);
-        *guard = Some(PlaybackEngine::spawn(
-            source,
-            SCRUB_CACHE_FRAMES,
-            python.to_path_buf(),
-            dir.to_path_buf(),
-        ));
+    if guard.is_none() {
+        let source = make_frame_source();
+        *guard = Some(PlaybackEngine::spawn(source, SCRUB_CACHE_FRAMES));
     }
     guard
         .as_ref()
@@ -414,8 +344,7 @@ mod tests {
         let source = Box::new(MockSource {
             decodes: decodes.clone(),
         });
-        let engine =
-            PlaybackEngine::spawn(source, 8, PathBuf::from("python"), PathBuf::from("/proj"));
+        let engine = PlaybackEngine::spawn(source, 8);
         let video = PathBuf::from("clip.mp4");
         let posters = PathBuf::from("/posters");
 
@@ -430,20 +359,5 @@ mod tests {
 
         engine.scrub_blocking(video, 5.0, posters).unwrap();
         assert_eq!(decodes.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn engine_matches_only_its_own_python_and_dir() {
-        let engine = PlaybackEngine::spawn(
-            Box::new(MockSource {
-                decodes: Arc::new(AtomicUsize::new(0)),
-            }),
-            2,
-            PathBuf::from("python"),
-            PathBuf::from("/proj"),
-        );
-        assert!(engine.matches(Path::new("python"), Path::new("/proj")));
-        assert!(!engine.matches(Path::new("python3"), Path::new("/proj")));
-        assert!(!engine.matches(Path::new("python"), Path::new("/other")));
     }
 }

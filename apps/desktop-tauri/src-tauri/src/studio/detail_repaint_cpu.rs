@@ -47,27 +47,27 @@ use crate::psd::{
 const DEFAULT_REPAINT_ACTIONS: [&str; 1] = ["detail_redraw"];
 
 /// Resolved parameters for one `prepare` run, mirroring the CLI arguments.
-pub(super) struct CpuPrepareParams {
-    pub(super) image_path: String,
-    pub(super) quality_report: Option<String>,
-    pub(super) repaint_actions: Option<String>,
-    pub(super) min_confidence: f64,
-    pub(super) padding: i64,
-    pub(super) max_regions: i64,
-    pub(super) invert_mask: bool,
-    pub(super) output_dir: String,
-    pub(super) output_name: Option<String>,
+pub(crate) struct CpuPrepareParams {
+    pub(crate) image_path: String,
+    pub(crate) quality_report: Option<String>,
+    pub(crate) repaint_actions: Option<String>,
+    pub(crate) min_confidence: f64,
+    pub(crate) padding: i64,
+    pub(crate) max_regions: i64,
+    pub(crate) invert_mask: bool,
+    pub(crate) output_dir: String,
+    pub(crate) output_name: Option<String>,
 }
 
 /// Resolved parameters for one `composite` run, mirroring the CLI arguments.
-pub(super) struct CpuCompositeParams {
-    pub(super) image_path: String,
-    pub(super) manifest: String,
-    pub(super) repainted: String,
-    pub(super) feather_px: f64,
-    pub(super) blend: Option<String>,
-    pub(super) output_dir: String,
-    pub(super) output_name: Option<String>,
+pub(crate) struct CpuCompositeParams {
+    pub(crate) image_path: String,
+    pub(crate) manifest: String,
+    pub(crate) repainted: String,
+    pub(crate) feather_px: f64,
+    pub(crate) blend: Option<String>,
+    pub(crate) output_dir: String,
+    pub(crate) output_name: Option<String>,
 }
 
 /// A candidate image decoded to interleaved RGBA f32 planes plus its loader
@@ -114,7 +114,7 @@ fn load_candidate(image_path: &str) -> Result<Option<Candidate>, String> {
 
 /// Run the `prepare` half in-process. Returns `Ok(Some(manifest))` on the
 /// fast path, or `Ok(None)` to defer to the Python bridge.
-pub(super) fn try_prepare(p: &CpuPrepareParams) -> Result<Option<PrepareRepaintResult>, String> {
+pub(crate) fn try_prepare(p: &CpuPrepareParams) -> Result<Option<PrepareRepaintResult>, String> {
     reject_unsafe_output_name(p.output_name.as_deref().unwrap_or(""))?;
     let Some(candidate) = load_candidate(&p.image_path)? else {
         return Ok(None);
@@ -305,7 +305,7 @@ pub(super) fn try_prepare(p: &CpuPrepareParams) -> Result<Option<PrepareRepaintR
 
 /// Run the `composite` half in-process. Returns `Ok(Some(result))` on the
 /// fast path, or `Ok(None)` to defer to the Python bridge.
-pub(super) fn try_composite(
+pub(crate) fn try_composite(
     p: &CpuCompositeParams,
 ) -> Result<Option<CompositeRepaintResult>, String> {
     reject_unsafe_output_name(p.output_name.as_deref().unwrap_or(""))?;
