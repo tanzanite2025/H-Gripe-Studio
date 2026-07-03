@@ -52,6 +52,15 @@ pub(crate) enum ViewportTarget {
         #[serde(rename = "timeSec")]
         time_sec: f64,
     },
+    /// One decoded frame of a registered video file, addressed by resource
+    /// reference + timestamp. The pre-timeline target for grading a raw video
+    /// path; timeline clips address frames through [`Self::VideoClip`].
+    VideoFrame {
+        #[serde(rename = "resourceId")]
+        resource_id: String,
+        #[serde(rename = "timeSec")]
+        time_sec: f64,
+    },
     NodeOutput {
         #[serde(rename = "nodeId")]
         node_id: String,
@@ -175,7 +184,9 @@ pub(crate) fn viewport_set_target(
 ) -> Result<(), String> {
     // Validate reference targets eagerly so a bad id fails at set time, not at
     // the first render.
-    if let ViewportTarget::Image { resource_id } = &target {
+    if let ViewportTarget::Image { resource_id } | ViewportTarget::VideoFrame { resource_id, .. } =
+        &target
+    {
         if resource::get(resource_id).is_none() {
             return Err(format!("unknown resource id: {resource_id}"));
         }
@@ -267,6 +278,39 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
                 height: thumb.height,
                 backend: cpu_backend(),
             })
+        }
+        #[cfg(feature = "native-ffmpeg")]
+        ViewportTarget::VideoFrame {
+            resource_id,
+            time_sec,
+        } => {
+            let entry = resource::get(&resource_id)
+                .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
+            let size = width.max(height).clamp(64, 2048);
+            // Decode the frame through the native media engine and run the
+            // grading kernel over its sRGB proxy — the identity document when
+            // no grade doc is set.
+            let doc = grade_doc.unwrap_or(Value::Null);
+            let graded = crate::studio::video_frame_grade_preview(
+                entry.path.clone(),
+                time_sec,
+                doc,
+                Some(size),
+            )?;
+            Ok(ViewportFrame {
+                data_url: graded.data_url,
+                width: graded.width,
+                height: graded.height,
+                backend: ViewportBackend {
+                    requested: "auto".to_string(),
+                    actual: graded.backend.to_string(),
+                    fallback_reason: None,
+                },
+            })
+        }
+        #[cfg(not(feature = "native-ffmpeg"))]
+        ViewportTarget::VideoFrame { .. } => {
+            Err("video frame targets require the native media engine".to_string())
         }
         ViewportTarget::ImageLayer { .. }
         | ViewportTarget::VideoClip { .. }

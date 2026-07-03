@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { generateThumbnail, videoFrameGradePreview, videoProbe } from "../bridge/tauri";
+import { generateThumbnail, videoProbe } from "../bridge/tauri";
 import { useGradeViewport } from "../viewport/useGradeViewport";
 import { useT, type MsgKey } from "../i18n";
 import {
@@ -178,10 +178,11 @@ export function GradePanel({
   const cubeInputRef = useRef<HTMLInputElement | null>(null);
   // Monotonic preview sequence: only the latest request may publish a frame.
   const previewSeq = useRef(0);
-  // Still-image graded frames render through a grade_preview viewport (WGPU
-  // migration Phase 3): the target is set once by reference, doc changes flow
-  // as viewport state. Null outside Tauri — the mirror fallback stays.
-  const renderGraded = useGradeViewport(videoPath ? undefined : imagePath ?? undefined);
+  // Graded frames render through a grade_preview viewport (WGPU migration
+  // Phase 3): the target (still image, or one decoded video frame) is a
+  // reference; doc changes flow as viewport state. Null outside Tauri — the
+  // mirror fallback stays.
+  const renderGraded = useGradeViewport({ imagePath, videoPath, videoTimestampSec });
 
   useEffect(() => {
     let cancelled = false;
@@ -212,13 +213,11 @@ export function GradePanel({
       setPreviewError(null);
       if (videoPath || imagePath) {
         try {
-          const result = videoPath
-            ? await videoFrameGradePreview(videoPath, videoTimestampSec, doc)
-            : await renderGraded(doc);
+          const result = await renderGraded(doc);
           if (previewSeq.current !== seq) return;
           if (result) {
             setPreview(result.data_url);
-            setBackend(typeof result.backend === "string" ? result.backend : result.backend.actual);
+            setBackend(result.backend.actual);
             return;
           }
         } catch (err) {
