@@ -18,6 +18,7 @@ mod engines;
 mod inspect;
 mod model_paths;
 mod repaint;
+mod smart;
 mod write;
 
 pub(crate) use cards::*;

@@ -124,12 +124,14 @@ pub(crate) struct ComposePsdResult {
 /// `<filename>.psd` + `<filename>_preview.png` + `<filename>_metadata.json`.
 ///
 /// The default path runs natively in Rust (`super::write`): the generated
-/// image is inserted as a new pixel layer inside a `03_GENERATED` group,
-/// splicing the template's own bytes so everything else round-trips
-/// untouched. If the native writer rejects the job (smart-object content
-/// replacement, non-PNG or colour-managed sources, non-8-bit/RGB templates),
-/// the optional legacy Python bridge (`compose_psd_cli.py`) is tried as a
-/// fallback. `dir` is the project root (defaults to the process working dir).
+/// image is inserted as a new pixel layer inside a `03_GENERATED` group — or,
+/// for `replace_content` on an embedded smart object, written inside the
+/// object (`super::smart`) — splicing the template's own bytes so everything
+/// else round-trips untouched. If the native writer rejects the job
+/// (externally linked smart objects, non-PNG or colour-managed sources,
+/// non-8-bit/RGB templates), the optional legacy Python bridge
+/// (`compose_psd_cli.py`) is tried as a fallback. `dir` is the project root
+/// (defaults to the process working dir).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compose_psd(

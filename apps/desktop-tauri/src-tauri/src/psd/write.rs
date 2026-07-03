@@ -714,9 +714,10 @@ fn json_pretty(pairs: &[(String, Value)]) -> String {
 }
 
 /// The native compose path behind the `compose_psd` command. Mirrors
-/// `compose_psd_cli.py`'s pixel-layer route; returns `Err` (so the caller can
-/// fall back to the legacy bridge) for smart-object content replacement and
-/// for any input the writer cannot reproduce faithfully.
+/// `compose_psd_cli.py`'s pixel-layer route and, for `replace_content` on an
+/// embedded smart object, `super::smart`'s in-place content replacement;
+/// returns `Err` (so the caller can fall back to the legacy bridge) for any
+/// input the writer cannot reproduce faithfully.
 pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdResult, String> {
     let template_path = args.template.trim();
     let image_path = args.image.trim();
@@ -755,9 +756,8 @@ pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdRes
     let tree = build_index_tree(&spans.records);
     let placeholder = resolve_placeholder(&plan, &tree, canvas_w, canvas_h)?;
 
-    if args.smart_object_mode == "replace_content" && placeholder.kind == Some("smartobject") {
-        return Err("smart-object content replacement is handled by the legacy bridge".to_string());
-    }
+    let so_replace =
+        args.smart_object_mode == "replace_content" && placeholder.kind == Some("smartobject");
 
     let (mut generated, source_mode) = load_rgba(image_path)?;
     let image_size = [generated.width(), generated.height()];
@@ -773,30 +773,60 @@ pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdRes
         placeholder.height,
         args.fit_mode,
     );
-    let main_name = "generated";
-
-    let rect = [
-        placeholder.top + off_y,
-        placeholder.left + off_x,
-        placeholder.top + off_y + fitted.height() as i32,
-        placeholder.left + off_x + fitted.width() as i32,
-    ];
-    let (new_records, new_channel_data) =
-        encode_generated_records(spans.psb, "03_GENERATED", main_name, rect, &fitted);
-    let insert_at = insertion_index(args.z_order, &spans.records, placeholder.subtree_start);
-    let hide_record_index = if args.hide_placeholder {
-        placeholder.record_index
+    let (composed, main_name, smart_object_mode) = if so_replace {
+        // True smart-object replacement: draw the fitted image into a
+        // box-sized transparent canvas (like the Python CLI's `paste`) and
+        // swap both the embedded source and the cached raster in place.
+        let record_index = placeholder
+            .record_index
+            .ok_or("smart-object placeholder has no record index")?;
+        let mut boxed = RgbaImage::new(
+            placeholder.width.max(1) as u32,
+            placeholder.height.max(1) as u32,
+        );
+        image::imageops::replace(&mut boxed, &fitted, i64::from(off_x), i64::from(off_y));
+        let mut png = Vec::new();
+        boxed
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|err| format!("failed to encode smart-object content: {err}"))?;
+        let rect = [
+            placeholder.top,
+            placeholder.left,
+            placeholder.top + boxed.height() as i32,
+            placeholder.left + boxed.width() as i32,
+        ];
+        let composed =
+            super::smart::replace_smart_object(&data, &spans, record_index, rect, &boxed, &png)?;
+        (
+            composed,
+            spans.records[record_index].name.clone(),
+            "replace_content",
+        )
     } else {
-        None
+        let rect = [
+            placeholder.top + off_y,
+            placeholder.left + off_x,
+            placeholder.top + off_y + fitted.height() as i32,
+            placeholder.left + off_x + fitted.width() as i32,
+        ];
+        let (new_records, new_channel_data) =
+            encode_generated_records(spans.psb, "03_GENERATED", "generated", rect, &fitted);
+        let insert_at = insertion_index(args.z_order, &spans.records, placeholder.subtree_start);
+        let hide_record_index = if args.hide_placeholder {
+            placeholder.record_index
+        } else {
+            None
+        };
+        let composed = splice_psd(
+            &data,
+            &spans,
+            insert_at,
+            &new_records,
+            &new_channel_data,
+            hide_record_index,
+        )?;
+        (composed, "generated".to_string(), "disable")
     };
-    let composed = splice_psd(
-        &data,
-        &spans,
-        insert_at,
-        &new_records,
-        &new_channel_data,
-        hide_record_index,
-    )?;
 
     // Build the preview before writing anything so an unsupported template
     // (exotic blending the native compositor rejects) falls back cleanly.
@@ -900,11 +930,19 @@ pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdRes
             .map(Value::from)
             .unwrap_or(Value::Null),
     );
-    set(&mut pairs, "generated_layer", Value::from(main_name));
+    set(
+        &mut pairs,
+        "generated_layer",
+        Value::from(main_name.as_str()),
+    );
     set(&mut pairs, "fit_mode", Value::from(args.fit_mode));
     set(&mut pairs, "fit_offset", Value::from(vec![off_x, off_y]));
     set(&mut pairs, "z_order", Value::from(args.z_order));
-    set(&mut pairs, "smart_object_mode", Value::from("disable"));
+    set(
+        &mut pairs,
+        "smart_object_mode",
+        Value::from(smart_object_mode),
+    );
     set(
         &mut pairs,
         "psd_path",
@@ -928,7 +966,7 @@ pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdRes
         preview_path,
         metadata_path: metadata_file.to_string_lossy().to_string(),
         placeholder_kind,
-        smart_object_mode: "disable".to_string(),
+        smart_object_mode: smart_object_mode.to_string(),
     })
 }
 

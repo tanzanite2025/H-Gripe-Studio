@@ -305,7 +305,7 @@ Every Rust site that can spawn a Python process today
 
 | Rust call site | Python entry point | Node / feature |
 | --- | --- | --- |
-| `psd/compose.rs` (`compose_psd`) | `compose_psd_cli.py` | PSD Export (fallback / smart-object lane) |
+| `psd/compose.rs` (`compose_psd`) | `compose_psd_cli.py` | PSD Export (fallback) |
 | `psd/compose.rs` (`inspect_psd`) | `inspect_psd_cli.py` | PSD template validation |
 | `psd/compose.rs` (`analyze_psd_context`) | `analyze_psd_cli.py` | PSD Context Analyze |
 | `psd/cards.rs` (`match_light_color`) | `color_match_cli.py` | Light & Color Match (legacy engines) |
@@ -342,9 +342,9 @@ Rust-default (Python only as optional legacy engine or fallback):
 
 Python-default (no Rust path yet):
 
-- Smart-object content replacement inside `compose_psd` (`psd_tools`) —
-  the only remaining Python-default PSD path (P3 below; inspect, analyze
-  and pixel-layer compose are native now).
+- ~~Smart-object content replacement inside `compose_psd`~~ — native now
+  (P3c below); every PSD command (inspect, analyze, pixel-layer compose,
+  embedded smart-object replace) is native-default.
 - Torch/Diffusers engines (`realesrgan`, `ccsr`, `supir`, `sd_inpaint`,
   `sdxl_inpaint`, `flux_fill`) and the ONNX legacy backends behind the
   bridge — opt-in only, never a default (P4 below).
@@ -398,16 +398,31 @@ Done:
   the same job, plus pixel-identical previews (also verified externally:
   psd_tools re-reads the Rust file and its `composite()` matches the
   Python CLI's preview pixel-for-pixel).
+- **Smart-object content replacement is native (P3c).** For
+  `smart_object_mode == "replace_content"` on an embedded (`liFD`) smart
+  object, `psd/smart.rs` writes the generated image *inside* the object,
+  byte-splicing exactly three spans instead of re-serialising the document
+  like psd_tools: the placeholder's layer record (new bounds + raw RGBA
+  channel info; blend data and every tagged block — `SoLd`, `luni` — are
+  copied verbatim so UUID/transform/warp survive), its channel data (the
+  cached raster previews show), and the matching UUID item inside the
+  document-level linked-layer block (`lnkD`/`lnk2`/`lnk3`), where the
+  embedded source bytes, size and file type become the new PNG. Unlike the
+  legacy bridge (which flattens to the document's RGB mode), the native
+  raster keeps the letterbox strips transparent — matching what Photoshop
+  re-renders from the embedded PNG. Golden tests run against psd-tools'
+  `placedLayer.psd` fixture and compare the preview against the Python
+  CLI's output; psd_tools re-reads the Rust file cleanly (layer tree,
+  UUID, embedded bytes, composite). Externally linked (`lnkE`) / alias
+  smart objects still error into the `compose_psd_cli.py` fallback.
 
 Pending:
 
-- Smart-object content replacement
-  (`smart_object_mode == "replace_content"`) stays on `compose_psd_cli.py`
-  + `third_party/psd_tools`, as do inputs the native writer rejects
-  (non-PNG / colour-managed / EXIF-rotated sources, non-8-bit/RGB
-  templates). Once real-template coverage confirms the native writer,
-  Phase 7 (deleting the Python runtime from the packaged app) can start
-  for everything except the smart-object lane.
+- Inputs the native writer rejects (non-PNG / colour-managed /
+  EXIF-rotated sources, non-8-bit/RGB templates, external smart objects)
+  stay on `compose_psd_cli.py` + `third_party/psd_tools`. Once
+  real-template coverage confirms the native writer, Phase 7 (deleting the
+  Python runtime from the packaged app) can start.
 
 ### P4 — Torch/Diffusers out of core (done)
 
