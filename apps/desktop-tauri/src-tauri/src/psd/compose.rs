@@ -250,10 +250,67 @@ pub(crate) struct InspectPsdResult {
 /// (file present, placeholder layer name actually exists) instead of only
 /// surfacing the problem mid-compose.
 ///
-/// Like `compose_psd`, this shells out to `python/bridge/inspect_psd_cli.py`
-/// using the project's bundled Python, reusing the vendored psd-tools pipeline.
+/// The default path runs natively in Rust (`super::inspect`), reading only the
+/// header + layer records — no Python involved. If native parsing fails (an
+/// exotic PSD variant), the optional legacy Python bridge
+/// (`inspect_psd_cli.py`) is tried as a fallback, keeping the previous
+/// behaviour available.
 #[tauri::command]
 pub(crate) fn inspect_psd(
+    dir: Option<String>,
+    template: String,
+    names: Option<Vec<String>>,
+) -> Result<InspectPsdResult, String> {
+    let requested = names.clone().unwrap_or_default();
+    let template_trimmed = template.trim();
+    let template_path = Path::new(template_trimmed);
+    if template_trimmed.is_empty() || !template_path.is_file() {
+        // Not an error: callers distinguish "no file on disk" from a crash.
+        return Ok(InspectPsdResult {
+            status: "succeeded".to_string(),
+            exists: false,
+            width: 0,
+            height: 0,
+            layers: Vec::new(),
+            missing: requested,
+        });
+    }
+
+    let native_err = match super::inspect::inspect_psd_file(template_path) {
+        Ok(parsed) => {
+            let layers: Vec<PsdLayerInfo> = parsed
+                .layers
+                .into_iter()
+                .map(|layer| PsdLayerInfo {
+                    name: layer.name,
+                    kind: layer.kind.to_string(),
+                })
+                .collect();
+            let missing = requested
+                .into_iter()
+                .filter(|name| !name.is_empty() && !layers.iter().any(|row| &row.name == name))
+                .collect();
+            return Ok(InspectPsdResult {
+                status: "succeeded".to_string(),
+                exists: true,
+                width: parsed.width,
+                height: parsed.height,
+                layers,
+                missing,
+            });
+        }
+        Err(err) => err,
+    };
+
+    inspect_psd_legacy(dir, template, names)
+        .map_err(|legacy_err| format!("native PSD inspect failed: {native_err}; {legacy_err}"))
+}
+
+/// The optional legacy Python bridge behind [`inspect_psd`]: shells out to
+/// `python/bridge/inspect_psd_cli.py` using the project's bundled Python,
+/// reusing the vendored psd-tools pipeline. Only tried when the native parser
+/// rejects the file.
+fn inspect_psd_legacy(
     dir: Option<String>,
     template: String,
     names: Option<Vec<String>>,
@@ -288,7 +345,7 @@ pub(crate) fn inspect_psd(
         .output()
         .map_err(|err| {
             format!(
-                "legacy Python bridge failed to launch {}: {err} (PSD inspect still requires the Python bridge; a native Rust PSD path is planned)",
+                "optional legacy Python bridge failed to launch {}: {err} (the default inspect path runs natively in Rust)",
                 python.display()
             )
         })?;

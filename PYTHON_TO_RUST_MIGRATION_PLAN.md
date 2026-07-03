@@ -359,11 +359,25 @@ bridge; a native Rust PSD path is planned" for the PSD commands. The
 `Executor` doc in `nodeSpecs.ts` describes `local` as native-Rust default +
 optional legacy bridge.
 
-### P3 — PSD (pending, migrate last)
+### P3 — PSD (in progress, migrate last)
 
-`compose_psd_cli.py` / `inspect_psd_cli.py` / `analyze_psd_cli.py` +
-`third_party/psd_tools` stay the only production PSD path. See
-"Phase 5: Replace PSD Python Last" for the staged plan.
+Done:
+
+- **Inspect is native.** `inspect_psd` now runs a minimal read-only Rust
+  PSD/PSB parser (`psd/inspect.rs`): it reads only the header + layer
+  records (canvas size, layer names incl. Unicode `luni`, group dividers,
+  smart-object markers) and never decodes pixel data. Output matches the
+  Python CLI's golden output (fixture:
+  `apps/desktop-tauri/src-tauri/tests/fixtures/inspect_template.psd`).
+  `inspect_psd_cli.py` remains only as an optional legacy fallback when
+  native parsing rejects an exotic file.
+
+Pending:
+
+- `analyze_psd_cli.py` (needs full-canvas compositing for the background
+  heuristics) and `compose_psd_cli.py` (layered PSD writer, smart-object
+  content replacement) + `third_party/psd_tools` stay the production PSD
+  path. See "Phase 5: Replace PSD Python Last" for the staged plan.
 
 ### P4 — Torch/Diffusers out of core (done)
 
