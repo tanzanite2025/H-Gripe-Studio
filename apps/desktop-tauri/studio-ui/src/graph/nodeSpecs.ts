@@ -798,10 +798,10 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   smartLayerSplit: {
     kind: "smartLayerSplit",
     family: "image",
-    executor: "graph",
+    executor: "compute",
     title: "Smart Layer Split",
     description:
-      "Protocol stub (IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md): wraps the connected image into a LayeredImageAsset with a locked original layer plus low-confidence background/subject candidates whose masks are placeholders. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports; a real segmentation engine replaces the stub without changing the ports.",
+      "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. The desktop runtime segments the subject in-process (model backend when a weight resolves, else the deterministic builtin CPU segmenter) and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
     category: "control",
     inputs: [port("image", "image", "image")],
     outputs: [
@@ -819,7 +819,22 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         options: ["subject", "background", "original"],
         defaultValue: "subject",
         inline: true,
-        hint: "which stub layer the selected_layer output emits",
+        hint: "which layer the selected_layer output emits",
+      },
+      {
+        key: "output_dir",
+        label: "Output dir",
+        control: "path",
+        defaultValue: "",
+        hint: "leave empty to use the configured output directory",
+      },
+      {
+        key: "output_name",
+        label: "Output name",
+        control: "text",
+        defaultValue: "",
+        hint: "base name for the per-layer PNGs (empty = <image>_split)",
+        inline: true,
       },
     ],
   },

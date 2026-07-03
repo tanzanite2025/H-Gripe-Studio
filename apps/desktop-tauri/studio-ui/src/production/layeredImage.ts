@@ -4,10 +4,10 @@
 // image into editable production layers; PSD is only one import/export format
 // of it. This file is protocol-first: it fixes the data model plus a
 // deterministic stub builder (original locked layer + background/subject
-// candidates with placeholder masks) so the node canvas, Review Editor, Grade
-// and Timeline can all reference the same asset shape before any real
-// segmentation engine lands. Fields stay snake_case: the same JSON round-trips
-// through the Rust `smartLayerSplit` graph node (studio/layer_split.rs).
+// candidates with placeholder masks) used by the browser preview; the desktop
+// runtime's `smartLayerSplit` compute node (studio/layer_split.rs) emits the
+// same shape with real segmented masks. Fields stay snake_case: the same JSON
+// round-trips through both runtimes.
 
 /** A reference to an image file on disk. */
 export interface ImageRef {

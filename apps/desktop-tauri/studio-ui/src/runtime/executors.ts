@@ -265,10 +265,10 @@ export const defaultExecutors: ExecutorRegistry = {
     return { image: image ?? null, result };
   },
 
-  // Wraps the connected image into the stub LayeredImageAsset (locked original
-  // layer + background/subject candidates with placeholder masks). Pure
-  // protocol bridging: the real segmentation engine replaces this without
-  // changing the ports. Mirrors the Rust graph-lane arm in studio/layer_split.rs.
+  // Browser-preview fallback: wraps the connected image into the stub
+  // LayeredImageAsset (locked original layer + background/subject candidates
+  // with placeholder masks). The desktop runtime runs real segmentation on the
+  // compute lane instead (studio/layer_split.rs); the ports are identical.
   smartLayerSplit: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
     if (!image) throw new Error("Smart Layer Split needs a connected image input");
