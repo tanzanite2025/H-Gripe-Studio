@@ -1,17 +1,20 @@
-//! The `detailWatchdog` node executor: bridges a graph node to the CPU quality
-//! watchdog (`crate::psd::detect_quality_issues`), scanning a candidate image
-//! for local breakdowns (blur, halos, colour mismatch, missing resolution) and
-//! exposing the (Phase 1 unchanged) image, the quality report, and the issue
-//! overlay as flat output ports.
+//! The `detailWatchdog` node executor. The default `rules` engine runs the
+//! in-process native-Rust rule layer ([`super::detail_watchdog_cpu`]); a
+//! learned detector — or a source the fast path cannot decode — is served by
+//! the Python bridge (`crate::psd::detect_quality_issues`). Both paths scan a
+//! candidate image for local breakdowns (blur, halos, colour mismatch,
+//! missing resolution) and expose the (Phase 1 unchanged) image, the quality
+//! report, and the issue overlay as flat output ports.
 
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
+use super::detail_watchdog_cpu::{self, CpuDetailWatchdogParams};
 use super::graph::{
     optional, resolve_output_dir, studio_output_map, studio_value_to_string, StudioGraphNode,
 };
-use crate::psd::detect_quality_issues;
+use crate::psd::{detect_quality_issues, DetectQualityResult};
 
 /// Encode an optional connected JSON input ({...}) as a string for the CLI.
 fn encode_input(inputs: &BTreeMap<String, Value>, key: &str) -> Result<Option<String>, String> {
@@ -40,24 +43,57 @@ pub(super) fn execute_studio_detail_watchdog(
     let target_bounds = encode_input(inputs, "target_bounds")?;
 
     let output_dir = resolve_output_dir(node)?;
+    let watch_targets = optional(studio_value_to_string(node.params.get("watch_targets")));
+    let mode = optional(studio_value_to_string(node.params.get("mode")));
+    // `engine` selects the opt-in ML detector (default `rules`); the bridge
+    // falls back to the always-on rule layer when it is unavailable.
+    let engine = optional(studio_value_to_string(node.params.get("engine")));
+    // `device` selects the ONNX execution provider for the learned detector
+    // (default `auto`); ignored by the always-on CPU rule layer.
+    let device = optional(studio_value_to_string(node.params.get("device")));
+    let output_name = optional(studio_value_to_string(node.params.get("output_name")));
+
+    // The default `rules` engine runs in-process; a learned detector — or a
+    // source the fast path cannot decode — falls through to Python.
+    let engine_is_rules = engine
+        .as_deref()
+        .map(|e| e.trim().eq_ignore_ascii_case("rules"))
+        .unwrap_or(true);
+    if engine_is_rules {
+        let cpu_params = CpuDetailWatchdogParams {
+            image_path: image.clone(),
+            visual_context: visual_context.clone(),
+            target_bounds: target_bounds.clone(),
+            watch_targets: watch_targets.clone(),
+            mode: mode.clone(),
+            output_dir: output_dir.clone(),
+            output_name: output_name.clone(),
+            device_requested: device.clone().unwrap_or_else(|| "auto".to_string()),
+        };
+        if let Some(result) = detail_watchdog_cpu::try_watch(&cpu_params)? {
+            return to_output_map(result);
+        }
+    }
 
     let result = detect_quality_issues(
         None,
         image,
         visual_context,
         target_bounds,
-        optional(studio_value_to_string(node.params.get("watch_targets"))),
-        optional(studio_value_to_string(node.params.get("mode"))),
-        // `engine` selects the opt-in ML detector (default `rules`); the bridge
-        // falls back to the always-on rule layer when it is unavailable.
-        optional(studio_value_to_string(node.params.get("engine"))),
-        // `device` selects the ONNX execution provider for the learned detector
-        // (default `auto`); ignored by the always-on CPU rule layer.
-        optional(studio_value_to_string(node.params.get("device"))),
+        watch_targets,
+        mode,
+        engine,
+        device,
         Some(output_dir),
-        optional(studio_value_to_string(node.params.get("output_name"))),
+        output_name,
     )?;
 
+    to_output_map(result)
+}
+
+/// Encode a [`DetectQualityResult`] into the node's flat output ports. Shared
+/// by the in-process and Python paths so both emit an identical output shape.
+fn to_output_map(result: DetectQualityResult) -> Result<BTreeMap<String, Value>, String> {
     let report = serde_json::to_value(&result.quality_report)
         .map_err(|err| format!("failed to encode QualityReport: {err}"))?;
     let watchdog = serde_json::to_value(&result.watchdog_report)
