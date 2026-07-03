@@ -1,7 +1,11 @@
 # Dual Dock Workspace Plan
 
-> Status: planning only. Do not implement while the cloud-side colour kernel is
-> still moving.
+> Status: superseded in direction by
+> [`UNIFIED_PRODUCTION_DRAWER_PLAN.md`](UNIFIED_PRODUCTION_DRAWER_PLAN.md) —
+> the "two docks" idea evolved into one bottom production drawer (landed,
+> PR #294–#300) with optional side rails as quick entry points / drop targets.
+> The sections on the graph canvas as source of truth and drag-to-rail inbox
+> remain relevant reference.
 
 This document freezes the product direction for replacing stacked edit modals
 with a resizable dual-dock workspace. The goal is to let the central node canvas,

@@ -7,7 +7,7 @@
 
 H-Gripe Studio is a local-first [Tauri](https://tauri.app) desktop app with no
 H-Gripe account/login system: a single
-React front end (shell panels + an in-house React Flow node editor) over a Rust
+React front end (an in-house React Flow node editor as the whole UI) over a Rust
 backend (the `hgripe-api` broker, Tauri commands, native compute cards, and
 resource scheduling) plus a Python bridge for PSD/image helpers and opt-in model
 backends. You orchestrate remote provider calls (image / text / audio generation
@@ -26,7 +26,7 @@ local workspace.
 ```
 H-Gripe Studio (Tauri desktop)
   apps/desktop-tauri/
-    studio-ui/     React + TS front end: shell panels + React Flow node editor
+    studio-ui/     React + TS front end: the React Flow node editor (the whole UI)
     src-tauri/     Rust backend: Tauri commands, Studio graph runner, PSD chain
   crates/hgripe-api/  API broker: provider adapters, retry/cache, task state, history
   python/bridge/      Pillow/numpy CLIs plus opt-in model backend seams
