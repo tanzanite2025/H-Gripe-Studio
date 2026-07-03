@@ -13,12 +13,13 @@ export type ViewportTarget =
   | { kind: "image"; resourceId: string }
   | { kind: "image_layer"; assetId: string; layerId: string }
   | { kind: "video_clip"; timelineId: string; clipId: string; timeSec: number }
+  | { kind: "video_frame"; resourceId: string; timeSec: number }
   | { kind: "node_output"; nodeId: string; outputPort?: string };
 
 /** Fallback contract: fallback is a reportable runtime decision, not failure. */
 export interface ViewportBackend {
   requested: "auto" | "gpu" | "cpu";
-  actual: "wgpu" | "cpu";
+  actual: "wgpu" | "gpu" | "cpu";
   fallback_reason?: string;
 }
 
