@@ -343,13 +343,18 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 
 /* nodes */
+:root {
+  --node-badge-size: 32px;
+}
 .node {
+  position: relative;
   width: 180px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 12px;
-  overflow: hidden;
+  /* visible so the corner type badge can sit 3/4 outside the card */
+  overflow: visible;
 }
 .node.selected { border-color: var(--accent); }
 .node-header {
@@ -357,9 +362,47 @@ button:disabled { opacity: 0.6; cursor: default; }
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
+  /* keep the title row clear of the corner badge zone */
+  padding-right: calc(var(--node-badge-size) * 0.55);
   background: #20232e;
   border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
 }
+/* Corner type badge: a circle whose center point is exactly the card's
+   top-right corner (1/4 inside the card, 3/4 outside). Identity stamp only:
+   an icon, no text, no status. See NODE_CARD_CORNER_BADGE_PLAN.md. */
+.node-type-badge {
+  position: absolute;
+  top: calc(var(--node-badge-size) / -2);
+  right: calc(var(--node-badge-size) / -2);
+  width: var(--node-badge-size);
+  height: var(--node-badge-size);
+  border-radius: 999px;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a2d37;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.node-type-badge svg {
+  width: 55%;
+  height: 55%;
+}
+.node.selected .node-type-badge { border-color: var(--accent); }
+.node-type-badge.family-image { background: #1d3328; color: #6fd39a; }
+.node-type-badge.family-video { background: #16283c; color: #6cb2ff; }
+.node-type-badge.family-audio { background: #322a1a; color: #ffc861; }
+.node-type-badge.family-psd { background: #16303c; color: #4fc3f7; }
+.node-type-badge.family-mask { background: #2b2436; color: #c39bf2; }
+.node-type-badge.family-crop { background: #33261d; color: #ffab70; }
+.node-type-badge.family-grade { background: #331d2b; color: #ff8ac2; }
+.node-type-badge.family-api { background: #1c2a3a; color: #7dd3fc; }
+.node-type-badge.family-compute { background: #23301d; color: #b3e07a; }
+.node-type-badge.family-export { background: #2f2a17; color: #e6d06a; }
+.node-type-badge.family-utility { background: #262933; color: var(--muted); }
 .node-title { font-weight: 600; }
 .node-body { padding: 8px; min-height: 30px; }
 .node-preview-text { color: var(--text); max-height: 48px; overflow: hidden; }

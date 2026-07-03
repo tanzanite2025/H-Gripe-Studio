@@ -1,5 +1,5 @@
 import { memo, useContext, useEffect, useRef, useState } from "react";
-import { Handle, Position, useStore, type NodeProps } from "@xyflow/react";
+import { useStore, type NodeProps } from "@xyflow/react";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";
@@ -16,6 +16,7 @@ import { subscribeIngest } from "../runtime/ingestStore";
 import { ParamField } from "./ParamField";
 import { useNodeEditing } from "./editingContext";
 import { psdTemplatePathWarning } from "./psdcheck";
+import { NodeCardShell } from "./NodeCardShell";
 
 export interface HgripeNodeData extends Record<string, unknown> {
   kind: string;
@@ -387,17 +388,14 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
     spec.kind === "psdTemplate" ? psdTemplatePathWarning(String(d.params.path ?? "")) : null;
 
   return (
-    <div className={`node ${selected ? "selected" : ""} status-${status} ${lod ? "lod" : ""}`}>
-      <div className="node-header">
-        <span className="node-title">{spec.title}</span>
-        {spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
-        <span className={`badge badge-${status}`} title={fmtDuration(d.durationMs)}>
-          {status}
-          {d.durationMs != null && (status === "succeeded" || status === "failed" || status === "cancelled") ? (
-            <em className="badge-time"> {fmtDuration(d.durationMs)}</em>
-          ) : null}
-        </span>
-      </div>
+    <NodeCardShell
+      spec={spec}
+      selected={!!selected}
+      status={status}
+      lod={lod}
+      durationMs={d.durationMs}
+      titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
+    >
       {!lod && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>
           {d.error}
@@ -566,30 +564,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
           </div>
         ) : null}
       </div>}
-
-      {spec.inputs.map((p, i) => (
-        <Handle
-          key={`in-${p.id}`}
-          id={p.id}
-          type="target"
-          position={Position.Left}
-          className={`port port-${p.type}`}
-          style={{ top: 44 + i * 22 }}
-          title={`${p.label}: ${p.type}`}
-        />
-      ))}
-      {spec.outputs.map((p, i) => (
-        <Handle
-          key={`out-${p.id}`}
-          id={p.id}
-          type="source"
-          position={Position.Right}
-          className={`port port-${p.type}`}
-          style={{ top: 44 + i * 22 }}
-          title={`${p.label}: ${p.type}`}
-        />
-      ))}
-    </div>
+    </NodeCardShell>
   );
 }
 
