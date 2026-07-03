@@ -186,13 +186,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [nodes, selectedId],
   );
 
-  // The selected split node's layered image asset. Derived client-side from
-  // the stub builder (same shape either runtime emits on run) so the review
-  // panel works before any run; a run-output asset store replaces this once
-  // real segmentation lands.
+  // The selected split node's layered image asset. The last run's real
+  // segmented asset (surfaced onto the card by the run controller) wins;
+  // before any run the panel falls back to the client-side stub builder so
+  // it still works, e.g. in the browser preview.
   const layeredAsset = useMemo<LayeredImageAsset | null>(() => {
     if (!selectedNode) return null;
-    if ((selectedNode.data as HgripeNodeData).kind !== "smartLayerSplit") return null;
+    const data = selectedNode.data as HgripeNodeData;
+    if (data.kind !== "smartLayerSplit") return null;
+    if (data.layeredAsset) return data.layeredAsset;
     const edge = edges.find((e) => e.target === selectedNode.id && e.targetHandle === "image");
     const src = edge ? nodes.find((n) => n.id === edge.source) : undefined;
     const d = src?.data as HgripeNodeData | undefined;

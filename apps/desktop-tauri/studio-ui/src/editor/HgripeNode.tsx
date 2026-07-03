@@ -17,6 +17,7 @@ import { ParamField } from "./ParamField";
 import { useNodeEditing } from "./editingContext";
 import { psdTemplatePathWarning } from "./psdcheck";
 import { NodeCardShell } from "./NodeCardShell";
+import type { LayeredImageAsset } from "../production/layeredImage";
 
 export interface HgripeNodeData extends Record<string, unknown> {
   kind: string;
@@ -41,6 +42,8 @@ export interface HgripeNodeData extends Record<string, unknown> {
   maskPath?: string | null;
   alphaImagePath?: string | null;
   cutoutImagePath?: string | null;
+  /** Layered image asset from the last run (smartLayerSplit node only). */
+  layeredAsset?: LayeredImageAsset | null;
 }
 
 function basename(p: string): string {

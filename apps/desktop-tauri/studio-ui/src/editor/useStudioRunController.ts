@@ -24,6 +24,7 @@ import {
 } from "./runhistory";
 import { useProjectScopedStore } from "./useProjectScopedStore";
 import type { WorkflowGraph } from "../graph/model";
+import { parseLayeredImageAsset } from "../production/layeredImage";
 import { ancestorSubgraph, runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
 import { batchItems, defaultExecutors } from "../runtime/executors";
 import {
@@ -356,6 +357,10 @@ export function useStudioRunController({
           const imagePath = str(out?.image);
           patchNode(node.id, { imagePath });
           if (imagePath) paths.push(imagePath);
+        } else if (node.kind === "smartLayerSplit") {
+          // Surface the run's real layered asset onto the card so the review
+          // panel replaces its client-side stub with segmented layers.
+          patchNode(node.id, { layeredAsset: parseLayeredImageAsset(out?.layered_asset) });
         } else if (node.kind === "psdExport") {
           // Surface the export triplet onto the card. Browser executors return
           // camelCase; the Rust backend returns the raw snake_case fields.
