@@ -233,6 +233,23 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       crop_report: "裁剪报告",
     },
   },
+  imageGrade: {
+    title: "调色",
+    description:
+      "用 hgripe-grade 内核（docs/design/grade-kernel.md）对图像进行调色——在调色对话框中编排 op 栈（曝光、白平衡、对比度、饱和度、RGB 混合器、色彩扭曲器、可调半径的锐化/降噪、胶片颗粒、1D/3D LUT），保存为 grade_doc。对话框通过内核实时预览（以 grade-gpu 构建且有适配器时走 GPU，否则走按行并行的 CPU 参考通路）；运行通路在图像自身色彩空间中对全分辨率 16-bit 工作表面调色，宽色域源保持 16-bit + ICC。输出调色后的图像与调色报告。",
+    params: {
+      format: {
+        label: "输出格式",
+        hint: "png（默认）或 16-bit tiff；宽色域源两者都保留 16-bit + ICC",
+      },
+      output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
+      output_name: { label: "输出名", hint: "调色后文件的基础名（空 = <image>_grade）" },
+    },
+    ports: {
+      image: "图像",
+      grade_report: "调色报告",
+    },
+  },
   subjectMask: {
     title: "主体蒙版 / 抠像",
     description:

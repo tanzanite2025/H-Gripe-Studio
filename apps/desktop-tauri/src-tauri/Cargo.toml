@@ -19,6 +19,12 @@ path = "src/main.rs"
 # `build.rs` copies the runtime DLLs next to the test/app binaries. Decoder
 # failures fall back to the PyAV/one-shot path exactly as before.
 native-ffmpeg = ["dep:rusty_ffmpeg"]
+# GPU backend for the grading dialog preview (`grade_preview`) and the
+# `imageGrade` node: compiles hgripe-grade's wgpu compute passes in. Off by
+# default so the ordinary build stays CPU-only; without it (or when no
+# adapter initialises at runtime) grading falls back to the kernel's
+# row-parallel CPU reference path.
+grade-gpu = ["hgripe-grade/gpu"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -72,3 +78,7 @@ moxcms = { version = "0.8.1", features = ["options"] }
 # Already in the tree via hgripe-api.
 sha2 = "0.10"
 hgripe-api = { path = "../../../crates/hgripe-api" }
+# The standalone f32 colour-grading kernel (docs/design/grade-kernel.md):
+# runs the `imageGrade` node and the grading dialog's `grade_preview` command.
+# `parallel` is the design doc's sanctioned rayon row-parallel apply path.
+hgripe-grade = { path = "../../../crates/hgripe-grade", features = ["parallel"] }

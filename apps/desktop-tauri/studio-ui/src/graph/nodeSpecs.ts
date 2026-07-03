@@ -821,6 +821,42 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
       },
     ],
   },
+  imageGrade: {
+    kind: "imageGrade",
+    executor: "compute",
+    title: "Grade",
+    description:
+      "Colour-grade an image with the hgripe-grade kernel (docs/design/grade-kernel.md) — an op stack (exposure, white balance, contrast, saturation, RGB mixer, colour warper, sharpen/denoise with adjustable radius, film grain, 1D/3D LUTs) authored in the grading dialog and stored as grade_doc. The dialog previews live through the kernel (GPU when the app is built with grade-gpu and an adapter is present, else the row-parallel CPU reference path); the run path grades the full-resolution 16-bit working surface in its own colour space, so a wide-gamut source stays 16-bit + ICC. Emits the graded image and a grade report.",
+    category: "control",
+    inputs: [port("image", "image", "image")],
+    outputs: [port("image", "image", "image"), port("grade_report", "grade report", "any")],
+    params: [
+      {
+        key: "format",
+        label: "Output format",
+        control: "select",
+        options: ["png", "tiff"],
+        defaultValue: "png",
+        inline: true,
+        hint: "png (default) or 16-bit tiff; a wide-gamut source keeps 16-bit + ICC in either",
+      },
+      {
+        key: "output_dir",
+        label: "Output dir",
+        control: "path",
+        defaultValue: "",
+        hint: "leave empty to use the configured output directory",
+      },
+      {
+        key: "output_name",
+        label: "Output name",
+        control: "text",
+        defaultValue: "",
+        hint: "base name for the graded output (empty = <image>_grade)",
+        inline: true,
+      },
+    ],
+  },
   refineMaskEdge: {
     kind: "refineMaskEdge",
     executor: "local",

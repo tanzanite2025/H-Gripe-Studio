@@ -413,6 +413,7 @@ fn execute_studio_compute_node(
     match node.kind.as_str() {
         "subjectMask" => execute_studio_subject_mask(node, inputs, skip_write_ports),
         "crop" => execute_studio_crop(node, inputs, skip_write_ports),
+        "imageGrade" => super::grade::execute_studio_grade(node, inputs, skip_write_ports),
         other => Err(format!("node kind is not a compute node: {other}")),
     }
 }

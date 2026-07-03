@@ -992,3 +992,47 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .crop-mode-row button.active { border-color: var(--accent); color: var(--accent); }
 
+/* Grade-Edit modal — reuses the mask-edit shell; the controls column is the
+   scrollable op stack. */
+.media-viewer.grade-edit { width: min(1180px, 94vw); height: 88vh; }
+.media-viewer.grade-edit .mask-edit-body { grid-template-columns: 1fr 300px; }
+.grade-edit-controls { overflow-y: auto; }
+.grade-op {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.grade-op-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+.grade-op-buttons { display: flex; gap: 4px; }
+.grade-op-buttons button,
+.grade-op-remove {
+  padding: 0 6px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 18px;
+}
+.grade-op-buttons button:hover,
+.grade-op-remove:hover { color: var(--text); border-color: var(--accent); }
+.grade-add-row { display: flex; gap: 6px; align-items: center; }
+.grade-add-row select { flex: 1; min-width: 0; }
+.grade-warp-point .slider-row small { min-width: 64px; }
+.grade-edit-controls .checkbox-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
