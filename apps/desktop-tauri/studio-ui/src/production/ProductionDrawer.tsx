@@ -4,6 +4,7 @@ import type { DrawerMode, DrawerTab } from "./drawerState";
 import { LayerReviewPanel } from "./LayerReviewPanel";
 import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
+import { ProgramMonitor } from "./ProgramMonitor";
 import { targetKey, type ProductionTarget } from "./productionTarget";
 import { timelineDuration, trackEnd, type TimelineModel } from "./timeline";
 
@@ -269,7 +270,9 @@ export function ProductionDrawer({
             </div>
             {timeline.tracks.every((track) => track.clips.length === 0) ? (
               <p className="production-timeline-empty">{t("drawer.timelineEmpty")}</p>
-            ) : null}
+            ) : (
+              <ProgramMonitor timeline={timeline} assets={assets} />
+            )}
             <div className="production-timeline-tracks">
               {timeline.tracks.map((track) => {
                 // Scale every lane to the same overall timeline length so clip
