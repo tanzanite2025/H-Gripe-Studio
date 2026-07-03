@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { generateThumbnail } from "../bridge/tauri";
+import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import {
   MASK_TOOLS,
   maskTool,
@@ -134,8 +134,13 @@ export function MaskEditModal({
   // (drag a tab to re-dock it; drag the rail edge to resize).
   const dock = useDockLayout(DOCK_STORAGE_KEY, DEFAULT_DOCK_LAYOUT);
 
-  const [underlay, setUnderlay] = useState<string | null>(null);
-  const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
+  // Underlay presentation goes through the viewport host (WGPU migration
+  // Phase 2): the image is targeted by resource reference and the host renders
+  // the frame; in browser preview it stays null and we draw a checkerboard so
+  // the user can still paint in the correct pixel space.
+  const viewport = useViewportUnderlay("image_edit", imagePath || undefined, 1280);
+  const underlay = viewport.underlay;
+  const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // In-progress freehand stroke (image-space points), null when not drawing.
@@ -226,26 +231,6 @@ export function MaskEditModal({
   }, []);
   const previewing = isPreviewableOp(toolId) && preview != null;
   const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
-
-  // Best-effort underlay: a large thumbnail of the connected image. Empty in
-  // browser preview (mocked backend) — we then draw a checkerboard so the user
-  // can still paint in the correct pixel space.
-  useEffect(() => {
-    if (!imagePath) return;
-    let cancelled = false;
-    generateThumbnail({ path: imagePath, size: 1280 })
-      .then((thumb) => {
-        if (cancelled) return;
-        if (thumb.data_url) setUnderlay(thumb.data_url);
-        if (thumb.width && thumb.height) setDims({ w: thumb.width, h: thumb.height });
-      })
-      .catch(() => {
-        /* keep checkerboard */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePath]);
 
   const penPendingRef = useRef(false);
   penPendingRef.current = penAnchors.length > 0;
