@@ -1,17 +1,20 @@
-//! The `refineMaskEdge` node executor: bridges a graph node to the mask edge
-//! refinement pipeline (`crate::psd::refine_mask_edge`), cleaning up a cut-out
-//! subject's matte and exposing the refined image, the refined mask, and an
-//! edge report as flat output ports.
+//! The `refineMaskEdge` node executor. The default `cpu` engine runs the
+//! in-process native-Rust heuristic ([`super::edge_refine_cpu`]); a learned
+//! matting engine — or a source the fast path cannot decode — is served by
+//! the Python bridge (`crate::psd::refine_mask_edge`). Both paths clean up a
+//! cut-out subject's matte and expose the refined image, the refined mask,
+//! and an edge report as flat output ports with identical shape.
 
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
+use super::edge_refine_cpu::{self, CpuEdgeRefineParams};
 use super::graph::{
     bool_param, number_param, optional, resolve_output_dir, studio_output_map,
     studio_value_to_string, StudioGraphNode,
 };
-use crate::psd::refine_mask_edge;
+use crate::psd::{refine_mask_edge, RefineEdgeResult};
 
 pub(super) fn execute_studio_refine_mask_edge(
     node: &StudioGraphNode,
@@ -23,29 +26,76 @@ pub(super) fn execute_studio_refine_mask_edge(
     }
 
     let output_dir = resolve_output_dir(node)?;
+    let mask = optional(studio_value_to_string(inputs.get("mask")));
+    let background = optional(studio_value_to_string(inputs.get("background")));
+    let trimap = optional(studio_value_to_string(inputs.get("trimap")));
+    let preset = optional(studio_value_to_string(node.params.get("preset")));
+    let erode_px = number_param(node, "erode_px", 1.0) as i64;
+    let dilate_px = number_param(node, "dilate_px", 0.0) as i64;
+    let feather_px = number_param(node, "feather_px", 4.0);
+    let guided_radius = number_param(node, "guided_radius", 8.0) as i64;
+    let edge_decontaminate = bool_param(node, "edge_decontaminate", true);
+    let background_blend_strength = number_param(node, "background_blend_strength", 0.4);
+    let output_name = optional(studio_value_to_string(node.params.get("output_name")));
+    let engine = optional(studio_value_to_string(node.params.get("engine")));
+    // `device` selects the ONNX execution provider for the learned matter
+    // (default `auto`); ignored by the CPU heuristic.
+    let device = optional(studio_value_to_string(node.params.get("device")));
+
+    // The default `cpu` engine runs in-process; a learned matting engine — or
+    // a source the fast path cannot decode — falls through to Python.
+    let engine_is_cpu = engine
+        .as_deref()
+        .map(|e| e.trim().eq_ignore_ascii_case("cpu"))
+        .unwrap_or(true);
+    if engine_is_cpu {
+        let cpu_params = CpuEdgeRefineParams {
+            image_path: image.clone(),
+            mask_path: mask.clone(),
+            background_path: background.clone(),
+            trimap_path: trimap.clone(),
+            preset: preset.clone(),
+            erode_px,
+            dilate_px,
+            feather_px,
+            guided_radius,
+            edge_decontaminate,
+            background_blend_strength,
+            output_dir: output_dir.clone(),
+            output_name: output_name.clone(),
+            device_requested: device.clone().unwrap_or_else(|| "auto".to_string()),
+        };
+        if let Some(result) = edge_refine_cpu::try_refine(&cpu_params)? {
+            return to_output_map(result);
+        }
+    }
 
     let result = refine_mask_edge(
         None,
         image,
-        optional(studio_value_to_string(inputs.get("mask"))),
-        optional(studio_value_to_string(inputs.get("background"))),
+        mask,
+        background,
         optional(studio_value_to_string(inputs.get("placeholder_mask"))),
-        optional(studio_value_to_string(inputs.get("trimap"))),
-        optional(studio_value_to_string(node.params.get("preset"))),
-        Some(number_param(node, "erode_px", 1.0) as i64),
-        Some(number_param(node, "dilate_px", 0.0) as i64),
-        Some(number_param(node, "feather_px", 4.0)),
-        Some(number_param(node, "guided_radius", 8.0) as i64),
-        Some(bool_param(node, "edge_decontaminate", true)),
-        Some(number_param(node, "background_blend_strength", 0.4)),
+        trimap,
+        preset,
+        Some(erode_px),
+        Some(dilate_px),
+        Some(feather_px),
+        Some(guided_radius),
+        Some(edge_decontaminate),
+        Some(background_blend_strength),
         Some(output_dir),
-        optional(studio_value_to_string(node.params.get("output_name"))),
-        optional(studio_value_to_string(node.params.get("engine"))),
-        // `device` selects the ONNX execution provider for the learned matter
-        // (default `auto`); ignored by the CPU heuristic.
-        optional(studio_value_to_string(node.params.get("device"))),
+        output_name,
+        engine,
+        device,
     )?;
 
+    to_output_map(result)
+}
+
+/// Encode a [`RefineEdgeResult`] into the node's flat output ports. Shared by
+/// the in-process and Python paths so both emit an identical output shape.
+fn to_output_map(result: RefineEdgeResult) -> Result<BTreeMap<String, Value>, String> {
     let report = serde_json::to_value(&result.edge_report)
         .map_err(|err| format!("failed to encode EdgeReport: {err}"))?;
 

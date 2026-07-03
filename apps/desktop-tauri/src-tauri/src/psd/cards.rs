@@ -206,6 +206,15 @@ pub(crate) struct EdgeReport {
     /// `explicit` when a mask was connected, else `alpha` (the image's own).
     #[serde(default)]
     pub(crate) source_mask: String,
+    /// The source colour mode label (e.g. `RGB`, `RGBA`, `CMYK`, `L`).
+    #[serde(default)]
+    pub(crate) source_mode: String,
+    /// Whether a non-identity EXIF orientation was normalised away.
+    #[serde(default)]
+    pub(crate) exif_transposed: bool,
+    /// The decode budget the load was guarded with.
+    #[serde(default)]
+    pub(crate) max_decode_pixels: i64,
     #[serde(default)]
     pub(crate) erode_px: i64,
     #[serde(default)]
@@ -221,6 +230,12 @@ pub(crate) struct EdgeReport {
     /// `true` when a background was connected and blended into the edge band.
     #[serde(default)]
     pub(crate) background_applied: bool,
+    /// `true` when a trimap protected its unknown band from erode/feather.
+    #[serde(default)]
+    pub(crate) trimap_applied: bool,
+    /// Pixels inside the trimap-protected band (0 without a trimap).
+    #[serde(default)]
+    pub(crate) protected_band_px: i64,
     #[serde(default)]
     pub(crate) edge_band_px: i64,
     #[serde(default)]
@@ -252,6 +267,9 @@ pub(crate) struct EdgeReport {
     /// `cuda` degrades to `cpu` when no accelerator provider is present.
     #[serde(default)]
     pub(crate) device_requested: String,
+    /// Set when the pass was a no-op (matte fully opaque or empty).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) note: Option<String>,
 }
 
 /// Result of the **Mask Edge Refine** node: the written refined RGBA image, the

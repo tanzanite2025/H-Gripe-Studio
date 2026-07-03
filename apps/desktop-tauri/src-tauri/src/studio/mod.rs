@@ -57,6 +57,7 @@ mod crop;
 mod detail_repaint;
 mod detail_watchdog;
 mod edge_refine;
+mod edge_refine_cpu;
 mod exec;
 #[cfg(feature = "native-ffmpeg")]
 mod ffmpeg_native;
