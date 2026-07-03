@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { generateThumbnail } from "../bridge/tauri";
+import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { useT } from "../i18n";
 
 // Logical fallback size when the connected image has no decodable thumbnail
@@ -76,8 +76,11 @@ export function CropEditModal({
   headerExtra,
 }: CropEditModalProps) {
   const t = useT();
-  const [underlay, setUnderlay] = useState<string | null>(null);
-  const [dims, setDims] = useState<{ w: number; h: number }>({ w: DEFAULT_W, h: DEFAULT_H });
+  // Underlay presentation goes through the viewport host (WGPU migration
+  // Phase 2); null in browser preview, where the fallback dims + box stay.
+  const viewport = useViewportUnderlay("image_edit", imagePath || undefined, 1280);
+  const underlay = viewport.underlay;
+  const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
   const [mode, setMode] = useState<"manual" | "auto_subject">(initialMode);
   const [aspect, setAspect] = useState<string>(initialAspect);
   const [margin, setMargin] = useState<number>(initialMargin);
@@ -90,28 +93,13 @@ export function CropEditModal({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ kind: DragKind; startX: number; startY: number; origin: CropBox } | null>(null);
 
-  // Best-effort underlay + true image dimensions. Empty in browser preview.
+  // Re-seed the default box once the true image dimensions arrive, unless the
+  // user already placed one.
   useEffect(() => {
-    if (!imagePath) return;
-    let cancelled = false;
-    generateThumbnail({ path: imagePath, size: 1280 })
-      .then((thumb) => {
-        if (cancelled) return;
-        if (thumb.data_url) setUnderlay(thumb.data_url);
-        if (thumb.width && thumb.height) {
-          const w = thumb.width;
-          const h = thumb.height;
-          setDims({ w, h });
-          if (!boxTouched.current) setBox(defaultBox(w, h));
-        }
-      })
-      .catch(() => {
-        /* keep the fallback dims + box */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePath]);
+    if (viewport.dims && !boxTouched.current) {
+      setBox(defaultBox(viewport.dims.w, viewport.dims.h));
+    }
+  }, [viewport.dims]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
