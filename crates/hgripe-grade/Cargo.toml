@@ -13,9 +13,16 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 rayon = { version = "1", optional = true }
+# The design doc's sanctioned GPU backend (grade-kernel.md "GPU backend"):
+# wgpu compute passes generated from the same GradeDoc op graph. The CPU
+# path stays the reference implementation; the GPU path is validated
+# against it with tolerance tests and is preview-grade, not bit-identical.
+wgpu = { version = "29.0.3", optional = true, default-features = false, features = ["dx12", "metal", "vulkan", "wgsl"] }
+pollster = { version = "0.4", optional = true }
 
 [features]
 parallel = ["dep:rayon"]
+gpu = ["dep:wgpu", "dep:pollster"]
 
 [dev-dependencies]
 serde_json = "1"
