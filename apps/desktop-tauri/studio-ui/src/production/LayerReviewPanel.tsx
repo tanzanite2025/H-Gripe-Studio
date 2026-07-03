@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { generateThumbnail } from "../bridge/files";
 import { useT } from "../i18n";
 import type { LayerCandidate, LayeredImageAsset } from "./layeredImage";
 
@@ -17,12 +19,70 @@ function layerVisible(layer: LayerCandidate, visibility: Record<string, boolean>
 }
 
 /**
+ * Thumbnail preview of the current review target: the selected layer's RGBA
+ * cutout (toggleable to its mask) or the asset's composite when the whole
+ * asset is targeted. Rendering goes through the backend thumbnail command like
+ * every other preview — the raw artifact is never decoded in the webview, and
+ * the browser preview (mocked backend) shows a text placeholder instead.
+ */
+function LayerPreview({ asset, layer }: { asset: LayeredImageAsset; layer: LayerCandidate | null }) {
+  const t = useT();
+  const [showMask, setShowMask] = useState(false);
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const path = layer
+    ? showMask
+      ? layer.mask.path
+      : layer.rgba?.path ?? layer.mask.path
+    : asset.preview_composite.path;
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    setError(null);
+    generateThumbnail({ path, size: 320 })
+      .then((thumb) => {
+        if (cancelled) return;
+        if (thumb.data_url) setSrc(thumb.data_url);
+        else setError(t("layers.previewUnavailable"));
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, t]);
+
+  return (
+    <div className="layer-review-preview">
+      <div className="layer-review-preview-stage" title={path}>
+        {src ? (
+          <img className="layer-review-preview-img" src={src} alt={layer?.name ?? "composite"} />
+        ) : (
+          <span className="layer-review-preview-empty">{error ?? "…"}</span>
+        )}
+      </div>
+      {layer ? (
+        <button
+          className="layer-review-preview-toggle"
+          onClick={() => setShowMask((v) => !v)}
+          title={t("layers.previewToggleTitle")}
+          aria-pressed={showMask}
+        >
+          {showMask ? t("layers.previewMask") : t("layers.previewLayer")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Minimal layer review list (IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Review
  * Editor stage 1): consumes a `LayeredImageAsset` — today the smartLayerSplit
  * stub — and lets the user select the whole asset or one candidate layer as
- * the unified production target, toggle candidate visibility, and read the
- * split report's warnings. Mask overlay / confirm-asset land with the real
- * segmentation engine.
+ * the unified production target, toggle candidate visibility, preview the
+ * selected layer's RGBA / mask, and read the split report's warnings.
  */
 export function LayerReviewPanel({
   asset,
@@ -45,6 +105,10 @@ export function LayerReviewPanel({
           {asset.split_report.engine_version}
         </span>
       </div>
+      <LayerPreview
+        asset={asset}
+        layer={asset.layers.find((layer) => layer.id === selectedLayerId) ?? null}
+      />
       <ul className="layer-review-list">
         <li className={selectedLayerId === null ? "active" : ""}>
           <button

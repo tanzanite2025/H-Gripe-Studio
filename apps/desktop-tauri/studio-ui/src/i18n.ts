@@ -609,6 +609,16 @@ export const messages = {
     zh: "拆分报告建议在生产使用前审阅该图层",
   },
   "layers.visibilityTitle": { en: "toggle layer visibility", zh: "切换图层可见性" },
+  "layers.previewLayer": { en: "layer", zh: "图层" },
+  "layers.previewMask": { en: "mask", zh: "蒙版" },
+  "layers.previewToggleTitle": {
+    en: "switch the preview between the layer's RGBA and its mask",
+    zh: "在图层 RGBA 与蒙版之间切换预览",
+  },
+  "layers.previewUnavailable": {
+    en: "preview unavailable (browser preview / backend mocked)",
+    zh: "预览不可用（浏览器预览 / 后端为模拟）",
+  },
   "drawer.gradePlaceholder": {
     en: "Select a target — a bin image asset, a timeline clip (still or video), or a node with an image output — to grade it here with the shared hgripe-grade kernel.",
     zh: "选择一个目标——素材区的图片、时间线上的 clip（静帧或视频）或带图片输出的节点——即可在这里用同一个 hgripe-grade 内核调色。",

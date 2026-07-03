@@ -75,6 +75,41 @@ describe("LayerReviewPanel", () => {
     expect(container.querySelector(".layer-review-warnings")?.textContent).toContain("stub split");
   });
 
+  it("previews the composite for the whole asset and toggles layer/mask when a layer is selected", () => {
+    const whole = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={null}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+      />,
+    );
+    expect(whole.container.querySelector(".layer-review-preview")).not.toBeNull();
+    // no layer selected -> composite preview, no mask toggle
+    expect(whole.container.querySelector(".layer-review-preview-toggle")).toBeNull();
+    expect(
+      whole.container.querySelector(".layer-review-preview-stage")?.getAttribute("title"),
+    ).toBe(asset.preview_composite.path);
+
+    const selected = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={STUB_SUBJECT_LAYER_ID}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+      />,
+    );
+    const toggle = selected.container.querySelector<HTMLButtonElement>(
+      ".layer-review-preview-toggle",
+    );
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle!);
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("toggles visibility with overrides on top of the layer's own flag", () => {
     const onToggleVisibility = vi.fn();
     const { container } = render(
