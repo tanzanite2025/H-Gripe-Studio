@@ -25,7 +25,7 @@ use std::ptr;
 
 use rusty_ffmpeg::ffi;
 
-use super::video_engine::{FrameSource, PyAvFrameSource, VideoMeta};
+use super::video_engine::{FrameSource, VideoMeta};
 
 /// libav's "no timestamp" sentinel (`AV_NOPTS_VALUE`), defined here so we don't
 /// depend on the macro surviving into the generated bindings.
@@ -91,44 +91,130 @@ impl FrameSource for NativeFfmpegFrameSource {
     }
 }
 
-/// The native decoder with a PyAV safety net. `probe`/`decode_frame` try libav
-/// first and, on any `Err` (unsupported codec, corrupt clip, a libav quirk),
-/// fall back to the long-lived PyAV worker — so turning on `native-ffmpeg`
-/// upgrades decoding where libav succeeds without losing any clip PyAV handled.
-/// This is what [`super::video_engine::make_frame_source`] hands the engine.
-pub(crate) struct FfmpegWithPyAvFallback {
-    native: NativeFfmpegFrameSource,
-    fallback: PyAvFrameSource,
+/// Encode/trim result mirrored onto the `videoAssemble` / `videoTrim` node
+/// reports (the same shape the PyAV worker's payloads carried).
+#[derive(Debug, Clone)]
+pub(crate) struct VideoEncodeStats {
+    pub(crate) frame_count: u64,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) fps: Option<f64>,
+    pub(crate) duration_sec: Option<f64>,
+    pub(crate) codec: String,
+    pub(crate) start_sec: Option<f64>,
+    pub(crate) end_sec: Option<f64>,
 }
 
-impl FfmpegWithPyAvFallback {
-    pub(crate) fn new(python: PathBuf, dir: PathBuf) -> Self {
-        Self {
-            native: NativeFfmpegFrameSource::new(),
-            fallback: PyAvFrameSource::new(python, dir),
-        }
+/// Encode an ordered image sequence into a video at `out` (the native
+/// `videoAssemble` path). The first frame fixes the (even) output size;
+/// later frames are resized to it, mirroring the PyAV worker's `assemble`.
+pub(crate) fn assemble_frames(
+    frames: &[String],
+    out: &Path,
+    fps: f64,
+    codec: &str,
+) -> Result<VideoEncodeStats, String> {
+    if frames.is_empty() {
+        return Err("no frames to assemble".to_string());
     }
+    let mut encoder: Option<Encoder> = None;
+    let (mut width, mut height) = (0u32, 0u32);
+    let mut count: u64 = 0;
+    for path in frames {
+        let image = image::open(path)
+            .map_err(|err| format!("failed to read frame {path}: {err}"))?
+            .to_rgba8();
+        if encoder.is_none() {
+            width = (image.width() - image.width() % 2).max(2);
+            height = (image.height() - image.height() % 2).max(2);
+            encoder = Some(Encoder::open(out, width, height, fps, codec)?);
+        }
+        let image = if (image.width(), image.height()) != (width, height) {
+            image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
+        } else {
+            image
+        };
+        encoder
+            .as_mut()
+            .expect("encoder initialised with the first frame")
+            .write_rgba(&image)?;
+        count += 1;
+    }
+    encoder.expect("at least one frame was encoded").finish()?;
+    Ok(VideoEncodeStats {
+        frame_count: count,
+        width,
+        height,
+        fps: Some(fps),
+        duration_sec: if fps > 0.0 {
+            Some(count as f64 / fps)
+        } else {
+            None
+        },
+        codec: codec.to_string(),
+        start_sec: None,
+        end_sec: None,
+    })
 }
 
-impl FrameSource for FfmpegWithPyAvFallback {
-    fn probe(&mut self, video: &Path) -> Result<VideoMeta, String> {
-        match self.native.probe(video) {
-            Ok(meta) => Ok(meta),
-            Err(_) => self.fallback.probe(video),
-        }
-    }
+/// Cut `[start_sec, end_sec)` out of `video` into `out` (the native
+/// `videoTrim` path). Decode-and-re-encode so the cut is frame-accurate
+/// rather than snapping to keyframes; audio is not carried over, mirroring
+/// the PyAV worker's `trim`.
+pub(crate) fn trim_video(
+    video: &Path,
+    out: &Path,
+    start_sec: f64,
+    end_sec: Option<f64>,
+    codec: &str,
+) -> Result<VideoEncodeStats, String> {
+    let mut decoder = Decoder::open(video)?;
+    let meta = decoder.probe()?;
+    let fps = meta.fps.filter(|f| *f > 0.0).unwrap_or(30.0);
+    let width = (meta.width - meta.width % 2).max(2);
+    let height = (meta.height - meta.height % 2).max(2);
+    let mut encoder = Encoder::open(out, width, height, fps, codec)?;
 
-    fn decode_frame(
-        &mut self,
-        video: &Path,
-        timestamp_sec: f64,
-        poster_out: &Path,
-    ) -> Result<PathBuf, String> {
-        match self.native.decode_frame(video, timestamp_sec, poster_out) {
-            Ok(path) => Ok(path),
-            Err(_) => self.fallback.decode_frame(video, timestamp_sec, poster_out),
+    let mut count: u64 = 0;
+    let mut first_ts: Option<f64> = None;
+    let mut last_ts: Option<f64> = None;
+    decoder.for_each_frame_from(start_sec, |ts, frame| {
+        if ts + 1e-9 < start_sec {
+            return Ok(true); // still walking up from the seek keyframe
         }
+        if let Some(end) = end_sec {
+            if ts >= end {
+                return Ok(false);
+            }
+        }
+        let frame = if (frame.width(), frame.height()) != (width, height) {
+            image::imageops::resize(&frame, width, height, image::imageops::FilterType::Triangle)
+        } else {
+            frame
+        };
+        encoder.write_rgba(&frame)?;
+        count += 1;
+        first_ts.get_or_insert(ts);
+        last_ts = Some(ts);
+        Ok(true)
+    })?;
+    if count == 0 {
+        return Err(format!(
+            "no frames in the requested range ({start_sec}s..{})",
+            end_sec.map_or_else(|| "end".to_string(), |end| format!("{end}s"))
+        ));
     }
+    encoder.finish()?;
+    Ok(VideoEncodeStats {
+        frame_count: count,
+        width,
+        height,
+        fps: Some(fps),
+        duration_sec: Some(count as f64 / fps),
+        codec: codec.to_string(),
+        start_sec: first_ts,
+        end_sec: last_ts,
+    })
 }
 
 /// An open input container + its selected video decode context. Owns the raw
@@ -437,6 +523,122 @@ impl Decoder {
         image::RgbaImage::from_raw(width as u32, height as u32, buffer)
             .ok_or_else(|| "RGBA buffer did not match frame dimensions".to_string())
     }
+
+    /// Seek to the keyframe at or before `start_sec`, then decode forward,
+    /// handing every frame (as RGBA + timestamp seconds) to `f`. `f` returns
+    /// `Ok(true)` to keep going, `Ok(false)` to stop.
+    fn for_each_frame_from(
+        &mut self,
+        start_sec: f64,
+        mut f: impl FnMut(f64, image::RgbaImage) -> Result<bool, String>,
+    ) -> Result<(), String> {
+        unsafe {
+            let q = self.time_base;
+            let ts_to_sec = |ts: i64| -> f64 {
+                if q.den > 0 {
+                    ts as f64 * q.num as f64 / q.den as f64
+                } else {
+                    0.0
+                }
+            };
+            if start_sec > 0.0 && q.num > 0 && q.den > 0 {
+                let target_ts = (start_sec * q.den as f64 / q.num as f64).round() as i64;
+                let _ = ffi::av_seek_frame(
+                    self.fmt,
+                    self.stream_index,
+                    target_ts,
+                    ffi::AVSEEK_FLAG_BACKWARD as i32,
+                );
+                ffi::avcodec_flush_buffers(self.codec_ctx);
+            }
+
+            let packet = ffi::av_packet_alloc();
+            let frame = ffi::av_frame_alloc();
+            if packet.is_null() || frame.is_null() {
+                if !packet.is_null() {
+                    let mut p = packet;
+                    ffi::av_packet_free(&mut p);
+                }
+                if !frame.is_null() {
+                    let mut fr = frame;
+                    ffi::av_frame_free(&mut fr);
+                }
+                return Err("failed to allocate libav packet/frame".to_string());
+            }
+
+            let mut result: Result<(), String> = Ok(());
+            let mut stop = false;
+            'read: while ffi::av_read_frame(self.fmt, packet) >= 0 {
+                if (*packet).stream_index == self.stream_index
+                    && ffi::avcodec_send_packet(self.codec_ctx, packet) >= 0
+                {
+                    while ffi::avcodec_receive_frame(self.codec_ctx, frame) >= 0 {
+                        let pts = {
+                            let best = (*frame).best_effort_timestamp;
+                            if best != AV_NOPTS_VALUE {
+                                best
+                            } else {
+                                (*frame).pts
+                            }
+                        };
+                        let ts = if pts != AV_NOPTS_VALUE {
+                            ts_to_sec(pts)
+                        } else {
+                            0.0
+                        };
+                        match self.frame_to_rgba(frame).and_then(|img| f(ts, img)) {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                stop = true;
+                                ffi::av_packet_unref(packet);
+                                break 'read;
+                            }
+                            Err(err) => {
+                                result = Err(err);
+                                ffi::av_packet_unref(packet);
+                                break 'read;
+                            }
+                        }
+                    }
+                }
+                ffi::av_packet_unref(packet);
+            }
+
+            // Drain the decoder unless the caller stopped or errored out.
+            if result.is_ok() && !stop {
+                ffi::avcodec_send_packet(self.codec_ctx, ptr::null());
+                while ffi::avcodec_receive_frame(self.codec_ctx, frame) >= 0 {
+                    let pts = {
+                        let best = (*frame).best_effort_timestamp;
+                        if best != AV_NOPTS_VALUE {
+                            best
+                        } else {
+                            (*frame).pts
+                        }
+                    };
+                    let ts = if pts != AV_NOPTS_VALUE {
+                        ts_to_sec(pts)
+                    } else {
+                        0.0
+                    };
+                    match self.frame_to_rgba(frame).and_then(|img| f(ts, img)) {
+                        Ok(true) => {}
+                        Ok(false) => break,
+                        Err(err) => {
+                            result = Err(err);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let mut p = packet;
+            ffi::av_packet_free(&mut p);
+            let mut fr = frame;
+            ffi::av_frame_free(&mut fr);
+            result
+        }
+    }
 }
 
 impl Drop for Decoder {
@@ -447,6 +649,237 @@ impl Drop for Decoder {
             }
             if !self.fmt.is_null() {
                 ffi::avformat_close_input(&mut self.fmt);
+            }
+        }
+    }
+}
+
+/// An open output container + H.264 encode context. Frames go in as RGBA
+/// (swscaled to yuv420p), packets come out interleaved into the container.
+/// Owns the raw libav pointers and frees them on drop; `finish` must be
+/// called to flush the encoder and write the trailer.
+struct Encoder {
+    fmt: *mut ffi::AVFormatContext,
+    codec_ctx: *mut ffi::AVCodecContext,
+    stream: *mut ffi::AVStream,
+    frame: *mut ffi::AVFrame,
+    packet: *mut ffi::AVPacket,
+    sws: *mut ffi::SwsContext,
+    width: u32,
+    height: u32,
+    next_pts: i64,
+    io_open: bool,
+}
+
+impl Encoder {
+    fn open(out: &Path, width: u32, height: u32, fps: f64, codec: &str) -> Result<Self, String> {
+        let h264_names = ["h264", "libx264", "libopenh264", "openh264"];
+        if !h264_names.iter().any(|n| codec.eq_ignore_ascii_case(n)) {
+            return Err(format!(
+                "unsupported codec '{codec}': the native encoder ships H.264 only"
+            ));
+        }
+        let codec_name = CString::new(codec.to_ascii_lowercase())
+            .map_err(|_| "codec name contains a NUL byte".to_string())?;
+        let path = CString::new(out.to_string_lossy().as_bytes())
+            .map_err(|_| "output path contains a NUL byte".to_string())?;
+        unsafe {
+            let mut fmt: *mut ffi::AVFormatContext = ptr::null_mut();
+            if ffi::avformat_alloc_output_context2(
+                &mut fmt,
+                ptr::null_mut(),
+                ptr::null(),
+                path.as_ptr(),
+            ) < 0
+                || fmt.is_null()
+            {
+                return Err("avformat_alloc_output_context2 failed".to_string());
+            }
+            let mut this = Encoder {
+                fmt,
+                codec_ctx: ptr::null_mut(),
+                stream: ptr::null_mut(),
+                frame: ptr::null_mut(),
+                packet: ptr::null_mut(),
+                sws: ptr::null_mut(),
+                width,
+                height,
+                next_pts: 0,
+                io_open: false,
+            };
+
+            let mut encoder = ffi::avcodec_find_encoder_by_name(codec_name.as_ptr());
+            if encoder.is_null() {
+                encoder = ffi::avcodec_find_encoder(ffi::AV_CODEC_ID_H264);
+            }
+            if encoder.is_null() {
+                return Err("no H.264 encoder available in the vendored libav".to_string());
+            }
+
+            let codec_ctx = ffi::avcodec_alloc_context3(encoder);
+            if codec_ctx.is_null() {
+                return Err("avcodec_alloc_context3 (encoder) failed".to_string());
+            }
+            this.codec_ctx = codec_ctx;
+
+            let fps_q = ffi::av_d2q(fps.max(1.0), 1_000_000);
+            (*codec_ctx).width = width as i32;
+            (*codec_ctx).height = height as i32;
+            (*codec_ctx).pix_fmt = ffi::AV_PIX_FMT_YUV420P;
+            (*codec_ctx).time_base = ffi::AVRational {
+                num: fps_q.den,
+                den: fps_q.num,
+            };
+            (*codec_ctx).framerate = fps_q;
+            (*codec_ctx).gop_size = 12;
+            if !(*fmt).oformat.is_null()
+                && ((*(*fmt).oformat).flags as u32) & ffi::AVFMT_GLOBALHEADER != 0
+            {
+                (*codec_ctx).flags |= ffi::AV_CODEC_FLAG_GLOBAL_HEADER as i32;
+            }
+
+            if ffi::avcodec_open2(codec_ctx, encoder, ptr::null_mut()) < 0 {
+                return Err("avcodec_open2 (encoder) failed".to_string());
+            }
+
+            let stream = ffi::avformat_new_stream(fmt, ptr::null());
+            if stream.is_null() {
+                return Err("avformat_new_stream failed".to_string());
+            }
+            this.stream = stream;
+            (*stream).time_base = (*codec_ctx).time_base;
+            if ffi::avcodec_parameters_from_context((*stream).codecpar, codec_ctx) < 0 {
+                return Err("avcodec_parameters_from_context failed".to_string());
+            }
+
+            if ((*(*fmt).oformat).flags as u32) & ffi::AVFMT_NOFILE == 0 {
+                if ffi::avio_open(&mut (*fmt).pb, path.as_ptr(), ffi::AVIO_FLAG_WRITE as i32) < 0 {
+                    return Err(format!("failed to open output file {}", out.display()));
+                }
+                this.io_open = true;
+            }
+            if ffi::avformat_write_header(fmt, ptr::null_mut()) < 0 {
+                return Err("avformat_write_header failed".to_string());
+            }
+
+            this.frame = ffi::av_frame_alloc();
+            this.packet = ffi::av_packet_alloc();
+            if this.frame.is_null() || this.packet.is_null() {
+                return Err("failed to allocate libav packet/frame".to_string());
+            }
+            (*this.frame).format = ffi::AV_PIX_FMT_YUV420P;
+            (*this.frame).width = width as i32;
+            (*this.frame).height = height as i32;
+            if ffi::av_frame_get_buffer(this.frame, 0) < 0 {
+                return Err("av_frame_get_buffer failed".to_string());
+            }
+
+            this.sws = ffi::sws_getContext(
+                width as i32,
+                height as i32,
+                ffi::AV_PIX_FMT_RGBA,
+                width as i32,
+                height as i32,
+                ffi::AV_PIX_FMT_YUV420P,
+                ffi::SWS_BILINEAR as i32,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null(),
+            );
+            if this.sws.is_null() {
+                return Err("sws_getContext (encode) failed".to_string());
+            }
+
+            Ok(this)
+        }
+    }
+
+    fn write_rgba(&mut self, image: &image::RgbaImage) -> Result<(), String> {
+        if (image.width(), image.height()) != (self.width, self.height) {
+            return Err("frame size does not match the encoder".to_string());
+        }
+        unsafe {
+            if ffi::av_frame_make_writable(self.frame) < 0 {
+                return Err("av_frame_make_writable failed".to_string());
+            }
+            let src_data: [*const u8; 4] = [
+                image.as_raw().as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+            ];
+            let src_stride: [i32; 4] = [(self.width * 4) as i32, 0, 0, 0];
+            let scaled = ffi::sws_scale(
+                self.sws,
+                src_data.as_ptr(),
+                src_stride.as_ptr(),
+                0,
+                self.height as i32,
+                (*self.frame).data.as_ptr(),
+                (*self.frame).linesize.as_ptr(),
+            );
+            if scaled <= 0 {
+                return Err("sws_scale (encode) produced no output".to_string());
+            }
+            (*self.frame).pts = self.next_pts;
+            self.next_pts += 1;
+            self.send(self.frame)
+        }
+    }
+
+    /// Send a frame (or null to flush) and drain any ready packets.
+    unsafe fn send(&mut self, frame: *mut ffi::AVFrame) -> Result<(), String> {
+        if ffi::avcodec_send_frame(self.codec_ctx, frame) < 0 {
+            return Err("avcodec_send_frame failed".to_string());
+        }
+        while ffi::avcodec_receive_packet(self.codec_ctx, self.packet) >= 0 {
+            ffi::av_packet_rescale_ts(
+                self.packet,
+                (*self.codec_ctx).time_base,
+                (*self.stream).time_base,
+            );
+            (*self.packet).stream_index = (*self.stream).index;
+            let ret = ffi::av_interleaved_write_frame(self.fmt, self.packet);
+            ffi::av_packet_unref(self.packet);
+            if ret < 0 {
+                return Err(format!("av_interleaved_write_frame failed ({ret})"));
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<(), String> {
+        unsafe {
+            self.send(ptr::null_mut())?;
+            if ffi::av_write_trailer(self.fmt) < 0 {
+                return Err("av_write_trailer failed".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Encoder {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.sws.is_null() {
+                ffi::sws_freeContext(self.sws);
+            }
+            if !self.packet.is_null() {
+                ffi::av_packet_free(&mut self.packet);
+            }
+            if !self.frame.is_null() {
+                ffi::av_frame_free(&mut self.frame);
+            }
+            if !self.codec_ctx.is_null() {
+                ffi::avcodec_free_context(&mut self.codec_ctx);
+            }
+            if !self.fmt.is_null() {
+                if self.io_open {
+                    ffi::avio_closep(&mut (*self.fmt).pb);
+                }
+                ffi::avformat_free_context(self.fmt);
+                self.fmt = ptr::null_mut();
             }
         }
     }
@@ -474,5 +907,57 @@ mod tests {
         let result =
             source.decode_frame(Path::new("definitely_not_a_real_clip_zzx.mp4"), 0.0, &out);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn assemble_rejects_unknown_codec() {
+        let dir = std::env::temp_dir();
+        let frame = dir.join("hgripe_native_ffmpeg_codec_test_frame.png");
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+            .save(&frame)
+            .unwrap();
+        let out = dir.join("hgripe_native_ffmpeg_codec_test.mp4");
+        let err =
+            assemble_frames(&[frame.to_string_lossy().to_string()], &out, 24.0, "vp9").unwrap_err();
+        assert!(err.contains("unsupported codec"), "{err}");
+        let _ = std::fs::remove_file(&frame);
+    }
+
+    /// Round trip through the native encoder + decoder: assemble a few solid
+    /// frames into an mp4, then trim it and re-probe both outputs. Exercises
+    /// the whole encode chain (H.264 open, swscale RGBA->yuv420p, mux, trailer)
+    /// against the vendored libav on CI.
+    #[test]
+    fn assemble_then_trim_round_trips() {
+        let dir = std::env::temp_dir();
+        let mut frames = Vec::new();
+        for i in 0..12u8 {
+            let path = dir.join(format!("hgripe_native_enc_frame_{i}.png"));
+            let img = image::RgbaImage::from_pixel(64, 48, image::Rgba([i * 20, 60, 200, 255]));
+            img.save(&path).unwrap();
+            frames.push(path.to_string_lossy().to_string());
+        }
+        let clip = dir.join("hgripe_native_enc_test.mp4");
+        let stats = assemble_frames(&frames, &clip, 6.0, "libx264").unwrap();
+        assert_eq!(stats.frame_count, 12);
+        assert_eq!((stats.width, stats.height), (64, 48));
+
+        let mut source = NativeFfmpegFrameSource::new();
+        let meta = source.probe(&clip).unwrap();
+        assert_eq!((meta.width, meta.height), (64, 48));
+
+        let cut = dir.join("hgripe_native_trim_test.mp4");
+        let trimmed = trim_video(&clip, &cut, 0.5, Some(1.5), "h264").unwrap();
+        assert!(
+            trimmed.frame_count >= 5 && trimmed.frame_count <= 7,
+            "{trimmed:?}"
+        );
+        assert!(source.probe(&cut).is_ok());
+
+        for frame in &frames {
+            let _ = std::fs::remove_file(frame);
+        }
+        let _ = std::fs::remove_file(&clip);
+        let _ = std::fs::remove_file(&cut);
     }
 }

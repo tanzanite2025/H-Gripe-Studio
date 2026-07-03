@@ -90,6 +90,7 @@ pub(crate) mod torch_worker;
 mod video_assemble;
 pub(crate) mod video_engine;
 mod video_trim;
+#[cfg(not(feature = "native-ffmpeg"))]
 pub(crate) mod video_worker;
 mod write_skip;
 

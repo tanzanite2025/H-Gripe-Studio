@@ -87,9 +87,14 @@ jobs:
 
       - name: cargo test
         working-directory: apps/desktop-tauri/src-tauri
-        # --features native-ffmpeg links + smoke-tests the vendored libav decoder
-        # (build.rs copies the runtime DLLs next to the test binaries).
-        run: cargo test --features native-ffmpeg
+        # Default features include native-ffmpeg: links + smoke-tests the
+        # vendored libav decode/encode (build.rs copies the runtime DLLs next
+        # to the test binaries).
+        run: cargo test
+
+      - name: cargo test (no native-ffmpeg, legacy PyAV paths)
+        working-directory: apps/desktop-tauri/src-tauri
+        run: cargo test --no-default-features
 
   vitmatte-e2e:
     name: tauri (vitmatte e2e)
