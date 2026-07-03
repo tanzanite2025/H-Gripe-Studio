@@ -52,6 +52,7 @@ interface MockViewport {
   target: ViewportTarget | null;
   width: number;
   height: number;
+  gradeDoc: unknown | null;
 }
 
 const mockViewports = new Map<string, MockViewport>();
@@ -69,7 +70,7 @@ export async function createViewport(kind: ViewportKind): Promise<ViewportDescri
   const invoke = tauriInvoke();
   if (invoke) return (await invoke("viewport_create", { kind })) as ViewportDescriptor;
   const viewport_id = `mock-vp-${mockNextId++}`;
-  mockViewports.set(viewport_id, { kind, target: null, width: 0, height: 0 });
+  mockViewports.set(viewport_id, { kind, target: null, width: 0, height: 0, gradeDoc: null });
   console.info(`[viewport] created ${viewport_id} kind=${kind} (mock)`);
   return { viewport_id, kind, backend: MOCK_BACKEND };
 }
@@ -110,6 +111,19 @@ export async function resizeViewport(
   const vp = mockGet(viewportId);
   vp.width = width;
   vp.height = height;
+}
+
+export async function setViewportGrade(viewportId: string, doc: unknown | null): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_set_grade", { viewportId, doc });
+    return;
+  }
+  const vp = mockGet(viewportId);
+  if (vp.kind !== "grade_preview") {
+    throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept a grade doc`);
+  }
+  vp.gradeDoc = doc;
 }
 
 export async function renderViewportFrame(viewportId: string): Promise<ViewportFrame> {

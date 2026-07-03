@@ -8,6 +8,7 @@ import {
   destroyViewport,
   renderViewportFrame,
   resizeViewport,
+  setViewportGrade,
   setViewportTarget,
   type ViewportBackend,
   type ViewportFrame,
@@ -18,7 +19,9 @@ import {
 export type ViewportCommand =
   | { kind: "set_target"; target: ViewportTarget }
   | { kind: "set_view"; zoom: number; panX: number; panY: number }
-  | { kind: "resize"; width: number; height: number };
+  | { kind: "resize"; width: number; height: number }
+  /** Grade doc applied at render time; grade_preview viewports only. */
+  | { kind: "set_grade"; doc: unknown | null };
 
 export class WgpuViewportHost {
   private viewportId: string | null;
@@ -53,6 +56,9 @@ export class WgpuViewportHost {
         return;
       case "resize":
         await resizeViewport(this.id(), cmd.width, cmd.height);
+        return;
+      case "set_grade":
+        await setViewportGrade(this.id(), cmd.doc);
         return;
       case "set_view":
         // Zoom/pan become viewport state in Phase 2 (image edit); the command

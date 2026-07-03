@@ -18,9 +18,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::commands::thumbnails::generate_thumbnail_inner;
 use crate::resource;
+use crate::studio::grade_preview;
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -98,6 +100,9 @@ struct ViewportState {
     target: Option<ViewportTarget>,
     width: u32,
     height: u32,
+    /// Grade document applied at render time (grade_preview viewports); the
+    /// doc is parameters only — pixels are resolved through the target.
+    grade_doc: Option<Value>,
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();
@@ -135,6 +140,7 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             target: None,
             width: 0,
             height: 0,
+            grade_doc: None,
         },
     );
     eprintln!("[viewport] created vp-{id} kind={kind} (open: {})", map.len());
@@ -195,25 +201,65 @@ pub(crate) fn viewport_resize(viewport_id: String, width: u32, height: u32) -> R
     Ok(())
 }
 
+/// Set (or clear) the grade document a grade_preview viewport applies at
+/// render time. Parameter updates flow through viewport state — the target
+/// reference and the transport stay untouched.
+#[tauri::command]
+pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Result<(), String> {
+    let id = parse_id(&viewport_id)?;
+    let mut map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    if state.kind != "grade_preview" {
+        return Err(format!(
+            "viewport {viewport_id} (kind={}) does not accept a grade doc",
+            state.kind
+        ));
+    }
+    state.grade_doc = doc;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
     let id = parse_id(&viewport_id)?;
-    let (target, width, height) = {
+    let (target, width, height, grade_doc) = {
         let map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
         let state = map
             .get(&id)
             .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
-        (state.target.clone(), state.width, state.height)
+        (
+            state.target.clone(),
+            state.width,
+            state.height,
+            state.grade_doc.clone(),
+        )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
     match target {
         ViewportTarget::Image { resource_id } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
+            let size = width.max(height).clamp(64, 2048);
+            if let Some(doc) = grade_doc {
+                // Graded frame: run the grading kernel over the target's sRGB
+                // proxy at the viewport size.
+                let graded = grade_preview(entry.path.clone(), doc, Some(size))?;
+                return Ok(ViewportFrame {
+                    data_url: graded.data_url,
+                    width: graded.width,
+                    height: graded.height,
+                    backend: ViewportBackend {
+                        requested: "auto".to_string(),
+                        actual: graded.backend.to_string(),
+                        fallback_reason: None,
+                    },
+                });
+            }
             // CPU placeholder transport: reuse the cached thumbnail pipeline at
             // the viewport's size (bounded so a huge surface cannot request a
             // full decode through this path).
-            let size = width.max(height).clamp(64, 2048);
             let thumb = generate_thumbnail_inner(&entry.path, size, None)?;
             Ok(ViewportFrame {
                 data_url: thumb.data_url,
@@ -255,6 +301,21 @@ mod tests {
         assert!(viewport_create("node_canvas".to_string()).is_err());
         assert!(viewport_destroy("nonsense".to_string()).is_err());
         assert!(viewport_resize("vp-999999".to_string(), 1, 1).is_err());
+    }
+
+    #[test]
+    fn grade_doc_only_on_grade_preview_viewports() {
+        let image = viewport_create("image_edit".to_string()).expect("create");
+        let err = viewport_set_grade(image.viewport_id.clone(), Some(serde_json::json!({})))
+            .expect_err("image_edit must reject a grade doc");
+        assert!(err.contains("does not accept a grade doc"));
+        viewport_destroy(image.viewport_id).expect("destroy");
+
+        let grade = viewport_create("grade_preview".to_string()).expect("create");
+        viewport_set_grade(grade.viewport_id.clone(), Some(serde_json::json!({})))
+            .expect("grade_preview accepts a grade doc");
+        viewport_set_grade(grade.viewport_id.clone(), None).expect("clearing the doc");
+        viewport_destroy(grade.viewport_id).expect("destroy");
     }
 
     #[test]

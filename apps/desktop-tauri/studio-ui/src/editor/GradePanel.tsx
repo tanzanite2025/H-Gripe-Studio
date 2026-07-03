@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { generateThumbnail, gradePreview, videoFrameGradePreview, videoProbe } from "../bridge/tauri";
+import { generateThumbnail, videoFrameGradePreview, videoProbe } from "../bridge/tauri";
+import { useGradeViewport } from "../viewport/useGradeViewport";
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
@@ -177,6 +178,10 @@ export function GradePanel({
   const cubeInputRef = useRef<HTMLInputElement | null>(null);
   // Monotonic preview sequence: only the latest request may publish a frame.
   const previewSeq = useRef(0);
+  // Still-image graded frames render through a grade_preview viewport (WGPU
+  // migration Phase 3): the target is set once by reference, doc changes flow
+  // as viewport state. Null outside Tauri — the mirror fallback stays.
+  const renderGraded = useGradeViewport(videoPath ? undefined : imagePath ?? undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,11 +214,11 @@ export function GradePanel({
         try {
           const result = videoPath
             ? await videoFrameGradePreview(videoPath, videoTimestampSec, doc)
-            : await gradePreview(imagePath!, doc);
+            : await renderGraded(doc);
           if (previewSeq.current !== seq) return;
           if (result) {
             setPreview(result.data_url);
-            setBackend(result.backend);
+            setBackend(typeof result.backend === "string" ? result.backend : result.backend.actual);
             return;
           }
         } catch (err) {
@@ -234,7 +239,7 @@ export function GradePanel({
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [doc, imagePath, videoPath, videoTimestampSec, underlay]);
+  }, [doc, imagePath, videoPath, videoTimestampSec, underlay, renderGraded]);
 
   const updateOp = useCallback((index: number, next: GradeOp) => {
     setOps((prev) => prev.map((op, i) => (i === index ? next : op)));
