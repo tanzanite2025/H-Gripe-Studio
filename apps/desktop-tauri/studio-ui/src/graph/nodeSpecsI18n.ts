@@ -218,6 +218,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         label: "检测文字",
         hint: "把疑似文字行检测为受保护的文字候选层（启发式边缘密度检测）——仅桌面运行时；每个区域都会标记待审",
       },
+      detect_shadow: {
+        label: "检测阴影",
+        hint: "把主体旁比背景基准更暗的区域检测为投影候选层（启发式亮度检测）——仅桌面运行时；会标记待审",
+      },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: { label: "输出名", hint: "每层 PNG 的基础名（空 = <image>_split）" },
     },
