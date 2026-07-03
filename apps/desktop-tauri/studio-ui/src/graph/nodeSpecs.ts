@@ -815,6 +815,74 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
       },
     ],
   },
+  // Integrated production card for the video operations, following the same
+  // data-driven contract as Image Processing: `row.in` / `row.out` port ids
+  // keep each row's dots on its row, params are namespaced `<row>.<key>`, and
+  // graph/lowering.ts (LOWERED_CARD_ROWS) expands each wired row into the
+  // matching internal leaf node at run time.
+  videoProcessing: {
+    kind: "videoProcessing",
+    family: "video",
+    executor: "local",
+    title: "Video Processing",
+    description:
+      "One production card for video operations, as semantic rows: Assemble (encode a frame sequence into a video) and Trim (cut a time range out of a clip). Connect to the row you want — each row exposes its own input/output dots and runs as the matching internal operation (Video Assemble, Video Trim).",
+    category: "process",
+    inputs: [
+      port("assemble.in", "Assemble frames", "any"),
+      port("trim.in", "Trim", "video"),
+    ],
+    outputs: [
+      port("assemble.out", "assembled video", "video"),
+      port("trim.out", "trimmed video", "video"),
+    ],
+    params: [
+      {
+        key: "assemble.fps",
+        label: "Assemble: FPS",
+        control: "number",
+        min: 1,
+        max: 240,
+        step: 1,
+        defaultValue: 24,
+        hint: "output frame rate",
+      },
+      {
+        key: "assemble.codec",
+        label: "Assemble: codec",
+        control: "select",
+        options: ["libx264", "libx265", "mpeg4"],
+        defaultValue: "libx264",
+        hint: "ffmpeg encoder; libx264 is the most compatible",
+      },
+      {
+        key: "trim.start_sec",
+        label: "Trim: start sec",
+        control: "number",
+        min: 0,
+        step: 0.1,
+        defaultValue: 0,
+        hint: "cut start (seconds from the beginning)",
+      },
+      {
+        key: "trim.end_sec",
+        label: "Trim: end sec",
+        control: "number",
+        min: 0,
+        step: 0.1,
+        defaultValue: 0,
+        hint: "cut end in seconds (0 = to the end of the clip)",
+      },
+      {
+        key: "trim.codec",
+        label: "Trim: codec",
+        control: "select",
+        options: ["libx264", "libx265", "mpeg4"],
+        defaultValue: "libx264",
+        hint: "ffmpeg encoder for the re-encode; libx264 is the most compatible",
+      },
+    ],
+  },
   subjectMask: {
     kind: "subjectMask",
     family: "mask",
