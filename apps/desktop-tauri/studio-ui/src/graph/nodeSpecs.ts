@@ -4,6 +4,8 @@
 
 import type { PortDataType, PortSpec } from "./model";
 
+export type { PortSpec } from "./model";
+
 export type ParamControl =
   | "text"
   | "textarea"
@@ -27,6 +29,12 @@ export interface ParamSpec {
   hint?: string;
   /** Render this param directly on the node card (not just the inspector). */
   inline?: boolean;
+  /**
+   * Render this inline param inside the function block of the given input
+   * port, so the param sits in the same framed block as its connection dot
+   * (the dot stays vertically centred on the block).
+   */
+  port?: string;
   /**
    * Only show this param in the inspector when a sibling param's current value
    * is one of `in`. Lets a node hide irrelevant controls (e.g. show API fields
@@ -143,6 +151,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         defaultValue: "",
         hint: "the initial prompt (a connected `text` input overrides this)",
         inline: true,
+        port: "text",
       },
       {
         key: "mode",

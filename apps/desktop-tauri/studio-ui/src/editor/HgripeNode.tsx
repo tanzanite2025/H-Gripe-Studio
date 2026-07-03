@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useRef, useState } from "react";
+import { memo, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore, type NodeProps } from "@xyflow/react";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
@@ -386,7 +386,30 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   // Params flagged `inline` are edited directly on the card; the rest live in
   // the Inspector. `imageSource`/`psdTemplate` paths get a basename caption so
   // the card stays readable even with a long absolute path.
-  const inlineParams = spec.params.filter((p) => p.inline);
+  const inlineParams = spec.params.filter((p) => p.inline && !p.port);
+  // Inline params bound to an input port render inside that port's function
+  // block, keeping the field next to the connection dot that overrides it.
+  const blockParams = spec.params.filter((p) => p.inline && p.port);
+  const renderInlineParam = (p: (typeof spec.params)[number]) => (
+    <label key={p.key} className="inline-field">
+      <span>{p.label}</span>
+      <ParamField
+        spec={p}
+        value={d.params[p.key]}
+        onChange={(v) => editing?.onParamChange(id, p.key, v)}
+        compact
+      />
+      {p.control === "path" && d.params[p.key] ? (
+        <small className="path">{basename(String(d.params[p.key]))}</small>
+      ) : null}
+    </label>
+  );
+  const portContent = blockParams.length
+    ? blockParams.reduce<Record<string, ReactNode[]>>((acc, p) => {
+        (acc[p.port ?? ""] ??= []).push(renderInlineParam(p));
+        return acc;
+      }, {})
+    : undefined;
   const templateWarn =
     spec.kind === "psdTemplate" ? psdTemplatePathWarning(String(d.params.path ?? "")) : null;
 
@@ -398,6 +421,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       lod={lod}
       durationMs={d.durationMs}
       titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
+      portContent={lod ? undefined : portContent}
     >
       {!lod && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>
@@ -406,20 +430,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       ) : null}
 
       {!lod && <div className="node-body">
-        {inlineParams.map((p) => (
-          <label key={p.key} className="inline-field">
-            <span>{p.label}</span>
-            <ParamField
-              spec={p}
-              value={d.params[p.key]}
-              onChange={(v) => editing?.onParamChange(id, p.key, v)}
-              compact
-            />
-            {p.control === "path" && d.params[p.key] ? (
-              <small className="path">{basename(String(d.params[p.key]))}</small>
-            ) : null}
-          </label>
-        ))}
+        {inlineParams.map(renderInlineParam)}
 
         {spec.kind === "preview" &&
           (d.imagePath ? (
