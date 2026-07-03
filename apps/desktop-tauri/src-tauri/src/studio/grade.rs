@@ -250,6 +250,41 @@ pub(crate) fn grade_preview(
         studio_image::DEFAULT_MAX_DECODE_PIXELS,
     )?;
     let srgb = loaded.image.to_srgb_rgba8();
+    grade_srgb_preview(srgb, doc, max_dim, started)
+}
+
+/// Live preview for the video grading dialog: decode the frame nearest
+/// `timestamp_sec` through the native media engine into the canonical
+/// [`WorkingImage`] surface — the same working space stills use — then grade
+/// the sRGB display proxy exactly like [`grade_preview`]. This is the Batch-3
+/// media/colour bridge: a video frame reaches the grading kernel without a
+/// PNG round-trip. Native-only: it drives the vendored libav decoder.
+#[cfg(feature = "native-ffmpeg")]
+#[tauri::command]
+pub(crate) fn video_frame_grade_preview(
+    video: String,
+    timestamp_sec: f64,
+    doc: Value,
+    max_dim: Option<u32>,
+) -> Result<GradePreviewResult, String> {
+    let started = Instant::now();
+    let doc = parse_grade_doc(Some(&doc))?;
+    let working =
+        super::ffmpeg_native::decode_frame_working(Path::new(video.trim()), timestamp_sec)?;
+    let srgb = working.to_srgb_rgba8();
+    grade_srgb_preview(srgb, doc, max_dim, started)
+}
+
+/// Grade an sRGB 8-bit proxy and encode it as a PNG data URL — the shared tail
+/// of both the still ([`grade_preview`]) and video
+/// ([`video_frame_grade_preview`]) preview paths. Downscales to at most
+/// `max_dim` on the long edge, runs `doc`, returns the result.
+fn grade_srgb_preview(
+    srgb: RgbaImage,
+    doc: GradeDoc,
+    max_dim: Option<u32>,
+    started: Instant,
+) -> Result<GradePreviewResult, String> {
     let (w, h) = srgb.dimensions();
     if w == 0 || h == 0 {
         return Err("Grade preview needs a non-empty image".to_string());
