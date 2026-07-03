@@ -56,7 +56,15 @@ import {
   type DrawerTab,
 } from "./production/drawerState";
 import { addAsset, assetKindForNodeKind, removeAsset, type MediaAsset } from "./production/mediaBin";
-import { assetTarget, nodeOutputTarget, targetKey, type ProductionTarget } from "./production/productionTarget";
+import {
+  assetTarget,
+  imageLayerTarget,
+  layeredImageTarget,
+  nodeOutputTarget,
+  targetKey,
+  type ProductionTarget,
+} from "./production/productionTarget";
+import { findLayer, stubLayeredImageAsset, type LayeredImageAsset } from "./production/layeredImage";
 import {
   appendClip,
   createTimeline,
@@ -148,6 +156,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     Record<string, { edit: AudioClipEdit; sourceDurationSec: number }>
   >({});
   const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
+  // Layer selection inside the targeted layered image asset (review panel):
+  // the selected candidate layer id plus per-layer visibility overrides.
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [layerVisibility, setLayerVisibility] = useState<Record<string, boolean>>({});
   // On-demand export dialog (plan step 9): opened by the drawer's export command.
   const [exportOpen, setExportOpen] = useState(false);
   const { fitView, screenToFlowPosition } = useReactFlow();
@@ -173,6 +185,22 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     () => nodes.find((n) => n.id === selectedId) ?? null,
     [nodes, selectedId],
   );
+
+  // The selected split node's layered image asset. Derived client-side from
+  // the stub builder (same shape either runtime emits on run) so the review
+  // panel works before any run; a run-output asset store replaces this once
+  // real segmentation lands.
+  const layeredAsset = useMemo<LayeredImageAsset | null>(() => {
+    if (!selectedNode) return null;
+    if ((selectedNode.data as HgripeNodeData).kind !== "smartLayerSplit") return null;
+    const edge = edges.find((e) => e.target === selectedNode.id && e.targetHandle === "image");
+    const src = edge ? nodes.find((n) => n.id === edge.source) : undefined;
+    const d = src?.data as HgripeNodeData | undefined;
+    const imagePath =
+      d?.imagePath ?? (typeof d?.params?.path === "string" ? (d.params.path as string) : null);
+    if (!imagePath) return null;
+    return stubLayeredImageAsset({ imagePath, nodeId: selectedNode.id });
+  }, [selectedNode, nodes, edges]);
 
   // Persisted drawer shell state so the drawer reopens how it was left.
   const changeDrawerMode = useCallback((m: DrawerMode) => {
@@ -253,18 +281,35 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       }
     }
     if (activeAssetId) return assetTarget(activeAssetId);
+    if (selectedId && layeredAsset) {
+      return selectedLayerId
+        ? imageLayerTarget(layeredAsset.id, selectedLayerId)
+        : layeredImageTarget(layeredAsset.id, selectedId);
+    }
     if (selectedId) return nodeOutputTarget(selectedId);
     return null;
-  }, [selectedClipId, timeline, activeAssetId, selectedId]);
+  }, [selectedClipId, timeline, activeAssetId, selectedId, layeredAsset, selectedLayerId]);
 
   // Selecting a canvas node retargets production selection to that node.
   const handleCanvasSelect = useCallback((id: string | null) => {
     setSelectedId(id);
+    setSelectedLayerId(null);
+    setLayerVisibility({});
     if (id) {
       setActiveAssetId(null);
       setSelectedClipId(null);
     }
   }, []);
+
+  const handleToggleLayerVisibility = useCallback(
+    (layerId: string) => {
+      const current =
+        layerVisibility[layerId] ??
+        (layeredAsset ? (findLayer(layeredAsset, layerId)?.visible ?? true) : true);
+      setLayerVisibility((vis) => ({ ...vis, [layerId]: !current }));
+    },
+    [layerVisibility, layeredAsset],
+  );
 
   // Static validation surfaced in the toolbar (type mismatches, cycles, …).
   const issues = useMemo(
@@ -372,10 +417,22 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       }
       case "node_output":
         return { imagePath: connectedImagePath(productionTarget.nodeId), videoPath: null };
+      case "layered_image":
+        return layeredAsset && layeredAsset.id === productionTarget.assetId
+          ? { imagePath: layeredAsset.preview_composite.path, videoPath: null }
+          : none;
+      case "image_layer": {
+        if (!layeredAsset || layeredAsset.id !== productionTarget.assetId) return none;
+        const layer = findLayer(layeredAsset, productionTarget.layerId);
+        return {
+          imagePath: layer?.rgba?.path ?? layeredAsset.base_image.path,
+          videoPath: null,
+        };
+      }
       default:
         return none;
     }
-  }, [productionTarget, binAssets, timeline, connectedImagePath]);
+  }, [productionTarget, binAssets, timeline, connectedImagePath, layeredAsset]);
 
   // Right-click on an image bin asset / still clip: reopen the existing
   // unified image editor (mask + crop) on the asset's source node, so the
@@ -833,6 +890,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           gradeVideoPath={gradeSource.videoPath}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
           onGradeCommit={handleGradeCommit}
+          layeredAsset={layeredAsset}
+          selectedLayerId={selectedLayerId}
+          onSelectLayer={setSelectedLayerId}
+          layerVisibility={layerVisibility}
+          onToggleLayerVisibility={handleToggleLayerVisibility}
         />
       </NodeEditingContext.Provider>
       {menu && (

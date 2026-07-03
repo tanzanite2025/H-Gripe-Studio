@@ -1,6 +1,8 @@
 import { useT, type MsgKey } from "../i18n";
 import { GradePanel } from "../editor/GradePanel";
 import type { DrawerMode, DrawerTab } from "./drawerState";
+import { LayerReviewPanel } from "./LayerReviewPanel";
+import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 import { targetKey, type ProductionTarget } from "./productionTarget";
 import { timelineDuration, trackEnd, type TimelineModel } from "./timeline";
@@ -45,6 +47,13 @@ export interface ProductionDrawerProps {
   /** The current target's stored grade doc (JSON string), if any. */
   gradeDoc: string | null;
   onGradeCommit: (gradeDoc: string) => void;
+  /** Layered asset of the selected split node, when one is targeted. */
+  layeredAsset: LayeredImageAsset | null;
+  /** Selected layer inside `layeredAsset` (`image_layer` target), if any. */
+  selectedLayerId: string | null;
+  onSelectLayer: (layerId: string | null) => void;
+  layerVisibility: Record<string, boolean>;
+  onToggleLayerVisibility: (layerId: string) => void;
 }
 
 function kindKey(kind: MediaAssetKind): MsgKey {
@@ -82,6 +91,11 @@ export function ProductionDrawer({
   gradeVideoPath,
   gradeDoc,
   onGradeCommit,
+  layeredAsset,
+  selectedLayerId,
+  onSelectLayer,
+  layerVisibility,
+  onToggleLayerVisibility,
 }: ProductionDrawerProps) {
   const t = useT();
 
@@ -120,7 +134,13 @@ export function ProductionDrawer({
           ? `${t("drawer.targetVideoClip")} · ${clipAssetName(target.clipId)}`
           : target.kind === "audio_clip"
             ? `${t("drawer.targetAudioClip")} · ${clipAssetName(target.clipId)}`
-            : target.kind;
+            : target.kind === "layered_image"
+              ? `${t("drawer.targetLayeredImage")} · ${target.assetId}`
+              : target.kind === "image_layer"
+                ? `${t("drawer.targetImageLayer")} · ${
+                    (layeredAsset && findLayer(layeredAsset, target.layerId)?.name) ?? target.layerId
+                  }`
+                : target.kind;
 
   return (
     <div className={`production-drawer production-drawer-${mode}`}>
@@ -160,6 +180,15 @@ export function ProductionDrawer({
 
       {tab === "edit" ? (
         <div className="production-drawer-body production-edit">
+          {layeredAsset ? (
+            <LayerReviewPanel
+              asset={layeredAsset}
+              selectedLayerId={selectedLayerId}
+              onSelectLayer={onSelectLayer}
+              visibility={layerVisibility}
+              onToggleVisibility={onToggleLayerVisibility}
+            />
+          ) : null}
           <div className="production-bin">
             <div className="production-bin-head">
               <h3>{t("drawer.binTitle")}</h3>
