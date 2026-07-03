@@ -4,6 +4,7 @@ import {
   findLayer,
   layeredAssetManifest,
   LAYER_SPLIT_STUB_ENGINE,
+  mergeLayersIntoAsset,
   parseLayeredImageAsset,
   STUB_BACKGROUND_LAYER_ID,
   STUB_ORIGINAL_LAYER_ID,
@@ -100,5 +101,50 @@ describe("parseLayeredImageAsset", () => {
       parseLayeredImageAsset({ ...asset, layers: [{ id: "x", name: "y", kind: "subject" }] }),
     ).toBeNull();
     expect(parseLayeredImageAsset({ ...asset, split_report: null })).toBeNull();
+  });
+});
+
+describe("mergeLayersIntoAsset", () => {
+  const asset = stubLayeredImageAsset({
+    imagePath: "/a/b.png",
+    nodeId: "n1",
+    createdAt: "0",
+  });
+  const merged = {
+    id: "layer_merged_1",
+    name: "merged (background candidate + subject candidate)",
+    mask: { path: "/out/merged_mask.png" },
+    rgba: { path: "/out/merged.png" },
+    bbox: [1, 1, 13, 13] as [number, number, number, number],
+  };
+
+  it("replaces the merged layers with one user-sourced layer at the first slot", () => {
+    const next = mergeLayersIntoAsset(
+      asset,
+      [STUB_BACKGROUND_LAYER_ID, STUB_SUBJECT_LAYER_ID],
+      merged,
+    );
+    expect(next.layers.map((l) => l.id)).toEqual([STUB_ORIGINAL_LAYER_ID, "layer_merged_1"]);
+    const layer = findLayer(next, "layer_merged_1")!;
+    expect(layer.source).toBe("user");
+    expect(layer.kind).toBe("object"); // background + subject differ in kind
+    expect(layer.bbox).toEqual([1, 1, 13, 13]);
+    expect(layer.confidence).toBeLessThanOrEqual(
+      Math.min(...asset.layers.filter((l) => !l.locked).map((l) => l.confidence)),
+    );
+    // the merged members' review issues are replaced by one merged-layer issue
+    expect(next.split_report.suggested_review.map((issue) => issue.layer_id)).toEqual([
+      "layer_merged_1",
+    ]);
+    // the input asset is untouched
+    expect(asset.layers).toHaveLength(3);
+  });
+
+  it("is a no-op when fewer than two unlocked layers match", () => {
+    expect(mergeLayersIntoAsset(asset, [STUB_SUBJECT_LAYER_ID], merged)).toBe(asset);
+    expect(
+      mergeLayersIntoAsset(asset, [STUB_ORIGINAL_LAYER_ID, STUB_SUBJECT_LAYER_ID], merged),
+    ).toBe(asset);
+    expect(mergeLayersIntoAsset(asset, ["nope", "also-nope"], merged)).toBe(asset);
   });
 });

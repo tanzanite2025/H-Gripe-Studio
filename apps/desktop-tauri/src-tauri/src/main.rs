@@ -104,6 +104,7 @@ fn main() {
             studio::read_studio_recents,
             studio::write_studio_recents,
             studio::cancel_studio_run,
+            studio::merge_layer_masks,
             studio::list_studio_media_index,
             studio::clear_studio_media_index,
             commands::tasks::rerun_task,

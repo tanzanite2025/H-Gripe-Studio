@@ -245,6 +245,70 @@ export function layeredAssetManifest(asset: LayeredImageAsset): {
   };
 }
 
+/**
+ * Apply a Review Editor "merge layers" to an asset: replace the (unlocked)
+ * merged layers with one user-sourced layer carrying the merged artifacts, at
+ * the position of the first merged layer. Confidence is the minimum of the
+ * merged candidates; the merged layer is flagged for review in the report.
+ * Pure asset transformation — the pixel artifacts come from the backend's
+ * `merge_layer_masks` command.
+ */
+export function mergeLayersIntoAsset(
+  asset: LayeredImageAsset,
+  layerIds: string[],
+  merged: {
+    id: string;
+    name: string;
+    mask: ImageRef;
+    rgba: ImageRef;
+    bbox: [number, number, number, number];
+  },
+): LayeredImageAsset {
+  const ids = new Set(layerIds);
+  const members = asset.layers.filter((layer) => ids.has(layer.id) && !layer.locked);
+  if (members.length < 2) return asset;
+  const memberIds = new Set(members.map((layer) => layer.id));
+  const mergedLayer: LayerCandidate = {
+    id: merged.id,
+    name: merged.name,
+    kind: members.every((layer) => layer.kind === members[0].kind) ? members[0].kind : "object",
+    bbox: merged.bbox,
+    mask: merged.mask,
+    rgba: merged.rgba,
+    confidence: Math.min(...members.map((layer) => layer.confidence)),
+    source: "user",
+    visible: true,
+    notes: [`merged from ${members.map((layer) => layer.name).join(" + ")}`],
+  };
+  const layers: LayerCandidate[] = [];
+  let inserted = false;
+  for (const layer of asset.layers) {
+    if (memberIds.has(layer.id)) {
+      if (!inserted) {
+        layers.push(mergedLayer);
+        inserted = true;
+      }
+      continue;
+    }
+    layers.push(layer);
+  }
+  return {
+    ...asset,
+    layers,
+    split_report: {
+      ...asset.split_report,
+      suggested_review: [
+        ...asset.split_report.suggested_review.filter((issue) => !memberIds.has(issue.layer_id)),
+        {
+          layer_id: mergedLayer.id,
+          severity: "info",
+          message: `merged from ${members.length} layers — review the union mask`,
+        },
+      ],
+    },
+  };
+}
+
 /** Find a layer by id, or null when the asset does not carry it. */
 export function findLayer(
   asset: LayeredImageAsset,

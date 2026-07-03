@@ -12,6 +12,11 @@ export interface LayerReviewPanelProps {
   /** Per-layer visibility overrides on top of each candidate's own flag. */
   visibility: Record<string, boolean>;
   onToggleVisibility: (layerId: string) => void;
+  /**
+   * Merge the checked (unlocked) layers into one. Omitted when merging is
+   * unavailable (browser preview has no backend to union the masks).
+   */
+  onMergeLayers?: (layerIds: string[]) => void;
 }
 
 function layerVisible(layer: LayerCandidate, visibility: Record<string, boolean>): boolean {
@@ -90,8 +95,17 @@ export function LayerReviewPanel({
   onSelectLayer,
   visibility,
   onToggleVisibility,
+  onMergeLayers,
 }: LayerReviewPanelProps) {
   const t = useT();
+  const [checked, setChecked] = useState<string[]>([]);
+  // Drop stale ids when the asset's layer set changes (e.g. after a merge).
+  const layerIds = new Set(asset.layers.map((layer) => layer.id));
+  const validChecked = checked.filter((id) => layerIds.has(id));
+  const toggleChecked = (layerId: string) =>
+    setChecked((ids) =>
+      ids.includes(layerId) ? ids.filter((id) => id !== layerId) : [...ids, layerId],
+    );
   const issuesByLayer = new Map<string, number>();
   for (const issue of asset.split_report.suggested_review) {
     issuesByLayer.set(issue.layer_id, (issuesByLayer.get(issue.layer_id) ?? 0) + 1);
@@ -125,6 +139,15 @@ export function LayerReviewPanel({
           const issues = issuesByLayer.get(layer.id) ?? 0;
           return (
             <li key={layer.id} className={selected ? "active" : ""}>
+              {onMergeLayers && !layer.locked ? (
+                <input
+                  type="checkbox"
+                  className="layer-review-check"
+                  checked={validChecked.includes(layer.id)}
+                  onChange={() => toggleChecked(layer.id)}
+                  title={t("layers.mergeCheckTitle")}
+                />
+              ) : null}
               <button
                 className="layer-review-item"
                 onClick={() => onSelectLayer(selected ? null : layer.id)}
@@ -162,6 +185,19 @@ export function LayerReviewPanel({
           );
         })}
       </ul>
+      {onMergeLayers ? (
+        <button
+          className="layer-review-merge"
+          disabled={validChecked.length < 2}
+          onClick={() => {
+            onMergeLayers(validChecked);
+            setChecked([]);
+          }}
+          title={t("layers.mergeTitle")}
+        >
+          {t("layers.merge", { n: validChecked.length })}
+        </button>
+      ) : null}
       {asset.split_report.warnings.length > 0 ? (
         <ul className="layer-review-warnings">
           {asset.split_report.warnings.map((warning) => (

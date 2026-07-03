@@ -54,6 +54,8 @@ export interface ProductionDrawerProps {
   onSelectLayer: (layerId: string | null) => void;
   layerVisibility: Record<string, boolean>;
   onToggleLayerVisibility: (layerId: string) => void;
+  /** Merge checked layers (desktop only; omitted in the browser preview). */
+  onMergeLayers?: (layerIds: string[]) => void;
 }
 
 function kindKey(kind: MediaAssetKind): MsgKey {
@@ -96,6 +98,7 @@ export function ProductionDrawer({
   onSelectLayer,
   layerVisibility,
   onToggleLayerVisibility,
+  onMergeLayers,
 }: ProductionDrawerProps) {
   const t = useT();
 
@@ -187,6 +190,7 @@ export function ProductionDrawer({
               onSelectLayer={onSelectLayer}
               visibility={layerVisibility}
               onToggleVisibility={onToggleLayerVisibility}
+              onMergeLayers={onMergeLayers}
             />
           ) : null}
           <div className="production-bin">

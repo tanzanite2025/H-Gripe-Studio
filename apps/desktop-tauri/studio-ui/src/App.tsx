@@ -45,7 +45,7 @@ import { useContextMenu } from "./editor/useContextMenu";
 import { useModals } from "./editor/useModals";
 import { loadPersistedGraph } from "./editor/persist";
 import { validateGraph } from "./runtime/dag";
-import { isTauri, listenFileDrop, primeIngest } from "./bridge/tauri";
+import { isTauri, listenFileDrop, mergeLayerMasks, primeIngest } from "./bridge/tauri";
 import { ProductionDrawer, type AddableAsset } from "./production/ProductionDrawer";
 import {
   loadDrawerMode,
@@ -64,7 +64,12 @@ import {
   targetKey,
   type ProductionTarget,
 } from "./production/productionTarget";
-import { findLayer, stubLayeredImageAsset, type LayeredImageAsset } from "./production/layeredImage";
+import {
+  findLayer,
+  mergeLayersIntoAsset,
+  stubLayeredImageAsset,
+  type LayeredImageAsset,
+} from "./production/layeredImage";
 import {
   appendClip,
   createTimeline,
@@ -320,6 +325,51 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       setLayerVisibility((vis) => ({ ...vis, [layerId]: !current }));
     },
     [layerVisibility, layeredAsset],
+  );
+
+  // Review Editor "merge layers": union the checked layers' masks on the
+  // backend, then replace them in the node's stored asset with one merged
+  // layer. Desktop-only — the browser preview has no backend to union masks.
+  const handleMergeLayers = useCallback(
+    (layerIds: string[]) => {
+      const node = selectedNode;
+      const asset = layeredAsset;
+      if (!node || !asset || layerIds.length < 2) return;
+      const members = layerIds
+        .map((id) => findLayer(asset, id))
+        .filter((layer): layer is NonNullable<typeof layer> => layer !== null && !layer.locked);
+      if (members.length < 2) return;
+      const mergedId = `layer_merged_${Date.now().toString(36)}`;
+      void mergeLayerMasks({
+        imagePath: asset.base_image.path,
+        maskPaths: members.map((layer) => layer.mask.path),
+        outputName: `${asset.id}_${mergedId}`,
+      })
+        .then((artifacts) => {
+          if (!artifacts) return;
+          const next = mergeLayersIntoAsset(
+            asset,
+            members.map((layer) => layer.id),
+            {
+              id: mergedId,
+              name: `merged (${members.map((layer) => layer.name).join(" + ")})`,
+              mask: { path: artifacts.mask_path, width: artifacts.width, height: artifacts.height },
+              rgba: { path: artifacts.rgba_path, width: artifacts.width, height: artifacts.height },
+              bbox: artifacts.bbox,
+            },
+          );
+          setNodes((ns) =>
+            ns.map((n) =>
+              n.id === node.id
+                ? { ...n, data: { ...(n.data as HgripeNodeData), layeredAsset: next } }
+                : n,
+            ),
+          );
+          setSelectedLayerId((id) => (id && layerIds.includes(id) ? mergedId : id));
+        })
+        .catch((err) => setMessage(String(err)));
+    },
+    [selectedNode, layeredAsset, setNodes, setMessage],
   );
 
   // Static validation surfaced in the toolbar (type mismatches, cycles, …).
@@ -906,6 +956,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSelectLayer={setSelectedLayerId}
           layerVisibility={layerVisibility}
           onToggleLayerVisibility={handleToggleLayerVisibility}
+          onMergeLayers={isTauri() ? handleMergeLayers : undefined}
         />
       </NodeEditingContext.Provider>
       {menu && (
