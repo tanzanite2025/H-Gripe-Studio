@@ -1,7 +1,7 @@
 # Node Card Corner Badge Plan
 
-> Status: local planning draft. Do not implement or submit until cloud-side UI
-> changes are pulled back and reconciled.
+> Status: implemented (top-right placement, centralized in `NodeCardShell` /
+> `NodeTypeBadge`; node specs declare a `family` field).
 
 ## Purpose
 

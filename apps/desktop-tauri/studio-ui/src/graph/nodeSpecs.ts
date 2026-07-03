@@ -41,9 +41,8 @@ export interface ParamSpec {
 /**
  * Where a node runs — the routing/grouping discriminator.
  * - `graph`  pure in-process node (no backend call).
- * - `local`  a local card; the default engines run in native Rust, with the
- *   optional legacy `python/bridge` CLI serving only opt-in legacy engines and
- *   the Python-only PSD paths; must not touch the network.
+ * - `local`  a local card; its engines run in-process in native Rust and must
+ *   not touch the network.
  * - `compute` in-process native-Rust image/model work; must not touch the network.
  * - `api`    always a provider call (needs a profile + credentials_ref).
  * - `hybrid` user picks per-node via a `mode` param (e.g. `promptOptimize`).
@@ -51,8 +50,28 @@ export interface ParamSpec {
  */
 export type Executor = "graph" | "local" | "compute" | "api" | "hybrid";
 
+/**
+ * Visual identity family for the corner type badge on the node card. Separate
+ * from `executor` (an image node can be API-backed or a pure file input; its
+ * badge family is still `image`). See NODE_CARD_CORNER_BADGE_PLAN.md.
+ */
+export type NodeVisualFamily =
+  | "image"
+  | "video"
+  | "audio"
+  | "psd"
+  | "mask"
+  | "crop"
+  | "grade"
+  | "api"
+  | "compute"
+  | "export"
+  | "utility";
+
 export interface NodeSpec {
   kind: string;
+  /** Corner badge identity family; the card shell renders the badge from this. */
+  family: NodeVisualFamily;
   title: string;
   /** Short description shown in the inspector / node palette. */
   description: string;
@@ -72,6 +91,7 @@ function port(id: string, label: string, type: PortDataType): PortSpec {
 export const NODE_SPECS: Record<string, NodeSpec> = {
   prompt: {
     kind: "prompt",
+    family: "utility",
     executor: "graph",
     title: "Prompt",
     description: "A text prompt fed into generation nodes.",
@@ -90,6 +110,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   promptOptimize: {
     kind: "promptOptimize",
+    family: "utility",
     executor: "hybrid",
     title: "Prompt Optimize",
     description:
@@ -191,6 +212,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   batch: {
     kind: "batch",
+    family: "utility",
     executor: "graph",
     title: "Batch",
     description:
@@ -211,6 +233,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   imageSource: {
     kind: "imageSource",
+    family: "image",
     executor: "graph",
     title: "Image Source",
     description: "An image file on disk, used as a reference / input image.",
@@ -232,6 +255,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   videoSource: {
     kind: "videoSource",
+    family: "video",
     executor: "graph",
     title: "Video Source",
     description: "A video file on disk; shows a poster frame and carries the path downstream.",
@@ -260,6 +284,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   psdTemplate: {
     kind: "psdTemplate",
+    family: "psd",
     executor: "graph",
     title: "PSD Template",
     description: "A .psd template path carried through to export.",
@@ -281,6 +306,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   number: {
     kind: "number",
+    family: "utility",
     executor: "graph",
     title: "Number",
     description: "A numeric value (seed, count, …) fed into other nodes.",
@@ -293,6 +319,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   generate: {
     kind: "generate",
+    family: "api",
     executor: "api",
     title: "Generate",
     description:
@@ -344,6 +371,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   compare: {
     kind: "compare",
+    family: "utility",
     executor: "graph",
     title: "Compare",
     description:
@@ -364,6 +392,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   logic: {
     kind: "logic",
+    family: "utility",
     executor: "graph",
     title: "Logic",
     description:
@@ -384,6 +413,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   if: {
     kind: "if",
+    family: "utility",
     executor: "graph",
     title: "If",
     description:
@@ -405,6 +435,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   switch: {
     kind: "switch",
+    family: "utility",
     executor: "graph",
     title: "Switch",
     description:
@@ -431,6 +462,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   reroute: {
     kind: "reroute",
+    family: "utility",
     executor: "graph",
     title: "Reroute",
     description:
@@ -442,6 +474,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   preview: {
     kind: "preview",
+    family: "image",
     executor: "graph",
     title: "Preview",
     description:
@@ -453,6 +486,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   save: {
     kind: "save",
+    family: "export",
     executor: "graph",
     title: "Export",
     description:
@@ -469,6 +503,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   psdContextAnalyze: {
     kind: "psdContextAnalyze",
+    family: "psd",
     executor: "local",
     title: "PSD Context Analyze",
     description:
@@ -526,6 +561,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   matchLightColor: {
     kind: "matchLightColor",
+    family: "grade",
     executor: "local",
     title: "Light & Color Match",
     description:
@@ -639,6 +675,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   subjectMask: {
     kind: "subjectMask",
+    family: "mask",
     executor: "compute",
     title: "Subject Mask / Matte",
     description:
@@ -760,6 +797,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   crop: {
     kind: "crop",
+    family: "crop",
     executor: "compute",
     title: "Crop",
     description:
@@ -825,6 +863,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   imageGrade: {
     kind: "imageGrade",
+    family: "grade",
     executor: "compute",
     title: "Grade",
     description:
@@ -861,6 +900,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   refineMaskEdge: {
     kind: "refineMaskEdge",
+    family: "mask",
     executor: "local",
     title: "Mask Edge Refine",
     description:
@@ -989,6 +1029,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   imageEnhance: {
     kind: "imageEnhance",
+    family: "compute",
     executor: "local",
     title: "Image Enhance",
     description:
@@ -1142,6 +1183,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   detailWatchdog: {
     kind: "detailWatchdog",
+    family: "compute",
     executor: "local",
     title: "Detail Watchdog",
     description:
@@ -1213,6 +1255,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   detailRepaint: {
     kind: "detailRepaint",
+    family: "compute",
     executor: "api",
     title: "Detail Repaint",
     description:
@@ -1353,6 +1396,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   videoAssemble: {
     kind: "videoAssemble",
+    family: "video",
     executor: "local",
     title: "Video Assemble",
     description:
@@ -1412,6 +1456,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   videoTrim: {
     kind: "videoTrim",
+    family: "video",
     executor: "local",
     title: "Video Trim",
     description:
@@ -1480,6 +1525,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   psdExport: {
     kind: "psdExport",
+    family: "psd",
     executor: "local",
     title: "PSD Export",
     description:

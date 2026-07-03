@@ -1,12 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { NODE_SPECS, type Executor } from "./nodeSpecs";
+import { NODE_SPECS, type Executor, type NodeVisualFamily } from "./nodeSpecs";
 
 const VALID: Executor[] = ["graph", "local", "compute", "api", "hybrid"];
+
+const VALID_FAMILIES: NodeVisualFamily[] = [
+  "image",
+  "video",
+  "audio",
+  "psd",
+  "mask",
+  "crop",
+  "grade",
+  "api",
+  "compute",
+  "export",
+  "utility",
+];
 
 describe("nodeSpecs executor tagging", () => {
   it("tags every node kind with a valid executor", () => {
     for (const [kind, spec] of Object.entries(NODE_SPECS)) {
       expect(VALID, `${kind} has a valid executor`).toContain(spec.executor);
+    }
+  });
+
+  it("tags every node kind with a valid corner-badge visual family", () => {
+    for (const [kind, spec] of Object.entries(NODE_SPECS)) {
+      expect(VALID_FAMILIES, `${kind} has a valid family`).toContain(spec.family);
+    }
+  });
+
+  it("keeps the badge family independent of the executor lane", () => {
+    const expected: Record<string, NodeVisualFamily> = {
+      imageSource: "image",
+      videoSource: "video",
+      psdTemplate: "psd",
+      psdExport: "psd",
+      subjectMask: "mask",
+      refineMaskEdge: "mask",
+      crop: "crop",
+      imageGrade: "grade",
+      matchLightColor: "grade",
+      generate: "api",
+      imageEnhance: "compute",
+      save: "export",
+    };
+    for (const [kind, family] of Object.entries(expected)) {
+      expect(NODE_SPECS[kind]?.family, kind).toBe(family);
     }
   });
 
