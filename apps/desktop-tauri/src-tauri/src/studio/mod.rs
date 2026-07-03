@@ -40,6 +40,8 @@
 //! - [`subject_mask`]: the `subjectMask` node executor (native-Rust matte).
 //! - [`subject_matte`]: continuous alpha matting (ViTMatte / trimap, Compute lane).
 //! - [`subject_sam2`]: SAM 2 interactive point-prompt segmenter (Compute lane).
+//! - [`reflection_regions`]: heuristic reflection candidate detection for
+//!   `smartLayerSplit` (Phase 3).
 //! - [`shadow_regions`]: heuristic cast-shadow candidate detection for
 //!   `smartLayerSplit` (Phase 3).
 //! - [`text_regions`]: heuristic text region detection for `smartLayerSplit`
@@ -87,6 +89,7 @@ mod pixel_ops;
 mod prompt_optimize;
 mod psd_analyze;
 mod psd_export;
+mod reflection_regions;
 mod run_cancel;
 mod run_events;
 mod schedule;

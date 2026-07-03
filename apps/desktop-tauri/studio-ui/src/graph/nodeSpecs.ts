@@ -852,6 +852,13 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "detect a cast-shadow candidate next to the subject (background regions darker than the background baseline) as its own layer — desktop runtime only; flagged for review",
       },
       {
+        key: "detect_reflection",
+        label: "Detect reflection",
+        control: "checkbox",
+        defaultValue: false,
+        hint: "detect a reflection candidate below the subject (a dimmer vertically mirrored copy on the surface) as its own layer — desktop runtime only; flagged for review",
+      },
+      {
         key: "output_dir",
         label: "Output dir",
         control: "path",
