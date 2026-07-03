@@ -3,13 +3,14 @@
 // the exact same files (`gradeKernel.golden.test.ts`), so the two
 // implementations are pinned to one spec instead of hand-mirrored.
 //
-// Three file kinds: `composite` cases exercise the blend/composite primitive
+// Four file kinds: `composite` cases exercise the blend/composite primitive
 // directly; `doc` cases run a whole `GradeDoc` over an input surface;
-// `scopes` cases run the read-only analysers and assert exact integer counts.
+// `scopes` cases run the read-only analysers and assert exact integer
+// counts; `temporal` cases run the cross-frame `temporal_denoise` stage.
 
 use hgripe_grade::{
-    apply, composite_over, histogram, vectorscope, waveform, BlendMode, GradeDoc, GradeSpace,
-    GradeSurface, Histogram, Vectorscope, Waveform,
+    apply, composite_over, histogram, temporal_denoise, vectorscope, waveform, BlendMode, GradeDoc,
+    GradeSpace, GradeSurface, Histogram, Vectorscope, Waveform,
 };
 use serde::Deserialize;
 
@@ -19,6 +20,17 @@ enum GoldenFile {
     Composite { cases: Vec<CompositeCase> },
     Doc { cases: Vec<DocCase> },
     Scopes { cases: Vec<ScopeCase> },
+    Temporal { cases: Vec<TemporalCase> },
+}
+
+#[derive(Deserialize)]
+struct TemporalCase {
+    name: String,
+    amount: f32,
+    prev: GoldenSurface,
+    input: GoldenSurface,
+    expected: Vec<f32>,
+    tolerance: f32,
 }
 
 #[derive(Deserialize)]
@@ -143,6 +155,14 @@ fn golden_vectors() {
                             assert_eq!(vectorscope(&surface, size), want, "{name}");
                         }
                     }
+                    ran += 1;
+                }
+            }
+            GoldenFile::Temporal { cases } => {
+                for case in cases {
+                    let mut surface = case.input.surface();
+                    temporal_denoise(&mut surface, &case.prev.surface(), case.amount);
+                    assert_close(&case.name, &surface.data, &case.expected, case.tolerance);
                     ran += 1;
                 }
             }

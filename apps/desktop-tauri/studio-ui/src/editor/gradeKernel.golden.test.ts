@@ -15,10 +15,12 @@ import opsSpatial from "../../../../../crates/hgripe-grade/goldens/ops_spatial.j
 import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json";
 import opsWarper from "../../../../../crates/hgripe-grade/goldens/ops_warper.json";
 import scopes from "../../../../../crates/hgripe-grade/goldens/scopes.json";
+import temporalDenoiseGoldens from "../../../../../crates/hgripe-grade/goldens/temporal_denoise.json";
 import {
   applyDoc,
   compositeOver,
   histogramScope,
+  temporalDenoise,
   vectorscopeScope,
   waveformScope,
   type GradeBlendMode,
@@ -48,6 +50,15 @@ interface CompositeCase {
 interface DocCase {
   name: string;
   doc: unknown;
+  input: GoldenSurface;
+  expected: number[];
+  tolerance: number;
+}
+
+interface TemporalCase {
+  name: string;
+  amount: number;
+  prev: GoldenSurface;
   input: GoldenSurface;
   expected: number[];
   tolerance: number;
@@ -109,6 +120,14 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
         assertClose(dst.data, c.expected, c.tolerance);
       });
     }
+  }
+
+  for (const c of (temporalDenoiseGoldens as { cases: TemporalCase[] }).cases) {
+    it(`temporal_denoise.json: ${c.name}`, () => {
+      const dst = surface(c.input);
+      temporalDenoise(dst, surface(c.prev), c.amount);
+      assertClose(dst.data, c.expected, c.tolerance);
+    });
   }
 
   // Scope counts are integers and the maths is f64 on both ends: exact.

@@ -15,7 +15,7 @@
 
 use crate::blend::BlendMode;
 use crate::doc::{GradeDoc, GradeLayer};
-use crate::ops::{planckian_gains, CurveChannel, GradeOp, MonotoneSpline};
+use crate::ops::{planckian_gains, CurveChannel, GradeOp, MonotoneSpline, MAX_RADIUS};
 use crate::qualifier::HslQualifier;
 use crate::surface::GradeSpace;
 
@@ -177,35 +177,41 @@ impl Builder {
         let dst = src.other().name();
         let src = src.name();
         let body = match op {
-            GradeOp::Sharpen { amount } => {
+            GradeOp::Sharpen { amount, radius } => {
                 let a = finite_or(*amount, 0.0).clamp(0.0, 10.0);
-                // The 3×3 taps are unrolled: some HLSL compilers (FXC,
-                // notably on the WARP software adapter) miscompile the
-                // nested-loop form, and nine straight-line taps are faster
+                let r = (*radius).clamp(1, MAX_RADIUS) as i32;
+                // The neighbourhood taps are unrolled: some HLSL compilers
+                // (FXC, notably on the WARP software adapter) miscompile
+                // the nested-loop form, and straight-line taps are faster
                 // anyway.
-                let taps: String = taps_3x3()
+                let count = ((2 * r + 1) * (2 * r + 1)) as f32;
+                let taps: String = taps(r)
+                    .into_iter()
                     .map(|(k, dx, dy)| {
                         format!(
                             "let t{k} = tap(x, y, {dx}, {dy});\n\
                              sum += vec3f(clamp01({src}[t{k}]), clamp01({src}[t{k} + 1u]), clamp01({src}[t{k} + 2u]));\n"
                         )
                     })
-                    .concat();
+                    .collect();
                 format!(
                     "var sum = vec3f(0.0);\n\
                      {taps}\
                      let v = vec3f(clamp01({src}[i]), clamp01({src}[i + 1u]), clamp01({src}[i + 2u]));\n\
-                     let outv = clamp(v + {a} * (v - sum / 9.0), vec3f(0.0), vec3f(1.0));",
+                     let outv = clamp(v + {a} * (v - sum / {count}), vec3f(0.0), vec3f(1.0));",
                     a = lit(a),
+                    count = lit(count),
                 )
             }
-            GradeOp::Denoise { amount } => {
+            GradeOp::Denoise { amount, radius } => {
                 let a = finite_or(*amount, 0.0).clamp(0.0, 1.0);
-                // Unrolled like sharpen; the binomial spatial weight is
-                // (2 − |dx|) × (2 − |dy|), baked per tap.
-                let taps: String = taps_3x3()
+                let r = (*radius).clamp(1, MAX_RADIUS) as i32;
+                // Unrolled like sharpen; the binomial spatial weight
+                // C(2r, r+dx) × C(2r, r+dy) is baked per tap.
+                let taps: String = taps(r)
+                    .into_iter()
                     .map(|(k, dx, dy)| {
-                        let spatial = ((2 - dx.abs()) * (2 - dy.abs())) as f32;
+                        let spatial = binomial(2 * r, r + dx) * binomial(2 * r, r + dy);
                         format!(
                             "let t{k} = tap(x, y, {dx}, {dy});\n\
                              let u{k} = vec3f(clamp01({src}[t{k}]), clamp01({src}[t{k} + 1u]), clamp01({src}[t{k} + 2u]));\n\
@@ -215,7 +221,7 @@ impl Builder {
                             spatial = lit(spatial),
                         )
                     })
-                    .concat();
+                    .collect();
                 format!(
                     "let v = vec3f(clamp01({src}[i]), clamp01({src}[i + 1u]), clamp01({src}[i + 2u]));\n\
                      var sum = vec3f(0.0);\n\
@@ -711,21 +717,25 @@ fn lit(v: f32) -> String {
     }
 }
 
-// The 3×3 neighbourhood offsets in row-major order: (tap index, dx, dy).
-fn taps_3x3() -> [(usize, i32, i32); 9] {
-    let mut out = [(0usize, 0i32, 0i32); 9];
-    let mut k = 0;
-    let mut dy = -1;
-    while dy <= 1 {
-        let mut dx = -1;
-        while dx <= 1 {
-            out[k] = (k, dx, dy);
-            k += 1;
-            dx += 1;
+// The (2r+1)×(2r+1) neighbourhood offsets in row-major order:
+// (tap index, dx, dy).
+fn taps(r: i32) -> Vec<(usize, i32, i32)> {
+    let mut out = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
+    for dy in -r..=r {
+        for dx in -r..=r {
+            out.push((out.len(), dx, dy));
         }
-        dy += 1;
     }
     out
+}
+
+// C(n, k) as f32 (mirrors `ops::spatial::binomial`).
+fn binomial(n: i32, k: i32) -> f32 {
+    let mut out = 1.0f64;
+    for j in 0..k {
+        out = out * f64::from(n - j) / f64::from(j + 1);
+    }
+    out as f32
 }
 
 fn finite_or(v: f32, fallback: f32) -> f32 {

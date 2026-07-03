@@ -44,8 +44,8 @@ export type GradeOp =
       monochrome: boolean;
     }
   | { type: "color_warper"; points: WarpPoint[] }
-  | { type: "sharpen"; amount: number }
-  | { type: "denoise"; amount: number }
+  | { type: "sharpen"; amount: number; radius?: number }
+  | { type: "denoise"; amount: number; radius?: number }
   | { type: "film_grain"; amount: number; seed: number };
 
 /** One colour-warper control point (mirrors Rust `WarpPoint`). */
@@ -310,10 +310,10 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       break;
     }
     case "sharpen":
-      sharpen(surface, op.amount);
+      sharpen(surface, op.amount, op.radius ?? 1);
       break;
     case "denoise":
-      denoise(surface, op.amount);
+      denoise(surface, op.amount, op.radius ?? 1);
       break;
     case "film_grain":
       filmGrain(surface, op.amount, op.seed);
