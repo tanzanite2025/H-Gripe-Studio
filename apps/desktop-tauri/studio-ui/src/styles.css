@@ -1158,13 +1158,22 @@ button:disabled { opacity: 0.6; cursor: default; }
 .production-grade {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 0;
+}
+.production-grade-empty {
+  margin: auto;
   color: var(--muted);
   font-size: 12px;
   text-align: center;
   padding: 0 24px;
 }
+.production-grade .grade-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  grid-template-columns: 1fr 300px;
+}
+.grade-apply-row { display: flex; justify-content: flex-end; }
 .production-timeline {
   flex: 1;
   min-width: 0;

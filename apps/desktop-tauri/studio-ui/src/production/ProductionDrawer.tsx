@@ -1,7 +1,8 @@
 import { useT, type MsgKey } from "../i18n";
+import { GradePanel } from "../editor/GradePanel";
 import type { DrawerMode, DrawerTab } from "./drawerState";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
-import type { ProductionTarget } from "./productionTarget";
+import { targetKey, type ProductionTarget } from "./productionTarget";
 import { timelineDuration, trackEnd, type TimelineModel } from "./timeline";
 
 export interface AddableAsset {
@@ -31,6 +32,11 @@ export interface ProductionDrawerProps {
   /** Append the active bin asset as a clip at the end of a compatible track. */
   onAddActiveToTimeline: () => void;
   onRemoveClip: (clipId: string) => void;
+  /** Image path the Grade tab previews for the current target, when resolvable. */
+  gradeImagePath: string | null;
+  /** The current target's stored grade doc (JSON string), if any. */
+  gradeDoc: string | null;
+  onGradeCommit: (gradeDoc: string) => void;
 }
 
 function kindKey(kind: MediaAssetKind): MsgKey {
@@ -61,6 +67,9 @@ export function ProductionDrawer({
   onSelectClip,
   onAddActiveToTimeline,
   onRemoveClip,
+  gradeImagePath,
+  gradeDoc,
+  onGradeCommit,
 }: ProductionDrawerProps) {
   const t = useT();
 
@@ -245,7 +254,16 @@ export function ProductionDrawer({
         </div>
       ) : (
         <div className="production-drawer-body production-grade">
-          <p>{t("drawer.gradePlaceholder")}</p>
+          {gradeImagePath ? (
+            <GradePanel
+              key={targetKey(target)}
+              imagePath={gradeImagePath}
+              initialDoc={gradeDoc}
+              onCommit={(commit) => onGradeCommit(commit.gradeDoc)}
+            />
+          ) : (
+            <p className="production-grade-empty">{t("drawer.gradePlaceholder")}</p>
+          )}
         </div>
       )}
     </div>
