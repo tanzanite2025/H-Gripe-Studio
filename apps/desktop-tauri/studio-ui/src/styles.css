@@ -271,6 +271,17 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 6px 8px;
 }
 .field textarea { min-height: 70px; resize: vertical; }
+.engine-check-btn {
+  align-self: flex-start;
+  background: #11131a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.engine-check-btn:disabled { opacity: 0.6; cursor: default; }
 .inspector-img { max-width: 100%; border-radius: 6px; border: 1px solid var(--border); display: block; }
 .inspector-img-btn {
   display: block;

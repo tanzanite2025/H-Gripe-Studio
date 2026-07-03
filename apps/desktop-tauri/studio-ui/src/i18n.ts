@@ -289,6 +289,12 @@ export const messages = {
     zh: "容器框。将节点拖入/拖出；成员随之移动。",
   },
   "inspector.label": { en: "Label", zh: "标签" },
+  "inspector.engineCheck": { en: "Check engines", zh: "检测引擎" },
+  "inspector.engineChecking": { en: "Checking…", zh: "检测中…" },
+  "inspector.engineUnchecked": {
+    en: "Not checked — options come from the node's config; availability is validated on run.",
+    zh: "未检测——选项来自节点配置；可用性在运行时校验。",
+  },
   "inspector.engineUnavailable": {
     en: "This engine can't run on this machine — falls back to the CPU baseline.",
     zh: "此引擎在本机无法运行——将回落到 CPU 基线。",

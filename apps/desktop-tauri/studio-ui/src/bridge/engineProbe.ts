@@ -106,17 +106,22 @@ export async function probeEngines(): Promise<EngineProbeReport> {
 }
 
 // --- On-demand cache ---------------------------------------------------------
-// The probe is demand-driven, never a mount side effect: callers ask for the
-// report only when the UI actually needs an engine availability (a selected
-// node with an `engine` param, a diagnostics view). Concurrent callers share
-// one in-flight invoke (single-flight) and results are reused for a TTL;
-// `force` bypasses the cache for a manual refresh.
+// Probing is a user-initiated diagnostic (a "check engines" button, a model
+// manager), never an automatic UI side effect: showing an engine dropdown
+// costs nothing and reads only the node spec. Concurrent callers share one
+// in-flight invoke (single-flight) and results are reused for a TTL; `force`
+// bypasses the cache for a manual refresh.
 
 const PROBE_TTL_MS = 5 * 60_000;
 
 let cachedReport: EngineProbeReport | null = null;
 let cachedAt = 0;
 let inflight: Promise<EngineProbeReport> | null = null;
+
+/** Last completed probe report, if any (no invoke). */
+export function lastEngineProbe(): EngineProbeReport | null {
+  return cachedReport;
+}
 
 /** Cached, single-flight `probeEngines`. `force` refreshes past the TTL. */
 export function probeEnginesCached(force = false): Promise<EngineProbeReport> {

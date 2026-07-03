@@ -1,10 +1,14 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useState } from "react";
 import type { Node } from "@xyflow/react";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";
-import { probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
+import {
+  lastEngineProbe,
+  probeEnginesCached,
+  type EngineProbeReport,
+} from "../bridge/engineProbe";
 import { ParamField } from "./ParamField";
 import { ProfilePicker } from "./ProfilePicker";
 import { OutputPicker } from "./OutputPicker";
@@ -30,30 +34,28 @@ interface InspectorProps {
 // node card), so the canvas stays light and previews never blow up node size.
 export function Inspector({ node, onParamChange }: InspectorProps) {
   const [viewerPath, setViewerPath] = useState<string | null>(null);
-  const [engineProbe, setEngineProbe] = useState<EngineProbeReport | null>(null);
+  // Engine dropdowns read only the node spec — selecting an engine is picking
+  // a ref, not probing it. The capability report exists only after the user
+  // explicitly checks (here or in a diagnostics view); until then options stay
+  // enabled and the run path does its own strict validation + fallback.
+  const [engineProbe, setEngineProbe] = useState<EngineProbeReport | null>(lastEngineProbe);
+  const [probing, setProbing] = useState(false);
   const lang = useContext(LangContext);
   const t = useT();
 
-  // Demand-driven engine probe: only when the selected node actually exposes
-  // an `engine` param does the inspector ask for the (cached, single-flight)
-  // capability report to grey out engines whose deps/weights are missing.
-  // Failures are non-fatal: we leave every option enabled rather than blocking
-  // selection on a probe.
   const nodeKind = node ? String((node.data as HgripeNodeData).kind) : null;
-  const needsEngineProbe =
+  const hasEngineParam =
     nodeKind !== null &&
     nodeKind !== "group" &&
     nodeSpec(nodeKind).params.some((p) => engineProbeKind(nodeKind, p.key) !== null);
-  useEffect(() => {
-    if (!needsEngineProbe) return;
-    let alive = true;
-    probeEnginesCached()
-      .then((report) => alive && setEngineProbe(report))
-      .catch(() => alive && setEngineProbe(null));
-    return () => {
-      alive = false;
-    };
-  }, [needsEngineProbe]);
+
+  const runEngineCheck = () => {
+    setProbing(true);
+    probeEnginesCached(true)
+      .then((report) => setEngineProbe(report))
+      .catch(() => setEngineProbe(null))
+      .finally(() => setProbing(false));
+  };
 
   if (!node) {
     return (
@@ -108,6 +110,17 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
             onParamChange(node.id, "credentials_ref", profile.credentials_ref ?? "");
           }}
         />
+      )}
+
+      {hasEngineParam && (
+        <div className="field engine-check">
+          <button type="button" className="engine-check-btn" onClick={runEngineCheck} disabled={probing}>
+            {probing ? t("inspector.engineChecking") : t("inspector.engineCheck")}
+          </button>
+          {!engineProbe && !probing && (
+            <small className="hint">{t("inspector.engineUnchecked")}</small>
+          )}
+        </div>
       )}
 
       {spec.params.filter(isVisible).map((p) => {
