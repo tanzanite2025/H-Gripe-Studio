@@ -239,7 +239,7 @@ fn require_plain(node: &LayerNode) -> Result<(), String> {
 /// psd_tools `psd.composite().convert("RGBA")`, which blends over a white
 /// backdrop and returns an opaque image. Restricted to plain normal-mode
 /// layers (see [`require_plain`]).
-fn composite_rgba(data: &[u8], parsed: &ParsedPsd) -> Result<RgbaImage, String> {
+pub(crate) fn composite_rgba(data: &[u8], parsed: &ParsedPsd) -> Result<RgbaImage, String> {
     let width = parsed.width as usize;
     let height = parsed.height as usize;
     // Premultiplied f64 accumulation: [r*a, g*a, b*a, a] per pixel, 0..1.

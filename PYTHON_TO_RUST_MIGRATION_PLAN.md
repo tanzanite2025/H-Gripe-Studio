@@ -305,7 +305,7 @@ Every Rust site that can spawn a Python process today
 
 | Rust call site | Python entry point | Node / feature |
 | --- | --- | --- |
-| `psd/compose.rs` (`compose_psd`) | `compose_psd_cli.py` | PSD Export |
+| `psd/compose.rs` (`compose_psd`) | `compose_psd_cli.py` | PSD Export (fallback / smart-object lane) |
 | `psd/compose.rs` (`inspect_psd`) | `inspect_psd_cli.py` | PSD template validation |
 | `psd/compose.rs` (`analyze_psd_context`) | `analyze_psd_cli.py` | PSD Context Analyze |
 | `psd/cards.rs` (`match_light_color`) | `color_match_cli.py` | Light & Color Match (legacy engines) |
@@ -342,8 +342,9 @@ Rust-default (Python only as optional legacy engine or fallback):
 
 Python-default (no Rust path yet):
 
-- PSD compose (`psd_tools`) — migrate last (P3 below; inspect and analyze
-  are native now).
+- Smart-object content replacement inside `compose_psd` (`psd_tools`) —
+  the only remaining Python-default PSD path (P3 below; inspect, analyze
+  and pixel-layer compose are native now).
 - Torch/Diffusers engines (`realesrgan`, `ccsr`, `supir`, `sd_inpaint`,
   `sdxl_inpaint`, `flux_fill`) and the ONNX legacy backends behind the
   bridge — opt-in only, never a default (P4 below).
@@ -354,9 +355,9 @@ Python-default (no Rust path yet):
 
 Bridge launch failures no longer read as a bare "python cli failed": every
 spawn site now states the lane — "optional legacy Python bridge …
-(the default engine runs natively in Rust)" for Rust-default cards,
-"legacy PyAV …" for video fallbacks, and "PSD … still requires the Python
-bridge; a native Rust PSD path is planned" for the PSD commands. The
+(the default engine runs natively in Rust)" for Rust-default cards and
+"legacy PyAV …" for video fallbacks; the PSD commands (inspect, analyze,
+compose) are all native-default now and use the same wording. The
 `Executor` doc in `nodeSpecs.ts` describes `local` as native-Rust default +
 optional legacy bridge.
 
@@ -384,12 +385,29 @@ Done:
   `analyze_psd_cli.py` remains only as an optional legacy fallback when the
   native path rejects a file (non-RGB/8-bit modes, zip-compressed channels,
   non-trivial blending: masks, opacity < 100%, non-normal modes, clipping).
+- **Compose (pixel-layer insert) is native.** `compose_psd` now runs a
+  native Rust writer by default (`psd/write.rs`): it splices the new
+  `03_GENERATED` group (end marker + pixel layer + group record, in
+  psd_tools' record layout) directly into the template's layer info
+  sub-section — every other byte of the template round-trips untouched —
+  recomputes the section lengths/count, honours `fit_mode`
+  (contain/cover/stretch), `z_order` (above_background/placeholder/top),
+  the optional matte (`mask`) and `hide_placeholder`, and writes the full
+  `.psd` + `_preview.png` + `_metadata.json` triplet. Golden tests re-read
+  the written PSD and assert the exact layer tree psd_tools produced for
+  the same job, plus pixel-identical previews (also verified externally:
+  psd_tools re-reads the Rust file and its `composite()` matches the
+  Python CLI's preview pixel-for-pixel).
 
 Pending:
 
-- `compose_psd_cli.py` (layered PSD writer, smart-object content
-  replacement) + `third_party/psd_tools` stay the production PSD write
-  path. See "Phase 5: Replace PSD Python Last" for the staged plan.
+- Smart-object content replacement
+  (`smart_object_mode == "replace_content"`) stays on `compose_psd_cli.py`
+  + `third_party/psd_tools`, as do inputs the native writer rejects
+  (non-PNG / colour-managed / EXIF-rotated sources, non-8-bit/RGB
+  templates). Once real-template coverage confirms the native writer,
+  Phase 7 (deleting the Python runtime from the packaged app) can start
+  for everything except the smart-object lane.
 
 ### P4 — Torch/Diffusers out of core (done)
 
