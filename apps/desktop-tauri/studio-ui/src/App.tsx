@@ -46,6 +46,17 @@ import { useModals } from "./editor/useModals";
 import { loadPersistedGraph } from "./editor/persist";
 import { validateGraph } from "./runtime/dag";
 import { isTauri, listenFileDrop, primeIngest } from "./bridge/tauri";
+import { ProductionDrawer, type AddableAsset } from "./production/ProductionDrawer";
+import {
+  loadDrawerMode,
+  loadDrawerTab,
+  saveDrawerMode,
+  saveDrawerTab,
+  type DrawerMode,
+  type DrawerTab,
+} from "./production/drawerState";
+import { addAsset, assetKindForNodeKind, removeAsset, type MediaAsset } from "./production/mediaBin";
+import { assetTarget, nodeOutputTarget, type ProductionTarget } from "./production/productionTarget";
 import { startIngestListener } from "./runtime/ingestStore";
 import { useT } from "./i18n";
 
@@ -102,6 +113,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
   const [edgeType, setEdgeType] = useState<EdgeStyle>("default");
   const [showMinimap, setShowMinimap] = useState(true);
+  // Bottom production drawer (Edit / Timeline + Grade) shell state, plus the
+  // lightweight media bin and the unified production selection it consumes.
+  const [drawerMode, setDrawerMode] = useState<DrawerMode>(() => loadDrawerMode());
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>(() => loadDrawerTab());
+  const [binAssets, setBinAssets] = useState<MediaAsset[]>([]);
+  const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -125,6 +142,56 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     () => nodes.find((n) => n.id === selectedId) ?? null,
     [nodes, selectedId],
   );
+
+  // Persisted drawer shell state so the drawer reopens how it was left.
+  const changeDrawerMode = useCallback((m: DrawerMode) => {
+    setDrawerMode(m);
+    saveDrawerMode(m);
+  }, []);
+  const changeDrawerTab = useCallback((tab: DrawerTab) => {
+    setDrawerTab(tab);
+    saveDrawerTab(tab);
+  }, []);
+
+  // The selected canvas node as a bin-addable media reference (image / video
+  // source card with a path), or null when the selection isn't one.
+  const addableAsset = useMemo<AddableAsset | null>(() => {
+    if (!selectedNode) return null;
+    const data = selectedNode.data as HgripeNodeData;
+    const kind = assetKindForNodeKind(data.kind);
+    const path = typeof data.params?.path === "string" ? (data.params.path as string) : "";
+    if (!kind || !path) return null;
+    return { kind, path, sourceNodeId: selectedNode.id };
+  }, [selectedNode]);
+
+  const handleAddSelectedToBin = useCallback(() => {
+    if (!addableAsset) return;
+    setBinAssets((assets) => {
+      const result = addAsset(assets, addableAsset);
+      setActiveAssetId(result.asset.id);
+      return result.assets;
+    });
+  }, [addableAsset]);
+
+  const handleRemoveBinAsset = useCallback((id: string) => {
+    setBinAssets((assets) => removeAsset(assets, id));
+    setActiveAssetId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  // Unified production selection: a bin asset when one is active, otherwise
+  // the selected canvas node's output. The drawer and (later) the on-demand
+  // editors consume this target rather than per-media-type selection state.
+  const productionTarget = useMemo<ProductionTarget | null>(() => {
+    if (activeAssetId) return assetTarget(activeAssetId);
+    if (selectedId) return nodeOutputTarget(selectedId);
+    return null;
+  }, [activeAssetId, selectedId]);
+
+  // Selecting a canvas node retargets production selection to that node.
+  const handleCanvasSelect = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (id) setActiveAssetId(null);
+  }, []);
 
   // Static validation surfaced in the toolbar (type mismatches, cycles, …).
   const issues = useMemo(
@@ -563,7 +630,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 onNodesChange={handleNodesChange}
                 onEdgesChange={handleEdgesChange}
                 setEdges={setEdges}
-                onSelect={setSelectedId}
+                onSelect={handleCanvasSelect}
                 onAddNode={addNode}
                 onBeforeConnect={takeSnapshot}
                 onNodeDragStop={handleNodeDragStop}
@@ -587,6 +654,19 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           </div>
           <Inspector node={selectedNode} onParamChange={onParamChange} />
         </div>
+        <ProductionDrawer
+          mode={drawerMode}
+          onSetMode={changeDrawerMode}
+          tab={drawerTab}
+          onSetTab={changeDrawerTab}
+          target={productionTarget}
+          assets={binAssets}
+          activeAssetId={activeAssetId}
+          onSelectAsset={setActiveAssetId}
+          onRemoveAsset={handleRemoveBinAsset}
+          addableAsset={addableAsset}
+          onAddSelected={handleAddSelectedToBin}
+        />
       </NodeEditingContext.Provider>
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />

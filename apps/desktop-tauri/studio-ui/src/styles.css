@@ -667,7 +667,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 /* ===================================================================
    Desktop shell (top bar + tabs + ported shell-ui panels).
    All panel content lives under `.shell-scroll` so its generic
-   selectors (.card, .badge, .row, table, textarea…) never collide
+   selectors (.card, .badge, .row, table, textareaâ€¦) never collide
    with the node-editor styles above.
    =================================================================== */
 .shell { display: flex; flex-direction: column; height: 100%; }
@@ -924,7 +924,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 /* Mask-Edit modal styles live in src/editor/maskEditModal/maskEditModal.css
    (imported by MaskEditModal.tsx). The crop editor below reuses that shell. */
 
-/* Crop-Edit modal — reuses the mask-edit shell with a 2-column body. */
+/* Crop-Edit modal â€” reuses the mask-edit shell with a 2-column body. */
 .media-viewer.crop-edit { width: min(1080px, 92vw); height: 86vh; }
 .media-viewer.crop-edit .mask-edit-body { grid-template-columns: 1fr 240px; }
 .crop-edit-stage-wrap {
@@ -992,7 +992,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .crop-mode-row button.active { border-color: var(--accent); color: var(--accent); }
 
-/* Grade-Edit modal — reuses the mask-edit shell; the controls column is the
+/* Grade-Edit modal â€” reuses the mask-edit shell; the controls column is the
    scrollable op stack. */
 .media-viewer.grade-edit { width: min(1180px, 94vw); height: 88vh; }
 .media-viewer.grade-edit .mask-edit-body { grid-template-columns: 1fr 300px; }
@@ -1036,3 +1036,137 @@ button:disabled { opacity: 0.6; cursor: default; }
   gap: 6px;
 }
 
+
+/* ---- bottom production drawer (Edit / Timeline + Grade) ---- */
+.production-drawer {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  min-height: 0;
+}
+.production-drawer-rail {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 12px;
+}
+.production-drawer-handle {
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.production-drawer-rail-meta { color: var(--muted); font-size: 11px; }
+.production-drawer-half { height: 260px; }
+.production-drawer-full { height: 55vh; }
+.production-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.production-drawer-head .spacer { flex: 1; }
+.production-drawer-tabs { display: flex; gap: 4px; }
+.production-drawer-tabs button {
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+  opacity: 0.75;
+}
+.production-drawer-tabs button.active {
+  opacity: 1;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.production-drawer-target {
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-drawer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  overflow: auto;
+}
+.production-bin {
+  width: 280px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 0;
+}
+.production-bin-head { display: flex; align-items: center; gap: 8px; }
+.production-bin-head h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.production-bin-head .spacer { flex: 1; }
+.production-bin-empty { color: var(--muted); font-size: 12px; }
+.production-bin-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+}
+.production-bin-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+}
+.production-bin-list li.active { outline: 1px solid var(--accent); }
+.production-bin-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 5px 6px;
+}
+.production-bin-kind {
+  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--muted);
+}
+.production-bin-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-bin-remove {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  color: var(--muted);
+}
+.production-bin-remove:hover { color: var(--text); }
+.production-timeline-placeholder,
+.production-grade {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 0 24px;
+}
+.production-timeline-placeholder {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
