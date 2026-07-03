@@ -1,12 +1,13 @@
-//! Native PSD template inspection: a minimal, read-only PSD/PSB parser that
-//! extracts the canvas size and the flattened layer list (name + kind) the
-//! `inspect_psd` command reports — the first PSD capability moved off the
-//! Python bridge (see PYTHON_TO_RUST_MIGRATION_PLAN.md, "Phase 5").
+//! Native PSD template reading: a minimal, read-only PSD/PSB parser behind
+//! the `inspect_psd` and `analyze_psd_context` commands — the PSD read
+//! capabilities moved off the Python bridge (see
+//! PYTHON_TO_RUST_MIGRATION_PLAN.md, "Phase 5").
 //!
-//! Scope is deliberately small: it reads the file header and the layer records
-//! (names, group dividers, smart-object markers) and never decodes pixel data,
-//! so it is fast and safe on multi-hundred-MB templates. Semantics mirror the
-//! legacy `inspect_psd_cli.py` exactly: layers are listed in file order
+//! The parser reads the file header and the layer records (names, bounds,
+//! group dividers, smart-object markers, channel data locations) without
+//! decoding any pixels, so inspection is fast and safe on multi-hundred-MB
+//! templates; `super::analyze` decodes channels on demand. Semantics mirror
+//! the legacy `inspect_psd_cli.py` exactly: layers are listed in file order
 //! (bottom-to-top), each group is followed by its children, names prefer the
 //! Unicode (`luni`) block over the Pascal name, and the kind is one of
 //! `"group"` / `"smartobject"` / `"pixel"`.
@@ -114,6 +115,67 @@ fn key_has_u64_length_in_psb(key: &[u8]) -> bool {
     )
 }
 
+/// Where one channel's compressed data lives in the file.
+#[derive(Clone)]
+pub(crate) struct ChannelRef {
+    /// Channel id: 0/1/2 = R/G/B, -1 = transparency alpha, -2 = layer mask.
+    pub(crate) id: i16,
+    /// Byte offset of the channel data block (starts with a compression u16).
+    pub(crate) offset: usize,
+    pub(crate) len: usize,
+}
+
+/// A parsed layer in the rebuilt group tree.
+pub(crate) struct LayerNode {
+    pub(crate) name: String,
+    pub(crate) kind: &'static str,
+    /// Record rectangle as (top, left, bottom, right) in canvas pixels.
+    pub(crate) rect: [i32; 4],
+    pub(crate) channels: Vec<ChannelRef>,
+    /// Blend mode key, e.g. `norm`.
+    pub(crate) blend: [u8; 4],
+    pub(crate) opacity: u8,
+    /// Non-zero: this layer clips onto the layer below.
+    pub(crate) clipping: u8,
+    /// Visibility from the record flags (bit 1 = hidden).
+    pub(crate) visible: bool,
+    pub(crate) children: Vec<LayerNode>,
+}
+
+impl LayerNode {
+    /// `(left, top, right, bottom)` like psd_tools `layer.bbox`: the record
+    /// rect for a normal layer, the union of child bboxes for a group.
+    pub(crate) fn bbox(&self) -> (i32, i32, i32, i32) {
+        if self.kind != "group" {
+            let [top, left, bottom, right] = self.rect;
+            return (left, top, right, bottom);
+        }
+        let mut acc: Option<(i32, i32, i32, i32)> = None;
+        for child in &self.children {
+            let (l, t, r, b) = child.bbox();
+            if r <= l || b <= t {
+                continue;
+            }
+            acc = Some(match acc {
+                None => (l, t, r, b),
+                Some((al, at, ar, ab)) => (al.min(l), at.min(t), ar.max(r), ab.max(b)),
+            });
+        }
+        acc.unwrap_or((0, 0, 0, 0))
+    }
+}
+
+/// The full parse result: header facts plus the layer tree.
+pub(crate) struct ParsedPsd {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) depth: u16,
+    /// PSD color mode (3 = RGB — the only mode the native path decodes).
+    pub(crate) color_mode: u16,
+    pub(crate) psb: bool,
+    pub(crate) tree: Vec<LayerNode>,
+}
+
 /// One raw layer record, before the group tree is rebuilt.
 struct RawLayer {
     name: String,
@@ -121,28 +183,38 @@ struct RawLayer {
     /// group itself), 3 = group end marker. 0 = a normal layer.
     divider: u8,
     smart_object: bool,
+    rect: [i32; 4],
+    /// (id, data length) per channel, in record order.
+    channel_lens: Vec<(i16, u64)>,
+    blend: [u8; 4],
+    opacity: u8,
+    clipping: u8,
+    visible: bool,
 }
 
 /// Parse a single layer record (bounds, channels, blend data, extra data with
 /// the Pascal name and tagged blocks) and distil it into a [`RawLayer`].
 fn parse_layer_record(cur: &mut Cursor<'_>, psb: bool) -> Result<RawLayer, String> {
-    // Bounds (top, left, bottom, right) — unused by inspect, but validated.
-    for _ in 0..4 {
-        cur.i32()?;
+    // Bounds: top, left, bottom, right.
+    let mut rect = [0i32; 4];
+    for slot in &mut rect {
+        *slot = cur.i32()?;
     }
     let channels = cur.u16()?;
+    let mut channel_lens = Vec::with_capacity(usize::from(channels));
     for _ in 0..channels {
-        cur.i16()?; // channel id
-        cur.length(psb)?; // channel data length
+        let id = cur.i16()?;
+        let len = cur.length(psb)?;
+        channel_lens.push((id, len));
     }
     let sig = cur.take(4)?;
     if sig != b"8BIM" {
         return Err("invalid blend-mode signature in layer record".to_string());
     }
-    cur.take(4)?; // blend mode key
-    cur.u8()?; // opacity
-    cur.u8()?; // clipping
-    cur.u8()?; // flags
+    let blend: [u8; 4] = cur.take(4)?.try_into().unwrap();
+    let opacity = cur.u8()?;
+    let clipping = cur.u8()?;
+    let flags = cur.u8()?;
     cur.u8()?; // filler
 
     let extra_len = u64::from(cur.u32()?);
@@ -213,27 +285,37 @@ fn parse_layer_record(cur: &mut Cursor<'_>, psb: bool) -> Result<RawLayer, Strin
         name,
         divider,
         smart_object,
+        rect,
+        channel_lens,
+        blend,
+        opacity,
+        clipping,
+        visible: flags & 0x02 == 0,
     })
 }
 
-/// Rebuild the group tree from the flat record list and emit the flattened
-/// `name`/`kind` rows in the same order the Python CLI prints: file order
-/// (bottom-to-top), each group immediately followed by its children.
-fn flatten(records: Vec<RawLayer>) -> Vec<NativeLayer> {
-    // Records run bottom-to-top: a group's end marker (divider 3) comes first,
-    // then its children, then the group record itself (divider 1/2).
-    let mut stack: Vec<Vec<NativeLayer>> = vec![Vec::new()];
-    for record in records {
+/// Rebuild the group tree from the flat record list. Records run
+/// bottom-to-top: a group's end marker (divider 3) comes first, then its
+/// children, then the group record itself (divider 1/2).
+fn build_tree(records: Vec<(RawLayer, Vec<ChannelRef>)>) -> Vec<LayerNode> {
+    let mut stack: Vec<Vec<LayerNode>> = vec![Vec::new()];
+    for (record, channels) in records {
         match record.divider {
             3 => stack.push(Vec::new()),
             1 => {
                 let children = stack.pop().unwrap_or_default();
                 let level = stack.last_mut().expect("group stack underflow");
-                level.push(NativeLayer {
+                level.push(LayerNode {
                     name: record.name,
                     kind: "group",
+                    rect: record.rect,
+                    channels,
+                    blend: record.blend,
+                    opacity: record.opacity,
+                    clipping: record.clipping,
+                    visible: record.visible,
+                    children,
                 });
-                level.extend(children);
             }
             _ => {
                 let kind = if record.smart_object {
@@ -244,24 +326,44 @@ fn flatten(records: Vec<RawLayer>) -> Vec<NativeLayer> {
                 stack
                     .last_mut()
                     .expect("layer stack underflow")
-                    .push(NativeLayer {
+                    .push(LayerNode {
                         name: record.name,
                         kind,
+                        rect: record.rect,
+                        channels,
+                        blend: record.blend,
+                        opacity: record.opacity,
+                        clipping: record.clipping,
+                        visible: record.visible,
+                        children: Vec::new(),
                     });
             }
         }
     }
     // A malformed file may leave unclosed groups; flush them in order.
-    let mut rows = Vec::new();
+    let mut tree = Vec::new();
     for level in stack {
-        rows.extend(level);
+        tree.extend(level);
     }
-    rows
+    tree
+}
+
+/// Flatten the tree into the `name`/`kind` rows the Python CLI prints: file
+/// order (bottom-to-top), each group immediately followed by its children.
+fn flatten(tree: &[LayerNode], rows: &mut Vec<NativeLayer>) {
+    for node in tree {
+        rows.push(NativeLayer {
+            name: node.name.clone(),
+            kind: node.kind,
+        });
+        flatten(&node.children, rows);
+    }
 }
 
 /// Parse a PSD/PSB template from raw bytes: header (canvas size, guarded by
-/// [`MAX_DECODE_PIXELS`]) plus the layer records.
-pub(crate) fn parse_psd(data: &[u8]) -> Result<NativeInspect, String> {
+/// [`MAX_DECODE_PIXELS`]), layer records (with channel data locations), and
+/// the offset of the merged image data section. No pixel data is decoded.
+pub(crate) fn parse_psd_full(data: &[u8]) -> Result<ParsedPsd, String> {
     let mut cur = Cursor::new(data);
     if cur.take(4)? != b"8BPS" {
         return Err("not a PSD file (bad 8BPS signature)".to_string());
@@ -273,11 +375,11 @@ pub(crate) fn parse_psd(data: &[u8]) -> Result<NativeInspect, String> {
         other => return Err(format!("unsupported PSD version {other}")),
     };
     cur.skip(6)?; // reserved
-    cur.u16()?; // channels
+    cur.u16()?; // channel count
     let height = cur.u32()?;
     let width = cur.u32()?;
-    cur.u16()?; // depth
-    cur.u16()?; // color mode
+    let depth = cur.u16()?;
+    let color_mode = cur.u16()?;
 
     if u64::from(width) * u64::from(height) > MAX_DECODE_PIXELS {
         return Err(format!(
@@ -294,7 +396,11 @@ pub(crate) fn parse_psd(data: &[u8]) -> Result<NativeInspect, String> {
 
     // Layer & mask info section, containing the layer info sub-section.
     let layer_mask_len = cur.length(psb)?;
-    let mut layers = Vec::new();
+    cur.pos
+        .checked_add(usize::try_from(layer_mask_len).map_err(|_| "section overflow")?)
+        .filter(|&end| end <= data.len())
+        .ok_or("PSD layer & mask info section truncated")?;
+    let mut tree = Vec::new();
     if layer_mask_len > 0 {
         let layer_info_len = cur.length(psb)?;
         if layer_info_len > 0 {
@@ -304,13 +410,41 @@ pub(crate) fn parse_psd(data: &[u8]) -> Result<NativeInspect, String> {
             for _ in 0..count {
                 records.push(parse_layer_record(&mut cur, psb)?);
             }
-            layers = flatten(records);
+            // Channel data blocks follow all layer records, per layer in
+            // record order; resolve each channel's byte range now.
+            let mut with_channels = Vec::with_capacity(records.len());
+            for record in records {
+                let mut channels = Vec::with_capacity(record.channel_lens.len());
+                for &(id, len) in &record.channel_lens {
+                    let len = usize::try_from(len).map_err(|_| "channel length overflow")?;
+                    let offset = cur.pos;
+                    cur.skip(len as u64)?;
+                    channels.push(ChannelRef { id, offset, len });
+                }
+                with_channels.push((record, channels));
+            }
+            tree = build_tree(with_channels);
         }
     }
 
-    Ok(NativeInspect {
+    Ok(ParsedPsd {
         width,
         height,
+        depth,
+        color_mode,
+        psb,
+        tree,
+    })
+}
+
+/// Parse only what `inspect_psd` needs: canvas size + flattened layer rows.
+pub(crate) fn parse_psd(data: &[u8]) -> Result<NativeInspect, String> {
+    let parsed = parse_psd_full(data)?;
+    let mut layers = Vec::new();
+    flatten(&parsed.tree, &mut layers);
+    Ok(NativeInspect {
+        width: parsed.width,
+        height: parsed.height,
         layers,
     })
 }

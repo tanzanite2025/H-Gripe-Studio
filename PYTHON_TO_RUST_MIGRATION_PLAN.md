@@ -342,7 +342,8 @@ Rust-default (Python only as optional legacy engine or fallback):
 
 Python-default (no Rust path yet):
 
-- PSD compose / inspect / analyze (`psd_tools`) — migrate last (P3 below).
+- PSD compose (`psd_tools`) — migrate last (P3 below; inspect and analyze
+  are native now).
 - Torch/Diffusers engines (`realesrgan`, `ccsr`, `supir`, `sd_inpaint`,
   `sdxl_inpaint`, `flux_fill`) and the ONNX legacy backends behind the
   bridge — opt-in only, never a default (P4 below).
@@ -371,12 +372,23 @@ Done:
   `apps/desktop-tauri/src-tauri/tests/fixtures/inspect_template.psd`).
   `inspect_psd_cli.py` remains only as an optional legacy fallback when
   native parsing rejects an exotic file.
+- **Analyze is native.** `analyze_psd_context` now runs the Phase-1
+  heuristics natively (`psd/analyze.rs`): channel decoding (raw + PackBits
+  RLE), a simple compositor for plain normal-mode layers over the white
+  backdrop (matching psd_tools `composite()`), alpha-weighted colour
+  statistics, median-cut palette, 3x3 light-direction, colour temperature,
+  and the three artifact PNGs (placeholder mask, background preview,
+  luminance histogram). Golden tests assert the exact `VisualContext`
+  JSON of `analyze_psd_cli.py` on the shared fixture, and the artifact
+  PNGs were verified pixel-identical to the Python CLI's output.
+  `analyze_psd_cli.py` remains only as an optional legacy fallback when the
+  native path rejects a file (non-RGB/8-bit modes, zip-compressed channels,
+  non-trivial blending: masks, opacity < 100%, non-normal modes, clipping).
 
 Pending:
 
-- `analyze_psd_cli.py` (needs full-canvas compositing for the background
-  heuristics) and `compose_psd_cli.py` (layered PSD writer, smart-object
-  content replacement) + `third_party/psd_tools` stay the production PSD
+- `compose_psd_cli.py` (layered PSD writer, smart-object content
+  replacement) + `third_party/psd_tools` stay the production PSD write
   path. See "Phase 5: Replace PSD Python Last" for the staged plan.
 
 ### P4 — Torch/Diffusers out of core (done)

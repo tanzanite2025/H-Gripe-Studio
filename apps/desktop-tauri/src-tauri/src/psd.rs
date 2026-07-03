@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use crate::studio::studio_reject_unsafe_basename;
 
+mod analyze;
 mod cards;
 mod compose;
 mod engines;
