@@ -193,12 +193,19 @@ node canvas
 type ProductionTarget =
   | { kind: "asset"; assetId: string }
   | { kind: "image"; assetId: string; sourceNodeId?: string }
-  | { kind: "image_layer"; workspaceId: string; layerId: string }
+  | { kind: "layered_image"; assetId: string; sourceNodeId?: string }
+  | { kind: "image_layer"; assetId: string; layerId: string; workspaceId?: string }
   | { kind: "video_clip"; timelineId: string; trackId: string; clipId: string; frame?: number }
   | { kind: "audio_clip"; timelineId: string; trackId: string; clipId: string; time?: number }
   | { kind: "node_output"; nodeId: string; outputPort?: string }
   | { kind: "timeline"; timelineId: string };
 ```
+
+`layered_image` 表示已经确认或正在确认的分层图片资产；`image_layer`
+表示其中某一个可编辑层。`workspaceId` 只作为已打开图片/PSD 编辑器的 UI
+宿主引用，不应该成为层资产的唯一身份。这样节点画布、Review Editor、Grade
+Tab、Timeline still clip 和 PSD export 都能通过同一个 `assetId/layerId`
+定位目标。
 
 底部抽屉和按需弹窗都不应该问“我是图片弹窗还是视频弹窗”。它们应该问：
 
@@ -290,7 +297,7 @@ Export command:
 
 ## 与现有文档的关系
 
-### `DUAL_DOCK_WORKSPACE_PLAN.md`
+### [`DUAL_DOCK_WORKSPACE_PLAN.md`](../completed/DUAL_DOCK_WORKSPACE_PLAN.md)
 
 保留其中关于：
 

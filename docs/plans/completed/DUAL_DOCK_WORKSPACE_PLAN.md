@@ -1,7 +1,7 @@
 # Dual Dock Workspace Plan
 
 > Status: superseded in direction by
-> [`UNIFIED_PRODUCTION_DRAWER_PLAN.md`](UNIFIED_PRODUCTION_DRAWER_PLAN.md) —
+> [`UNIFIED_PRODUCTION_DRAWER_PLAN.md`](../active/UNIFIED_PRODUCTION_DRAWER_PLAN.md) —
 > the "two docks" idea evolved into one bottom production drawer (landed,
 > PR #294–#300) with optional side rails as quick entry points / drop targets.
 > The sections on the graph canvas as source of truth and drag-to-rail inbox

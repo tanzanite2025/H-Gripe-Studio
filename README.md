@@ -31,6 +31,7 @@ H-Gripe Studio (Tauri desktop)
   crates/hgripe-api/  API broker: provider adapters, retry/cache, task state, history
   docs/cards/         per-card contracts (inputs, params, outputs, boundaries)
   docs/design/        architecture & design notes (executor split, resource model, roadmap)
+  docs/plans/         active and completed planning docs for project history
 ```
 
 - **API execution** runs through the `hgripe-api` broker (`run_task_json` /
