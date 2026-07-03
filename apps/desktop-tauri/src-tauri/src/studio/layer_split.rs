@@ -1,5 +1,5 @@
 //! `smartLayerSplit` compute node: subject/background separation plus optional
-//! multi-object instancing, text region detection and shadow candidates
+//! multi-object instancing, text/logo region detection and shadow candidates
 //! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phases 1–3).
 //!
 //! Splits a flat image into a `LayeredImageAsset` — a locked original layer
@@ -245,6 +245,25 @@ pub(crate) fn execute_studio_smart_layer_split(
         Vec::new()
     };
 
+    // Phase 3 logo regions: compact high-contrast marks near the canvas
+    // border, kept as protected candidates. Regions already claimed as text
+    // are dropped — the text candidate wins the overlap.
+    let detect_logo = bool_param(node, "detect_logo", false);
+    let logo_regions: Vec<GrayImage> = if detect_logo {
+        let text_bboxes: Vec<[u32; 4]> = text_regions.iter().map(mask_bbox).collect();
+        super::text_regions::logo_region_masks(&srgb)
+            .into_iter()
+            .filter(|mask| {
+                let [x0, y0, x1, y1] = mask_bbox(mask);
+                !text_bboxes
+                    .iter()
+                    .any(|&[tx0, ty0, tx1, ty1]| x0 <= tx1 && x1 >= tx0 && y0 <= ty1 && y1 >= ty0)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let subject_bbox = mask_bbox(&subject_mask);
 
     // Phase 3 shadow candidate: a background region darker than the
@@ -381,6 +400,36 @@ pub(crate) fn execute_studio_smart_layer_split(
     }
     if detect_text && text_regions.is_empty() {
         warnings.push(json!("text detection found no text-like regions"));
+    }
+    // Logo regions mirror the text candidates: protected, low-confidence,
+    // always flagged for review.
+    for (n, region_mask) in logo_regions.iter().enumerate() {
+        let ordinal = n + 1;
+        let layer_id = format!("layer_logo_{ordinal}");
+        let mask_path = dir.join(format!("{base}_logo_{ordinal}_mask.png"));
+        let rgba_path = dir.join(format!("{base}_logo_{ordinal}.png"));
+        save_mask(region_mask, &mask_path)?;
+        let rgba = pixel_ops::apply_alpha_mask_working(&working, region_mask);
+        studio_image::write_working_output(&rgba_path, &rgba)?;
+        layers.push(json!({
+            "id": layer_id,
+            "name": format!("logo region {ordinal}"),
+            "kind": "logo",
+            "bbox": mask_bbox(region_mask),
+            "mask": { "path": mask_path.to_string_lossy(), "width": width, "height": height },
+            "rgba": { "path": rgba_path.to_string_lossy(), "width": width, "height": height },
+            "confidence": 0.3,
+            "source": "algorithm",
+            "visible": true,
+            "notes": ["protected: likely logo / brand mark — keep when editing surrounding layers"],
+        }));
+        suggested_review.push(review(
+            &layer_id,
+            "heuristic logo region — verify before relying on protection",
+        ));
+    }
+    if detect_logo && logo_regions.is_empty() {
+        warnings.push(json!("logo detection found no mark-like regions near the canvas border"));
     }
     // The shadow candidate is a weight-free luminance heuristic: low
     // confidence and always flagged for review.
@@ -691,6 +740,89 @@ mod tests {
         let out = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap();
         let layers = out["layered_asset"]["layers"].as_array().unwrap();
         assert!(layers.iter().all(|layer| layer["kind"] != "text"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_logo_emits_protected_logo_layers() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hgripe_layer_split_logo_{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        // A light canvas with a compact grid of dark strokes in the corner:
+        // the heuristic detector picks it up as one mark.
+        let image_path = root.join("packshot.png");
+        let mut image = RgbaImage::from_pixel(100, 100, Rgba([245, 245, 245, 255]));
+        for row in 0..3u32 {
+            for g in 0..3u32 {
+                let gx = 4 + g * 4;
+                let gy = 4 + row * 5;
+                for y in gy..gy + 5 {
+                    for x in gx..gx + 2 {
+                        image.put_pixel(x, y, Rgba([10, 10, 10, 255]));
+                    }
+                }
+            }
+        }
+        image.save(&image_path).unwrap();
+        let mut inputs = BTreeMap::new();
+        inputs.insert("image".to_string(), json!(image_path.to_string_lossy()));
+        let out = execute_studio_smart_layer_split(
+            &node(&root, &[("detect_logo", json!(true))]),
+            &inputs,
+        )
+        .unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap().clone();
+        let logos: Vec<_> = layers
+            .iter()
+            .filter(|layer| layer["kind"] == "logo")
+            .collect();
+        assert_eq!(logos.len(), 1, "expected one logo layer in {layers:?}");
+        let review = out["layered_asset"]["split_report"]["suggested_review"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let logo = logos[0];
+        assert_eq!(logo["id"], "layer_logo_1");
+        assert_eq!(logo["source"], "algorithm");
+        let notes = logo["notes"].as_array().unwrap();
+        assert!(notes[0].as_str().unwrap().starts_with("protected:"));
+        let mask = logo["mask"]["path"].as_str().unwrap();
+        let rgba = logo["rgba"]["path"].as_str().unwrap();
+        assert!(Path::new(mask).is_file(), "missing mask {mask}");
+        assert!(Path::new(rgba).is_file(), "missing rgba {rgba}");
+        assert!(
+            review.iter().any(|issue| issue["layer_id"] == "layer_logo_1"),
+            "no review issue for the logo layer"
+        );
+        // With text detection on too, a region claimed as text is not
+        // duplicated as a logo.
+        let out = execute_studio_smart_layer_split(
+            &node(
+                &root,
+                &[("detect_logo", json!(true)), ("detect_text", json!(true))],
+            ),
+            &inputs,
+        )
+        .unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap().clone();
+        let text_bboxes: Vec<_> = layers
+            .iter()
+            .filter(|layer| layer["kind"] == "text")
+            .map(|layer| layer["bbox"].clone())
+            .collect();
+        for logo in layers.iter().filter(|layer| layer["kind"] == "logo") {
+            assert!(
+                !text_bboxes.contains(&logo["bbox"]),
+                "logo duplicates a text region: {logo:?}"
+            );
+        }
+        // Without the param, no logo layers are emitted.
+        let out = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap();
+        assert!(layers.iter().all(|layer| layer["kind"] != "logo"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

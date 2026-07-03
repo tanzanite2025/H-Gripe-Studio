@@ -838,6 +838,13 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "detect likely text lines as protected text layer candidates (heuristic edge-density detector) — desktop runtime only; every region is flagged for review",
       },
       {
+        key: "detect_logo",
+        label: "Detect logo",
+        control: "checkbox",
+        defaultValue: false,
+        hint: "detect compact high-contrast marks near the canvas border as protected logo layer candidates (heuristic) — desktop runtime only; every region is flagged for review",
+      },
+      {
         key: "detect_shadow",
         label: "Detect shadow",
         control: "checkbox",
