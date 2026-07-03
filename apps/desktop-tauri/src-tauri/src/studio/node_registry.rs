@@ -42,6 +42,9 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
         // the GPU (serialised), plain crop geometry is CPU-only.
         "subjectMask" => (Compute, Gpu),
         "crop" => (Compute, CpuBound),
+        // The grading kernel node: CPU row-parallel by default; the optional
+        // `grade-gpu` build routes through wgpu inside the same lane.
+        "imageGrade" => (Compute, CpuBound),
         // Broker / hybrid calls await a (possibly remote) provider; they are
         // network-bound and never hold the local GPU permit.
         "generate" | "detailRepaint" => (Api, Network),

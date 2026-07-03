@@ -12,6 +12,8 @@
 //!   (cancellable execute + task history, task ids, numeric param readers).
 //! - [`write_skip`]: PNG write-skip analysis for compute-node outputs.
 //! - [`generate`]: the `generate` node executor (provider image call).
+//! - [`grade`]: the `imageGrade` node executor and the grading dialog's
+//!   `grade_preview` command (the `hgripe-grade` kernel's UI entry points).
 //! - [`detail_repaint`]: the `detailRepaint` node executor (issue-region
 //!   repaint via provider `image.edit`).
 //! - [`prompt_optimize`]: the `promptOptimize` node executor (local
@@ -60,6 +62,7 @@ mod exec;
 mod ffmpeg_native;
 mod frame_cache;
 mod generate;
+mod grade;
 mod graph;
 pub(crate) mod heif_decode;
 mod history;
@@ -100,6 +103,7 @@ pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
 // re-exports the function, not the hidden `__cmd__cmd` helper that the Tauri
 // command macro generates beside it; the glob carries both.
 pub(crate) use exec::*;
+pub(crate) use grade::*;
 pub(crate) use history::*;
 pub(crate) use media_index::*;
 pub(crate) use persist::*;

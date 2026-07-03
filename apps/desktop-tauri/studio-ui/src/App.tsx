@@ -19,6 +19,7 @@ import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
 import { MaskEditModal } from "./editor/MaskEditModal";
 import { CropEditModal } from "./editor/CropEditModal";
+import { GradeEditModal } from "./editor/GradeEditModal";
 import { MediaEditModal } from "./editor/MediaEditModal";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
@@ -195,14 +196,17 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     previewNode,
     maskEditNode,
     cropEditNode,
+    gradeEditNode,
     mediaEditSource,
     setPreviewNodeId,
     setMaskEditNodeId,
     setCropEditNodeId,
+    setGradeEditNodeId,
     setMediaEditSourceId,
     openPreview,
     openMaskEdit,
     openCropEdit,
+    openGradeEdit,
     openMediaEdit,
     connectedImagePath,
   } = useModals({ nodes, edges });
@@ -453,8 +457,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   // Stable context value so memoized node cards can edit their own params.
   const editing = useMemo(
-    () => ({ onParamChange, openPreview, openMaskEdit, openCropEdit, openMediaEdit, addBoundEdit, runUpToNode }),
-    [onParamChange, openPreview, openMaskEdit, openCropEdit, openMediaEdit, addBoundEdit, runUpToNode],
+    () => ({ onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode }),
+    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode],
   );
 
   return (
@@ -671,6 +675,25 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             pendingRunNode.current = id;
           }}
           onClose={() => setCropEditNodeId(null)}
+        />
+      )}
+
+      {gradeEditNode && (
+        <GradeEditModal
+          title={t("grade.title")}
+          imagePath={connectedImagePath(gradeEditNode.id)}
+          initialDoc={
+            typeof (gradeEditNode.data as HgripeNodeData).params.grade_doc === "string"
+              ? ((gradeEditNode.data as HgripeNodeData).params.grade_doc as string)
+              : null
+          }
+          onCommit={(commit) => {
+            // Fold the dialog's op stack into the node's grade_doc, then run
+            // up to this node so the graded result shows immediately.
+            pendingRunNode.current = gradeEditNode.id;
+            onParamChange(gradeEditNode.id, "grade_doc", commit.gradeDoc);
+          }}
+          onClose={() => setGradeEditNodeId(null)}
         />
       )}
 

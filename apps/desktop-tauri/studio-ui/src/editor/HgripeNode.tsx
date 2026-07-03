@@ -488,6 +488,28 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
           </div>
         ) : null}
 
+        {spec.kind === "imageGrade" ? (
+          <div className="subject-mask">
+            {d.imagePath ? (
+              <LazyThumb path={d.imagePath} />
+            ) : (
+              <div className="node-thumb placeholder" title={t("grade.title")}>
+                {isConnected("image") ? t("grade.editHint") : t("node.connectImage")}
+              </div>
+            )}
+            <div className="subject-mask-actions nodrag">
+              <button
+                type="button"
+                className="primary"
+                title={t("grade.openTitle")}
+                onClick={() => editing?.openGradeEdit?.(id)}
+              >
+                {t("grade.title")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {spec.kind === "imageSource" && d.params.path ? (
           <ImageSourceCard id={id} path={String(d.params.path)} />
         ) : null}

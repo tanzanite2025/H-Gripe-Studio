@@ -13,12 +13,14 @@ export function useModals({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
   const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
   const [cropEditNodeId, setCropEditNodeId] = useState<string | null>(null);
+  const [gradeEditNodeId, setGradeEditNodeId] = useState<string | null>(null);
   // Image source whose unified manual editor (mask + crop) is open, if any.
   const [mediaEditSourceId, setMediaEditSourceId] = useState<string | null>(null);
 
   const openPreview = useCallback((nodeId: string) => setPreviewNodeId(nodeId), []);
   const openMaskEdit = useCallback((nodeId: string) => setMaskEditNodeId(nodeId), []);
   const openCropEdit = useCallback((nodeId: string) => setCropEditNodeId(nodeId), []);
+  const openGradeEdit = useCallback((nodeId: string) => setGradeEditNodeId(nodeId), []);
   const openMediaEdit = useCallback((sourceId: string) => setMediaEditSourceId(sourceId), []);
 
   // Resolve the image path feeding a node's `image` input port: follow the
@@ -49,6 +51,10 @@ export function useModals({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
     () => nodes.find((n) => n.id === cropEditNodeId) ?? null,
     [nodes, cropEditNodeId],
   );
+  const gradeEditNode = useMemo(
+    () => nodes.find((n) => n.id === gradeEditNodeId) ?? null,
+    [nodes, gradeEditNodeId],
+  );
   const mediaEditSource = useMemo(
     () => nodes.find((n) => n.id === mediaEditSourceId) ?? null,
     [nodes, mediaEditSourceId],
@@ -58,14 +64,17 @@ export function useModals({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
     previewNode,
     maskEditNode,
     cropEditNode,
+    gradeEditNode,
     mediaEditSource,
     setPreviewNodeId,
     setMaskEditNodeId,
     setCropEditNodeId,
+    setGradeEditNodeId,
     setMediaEditSourceId,
     openPreview,
     openMaskEdit,
     openCropEdit,
+    openGradeEdit,
     openMediaEdit,
     connectedImagePath,
   };

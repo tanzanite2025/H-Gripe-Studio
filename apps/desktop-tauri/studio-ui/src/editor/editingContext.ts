@@ -9,6 +9,8 @@ export interface NodeEditing {
   openMaskEdit?: (nodeId: string) => void;
   /** Open the on-demand Crop-Edit modal for a crop node (manual box / auto). */
   openCropEdit?: (nodeId: string) => void;
+  /** Open the on-demand Grade-Edit modal for an imageGrade node (op stack + preview). */
+  openGradeEdit?: (nodeId: string) => void;
   /**
    * Open the unified manual editor for an image source card. Hosts the mask and
    * crop editors behind one tool-group switcher; applying spawns a single bound
