@@ -23,18 +23,22 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 ## Upgrade directions
 
-### 1. UI integration (highest leverage, kernel is ready and waiting)
+### 1. UI integration (largely landed)
 
-- **GPU preview in the grading dialog.** The `GpuGrader` exists but the
-  dialog preview still runs the TS mirror. Wire the preview to the GPU
-  backend (Tauri command or WebGPU port of the generated WGSL) with CPU
-  fallback; target <33 ms/frame at 1080p for realtime scrubbing.
-- **Expose the newer ops in the panel.** Sharpen / denoise (with the radius
-  control), film grain, RGB mixer, color warper and 1D LUT have no UI yet.
-- **Temporal denoise in the video dialog.** The kernel stage is
-  caller-managed (`temporal_denoise(current, prev, amount)`); the video
-  dialog needs to keep the previous graded frame and feed it back, with a
-  reset on seek/cut.
+- ✅ **GPU preview in the grading dialog.** The panel's preview calls the
+  backend `grade_preview` / `video_frame_grade_preview` commands, which run
+  the process-wide `GpuGrader` (pipelines cached per op sequence) and fall
+  back to the CPU reference path when no adapter initialises; the TS mirror
+  remains the browser-preview / error fallback. The `grade-gpu` feature is
+  now **on by default** in the desktop build.
+- ✅ **Expose the newer ops in the panel.** Sharpen / denoise (with the
+  radius control), film grain, RGB mixer, color warper and `.cube` LUT
+  loading are in `GradePanel`.
+- **Temporal denoise in the video dialog.** Still open: the kernel stage is
+  caller-managed (`temporal_denoise(current, prev, amount)`); the
+  `TemporalAccumulator` seam exists in `studio/grade.rs` but the video
+  preview path does not yet keep the previous graded frame, with a reset on
+  seek/cut.
 
 ### 2. New ops (same triple-end pattern: Rust + TS goldens + WGSL)
 
@@ -121,8 +125,8 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 ## Suggested ordering
 
-1. GPU preview in the dialog + expose the shipped ops (§1) — user-visible
-   payoff for work already done.
+1. ✅ GPU preview in the dialog + expose the shipped ops (§1) — landed;
+   temporal denoise in the video dialog is the remaining §1 item.
 2. Blur primitive (§4), then vignette + halation/bloom + glow (§2).
 3. LUT export (§3) — small, high interchange value.
 4. Keyframe interpolation + GPU export renderer (§6) as the video dialog
