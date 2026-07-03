@@ -586,6 +586,29 @@ export const messages = {
     zh: "浏览器预览没有编码器——请在桌面版中导出",
   },
   "export.done": { en: "exported {len}s → {path}", zh: "已导出 {len} 秒 → {path}" },
+  "drawer.targetLayeredImage": { en: "layered image", zh: "分层图像" },
+  "drawer.targetImageLayer": { en: "image layer", zh: "图像图层" },
+
+  // ---- layer review panel (layered image asset candidates) ----
+  "layers.title": { en: "Layers", zh: "图层" },
+  "layers.wholeAsset": { en: "whole asset (composite)", zh: "整个资产（合成）" },
+  "layers.compositeBadge": { en: "composite", zh: "合成" },
+  "layers.selectAssetTitle": {
+    en: "target the whole layered image (composite preview)",
+    zh: "选中整个分层图像（合成预览）",
+  },
+  "layers.confidence": { en: "{pct}%", zh: "{pct}%" },
+  "layers.locked": { en: "locked", zh: "锁定" },
+  "layers.lockedTitle": {
+    en: "the original image layer is locked — edits produce new layers, never overwrite it",
+    zh: "原图层已锁定——编辑只会生成新图层，绝不覆盖原图",
+  },
+  "layers.issues": { en: "{n} review", zh: "{n} 项待审" },
+  "layers.issuesTitle": {
+    en: "the split report suggests reviewing this layer before production use",
+    zh: "拆分报告建议在生产使用前审阅该图层",
+  },
+  "layers.visibilityTitle": { en: "toggle layer visibility", zh: "切换图层可见性" },
   "drawer.gradePlaceholder": {
     en: "Select a target — a bin image asset, a timeline clip (still or video), or a node with an image output — to grade it here with the shared hgripe-grade kernel.",
     zh: "选择一个目标——素材区的图片、时间线上的 clip（静帧或视频）或带图片输出的节点——即可在这里用同一个 hgripe-grade 内核调色。",
