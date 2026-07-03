@@ -624,6 +624,11 @@ export const messages = {
     en: "check to include this layer in a merge",
     zh: "勾选以纳入合并",
   },
+  "layers.split": { en: "split layer", zh: "拆分图层" },
+  "layers.splitTitle": {
+    en: "split the selected layer's mask into its connected components",
+    zh: "把选中图层的蒙版按连通域拆分为多个图层",
+  },
   "layers.previewUnavailable": {
     en: "preview unavailable (browser preview / backend mocked)",
     zh: "预览不可用（浏览器预览 / 后端为模拟）",

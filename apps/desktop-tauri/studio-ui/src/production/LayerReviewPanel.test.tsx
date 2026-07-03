@@ -164,6 +164,52 @@ describe("LayerReviewPanel", () => {
     expect(merge!.disabled).toBe(true);
   });
 
+  it("splits the selected unlocked layer when a split handler is provided", () => {
+    const onSplitLayer = vi.fn();
+    const noSelection = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={null}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+        onSplitLayer={onSplitLayer}
+      />,
+    );
+    const disabled = noSelection.container.querySelector<HTMLButtonElement>(".layer-review-split");
+    expect(disabled).not.toBeNull();
+    expect(disabled!.disabled).toBe(true);
+
+    const lockedSelected = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={STUB_ORIGINAL_LAYER_ID}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+        onSplitLayer={onSplitLayer}
+      />,
+    );
+    expect(
+      lockedSelected.container.querySelector<HTMLButtonElement>(".layer-review-split")!.disabled,
+    ).toBe(true);
+
+    const { container } = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={STUB_SUBJECT_LAYER_ID}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+        onSplitLayer={onSplitLayer}
+      />,
+    );
+    const split = container.querySelector<HTMLButtonElement>(".layer-review-split")!;
+    expect(split.disabled).toBe(false);
+    fireEvent.click(split);
+    expect(onSplitLayer).toHaveBeenCalledWith(STUB_SUBJECT_LAYER_ID);
+  });
+
   it("hides merge affordances without a merge handler (browser preview)", () => {
     const { container } = render(
       <LayerReviewPanel

@@ -6,6 +6,7 @@ import {
   LAYER_SPLIT_STUB_ENGINE,
   mergeLayersIntoAsset,
   parseLayeredImageAsset,
+  splitLayerInAsset,
   STUB_BACKGROUND_LAYER_ID,
   STUB_ORIGINAL_LAYER_ID,
   STUB_SUBJECT_LAYER_ID,
@@ -146,5 +147,49 @@ describe("mergeLayersIntoAsset", () => {
       mergeLayersIntoAsset(asset, [STUB_ORIGINAL_LAYER_ID, STUB_SUBJECT_LAYER_ID], merged),
     ).toBe(asset);
     expect(mergeLayersIntoAsset(asset, ["nope", "also-nope"], merged)).toBe(asset);
+  });
+});
+
+describe("splitLayerInAsset", () => {
+  const asset = stubLayeredImageAsset({
+    imagePath: "/a/b.png",
+    nodeId: "n1",
+    createdAt: "0",
+  });
+  const parts = [1, 2].map((n) => ({
+    id: `layer_part_x_${n}`,
+    name: `subject candidate part ${n}`,
+    mask: { path: `/out/part_${n}_mask.png` },
+    rgba: { path: `/out/part_${n}.png` },
+    bbox: [n, n, n + 3, n + 3] as [number, number, number, number],
+  }));
+
+  it("replaces the split layer with its part layers in place", () => {
+    const next = splitLayerInAsset(asset, STUB_SUBJECT_LAYER_ID, parts);
+    expect(next.layers.map((l) => l.id)).toEqual([
+      STUB_ORIGINAL_LAYER_ID,
+      STUB_BACKGROUND_LAYER_ID,
+      "layer_part_x_1",
+      "layer_part_x_2",
+    ]);
+    const part = findLayer(next, "layer_part_x_1")!;
+    expect(part.source).toBe("user");
+    expect(part.kind).toBe("object");
+    expect(part.bbox).toEqual([1, 1, 4, 4]);
+    const source = findLayer(asset, STUB_SUBJECT_LAYER_ID)!;
+    expect(part.confidence).toBeCloseTo(Math.max(source.confidence - 0.15, 0.1));
+    // the split layer's review issues are replaced by one per part
+    const reviewIds = next.split_report.suggested_review.map((issue) => issue.layer_id);
+    expect(reviewIds).not.toContain(STUB_SUBJECT_LAYER_ID);
+    expect(reviewIds).toContain("layer_part_x_1");
+    expect(reviewIds).toContain("layer_part_x_2");
+    // the input asset is untouched
+    expect(asset.layers).toHaveLength(3);
+  });
+
+  it("is a no-op for locked/unknown layers or fewer than two parts", () => {
+    expect(splitLayerInAsset(asset, STUB_ORIGINAL_LAYER_ID, parts)).toBe(asset);
+    expect(splitLayerInAsset(asset, "nope", parts)).toBe(asset);
+    expect(splitLayerInAsset(asset, STUB_SUBJECT_LAYER_ID, parts.slice(0, 1))).toBe(asset);
   });
 });

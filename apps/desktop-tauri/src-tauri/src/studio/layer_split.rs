@@ -78,7 +78,7 @@ pub(crate) fn mask_bbox(mask: &GrayImage) -> [u32; 4] {
 /// blobs below [`MIN_INSTANCE_AREA_FRACTION`] of the canvas are dropped and
 /// at most [`MAX_INSTANCES`] are kept. Each instance mask preserves the
 /// original (soft) mask values inside its component.
-fn instance_masks(mask: &GrayImage) -> Vec<GrayImage> {
+pub(crate) fn instance_masks(mask: &GrayImage) -> Vec<GrayImage> {
     let (width, height) = mask.dimensions();
     let total = u64::from(width) * u64::from(height);
     if total == 0 {

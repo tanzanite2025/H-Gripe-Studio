@@ -56,6 +56,8 @@ export interface ProductionDrawerProps {
   onToggleLayerVisibility: (layerId: string) => void;
   /** Merge checked layers (desktop only; omitted in the browser preview). */
   onMergeLayers?: (layerIds: string[]) => void;
+  /** Split the selected layer (desktop only; omitted in the browser preview). */
+  onSplitLayer?: (layerId: string) => void;
 }
 
 function kindKey(kind: MediaAssetKind): MsgKey {
@@ -99,6 +101,7 @@ export function ProductionDrawer({
   layerVisibility,
   onToggleLayerVisibility,
   onMergeLayers,
+  onSplitLayer,
 }: ProductionDrawerProps) {
   const t = useT();
 
@@ -191,6 +194,7 @@ export function ProductionDrawer({
               visibility={layerVisibility}
               onToggleVisibility={onToggleLayerVisibility}
               onMergeLayers={onMergeLayers}
+              onSplitLayer={onSplitLayer}
             />
           ) : null}
           <div className="production-bin">

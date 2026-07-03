@@ -17,6 +17,11 @@ export interface LayerReviewPanelProps {
    * unavailable (browser preview has no backend to union the masks).
    */
   onMergeLayers?: (layerIds: string[]) => void;
+  /**
+   * Split the selected (unlocked) layer into its connected components.
+   * Omitted when splitting is unavailable (browser preview has no backend).
+   */
+  onSplitLayer?: (layerId: string) => void;
 }
 
 function layerVisible(layer: LayerCandidate, visibility: Record<string, boolean>): boolean {
@@ -96,6 +101,7 @@ export function LayerReviewPanel({
   visibility,
   onToggleVisibility,
   onMergeLayers,
+  onSplitLayer,
 }: LayerReviewPanelProps) {
   const t = useT();
   const [checked, setChecked] = useState<string[]>([]);
@@ -185,18 +191,32 @@ export function LayerReviewPanel({
           );
         })}
       </ul>
-      {onMergeLayers ? (
-        <button
-          className="layer-review-merge"
-          disabled={validChecked.length < 2}
-          onClick={() => {
-            onMergeLayers(validChecked);
-            setChecked([]);
-          }}
-          title={t("layers.mergeTitle")}
-        >
-          {t("layers.merge", { n: validChecked.length })}
-        </button>
+      {onMergeLayers || onSplitLayer ? (
+        <div className="layer-review-actions">
+          {onMergeLayers ? (
+            <button
+              className="layer-review-merge"
+              disabled={validChecked.length < 2}
+              onClick={() => {
+                onMergeLayers(validChecked);
+                setChecked([]);
+              }}
+              title={t("layers.mergeTitle")}
+            >
+              {t("layers.merge", { n: validChecked.length })}
+            </button>
+          ) : null}
+          {onSplitLayer ? (
+            <button
+              className="layer-review-split"
+              disabled={!asset.layers.some((layer) => layer.id === selectedLayerId && !layer.locked)}
+              onClick={() => selectedLayerId && onSplitLayer(selectedLayerId)}
+              title={t("layers.splitTitle")}
+            >
+              {t("layers.split")}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {asset.split_report.warnings.length > 0 ? (
         <ul className="layer-review-warnings">
