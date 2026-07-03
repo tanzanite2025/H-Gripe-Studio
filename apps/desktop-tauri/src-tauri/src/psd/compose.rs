@@ -369,15 +369,50 @@ fn inspect_psd_legacy(
 /// Match, etc.) consume the returned context so the user never hand-describes
 /// the template's lighting/colour.
 ///
-/// Like `compose_psd` / `inspect_psd`, it shells out to
-/// `python/bridge/analyze_psd_cli.py` using the project's bundled Python,
-/// reusing the vendored psd-tools + Pillow pipeline. `background_layer` /
-/// `target_placeholder` may be empty (auto: whole-canvas placeholder, full
-/// composite background); `output_dir` is where the placeholder mask and
-/// background preview PNGs are written (defaults to the CLI's choice when
-/// omitted). `reference_layers` is currently advisory (Phase 1 is heuristic).
+/// The default path runs natively in Rust (`super::analyze`), decoding only
+/// the pixels it needs from the template. If the native analyzer rejects the
+/// file (non-RGB/8-bit modes, zip-compressed channels, a group/masked
+/// background layer that needs real re-compositing), the optional legacy
+/// Python bridge (`analyze_psd_cli.py`) is tried as a fallback.
+/// `background_layer` / `target_placeholder` may be empty (auto: whole-canvas
+/// placeholder, full composite background); `output_dir` is where the
+/// placeholder mask and background preview PNGs are written.
+/// `reference_layers` is currently advisory (Phase 1 is heuristic).
 #[tauri::command]
 pub(crate) fn analyze_psd_context(
+    dir: Option<String>,
+    template: String,
+    background_layer: Option<String>,
+    target_placeholder: Option<String>,
+    reference_layers: Option<Vec<String>>,
+    output_dir: Option<String>,
+) -> Result<VisualContext, String> {
+    let native_err = match super::analyze::analyze_psd_native(
+        template.trim(),
+        background_layer.as_deref().unwrap_or(""),
+        target_placeholder.as_deref().unwrap_or(""),
+        output_dir.as_deref().unwrap_or(""),
+    ) {
+        Ok(context) => return Ok(context),
+        Err(err) => err,
+    };
+
+    analyze_psd_context_legacy(
+        dir,
+        template,
+        background_layer,
+        target_placeholder,
+        reference_layers,
+        output_dir,
+    )
+    .map_err(|legacy_err| format!("native PSD analyze failed: {native_err}; {legacy_err}"))
+}
+
+/// The optional legacy Python bridge behind [`analyze_psd_context`]: shells
+/// out to `python/bridge/analyze_psd_cli.py` using the project's bundled
+/// Python, reusing the vendored psd-tools + Pillow pipeline. Only tried when
+/// the native analyzer rejects the file.
+fn analyze_psd_context_legacy(
     dir: Option<String>,
     template: String,
     background_layer: Option<String>,
@@ -421,7 +456,7 @@ pub(crate) fn analyze_psd_context(
         .output()
         .map_err(|err| {
             format!(
-                "legacy Python bridge failed to launch {}: {err} (PSD analyze still requires the Python bridge; a native Rust PSD path is planned)",
+                "optional legacy Python bridge failed to launch {}: {err} (the default analyze path runs natively in Rust)",
                 python.display()
             )
         })?;
