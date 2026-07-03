@@ -180,8 +180,18 @@ export function FlowCanvas({
       fitView
     >
       <Background />
-      {showMinimap && <MiniMap pannable zoomable nodeColor={miniColor} nodeStrokeWidth={3} />}
-      <Controls />
+      {showMinimap && (
+        <MiniMap
+          className="flow-minimap"
+          pannable
+          zoomable
+          nodeColor={miniColor}
+          nodeStrokeWidth={3}
+          maskColor="rgba(14, 15, 19, 0.66)"
+          bgColor="#11131a"
+        />
+      )}
+      <Controls className="flow-controls" />
       <HelperLineOverlay horizontal={helperLines?.horizontal} vertical={helperLines?.vertical} />
     </ReactFlow>
   );

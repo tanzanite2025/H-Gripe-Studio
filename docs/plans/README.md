@@ -13,8 +13,10 @@ Use it as the quick project-memory map:
 | Document | Purpose | Next Use |
 | --- | --- | --- |
 | [`active/UNIFIED_PRODUCTION_DRAWER_PLAN.md`](active/UNIFIED_PRODUCTION_DRAWER_PLAN.md) | Defines the unified production workspace: node canvas as source, bottom drawer for Edit/Timeline + Grade, image/audio editors opened on demand. | Main product direction for timeline, grading, image/audio entry points, and `ProductionTarget`. |
+| [`active/NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](active/NODE_CARD_PRODUCT_BOUNDARY_PLAN.md) | Defines which concepts are allowed to become visible node cards, and which low-level primitives must live inside owning cards or canvas tools. | Use before adding/revising palette nodes, card bodies, right-click actions, or runtime graph primitives. |
 | [`active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md`](active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md) | Defines flat image -> editable layered asset -> model/grade/timeline/PSD export. | Next PR should be protocol bridge first: `LayeredImageAsset`, `layered_image`, `image_layer`, and node ports. |
 | [`active/GPU_DEVICE_STRATEGY_PLAN.md`](active/GPU_DEVICE_STRATEGY_PLAN.md) | Defines thin device reporting now and deeper device management later. | Normalize requested/used/fallback reporting before any full scheduler. |
+| [`active/UI_TYPOGRAPHY_SYSTEM_PLAN.md`](active/UI_TYPOGRAPHY_SYSTEM_PLAN.md) | Defines bilingual typography, font fallback, and dark UI type tokens. | Use before restyling the app shell, node cards, drawer, and editor panels. |
 | [`active/VENDORED_E2E_INTEGRATION_PLAN.md`](active/VENDORED_E2E_INTEGRATION_PLAN.md) | Tracks vendored FFmpeg/moxcms/Rust PSD and end-to-end runtime ownership. | Continue `hgripe-grade`, ONNX helper, FFmpeg, and colour-pipeline integration. |
 | [`active/PS_TOOLBAR_PARITY_PLAN.md`](active/PS_TOOLBAR_PARITY_PLAN.md) | Preserves Photoshop-style toolbar muscle memory for the image/PSD editor. | Use when implementing or revising toolbar slots, flyouts, shortcut badges, and tool options. |
 

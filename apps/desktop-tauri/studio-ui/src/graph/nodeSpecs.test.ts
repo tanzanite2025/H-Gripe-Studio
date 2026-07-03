@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NODE_SPECS, type Executor, type NodeVisualFamily } from "./nodeSpecs";
+import { NODE_SPECS, paletteGroups, type Executor, type NodeVisualFamily } from "./nodeSpecs";
 
 const VALID: Executor[] = ["graph", "local", "compute", "api", "hybrid"];
 
@@ -68,6 +68,17 @@ describe("nodeSpecs executor tagging", () => {
     };
     for (const [kind, executor] of Object.entries(expected)) {
       expect(NODE_SPECS[kind]?.executor, kind).toBe(executor);
+    }
+  });
+
+  it("keeps implementation primitives out of the default palette", () => {
+    const hidden = ["number", "compare", "logic", "if", "switch", "reroute"];
+    const paletteKinds = new Set(paletteGroups().flatMap((group) => group.specs.map((spec) => spec.kind)));
+
+    for (const kind of hidden) {
+      expect(NODE_SPECS[kind], `${kind} still exists for saved workflows/runtime`).toBeTruthy();
+      expect(NODE_SPECS[kind]?.palette, `${kind} is marked internal`).toBe("internal");
+      expect(paletteKinds.has(kind), `${kind} is hidden from the default palette`).toBe(false);
     }
   });
 });

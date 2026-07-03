@@ -79,6 +79,12 @@ export interface NodeSpec {
   category: "input" | "generate" | "control" | "output" | "utility";
   /** Where the node runs; drives palette local/API grouping + broker routing. */
   executor: Executor;
+  /**
+   * Internal primitives stay loadable for saved workflows/runtime support, but
+   * they are not product-facing cards. Their behavior belongs inside the
+   * owning media/model/edit card as params, ports, menus, or internal rules.
+   */
+  palette?: "default" | "internal";
   inputs: PortSpec[];
   outputs: PortSpec[];
   params: ParamSpec[];
@@ -308,6 +314,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "number",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "Number",
     description: "A numeric value (seed, count, …) fed into other nodes.",
     category: "input",
@@ -373,6 +380,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "compare",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "Compare",
     description:
       "Compares two values and emits 1 (true) or 0 (false). Numeric when both sides parse as numbers, else string comparison. Wire `result` into an If's `cond`.",
@@ -394,6 +402,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "logic",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "Logic",
     description:
       "Boolean logic on the truthiness of its inputs, emitting 1 (true) or 0 (false). `not` uses only `a`. Wire `result` into an If's `cond`.",
@@ -415,6 +424,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "if",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "If",
     description:
       "Conditional gate: forwards `value` to the `true` or `false` output based on a condition. The branch that is not taken is pruned (its downstream nodes are skipped).",
@@ -437,6 +447,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "switch",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "Switch",
     description:
       "Multi-way router: forwards `value` to the output matching `index` (0/1/2), else to `default`. Unselected branches are pruned (skipped).",
@@ -464,6 +475,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "reroute",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "Reroute",
     description:
       "Pass-through relay: forwards its input unchanged. Use it to tidy long edges and route wires around the canvas.",
@@ -1674,6 +1686,6 @@ export function paletteGroups(): { category: NodeSpec["category"]; specs: NodeSp
   const order: NodeSpec["category"][] = ["input", "generate", "control", "utility", "output"];
   return order.map((category) => ({
     category,
-    specs: Object.values(NODE_SPECS).filter((s) => s.category === category),
+    specs: Object.values(NODE_SPECS).filter((s) => s.category === category && s.palette !== "internal"),
   }));
 }

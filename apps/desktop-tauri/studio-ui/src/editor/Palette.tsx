@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { paletteGroups, type NodeSpec } from "../graph/nodeSpecs";
 import { GROUP_ZH, localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT, type MsgKey } from "../i18n";
@@ -26,6 +26,10 @@ const EXECUTOR_BADGE: Partial<Record<NodeSpec["executor"], string>> = {
 
 // MIME-ish key carried on drag so the canvas knows which node kind to create.
 export const DND_NODE_KIND = "application/hgripe-node-kind";
+const PALETTE_WIDTH_KEY = "hgripe.studio.paletteWidth.v1";
+const PALETTE_MIN_WIDTH = 184;
+const PALETTE_MAX_WIDTH = 360;
+const PALETTE_DEFAULT_WIDTH = 220;
 
 // The Group container is not in NODE_SPECS' palette groups; describe it here so
 // it participates in search alongside the catalogue.
@@ -46,14 +50,55 @@ export function matches(spec: { title: string; kind: string; description: string
     .every((term) => hay.includes(term));
 }
 
+function clampPaletteWidth(width: number) {
+  return Math.min(PALETTE_MAX_WIDTH, Math.max(PALETTE_MIN_WIDTH, Math.round(width)));
+}
+
+function loadPaletteWidth() {
+  if (typeof window === "undefined") return PALETTE_DEFAULT_WIDTH;
+  const raw = window.localStorage.getItem(PALETTE_WIDTH_KEY);
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) ? clampPaletteWidth(parsed) : PALETTE_DEFAULT_WIDTH;
+}
+
 // Left rail listing the available node kinds. A search box filters by title /
 // kind / description; each item can be dragged onto the canvas (drop position
 // is honoured) or clicked to add at a default location.
 export function Palette({ onAdd }: PaletteProps) {
   const [query, setQuery] = useState("");
+  const [width, setWidth] = useState(loadPaletteWidth);
   const inputRef = useRef<HTMLInputElement>(null);
   const lang = useContext(LangContext);
   const t = useT();
+
+  const setPaletteWidth = (next: number) => {
+    const clamped = clampPaletteWidth(next);
+    setWidth(clamped);
+    window.localStorage.setItem(PALETTE_WIDTH_KEY, String(clamped));
+  };
+
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+    const previousCursor = document.body.style.cursor;
+    const previousSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      setPaletteWidth(startWidth + moveEvent.clientX - startX);
+    };
+    const onPointerUp = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  };
 
   // "/" focuses search (unless already typing in a field), so you can add a
   // node without reaching for the mouse.
@@ -87,7 +132,15 @@ export function Palette({ onAdd }: PaletteProps) {
   const empty = groups.length === 0 && !showGroupItem;
 
   return (
-    <aside className="palette">
+    <aside className="palette" style={{ width }}>
+      <div
+        className="palette-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize node palette"
+        title="Drag to resize node palette"
+        onPointerDown={startResize}
+      />
       <h2>{t("palette.heading")}</h2>
       <input
         ref={inputRef}
@@ -116,7 +169,7 @@ export function Palette({ onAdd }: PaletteProps) {
                 e.dataTransfer.effectAllowed = "move";
               }}
               onClick={() => onAdd(spec.kind)}
-              title={spec.description}
+              title={`${spec.title} - ${spec.description}`}
             >
               <span className="palette-item-title">{spec.title}</span>
               {EXECUTOR_BADGE[spec.executor] && (
@@ -139,7 +192,7 @@ export function Palette({ onAdd }: PaletteProps) {
               e.dataTransfer.effectAllowed = "move";
             }}
             onClick={() => onAdd("group")}
-            title={lang === "zh" ? GROUP_ZH.description : GROUP_ITEM.description}
+            title={`${t("palette.group")} - ${lang === "zh" ? GROUP_ZH.description : GROUP_ITEM.description}`}
           >
             {t("palette.group")}
           </button>

@@ -493,13 +493,39 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 /* palette (left rail) */
 .palette {
-  width: 168px;
+  flex: 0 0 auto;
+  position: relative;
+  width: 220px;
+  min-width: 184px;
+  max-width: 360px;
   border-right: 1px solid var(--border);
   background: var(--panel);
   padding: 12px;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 .palette h2 { margin: 0 0 8px; font-size: 14px; }
+.palette-resize {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.palette-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+}
+.palette-resize:hover::after,
+.palette-resize:active::after { background: var(--accent); }
 .palette-group { margin-bottom: 12px; }
 .palette-group h3 {
   margin: 0 0 6px;
@@ -514,11 +540,13 @@ button:disabled { opacity: 0.6; cursor: default; }
   justify-content: space-between;
   gap: 6px;
   width: 100%;
+  min-height: 36px;
   text-align: left;
   margin-bottom: 4px;
   cursor: grab;
 }
 .palette-item-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -552,6 +580,53 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 4px 6px;
   font-size: 12px;
   box-sizing: border-box;
+}
+
+/* React Flow built-ins need explicit dark styling; the upstream defaults are
+   bright and disappear on the dark canvas. */
+.flow-controls.react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.36);
+}
+.flow-controls .react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  fill: var(--text);
+}
+.flow-controls .react-flow__controls-button:last-child { border-bottom: 0; }
+.flow-controls .react-flow__controls-button:hover {
+  background: #2a3141;
+  color: #fff;
+  fill: #fff;
+}
+.flow-controls .react-flow__controls-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+.flow-minimap.react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #11131a;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.38);
+}
+.flow-minimap .react-flow__minimap-mask {
+  fill: rgba(14, 15, 19, 0.66);
+}
+.react-flow__attribution {
+  background: rgba(24, 26, 33, 0.82) !important;
+  color: var(--muted) !important;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-bottom: 0;
 }
 
 /* inspector control extras */
