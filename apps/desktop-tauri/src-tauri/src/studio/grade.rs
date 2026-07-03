@@ -147,7 +147,8 @@ pub(super) fn execute_studio_grade(
         return Err("Grade needs a non-empty image".to_string());
     }
 
-    let mut surface = GradeSurface::from_rgba16(width, height, &image.pixels, grade_space(image.space));
+    let mut surface =
+        GradeSurface::from_rgba16(width, height, &image.pixels, grade_space(image.space));
     let backend = apply_grade_doc(&doc, &mut surface);
     let graded = WorkingImage {
         width,
@@ -264,7 +265,11 @@ pub(crate) fn grade_preview(
     };
     let (pw, ph) = srgb.dimensions();
 
-    let data: Vec<f32> = srgb.as_raw().iter().map(|&v| f32::from(v) / 255.0).collect();
+    let data: Vec<f32> = srgb
+        .as_raw()
+        .iter()
+        .map(|&v| f32::from(v) / 255.0)
+        .collect();
     let mut surface = GradeSurface {
         w: pw,
         h: ph,
@@ -282,10 +287,7 @@ pub(crate) fn grade_preview(
         .ok_or_else(|| "graded preview buffer has the wrong size".to_string())?;
     let mut png: Vec<u8> = Vec::new();
     graded
-        .write_to(
-            &mut std::io::Cursor::new(&mut png),
-            image::ImageFormat::Png,
-        )
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|err| format!("failed to encode preview png: {err}"))?;
     Ok(GradePreviewResult {
         data_url: format!(
@@ -349,10 +351,7 @@ mod tests {
     #[test]
     fn parse_grade_doc_accepts_missing_string_and_object_forms() {
         assert_eq!(parse_grade_doc(None).unwrap().layers.len(), 0);
-        assert_eq!(
-            parse_grade_doc(Some(&json!("  "))).unwrap().layers.len(),
-            0
-        );
+        assert_eq!(parse_grade_doc(Some(&json!("  "))).unwrap().layers.len(), 0);
         let doc = json!({ "layers": [{ "blend": "normal", "opacity": 1.0, "visible": true, "mask": null, "ops": [{ "type": "exposure", "ev": 1.0 }] }] });
         assert_eq!(parse_grade_doc(Some(&doc)).unwrap().layers.len(), 1);
         let as_string = json!(doc.to_string());
