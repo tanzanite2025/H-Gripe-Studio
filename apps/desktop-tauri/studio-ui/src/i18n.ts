@@ -658,10 +658,22 @@ export const messages = {
   "drawer.kindImage": { en: "image", zh: "图片" },
   "drawer.kindVideo": { en: "video", zh: "视频" },
   "drawer.kindAudio": { en: "audio", zh: "音频" },
-  "drawer.timelinePlaceholder": {
-    en: "Multi-track timeline (still / video / audio clips) arrives in the next step; assets registered here will be placeable as clips.",
-    zh: "多轨时间线（静帧 / 视频 / 音频 clip）将在下一步加入；这里登记的素材届时可放入时间线。",
+  "drawer.targetVideoClip": { en: "video clip", zh: "视频 clip" },
+  "drawer.targetAudioClip": { en: "audio clip", zh: "音频 clip" },
+  "drawer.timelineTitle": { en: "Timeline", zh: "时间线" },
+  "drawer.timelineDuration": { en: "{s}s", zh: "{s} 秒" },
+  "drawer.addToTimeline": { en: "Add to timeline", zh: "加入时间线" },
+  "drawer.addToTimelineTitle": {
+    en: "append the selected bin asset as a clip at the end of a compatible track (images become still clips)",
+    zh: "把所选素材追加为兼容轨道末尾的 clip（图片成为静帧 clip）",
   },
+  "drawer.timelineEmpty": {
+    en: "Empty timeline — select a bin asset and use \"Add to timeline\" to place it as a clip.",
+    zh: "时间线为空——选中素材后用「加入时间线」放置为 clip。",
+  },
+  "drawer.trackVideo": { en: "V", zh: "视" },
+  "drawer.trackAudio": { en: "A", zh: "音" },
+  "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
   "drawer.gradePlaceholder": {
     en: "The Grade tab will edit the current target (image / video clip) with the shared hgripe-grade kernel once GradeEditModal is extracted into an embeddable GradePanel.",
     zh: "调色 Tab 将在 GradeEditModal 抽成可嵌入 GradePanel 后，用同一个 hgripe-grade 内核编辑当前目标（图片 / 视频 clip）。",

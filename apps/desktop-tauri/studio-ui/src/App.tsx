@@ -57,6 +57,14 @@ import {
 } from "./production/drawerState";
 import { addAsset, assetKindForNodeKind, removeAsset, type MediaAsset } from "./production/mediaBin";
 import { assetTarget, nodeOutputTarget, type ProductionTarget } from "./production/productionTarget";
+import {
+  appendClip,
+  createTimeline,
+  findClip,
+  removeClip,
+  removeClipsForAsset,
+  type TimelineModel,
+} from "./production/timeline";
 import { startIngestListener } from "./runtime/ingestStore";
 import { useT } from "./i18n";
 
@@ -119,6 +127,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(() => loadDrawerTab());
   const [binAssets, setBinAssets] = useState<MediaAsset[]>([]);
   const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<TimelineModel>(() => createTimeline());
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -176,21 +186,63 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const handleRemoveBinAsset = useCallback((id: string) => {
     setBinAssets((assets) => removeAsset(assets, id));
     setActiveAssetId((cur) => (cur === id ? null : cur));
+    // Clips are references to bin assets, so they leave with the asset.
+    const next = removeClipsForAsset(timeline, id);
+    setTimeline(next);
+    setSelectedClipId((cur) => (cur && !findClip(next, cur) ? null : cur));
+  }, [timeline]);
+
+  const handleAddActiveToTimeline = useCallback(() => {
+    if (!activeAssetId) return;
+    const asset = binAssets.find((a) => a.id === activeAssetId);
+    if (!asset) return;
+    const result = appendClip(timeline, asset);
+    if (!result) return;
+    setTimeline(result.timeline);
+    setSelectedClipId(result.clip.id);
+  }, [activeAssetId, binAssets, timeline]);
+
+  const handleRemoveClip = useCallback((clipId: string) => {
+    setTimeline((tl) => removeClip(tl, clipId));
+    setSelectedClipId((cur) => (cur === clipId ? null : cur));
   }, []);
 
-  // Unified production selection: a bin asset when one is active, otherwise
-  // the selected canvas node's output. The drawer and (later) the on-demand
-  // editors consume this target rather than per-media-type selection state.
+  const handleSelectClip = useCallback((clipId: string | null) => {
+    setSelectedClipId(clipId);
+    if (clipId) setActiveAssetId(null);
+  }, []);
+
+  const handleSelectBinAsset = useCallback((assetId: string | null) => {
+    setActiveAssetId(assetId);
+    if (assetId) setSelectedClipId(null);
+  }, []);
+
+  // Unified production selection: a timeline clip when one is selected, else
+  // an active bin asset, else the selected canvas node's output. The drawer
+  // and (later) the on-demand editors consume this target rather than
+  // per-media-type selection state.
   const productionTarget = useMemo<ProductionTarget | null>(() => {
+    if (selectedClipId) {
+      const found = findClip(timeline, selectedClipId);
+      if (found) {
+        const base = { timelineId: timeline.id, trackId: found.track.id, clipId: found.clip.id };
+        return found.clip.kind === "audio"
+          ? { kind: "audio_clip", ...base }
+          : { kind: "video_clip", ...base };
+      }
+    }
     if (activeAssetId) return assetTarget(activeAssetId);
     if (selectedId) return nodeOutputTarget(selectedId);
     return null;
-  }, [activeAssetId, selectedId]);
+  }, [selectedClipId, timeline, activeAssetId, selectedId]);
 
   // Selecting a canvas node retargets production selection to that node.
   const handleCanvasSelect = useCallback((id: string | null) => {
     setSelectedId(id);
-    if (id) setActiveAssetId(null);
+    if (id) {
+      setActiveAssetId(null);
+      setSelectedClipId(null);
+    }
   }, []);
 
   // Static validation surfaced in the toolbar (type mismatches, cycles, …).
@@ -662,10 +714,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           target={productionTarget}
           assets={binAssets}
           activeAssetId={activeAssetId}
-          onSelectAsset={setActiveAssetId}
+          onSelectAsset={handleSelectBinAsset}
           onRemoveAsset={handleRemoveBinAsset}
           addableAsset={addableAsset}
           onAddSelected={handleAddSelectedToBin}
+          timeline={timeline}
+          selectedClipId={selectedClipId}
+          onSelectClip={handleSelectClip}
+          onAddActiveToTimeline={handleAddActiveToTimeline}
+          onRemoveClip={handleRemoveClip}
         />
       </NodeEditingContext.Provider>
       {menu && (

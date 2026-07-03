@@ -1155,7 +1155,6 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: var(--muted);
 }
 .production-bin-remove:hover { color: var(--text); }
-.production-timeline-placeholder,
 .production-grade {
   flex: 1;
   display: flex;
@@ -1166,7 +1165,74 @@ button:disabled { opacity: 0.6; cursor: default; }
   text-align: center;
   padding: 0 24px;
 }
-.production-timeline-placeholder {
-  border: 1px dashed var(--border);
+.production-timeline {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
   border-radius: 8px;
+  padding: 8px;
+  min-height: 0;
 }
+.production-timeline-head { display: flex; align-items: center; gap: 8px; }
+.production-timeline-head h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.production-timeline-head .spacer { flex: 1; }
+.production-timeline-duration { color: var(--muted); font-size: 11px; }
+.production-timeline-empty { color: var(--muted); font-size: 12px; margin: 0; }
+.production-timeline-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  min-height: 0;
+}
+.production-track { display: flex; align-items: stretch; gap: 6px; }
+.production-track-label {
+  width: 22px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.production-track-lane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.production-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #2c3444;
+  color: var(--text);
+  font-size: 11px;
+  overflow: hidden;
+}
+.production-clip.clip-still { background: #35402e; }
+.production-clip.clip-audio { background: #40303c; }
+.production-clip.active { outline: 1px solid var(--accent); }
+.production-clip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.production-clip-remove { color: var(--muted); padding: 0 2px; }
+.production-clip-remove:hover { color: var(--text); }

@@ -2,6 +2,7 @@ import { useT, type MsgKey } from "../i18n";
 import type { DrawerMode, DrawerTab } from "./drawerState";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 import type { ProductionTarget } from "./productionTarget";
+import { timelineDuration, trackEnd, type TimelineModel } from "./timeline";
 
 export interface AddableAsset {
   kind: MediaAssetKind;
@@ -24,6 +25,12 @@ export interface ProductionDrawerProps {
   /** The selected canvas node as a bin-addable media reference, when it is one. */
   addableAsset: AddableAsset | null;
   onAddSelected: () => void;
+  timeline: TimelineModel;
+  selectedClipId: string | null;
+  onSelectClip: (clipId: string | null) => void;
+  /** Append the active bin asset as a clip at the end of a compatible track. */
+  onAddActiveToTimeline: () => void;
+  onRemoveClip: (clipId: string) => void;
 }
 
 function kindKey(kind: MediaAssetKind): MsgKey {
@@ -49,6 +56,11 @@ export function ProductionDrawer({
   onRemoveAsset,
   addableAsset,
   onAddSelected,
+  timeline,
+  selectedClipId,
+  onSelectClip,
+  onAddActiveToTimeline,
+  onRemoveClip,
 }: ProductionDrawerProps) {
   const t = useT();
 
@@ -69,13 +81,25 @@ export function ProductionDrawer({
     );
   }
 
+  const clipAssetName = (clipId: string): string => {
+    for (const track of timeline.tracks) {
+      const clip = track.clips.find((c) => c.id === clipId);
+      if (clip) return assets.find((a) => a.id === clip.assetId)?.name ?? clip.assetId;
+    }
+    return clipId;
+  };
+
   const targetLabel = !target
     ? t("drawer.targetNone")
     : target.kind === "asset"
       ? `${t("drawer.targetAsset")} · ${assets.find((a) => a.id === target.assetId)?.name ?? target.assetId}`
       : target.kind === "node_output"
         ? `${t("drawer.targetNode")} · ${target.nodeId}`
-        : target.kind;
+        : target.kind === "video_clip"
+          ? `${t("drawer.targetVideoClip")} · ${clipAssetName(target.clipId)}`
+          : target.kind === "audio_clip"
+            ? `${t("drawer.targetAudioClip")} · ${clipAssetName(target.clipId)}`
+            : target.kind;
 
   return (
     <div className={`production-drawer production-drawer-${mode}`}>
@@ -153,8 +177,70 @@ export function ProductionDrawer({
               </ul>
             )}
           </div>
-          <div className="production-timeline-placeholder">
-            <p>{t("drawer.timelinePlaceholder")}</p>
+          <div className="production-timeline">
+            <div className="production-timeline-head">
+              <h3>{t("drawer.timelineTitle")}</h3>
+              <span className="production-timeline-duration">
+                {t("drawer.timelineDuration", { s: timelineDuration(timeline).toFixed(1) })}
+              </span>
+              <div className="spacer" />
+              <button
+                onClick={onAddActiveToTimeline}
+                disabled={!activeAssetId}
+                title={t("drawer.addToTimelineTitle")}
+              >
+                {t("drawer.addToTimeline")}
+              </button>
+            </div>
+            {timeline.tracks.every((track) => track.clips.length === 0) ? (
+              <p className="production-timeline-empty">{t("drawer.timelineEmpty")}</p>
+            ) : null}
+            <div className="production-timeline-tracks">
+              {timeline.tracks.map((track) => {
+                // Scale every lane to the same overall timeline length so clip
+                // positions line up vertically across tracks.
+                const total = Math.max(timelineDuration(timeline), Math.max(trackEnd(track), 1));
+                return (
+                  <div key={track.id} className="production-track">
+                    <span className={`production-track-label track-${track.kind}`}>
+                      {track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")}
+                    </span>
+                    <div className="production-track-lane">
+                      {track.clips.map((clip) => {
+                        const selected = clip.id === selectedClipId;
+                        return (
+                          <button
+                            key={clip.id}
+                            className={`production-clip clip-${clip.kind}${selected ? " active" : ""}`}
+                            style={{
+                              left: `${(clip.start / total) * 100}%`,
+                              width: `${(clip.duration / total) * 100}%`,
+                            }}
+                            onClick={() => onSelectClip(selected ? null : clip.id)}
+                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s`}
+                          >
+                            <span className="production-clip-name">{clipAssetName(clip.id)}</span>
+                            {selected ? (
+                              <span
+                                className="production-clip-remove"
+                                role="button"
+                                title={t("drawer.removeClipTitle")}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRemoveClip(clip.id);
+                                }}
+                              >
+                                ×
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       ) : (
