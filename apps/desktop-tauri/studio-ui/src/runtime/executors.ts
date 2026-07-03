@@ -9,7 +9,13 @@
 import { analyzePsdContext, composePsd, compositeRepaint, detectQualityIssues, enhanceImage, getOutputDir, localRepaintRegions, matchLightColor, prepareRepaintRegions, refineMaskEdge, runTaskJson } from "../bridge/tauri";
 import type { RepaintedCrop } from "../bridge/tauri";
 import type { Bounds, QualityReport, RepaintReport, VisualContext } from "../types/production";
-import { findLayer, stubLayeredImageAsset, STUB_ORIGINAL_LAYER_ID } from "../production/layeredImage";
+import {
+  findLayer,
+  layeredAssetManifest,
+  stubLayeredImageAsset,
+  STUB_ORIGINAL_LAYER_ID,
+  type LayeredImageAsset,
+} from "../production/layeredImage";
 import type { ExecutorRegistry } from "./dag";
 import {
   optimizePromptLocally,
@@ -670,9 +676,15 @@ export const defaultExecutors: ExecutorRegistry = {
   // smart-object replacement when possible) and exports the .psd triplet via
   // the backend `compose_psd` command.
   psdExport: async (ctx) => {
-    const image = (ctx.inputs.image as string | undefined) ?? null;
+    // A connected layered asset stands in for the flat image via its composite
+    // preview, and its layer manifest is recorded in the exported metadata.
+    const layeredAsset = (ctx.inputs.layered_asset as LayeredImageAsset | undefined) ?? null;
+    const image =
+      (ctx.inputs.image as string | undefined) ??
+      layeredAsset?.preview_composite.path ??
+      null;
     const template = (ctx.inputs.template as string | undefined) ?? null;
-    if (!image) throw new Error("PSD Export needs a connected image input");
+    if (!image) throw new Error("PSD Export needs a connected image or layered asset input");
     if (!template) throw new Error("PSD Export needs a connected PSD template input");
 
     // Fall back to the configured output directory when none is set on the node.
@@ -684,12 +696,29 @@ export const defaultExecutors: ExecutorRegistry = {
     // production metadata object merged into the exported _metadata.json.
     const mask = (ctx.inputs.mask as string | undefined) || undefined;
     const metadataInput = ctx.inputs.metadata;
-    const metadata =
-      metadataInput != null
-        ? typeof metadataInput === "string"
-          ? metadataInput
-          : JSON.stringify(metadataInput)
-        : undefined;
+    let metadata: string | undefined;
+    if (layeredAsset) {
+      let base: Record<string, unknown> = {};
+      if (metadataInput != null) {
+        if (typeof metadataInput === "string") {
+          try {
+            base = JSON.parse(metadataInput) as Record<string, unknown>;
+          } catch {
+            base = { metadata: metadataInput };
+          }
+        } else {
+          base = metadataInput as Record<string, unknown>;
+        }
+      }
+      metadata = JSON.stringify({ ...base, layered_asset: layeredAssetManifest(layeredAsset) });
+    } else {
+      metadata =
+        metadataInput != null
+          ? typeof metadataInput === "string"
+            ? metadataInput
+            : JSON.stringify(metadataInput)
+          : undefined;
+    }
     const result = await composePsd({
       template,
       image,

@@ -506,7 +506,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   psdExport: {
     title: "PSD 导出",
     description:
-      "将生成图像写入 PSD 模板的占位符（尽可能做真正的智能对象替换），并导出 final.psd + preview.png + metadata.json。可接收可选的精修蒙版（作为图像 alpha 应用）以及一个并入导出元数据的生产元数据对象。",
+      "将生成图像写入 PSD 模板的占位符（尽可能做真正的智能对象替换），并导出 final.psd + preview.png + metadata.json。可接收可选的精修蒙版（作为图像 alpha 应用）以及一个并入导出元数据的生产元数据对象。连接分层资产（智能图层拆分）时，其合成预览可代替图像输入，图层清单（名称、bbox、alpha 引用）会记录到导出的元数据中。",
     params: {
       filename: { label: "文件名" },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
@@ -517,7 +517,13 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         hint: "replace_content 重写智能对象（在 Photoshop 中保持可编辑）",
       },
     },
-    ports: { image: "图像", template: "模板", mask: "蒙版", metadata: "元数据" },
+    ports: {
+      image: "图像",
+      layered_asset: "分层资产",
+      template: "模板",
+      mask: "蒙版",
+      metadata: "元数据",
+    },
   },
 };
 

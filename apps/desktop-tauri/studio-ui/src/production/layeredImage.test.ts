@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findLayer,
+  layeredAssetManifest,
   LAYER_SPLIT_STUB_ENGINE,
   STUB_BACKGROUND_LAYER_ID,
   STUB_ORIGINAL_LAYER_ID,
@@ -53,5 +54,22 @@ describe("stubLayeredImageAsset", () => {
   it("finds layers by id", () => {
     expect(findLayer(asset, STUB_BACKGROUND_LAYER_ID)?.kind).toBe("background");
     expect(findLayer(asset, "nope")).toBeNull();
+  });
+
+  it("flattens into the export manifest with names, bbox and alpha refs", () => {
+    const manifest = layeredAssetManifest(asset);
+    expect(manifest.asset_id).toBe("layered-n1");
+    expect(manifest.engine_version).toBe(LAYER_SPLIT_STUB_ENGINE);
+    expect(manifest.composite_preview).toBe("/a/b.png");
+    expect(manifest.layers).toHaveLength(3);
+    expect(manifest.layers[0]).toEqual({
+      id: STUB_ORIGINAL_LAYER_ID,
+      name: "original image",
+      kind: "unknown",
+      bbox: [0, 0, 0, 0],
+      alpha: "/a/b.png",
+      locked: true,
+      confidence: 1,
+    });
   });
 });

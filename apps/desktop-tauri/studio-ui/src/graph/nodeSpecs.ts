@@ -1557,10 +1557,11 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     executor: "local",
     title: "PSD Export",
     description:
-      "Write the generated image into a PSD template's placeholder (true smart-object replacement when possible) and export final.psd + preview.png + metadata.json. Accepts an optional refined mask (applied as the image's alpha) and a production metadata object merged into the exported metadata.",
+      "Write the generated image into a PSD template's placeholder (true smart-object replacement when possible) and export final.psd + preview.png + metadata.json. Accepts an optional refined mask (applied as the image's alpha) and a production metadata object merged into the exported metadata. A connected layered asset (Smart Layer Split) stands in for the image via its composite preview, and its layer manifest (names, bbox, alpha refs) is recorded in the exported metadata.",
     category: "output",
     inputs: [
       port("image", "image", "image"),
+      port("layered_asset", "layered asset", "any"),
       port("template", "template", "any"),
       port("mask", "mask", "image"),
       port("metadata", "metadata", "any"),

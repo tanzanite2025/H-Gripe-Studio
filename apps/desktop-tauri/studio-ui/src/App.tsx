@@ -216,12 +216,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // source card with a path), or null when the selection isn't one.
   const addableAsset = useMemo<AddableAsset | null>(() => {
     if (!selectedNode) return null;
+    // A split node registers its layered asset's composite preview, so a
+    // timeline still clip can reference the layered image.
+    if (layeredAsset) {
+      return {
+        kind: "image",
+        path: layeredAsset.preview_composite.path,
+        sourceNodeId: selectedNode.id,
+      };
+    }
     const data = selectedNode.data as HgripeNodeData;
     const kind = assetKindForNodeKind(data.kind);
     const path = typeof data.params?.path === "string" ? (data.params.path as string) : "";
     if (!kind || !path) return null;
     return { kind, path, sourceNodeId: selectedNode.id };
-  }, [selectedNode]);
+  }, [selectedNode, layeredAsset]);
 
   const handleAddSelectedToBin = useCallback(() => {
     if (!addableAsset) return;

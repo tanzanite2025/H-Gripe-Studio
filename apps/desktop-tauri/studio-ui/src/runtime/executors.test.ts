@@ -3,6 +3,7 @@ import * as bridge from "../bridge/tauri";
 import { GRAPH_VERSION, type WorkflowGraph } from "../graph/model";
 import { runGraph, validateGraph } from "./dag";
 import { batchItems, defaultExecutors } from "./executors";
+import { stubLayeredImageAsset as stubAsset } from "../production/layeredImage";
 
 function ctx(kind: string, params: Record<string, unknown>, inputs: Record<string, unknown> = {}) {
   return { nodeId: `${kind}-1`, kind, params, inputs };
@@ -323,10 +324,22 @@ describe("psdExport sink", () => {
   it("requires both an image and a template input", async () => {
     await expect(
       defaultExecutors.psdExport(ctx("psdExport", {}, { template: "/t.psd" })),
-    ).rejects.toThrow(/image input/);
+    ).rejects.toThrow(/image or layered asset input/);
     await expect(
       defaultExecutors.psdExport(ctx("psdExport", {}, { image: "/gen/x.png" })),
     ).rejects.toThrow(/template input/);
+  });
+
+  it("falls back to a connected layered asset's composite preview as the image", async () => {
+    const asset = stubAsset({ imagePath: "/a/b.png", nodeId: "n1", createdAt: "0" });
+    const out = (await defaultExecutors.psdExport(
+      ctx(
+        "psdExport",
+        { filename: "layered", output_dir: "/out" },
+        { layered_asset: asset, template: "/t.psd" },
+      ),
+    )) as { psdPath: string };
+    expect(out.psdPath).toBe("/out/layered.psd");
   });
 });
 
