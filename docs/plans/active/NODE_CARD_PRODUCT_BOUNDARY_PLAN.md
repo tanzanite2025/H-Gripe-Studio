@@ -71,23 +71,36 @@ of scattering one card per small operation.
 
 The card body is a row-based panel:
 
-| Row | Row Input | Row Output | Manual Entry |
+| Row | Row Input | Row Output | Role |
 | --- | --- | --- | --- |
-| Layer Split | image | layered image | Open layer review / image editor |
-| Enhance | image | enhanced image | Optional compare/review |
-| Grade | image or layer | graded image | Open Grade panel / grade popup |
-| Crop / Transform | image | cropped image | Open crop/transform editor |
-| Mask / Matte | image | mask / cutout / alpha | Open mask editor |
-| Repair / Repaint | image + optional report | repaired image | Open repair editor |
+| Layer Split | image | layered image | Compute a layered asset for review / downstream nodes. |
+| Enhance | image | enhanced image | Parameterized quality enhancement. |
+| Grade | image or layer | graded image | Reusable colour operation backed by `hgripe-grade`. |
+| Crop / Transform | image | cropped image | Parameterized crop / transform operation. |
+| Mask / Matte | image | mask / cutout / alpha | Parameterized matte output for downstream use. |
+| Repair / Repaint | image + optional report | repaired image | Parameterized repair output. |
 
 Each row can expose its own input/output connection dots. If the user wants to
 grade, they connect to the Grade row. If they want crop, they connect to the
 Crop row. The canvas shows one coherent Image Processing card, while the
 inside of the card makes the available image operations obvious.
 
-Manual work should not become separate random cards. Manual edit opens the
-existing image editor/modal from the row or image target, records the operation
-stack, and writes the confirmed result back to that row's output.
+Free manual editing does not live on every Image Processing row. It belongs to
+the Image Source card itself: the bottom `Edit` action opens the full image
+editor, and the user can crop, mask, paint, retouch, adjust layers, or make any
+other free edit there. Confirming that editor produces a traceable edited image
+asset / output without mutating the original source.
+
+Image Processing rows are for flow-level, connectable operations. They expose
+row-specific input/output ports and parameters so the user can wire exactly the
+operation they want. They can provide preview/review affordances, but they should
+not redefine the free image editor row by row.
+
+Row ports must be semantically aligned with the row, not auto-spaced by total
+port count. A Grade connection dot must sit on the Grade row; a Crop connection
+dot must sit on the Crop row. Ports should have stable semantic ids such as
+`grade.in`, `grade.out`, `crop.in`, `crop.out`, `mask.out`, and
+`layerSplit.out`.
 
 The old leaf node kinds such as `subjectMask`, `crop`, `imageGrade`,
 `imageEnhance`, `detailWatchdog`, and `detailRepaint` may remain as internal
@@ -206,10 +219,12 @@ The user-facing canvas should stay at the production level.
    action, move their behavior into the owning card or the canvas chrome.
 4. For each production card, make the owning controls explicit:
    - Generate owns seed/steps/mode.
-   - Smart Layer Split owns thresholds/review rules.
-   - Mask owns confidence/review/refine policy.
-   - Crop owns aspect/margin/box/auto mode.
-   - Grade owns all color numeric controls.
+   - Image Source owns the bottom free `Edit` entry.
+   - Image Processing owns row-level ports for split/enhance/grade/crop/mask/repair.
+   - Layer Split owns thresholds/review rules.
+   - Mask row owns confidence/review/refine policy.
+   - Crop row owns aspect/margin/box/auto mode.
+   - Grade row owns all color numeric controls.
    - Timeline owns clip routing and audio/video edit entry points.
 5. Only after the ownership is clear, add richer card bodies and context menus.
 
@@ -218,8 +233,8 @@ The user-facing canvas should stay at the production level.
 The node palette should read like a studio tool:
 
 ```text
-Image Source -> Smart Layer Split -> Review -> Grade -> Export
-Prompt -> Generate -> Mask/Crop/Enhance -> Export
+Image Source -> Image Processing(split/grade/crop/mask rows) -> Export
+Prompt -> Generate -> Image Processing(enhance/repair rows) -> Export
 Video Source -> Timeline / Grade / Assemble
 ```
 

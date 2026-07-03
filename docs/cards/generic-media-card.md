@@ -1,216 +1,165 @@
-# Generic Media cards (Image / Video) + bound edit-result nodes
+# Generic Media Cards And Image Processing Card
 
-The canvas-first ingestion + editing surface. Dropping a **file onto the canvas**
-creates a **generic media card** — an **Image** card or a **Video** card, chosen
-by the file type (the two are deliberately **never** the same card). Editing an
-image (mask, crop, colour, …) never mutates the source card: it spawns a
-**bound result node** wired from the source, so the produced image flows on to
-the rest of the workflow.
+This document fixes the canvas product model for media ingestion and image
+processing.
 
-This document is the frozen contract for the ingestion + binding model and the
-auto/manual split. It does not redefine the individual edit backends (mask =
-`subjectMask`, etc.); it defines how a media card *hands off* to them and how
-their result becomes a downstream node.
+Dropping a file onto the canvas creates a source card:
 
-## Why a bound result node (not in-place mutation)
+- Image files create an **Image Source** card.
+- Video files create a **Video Source** card.
+- The two are deliberately separate product cards.
 
-A node graph is already non-destructive by construction: a processing node
-*reads* an input image and *emits* a new one. Overwriting the source card would
-throw that away and leave nothing for downstream steps to consume.
+The Image Source card is not a pile of small edit nodes. It is the user's source
+asset on the canvas. Its bottom **Edit** action opens the full image editor, so
+the user can freely crop, mask, paint, retouch, adjust layers, or make any other
+manual edit in one coherent editor.
 
-**Decision (confirmed):**
+Flow-level image operations belong in an **Image Processing** card. That card is
+a row-based processing panel with row-aligned ports: if the user wants grading,
+they wire the Grade row; if they want crop, they wire the Crop row.
 
-- The **source media card stays a pure input** — its `path` / thumbnail never
-  change as a result of an edit.
-- Each edit is a **separate processing node** (`crop`, `subjectMask`, colour, …)
-  connected from the source by an edge.
-- That edit node **renders + displays its own result** on its card and exposes
-  it on an **output port** for the next step.
-- Editing is therefore **chainable**: a result node can itself be edited, adding
-  another bound node downstream, growing the workflow naturally.
+## Source Card Rule
 
-The "generic image card + a row of edit buttons" is thus a **convenience layer**
-over the existing graph model: clicking an edit button *auto-creates the right
-edit node, auto-wires the binding edge, and opens that node's editor*. There is
-no new destructive "apply that rewrites the source".
+The source media card stays a pure input:
 
-## Binding edge
+- Its path / thumbnail represent the original file.
+- Manual editing through the bottom `Edit` action must not destructively mutate
+  the original source.
+- Confirming the editor creates a traceable edited asset / output reference.
+- The edited result can flow into downstream nodes like any other image output.
 
-The source→edit link is a normal data edge **plus** a distinct visual treatment
-so a binding reads differently from an ordinary workflow connection.
+The source card owns free-form manual editing. Do not spread "manual edit" entry
+points across every processing row.
 
-| Aspect | Value |
-| --- | --- |
-| Edge `type` | `binding` (new React Flow edge type) |
-| Render | a **short, straight** connector (not the default bezier) — the two cards sit close, the line is the literal "this result is bound to that source" tie |
-| Data | identical to a normal `image`-typed edge (source `image` out → edit `image` in); it still participates in the DAG / cycle checks |
-| Auto-layout | the edit node is placed immediately to the right of the source so the binding line stays short |
+## Image Source Card
 
-`binding` is purely presentational + a layout hint; the executor / `toWorkflowGraph`
-treats it as a regular edge so nothing downstream needs to special-case it.
-
-## Drop → card routing
-
-`FlowCanvas` currently only handles **palette** drags (`DND_NODE_KIND`, an
-in-app node-kind string) in `onDrop`. OS **file** drops need a separate path,
-and crucially must yield an **absolute filesystem path** (the Rust backends
-all work on disk paths):
-
-| Environment | Mechanism | Gives path? |
-| --- | --- | --- |
-| Desktop (Tauri) | the webview drag-drop event (`onDragDropEvent` / `tauri://file-drop`) | **yes** — absolute paths |
-| Browser preview | DOM `DataTransfer.files` | no real disk path (browser-sandboxed) |
-
-**Decision:** ingestion uses the **Tauri** drag-drop event on desktop (the real
-target); browser-preview drop is best-effort / disabled for files. The dropped
-path's extension routes it:
-
-| Extension (case-insensitive) | Card |
-| --- | --- |
-| `png` `jpg` `jpeg` `webp` `gif` `bmp` `tif` `tiff` `heic` `heif` `avif` | **Image** card (`imageSource`, extended) |
-| `mp4` `mov` `mkv` `webm` `avi` `m4v` | **Video** card (`videoSource`, new) |
-| anything else | rejected with a status-bar note |
-
-The node is created at the drop position (`screenToFlowPosition`), with `path`
-pre-filled.
-
-## Image card (`imageSource`, extended)
-
-The existing `imageSource` node grows from "a path input" into the generic image
-card, mirroring the `subjectMask` card body pattern (thumbnail + action row):
+The existing `imageSource` node grows from "a path input" into the product image
+card:
 
 | Element | Notes |
 | --- | --- |
-| Thumbnail | `LazyThumb(path)` — already lazy + backend-thumbnailed |
-| Info row | `width × height` (free — `generateThumbnail` already returns dims), file basename; format / DPI / size are a later enrich |
-| Action row | icon buttons that each **spawn a bound edit node** + open its editor: `Mask`, `Crop`, … (`planned` ones render greyed) |
+| Thumbnail | Uses lazy thumbnail generation for the selected file. |
+| Info row | Shows dimensions, basename, and later format / DPI / size. |
+| Output port | Emits the source image reference. |
+| Bottom `Edit` action | Opens the full image editor for unrestricted manual edits. |
 
-The action buttons call `editing.addBoundEdit(sourceId, editKind, opts?)` (see
-below); they do **not** mutate `imageSource`. `opts` is what splits the auto vs
-manual entry points for the same edit kind:
+The bottom `Edit` action is the correct entry for free editing. It is not a
+small per-operation shortcut row. Once the edit is confirmed, the app records
+the operation stack / edited output as a new non-destructive result.
 
-- **Manual** lives on the card action row. The `Crop` button calls
-  `addBoundEdit(id, "crop", { params: { mode: "manual" }, openEditor: true })` —
-  spawns the bound crop node and opens `CropEditModal` to draw the box.
-- **Auto** lives on the node's **right-click menu**. For an `imageSource` node the
-  menu lists the purely-computed edits, each calling
-  `addBoundEdit(id, editKind, { params, openEditor: false, run: true })` — spawns
-  the bound node and runs its ancestor subgraph (run-up-to-node) straight away,
-  surfacing the result with no editor:
-  - `Crop to subject (auto)` → `crop` `{ mode: "auto_subject" }`
-  - `Subject mask (auto)` → `subjectMask` `{ mode: "auto_subject" }`
-  - `Enhance quality (auto)` → `imageEnhance`
-  - `Detect defects (auto)` → `detailWatchdog`
+## Image Processing Card
 
-  These are the edits derivable from the single input image alone. Edits needing a
-  second input (`matchLightColor` wants a background, `refineMaskEdge` a mask,
-  `detailRepaint` a quality report) are **not** single-image auto entries — wire
-  them up explicitly.
+The Image Processing card is the visible entry for connectable image operations.
+It replaces the idea that every small operation needs its own palette card.
 
-This is the general shape for every edit kind: the human-spatial-intent lane is a
-card button (opens an editor), the algorithm-derived lane is a right-click entry
-(`openEditor: false, run: true`).
-
-## Video card (`videoSource`, new) — separate track
-
-Video is **not** an image and gets its own card, editor set, and backend. It
-was scoped separately because it needed real video decoding — which has since
-landed as the **media engine** (`studio/video_engine.rs`: decoder seam +
-frame cache + latest-wins playback thread on the vendored native-ffmpeg
-backend; the legacy PyAV backend was deleted in Phase 7, #314; `video_scrub`
-for timeline dragging — see `design/editor-resource-model.md` §Staged
-rollout). Encode/export exists as the **Video Assemble** card
-(`studio/video_assemble.rs`, native FFmpeg encoders).
-
-The **first version** of the video card is implemented: dropping a video
-file creates a `videoSource` node whose `video_probe` Tauri command uses the
-native media engine to read metadata (duration / resolution / fps / codec)
-and decode a **poster frame** to a cached PNG. The card shows that poster
-through the existing `generate_thumbnail` pipeline plus a
-`name · W×H · m:ss · fps` info row, and carries the original path downstream
-on a `video` output port.
-
-## Auto (computed) vs Manual — how the split is decided
-
-Every editable operation is one of two kinds, decided by a single rule:
-
-> **Can the result be derived from the input alone by an algorithm / model?**
-
-| → | Kind | UI | Lane |
+| Row | Input Port | Output Port | Notes |
 | --- | --- | --- | --- |
-| **Yes** | **Auto (computed)** | a button + engine/param selectors; running it produces the result | backend compute (ML / native) |
-| **No — needs human spatial intent** | **Manual** | tools in the editor (brush, wand, crop box, rotate angle, region pick) | recorded as image-space **ops**, rasterised by the backend |
+| Layer Split | `layerSplit.in` | `layerSplit.out` | Produces a layered image asset for review and downstream use. |
+| Enhance | `enhance.in` | `enhance.out` | Parameterized image enhancement. |
+| Grade | `grade.in` | `grade.out` | Uses the shared `hgripe-grade` kernel. |
+| Crop / Transform | `crop.in` | `crop.out` | Parameterized crop / transform output. |
+| Mask / Matte | `mask.in` | `mask.out` / `cutout.out` / `alpha.out` | Produces mask, cutout, or alpha outputs. |
+| Repair / Repaint | `repair.in` | `repair.out` | Parameterized repair result, optionally using a quality report. |
 
-Examples: subject segmentation, edge refine, light/colour match, enhance, defect
-detect, *crop-to-subject* are **auto**; precise brush touch-ups, magic-wand
-補点, hand-drawn crop box / aspect, manual rotate angle are **manual**.
+Each row has stable height and its ports sit on the row center. Ports must not be
+auto-spaced by total port count. A Grade connection dot must align with the
+Grade row, and a Crop connection dot must align with the Crop row.
 
-Many features have **both** forms (crop = auto crop-to-subject **and** manual
-box; mask = auto segment **and** manual brush). The clean design — already
-embodied by the `subjectMask` card's `Auto` + `Edit Mask` buttons — is:
+## Row-Aligned Port Contract
 
-> **Auto produces a base result; manual edits refine on top**, both folded into
-> the **same op stack** on the node and resolved by the **same render pipeline**.
-
-So auto/manual is a split **inside** an edit node (an `engine`/auto param set +
-a manual `edit_paths`/ops set); the **binding** is the relationship **between**
-nodes. The two concerns are orthogonal.
-
-## "Confirm → result appears" (run-up-to-node)
-
-Clicking **Confirm** in an editor must show the produced result immediately,
-without forcing a full-graph run. The run controller today only runs the **whole
-graph** (`run`) or a **batch** (`runBatch`) — there is no single-node / partial
-run.
-
-**Decision (confirmed):** add a **run-up-to-node** execution path:
-
-1. Editor commits its params/ops onto the (bound) edit node.
-2. The controller builds the **ancestor subgraph** of that node (the node + all
-   its transitive inputs) and runs only that.
-3. The edit node's output paths are surfaced onto its card (it renders its
-   result thumbnail, like `preview` / `psdExport` already do).
-
-This reuses the existing executor + `applyPreviews` machinery; it only needs a
-subgraph selector ("node + ancestors") and a `run(targetNodeId)` entry point.
-
-## NodeEditing context additions
+The port model must use semantic ids, not anonymous positions:
 
 ```ts
-interface NodeEditing {
-  onParamChange(nodeId, key, value): void;        // existing
-  openPreview?(nodeId): void;                       // existing
-  openMaskEdit?(nodeId): void;                      // existing
-  // NEW: create a bound edit node from a source media card + open its editor.
-  addBoundEdit?(sourceId: string, editKind: string): void;
-  // NEW: run only the target node + its ancestors, then surface the result.
-  runUpToNode?(nodeId: string): void;
-}
+type ImageProcessingPort =
+  | "layerSplit.in"
+  | "layerSplit.out"
+  | "enhance.in"
+  | "enhance.out"
+  | "grade.in"
+  | "grade.out"
+  | "crop.in"
+  | "crop.out"
+  | "mask.in"
+  | "mask.out"
+  | "cutout.out"
+  | "alpha.out"
+  | "repair.in"
+  | "repair.out";
 ```
 
-`addBoundEdit` owns: spawn `editKind` node → connect a `binding` edge from
-`sourceId.image` → position it to the right → open the matching editor.
+Rendering should position React Flow handles from the row layout, not from the
+default evenly-spaced node edge layout.
 
-## Phases
+## Relationship To Existing Leaf Nodes
 
-1. **Image ingestion + binding (this contract, first):**
-   - Tauri file-drop → `imageSource` at drop position (absolute path).
-   - `imageSource` card body: thumbnail + `w×h` info + action row.
-   - `binding` edge type (short, straight) + `addBoundEdit`.
-   - `runUpToNode` partial execution so Confirm shows a result.
-2. **Crop edit node:** auto crop-to-subject (compute) **+** manual box/aspect
-   (ops), wired through the result pipeline; first non-mask edit to validate the
-   unified auto/manual + binding model end-to-end.
-3. **Video card:** `videoSource` + backend poster-frame extraction + its own
-   (trim / frame-crop) editors, on a separate track.
-4. **Manual editor unification ("all-in-one"):** the image card's manual lanes
-   collapse into a single **Edit** button that opens `MediaEditModal` — a unified
-   editor whose bar carries a tool-group switcher (**Mask** ⟷ **Crop**). It hosts
-   the existing `MaskEditModal` / `CropEditModal` (each unchanged, gaining only a
-   `headerExtra` slot for the switcher). Per **option A**, the source image is
-   never mutated and one *Apply* produces exactly one bound edit node of the
-   active group — mask → `subjectMask` seeded with `edit_paths`, crop → `crop`
-   seeded with `mode`/`aspect`/`margin_pct`/`crop_box` — then run-up-to-node, the
-   same pipeline as the auto entries. Existing `subjectMask` / `crop` nodes keep
-   their own node-bound editors (`openMaskEdit` / `openCropEdit`). Folding in more
-   tools (rotate / colour) is future work behind the same group switcher.
+Existing leaf node kinds may remain for runtime compatibility and internal
+lowering:
+
+- `subjectMask`
+- `crop`
+- `imageGrade`
+- `imageEnhance`
+- `detailWatchdog`
+- `detailRepaint`
+
+They should not be the default product palette shape. The visible product shape
+is:
+
+```text
+Image Source
+  bottom Edit -> full image editor
+
+Image Processing
+  Layer Split row -> layered image output
+  Enhance row     -> enhanced image output
+  Grade row       -> graded image output
+  Crop row        -> cropped image output
+  Mask row        -> mask/cutout/alpha outputs
+  Repair row      -> repaired image output
+```
+
+The executor may lower a row operation into existing internal node kinds, but
+the user-facing canvas should stay organized around the Image Processing card.
+
+## Video Card
+
+Video remains a separate card and backend track.
+
+The Video Source card carries the original video reference, poster frame, and
+metadata. Video trim, clip grade, audio handling, and export flow through the
+Edit / Timeline workspace and the shared production drawer model, not through
+the Image Processing card.
+
+## Drop Routing
+
+Desktop ingestion should use the Tauri file-drop path so the backend receives
+absolute filesystem paths.
+
+| Extension | Card |
+| --- | --- |
+| `png` `jpg` `jpeg` `webp` `gif` `bmp` `tif` `tiff` `heic` `heif` `avif` | Image Source |
+| `mp4` `mov` `mkv` `webm` `avi` `m4v` | Video Source |
+| anything else | reject with a status note |
+
+Browser preview can remain best-effort because browser file drops do not provide
+real disk paths.
+
+## Execution Contract
+
+Running an Image Processing row should execute only the required ancestor graph
+and the selected row operation when possible. The result should surface on that
+row's output and be available to downstream nodes.
+
+Confirming the full image editor should similarly create a traceable edited
+output, but the source card remains the original source.
+
+## Implementation Phases
+
+1. Keep `imageSource` as the source card and give it a clear bottom `Edit`
+   action for the full image editor.
+2. Add the Image Processing card with stable row layout and row-aligned semantic
+   ports.
+3. Route row execution through existing internal node kinds where useful.
+4. Move leaf processing nodes out of the default palette once the Image
+   Processing card covers their product role.
+5. Preserve old saved workflows by continuing to load old leaf node kinds.
