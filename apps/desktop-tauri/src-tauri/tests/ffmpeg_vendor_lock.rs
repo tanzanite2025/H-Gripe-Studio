@@ -62,7 +62,11 @@ fn declared_feature() -> String {
 /// `LIB<NAME>_VERSION_MAJOR` from the vendored headers. FFmpeg keeps the
 /// major in `version_major.h` for every lib except avutil (`version.h`).
 fn header_major(include: &Path, lib: &str) -> u32 {
-    let file = if lib == "avutil" { "version.h" } else { "version_major.h" };
+    let file = if lib == "avutil" {
+        "version.h"
+    } else {
+        "version_major.h"
+    };
     let text = read(&include.join(format!("lib{lib}")).join(file));
     let needle = format!("#define LIB{}_VERSION_MAJOR", lib.to_uppercase());
     text.lines()
@@ -76,7 +80,9 @@ fn feature_matches_vendored_headers_and_dlls() {
     let root = repo_root();
     let feature = declared_feature();
     let expected = expected_majors(&feature).unwrap_or_else(|| {
-        panic!("unknown rusty_ffmpeg feature `{feature}` — add its libav* majors to expected_majors()")
+        panic!(
+            "unknown rusty_ffmpeg feature `{feature}` — add its libav* majors to expected_majors()"
+        )
     });
 
     let vendor = root.join("third_party/ffmpeg/win-x64");
@@ -127,11 +133,14 @@ fn lockfile_and_vendored_crate_match_the_feature() {
     let locked_version = lock
         .lines()
         .skip_while(|l| *l != "name = \"rusty_ffmpeg\"")
-        .find_map(|l| l.strip_prefix("version = \"").and_then(|v| v.strip_suffix('"')))
+        .find_map(|l| {
+            l.strip_prefix("version = \"")
+                .and_then(|v| v.strip_suffix('"'))
+        })
         .expect("rusty_ffmpeg entry in Cargo.lock");
-    let (_, build_meta) = locked_version
-        .split_once("+ffmpeg.")
-        .unwrap_or_else(|| panic!("rusty_ffmpeg lock version `{locked_version}` has no +ffmpeg.X.Y metadata"));
+    let (_, build_meta) = locked_version.split_once("+ffmpeg.").unwrap_or_else(|| {
+        panic!("rusty_ffmpeg lock version `{locked_version}` has no +ffmpeg.X.Y metadata")
+    });
     assert_eq!(
         build_meta, feature_ver,
         "Cargo.lock pins rusty_ffmpeg {locked_version} but the Cargo feature is `{feature}` — \
