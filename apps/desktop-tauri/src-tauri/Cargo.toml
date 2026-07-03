@@ -10,7 +10,7 @@ name = "hgripe-desktop"
 path = "src/main.rs"
 
 [features]
-default = ["native-ffmpeg"]
+default = ["native-ffmpeg", "grade-gpu"]
 # Native in-process FFmpeg backend: decode (`FrameSource` behind the
 # media-engine seam) plus encode (`videoTrim`/`videoAssemble`), linked against
 # the vendored LGPL *shared* libav* libraries checked into `third_party/ffmpeg`
@@ -22,10 +22,10 @@ default = ["native-ffmpeg"]
 # test/app binaries.
 native-ffmpeg = ["dep:rusty_ffmpeg"]
 # GPU backend for the grading dialog preview (`grade_preview`) and the
-# `imageGrade` node: compiles hgripe-grade's wgpu compute passes in. Off by
-# default so the ordinary build stays CPU-only; without it (or when no
-# adapter initialises at runtime) grading falls back to the kernel's
-# row-parallel CPU reference path.
+# `imageGrade` node: compiles hgripe-grade's wgpu compute passes in. On by
+# default; when no adapter initialises at runtime (or with
+# `--no-default-features`) grading falls back to the kernel's row-parallel
+# CPU reference path.
 grade-gpu = ["hgripe-grade/gpu"]
 
 [build-dependencies]
