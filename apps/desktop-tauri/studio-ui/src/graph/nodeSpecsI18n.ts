@@ -204,6 +204,22 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       prompt_suffix: "提示词后缀",
     },
   },
+  smartLayerSplit: {
+    title: "智能图层拆分",
+    description:
+      "协议桩（IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md）：把连接的图像包装成 LayeredImageAsset —— 一个锁定的原图层，加上低置信度的背景/主体候选层（mask 为占位）。下游节点、Review 编辑器、调色和时间线消费 layered_asset / 图层端口；真正的分割引擎替换此桩时端口不变。",
+    params: {
+      selected_kind: { label: "选中图层", hint: "selected_layer 输出发出的桩图层" },
+    },
+    ports: {
+      image: "图像",
+      layered_asset: "分层资产",
+      composite_preview: "合成预览",
+      selected_layer: "选中图层",
+      masks: "mask 集",
+      split_report: "拆分报告",
+    },
+  },
   crop: {
     title: "裁剪",
     description:

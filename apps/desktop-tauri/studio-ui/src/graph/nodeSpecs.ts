@@ -795,6 +795,34 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
       },
     ],
   },
+  smartLayerSplit: {
+    kind: "smartLayerSplit",
+    family: "image",
+    executor: "graph",
+    title: "Smart Layer Split",
+    description:
+      "Protocol stub (IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md): wraps the connected image into a LayeredImageAsset with a locked original layer plus low-confidence background/subject candidates whose masks are placeholders. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports; a real segmentation engine replaces the stub without changing the ports.",
+    category: "control",
+    inputs: [port("image", "image", "image")],
+    outputs: [
+      port("layered_asset", "layered asset", "any"),
+      port("composite_preview", "composite preview", "image"),
+      port("selected_layer", "selected layer", "image"),
+      port("masks", "masks", "any"),
+      port("split_report", "split report", "any"),
+    ],
+    params: [
+      {
+        key: "selected_kind",
+        label: "Selected layer",
+        control: "select",
+        options: ["subject", "background", "original"],
+        defaultValue: "subject",
+        inline: true,
+        hint: "which stub layer the selected_layer output emits",
+      },
+    ],
+  },
   crop: {
     kind: "crop",
     family: "crop",

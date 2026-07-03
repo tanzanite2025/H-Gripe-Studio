@@ -32,9 +32,8 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
     // Pure in-process graph logic: routing, comparisons, sources, sinks.
     let (executor, category) = match kind {
         "prompt" | "batch" | "imageSource" | "videoSource" | "psdTemplate" | "number"
-        | "reroute" | "group" | "compare" | "logic" | "if" | "switch" | "preview" | "save" => {
-            (Graph, CpuLight)
-        }
+        | "reroute" | "group" | "compare" | "logic" | "if" | "switch" | "preview" | "save"
+        | "smartLayerSplit" => (Graph, CpuLight),
         // `python/bridge` CLI cards: CPU-bound subprocess work.
         "psdContextAnalyze" | "matchLightColor" | "refineMaskEdge" | "imageEnhance"
         | "detailWatchdog" | "psdExport" | "videoAssemble" | "videoTrim" => (Local, CpuBound),

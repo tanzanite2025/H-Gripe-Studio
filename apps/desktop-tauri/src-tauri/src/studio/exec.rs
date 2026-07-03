@@ -363,6 +363,9 @@ fn execute_studio_graph_node(
                 inputs.get("value").cloned().unwrap_or(Value::Null),
             )]))
         }
+        "smartLayerSplit" => {
+            super::layer_split::execute_studio_smart_layer_split(node, inputs)
+        }
         "preview" => Ok(studio_output_map([(
             "image",
             inputs.get("image").cloned().unwrap_or(Value::Null),
@@ -711,6 +714,7 @@ mod tests {
             "switch",
             "preview",
             "save",
+            "smartLayerSplit",
         ] {
             assert_eq!(studio_executor_for_kind(kind), Some(Graph), "{kind}");
         }
