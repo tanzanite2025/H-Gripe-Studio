@@ -18,10 +18,12 @@ import pytest
 
 # The bridge modules live one directory up (``python/bridge``); make importable.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The torch engines live in the opt-in plugin package (``plugins/torch-engines``).
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "plugins" / "torch-engines"))
 
 import torch_worker  # noqa: E402
-from inpaint_backends import sd_inpaint  # noqa: E402
-from sr_backends import realesrgan  # noqa: E402
+
+from hgripe_torch_engines import realesrgan, sd_inpaint  # noqa: E402
 
 
 # ---- worker protocol -----------------------------------------------------

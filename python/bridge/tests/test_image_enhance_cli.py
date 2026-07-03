@@ -219,7 +219,7 @@ def _realesrgan_stack_ready() -> bool:
         from realesrgan import RealESRGANer  # noqa: F401
     except Exception:
         return False
-    from sr_backends.realesrgan import RealEsrganBackend
+    from hgripe_torch_engines.realesrgan import RealEsrganBackend
 
     return RealEsrganBackend().weight_path().is_file()
 

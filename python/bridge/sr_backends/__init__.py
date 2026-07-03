@@ -3,8 +3,12 @@
 The Phase 1 CPU path (Lanczos resample + unsharp) lives in
 ``image_enhance_cli.py`` and is always available. This package is the
 ``engine`` seam from ``docs/card-executor-split-and-psd-chain-hardening.md``:
-additional engines (``realesrgan`` now; ``ccsr`` / ``supir`` later) register
-here and are selected per run by the node's ``engine`` param.
+additional engines (``realesrgan`` / ``ccsr`` / ``supir``) are selected per
+run by the node's ``engine`` param. Their torch/diffusers implementations do
+not live in the bridge: they ship in the opt-in torch engine plugin
+(``plugins/torch-engines``), discovered at runtime by
+:func:`load_torch_plugin`. Without the plugin no torch engine is registered
+and the CPU path is the only local engine — core carries zero torch code.
 
 Design rules (mirroring the ViTMatte matting backend):
 
@@ -24,7 +28,9 @@ Design rules (mirroring the ViTMatte matting backend):
 
 from __future__ import annotations
 
+import importlib
 import os
+import sys
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -300,16 +306,74 @@ def device_probe() -> dict[str, Any]:
     return report
 
 
+# ---- torch engine plugin ("Phase 6") --------------------------------------
+
+#: Package name the torch/diffusers engine plugin exposes.
+TORCH_PLUGIN_PACKAGE = "hgripe_torch_engines"
+
+
+def torch_plugin_dir() -> Path | None:
+    """Directory holding the opt-in torch/diffusers engine plugin, if present.
+
+    ``HGRIPE_TORCH_PLUGIN_DIR`` overrides the location (dev / CI / a user who
+    installed the plugin elsewhere); otherwise the repo-layout default is
+    ``plugins/torch-engines`` at the repo root. The packaged desktop app does
+    not bundle ``plugins/``, so this returns ``None`` there and the torch
+    engines are simply not registered.
+    """
+    override = (os.environ.get("HGRIPE_TORCH_PLUGIN_DIR") or "").strip()
+    if override:
+        path = Path(override)
+        return path if path.is_dir() else None
+    # python/bridge/sr_backends/__init__.py -> repo plugins/torch-engines
+    here = Path(__file__).resolve()
+    candidate = here.parents[3] / "plugins" / "torch-engines"
+    return candidate if candidate.is_dir() else None
+
+
+#: Memoised ``(module_or_None, reason)`` result of :func:`load_torch_plugin`.
+_TORCH_PLUGIN: list[tuple[Any, str]] = []
+
+
+def load_torch_plugin() -> Any:
+    """Import the torch engine plugin package, or ``None`` when unavailable.
+
+    Never raises: a missing directory or a broken plugin import just means no
+    torch engines are registered (the probe records the reason). The result is
+    memoised for the life of the process.
+    """
+    if _TORCH_PLUGIN:
+        return _TORCH_PLUGIN[0][0]
+    directory = torch_plugin_dir()
+    if directory is None:
+        _TORCH_PLUGIN.append((None, "torch engine plugin not installed"))
+        return None
+    try:
+        if str(directory) not in sys.path:
+            sys.path.insert(0, str(directory))
+        module = importlib.import_module(TORCH_PLUGIN_PACKAGE)
+    except Exception as err:  # noqa: BLE001 - a broken plugin must not crash the bridge
+        _TORCH_PLUGIN.append((None, f"torch engine plugin failed to load: {type(err).__name__}: {err}"))
+        return None
+    _TORCH_PLUGIN.append((module, f"loaded from {directory}"))
+    return module
+
+
+def torch_plugin_status() -> dict[str, Any]:
+    """Probe entry describing whether the torch engine plugin is present."""
+    module = load_torch_plugin()
+    return {"installed": module is not None, "reason": _TORCH_PLUGIN[0][1]}
+
+
 # ---- registry ------------------------------------------------------------
 
-# Imported lazily so this module stays torch-free at import time.
+# Plugin-discovered so core carries no torch/diffusers code: the engines are
+# registered only when the opt-in plugin package is installed.
 def _registry() -> dict[str, SrBackend]:
-    from .ccsr import CcsrBackend
-    from .realesrgan import RealEsrganBackend
-    from .supir import SupirBackend
-
-    backends: list[SrBackend] = [RealEsrganBackend(), CcsrBackend(), SupirBackend()]
-    return {b.id: b for b in backends}
+    plugin = load_torch_plugin()
+    if plugin is None:
+        return {}
+    return {b.id: b for b in plugin.sr_backend_list()}
 
 
 def known_engines() -> list[str]:
@@ -354,4 +418,8 @@ def probe() -> dict[str, Any]:
             # Cached-weight inventory: which non-bundled weight it loads + size.
             "weight": _engine_weight(backend),
         }
-    return {"engines": engines, "model_cache_dir": str(model_cache_dir())}
+    return {
+        "engines": engines,
+        "model_cache_dir": str(model_cache_dir()),
+        "plugin": torch_plugin_status(),
+    }

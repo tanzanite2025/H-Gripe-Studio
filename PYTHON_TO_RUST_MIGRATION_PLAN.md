@@ -365,12 +365,39 @@ optional legacy bridge.
 `third_party/psd_tools` stay the only production PSD path. See
 "Phase 5: Replace PSD Python Last" for the staged plan.
 
-### P4 — Torch/Diffusers out of core (pending)
+### P4 — Torch/Diffusers out of core (done)
 
 No default path depends on torch/diffusers today (verified in P1); they are
-opt-in `engine` values only. Remaining work: move them behind an external
-engine/plugin lifecycle instead of `python/bridge/*_backends`, per
-"Phase 6".
+opt-in `engine` values only. The engines have now been moved out of
+`python/bridge` into a plugin package, per "Phase 6":
+
+- `plugins/torch-engines/hgripe_torch_engines/` hosts every torch/diffusers
+  engine module: `realesrgan.py`, `ccsr.py`, `supir.py` (Image Enhance SR)
+  and `sd_inpaint.py`, `sdxl_inpaint.py`, `flux_fill.py` (Detail Repaint
+  local inpaint). The modules keep their lazy-import / no-bundled-weights /
+  graceful-degradation design and still reuse the bridge's torch-free helpers
+  (`model_cache_dir`, `resolve_device`, `resolve_precision`, the
+  `*Unavailable` errors).
+- `python/bridge/sr_backends` and `python/bridge/inpaint_backends` no longer
+  contain torch/diffusers code. Their registries discover the plugin at
+  runtime (`sr_backends.load_torch_plugin`): `HGRIPE_TORCH_PLUGIN_DIR`
+  overrides the location, otherwise the repo-layout `plugins/torch-engines`
+  is used when present. When the plugin is absent every torch engine is
+  simply not registered and the nodes keep their always-available defaults
+  (native Rust CPU path / remote provider). `--probe-engines` now reports a
+  `plugin` entry (`installed` + `reason`) so the UI can say why the engines
+  are missing.
+- Packaging: `tauri.conf.json` does not bundle `plugins/`, so the packaged
+  desktop app now ships zero torch/diffusers code. Installing the plugin
+  (plus the optional torch stack and weights) is what opts a machine in.
+- The warm-cache torch worker (`torch_worker.py` + `studio/torch_worker.rs`)
+  is unchanged: it hosts the same CLIs, and the plugin's process-global
+  caches (`hgripe_torch_engines.realesrgan._WARM_UPSAMPLERS`,
+  `hgripe_torch_engines.sd_inpaint._WARM_PIPELINES`) still survive across
+  requests when the plugin is installed.
+
+Remaining work for later phases: stop bundling the rest of `python/bridge`
+(P5) and delete the worker host once no engine needs it (Phase 7).
 
 ### P5 — Packaging (pending)
 

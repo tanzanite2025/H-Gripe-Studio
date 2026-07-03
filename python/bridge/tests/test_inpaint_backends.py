@@ -19,6 +19,8 @@ import pytest
 
 # ``inpaint_backends`` lives one directory up (``python/bridge``).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The torch engines live in the opt-in plugin package (``plugins/torch-engines``).
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "plugins" / "torch-engines"))
 
 import inpaint_backends as ib  # noqa: E402
 from inpaint_backends import (  # noqa: E402
@@ -27,9 +29,10 @@ from inpaint_backends import (  # noqa: E402
     probe,
     resolve,
 )
-from inpaint_backends.flux_fill import FluxFillBackend  # noqa: E402
-from inpaint_backends.sd_inpaint import StableDiffusionInpaintBackend  # noqa: E402
-from inpaint_backends.sdxl_inpaint import StableDiffusionXLInpaintBackend  # noqa: E402
+
+from hgripe_torch_engines.flux_fill import FluxFillBackend  # noqa: E402
+from hgripe_torch_engines.sd_inpaint import StableDiffusionInpaintBackend  # noqa: E402
+from hgripe_torch_engines.sdxl_inpaint import StableDiffusionXLInpaintBackend  # noqa: E402
 
 PIL = pytest.importorskip("PIL")
 from PIL import Image  # noqa: E402
@@ -125,7 +128,7 @@ def test_weight_path_prefers_env_override(
 
 
 def test_controlnet_weight_path_prefers_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    from inpaint_backends.sd_inpaint import controlnet_weight_path
+    from hgripe_torch_engines.sd_inpaint import controlnet_weight_path
 
     monkeypatch.setenv("HGRIPE_CONTROLNET_MODEL", "/models/my-controlnet")
     assert controlnet_weight_path() == Path("/models/my-controlnet")
@@ -189,7 +192,7 @@ def test_other_backends_reject_controlnet(
 
 def test_canny_condition_is_rgb_edge_map() -> None:
     np = pytest.importorskip("numpy")
-    from inpaint_backends.sd_inpaint import canny_condition
+    from hgripe_torch_engines.sd_inpaint import canny_condition
 
     # A half-black / half-white image has one strong vertical edge.
     img = Image.new("RGB", (32, 32), (0, 0, 0))
