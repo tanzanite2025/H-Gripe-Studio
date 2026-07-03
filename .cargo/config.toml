@@ -4,3 +4,11 @@ replace-with = "vendored-sources"
 [source.vendored-sources]
 directory = "third_party/cargo-vendor"
 
+# Workspace-level defaults for the native FFmpeg feature. These mirror
+# apps/desktop-tauri/src-tauri/.cargo/config.toml so root-level commands such as
+# `cargo run -p hgripe-desktop` and `cargo check --workspace` can link the
+# vendored Windows FFmpeg libraries without manual shell setup.
+[env]
+FFMPEG_LIBS_DIR = { value = "third_party/ffmpeg/win-x64/lib", relative = true }
+FFMPEG_LINK_MODE = "dynamic"
+FFMPEG_BINDING_PATH = { value = "third_party/ffmpeg/prebuilt-binding-placeholder.rs", relative = true }
