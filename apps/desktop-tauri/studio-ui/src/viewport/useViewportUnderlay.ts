@@ -17,6 +17,9 @@ export interface ViewportUnderlay {
   dims: { w: number; h: number } | null;
   /** Backend report of the last rendered frame (fallback contract). */
   backend: ViewportBackend | null;
+  /** True once the attempt finished — with a frame, or without one (browser
+   * preview / render error), letting callers stop showing a loading state. */
+  settled: boolean;
 }
 
 /**
@@ -35,16 +38,24 @@ export function useViewportUnderlay(
     underlay: null,
     dims: null,
     backend: null,
+    settled: false,
   });
 
   useEffect(() => {
+    setState({ underlay: null, dims: null, backend: null, settled: false });
     if (!imagePath) return;
     let cancelled = false;
     let host: WgpuViewportHost | null = null;
+    const settle = () => {
+      if (!cancelled) setState((s) => (s.settled ? s : { ...s, settled: true }));
+    };
 
     (async () => {
       const res = await registerResource(imagePath);
-      if (!res || cancelled) return;
+      if (!res || cancelled) {
+        settle();
+        return;
+      }
       host = await WgpuViewportHost.open(kind);
       if (cancelled) {
         // The cleanup ran while `open` was in flight; it saw `host === null`,
@@ -63,9 +74,11 @@ export function useViewportUnderlay(
         underlay: frame.data_url,
         dims: { w: frame.width, h: frame.height },
         backend: frame.backend,
+        settled: true,
       });
     })().catch(() => {
-      /* keep nulls; editors fall back to their checkerboard */
+      // Keep nulls; editors fall back to their checkerboard.
+      settle();
     });
 
     return () => {
