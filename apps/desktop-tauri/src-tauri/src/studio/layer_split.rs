@@ -1,6 +1,6 @@
 //! `smartLayerSplit` compute node: subject/background separation plus optional
-//! multi-object instancing (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md,
-//! Phases 1–2).
+//! multi-object instancing and text region detection
+//! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phases 1–3).
 //!
 //! Splits a flat image into a `LayeredImageAsset` — a locked original layer
 //! plus real background/subject candidates whose masks come from the shared
@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use image::{GrayImage, Luma};
 use serde_json::{json, Value};
 
-use super::graph::{studio_output_map, studio_value_to_string, StudioGraphNode};
+use super::graph::{bool_param, studio_output_map, studio_value_to_string, StudioGraphNode};
 use super::persist::studio_reject_unsafe_basename;
 use super::pixel_ops;
 use super::studio_image;
@@ -236,6 +236,15 @@ pub(crate) fn execute_studio_smart_layer_split(
         Vec::new()
     };
 
+    // Phase 3 text regions: detect likely text lines so the Review Editor can
+    // mark them protected when editing the surrounding pixels.
+    let detect_text = bool_param(node, "detect_text", false);
+    let text_regions = if detect_text {
+        super::text_regions::text_region_masks(&srgb)
+    } else {
+        Vec::new()
+    };
+
     let subject_bbox = mask_bbox(&subject_mask);
     let is_builtin = provider == BUILTIN_PROVIDER;
     // The weight-free fallback is a colour heuristic — keep its candidates
@@ -331,6 +340,36 @@ pub(crate) fn execute_studio_smart_layer_split(
             &layer_id,
             "auto instance — verify it is one object (merge/split if needed)",
         ));
+    }
+    // Text regions are filled-bbox candidates from a weight-free heuristic:
+    // low-confidence, marked protected, and always flagged for review.
+    for (n, region_mask) in text_regions.iter().enumerate() {
+        let ordinal = n + 1;
+        let layer_id = format!("layer_text_{ordinal}");
+        let mask_path = dir.join(format!("{base}_text_{ordinal}_mask.png"));
+        let rgba_path = dir.join(format!("{base}_text_{ordinal}.png"));
+        save_mask(region_mask, &mask_path)?;
+        let rgba = pixel_ops::apply_alpha_mask_working(&working, region_mask);
+        studio_image::write_working_output(&rgba_path, &rgba)?;
+        layers.push(json!({
+            "id": layer_id,
+            "name": format!("text region {ordinal}"),
+            "kind": "text",
+            "bbox": mask_bbox(region_mask),
+            "mask": { "path": mask_path.to_string_lossy(), "width": width, "height": height },
+            "rgba": { "path": rgba_path.to_string_lossy(), "width": width, "height": height },
+            "confidence": 0.3,
+            "source": "algorithm",
+            "visible": true,
+            "notes": ["protected: likely text — keep when editing surrounding layers"],
+        }));
+        suggested_review.push(review(
+            &layer_id,
+            "heuristic text region — verify before relying on protection",
+        ));
+    }
+    if detect_text && text_regions.is_empty() {
+        warnings.push(json!("text detection found no text-like regions"));
     }
     if instancing == "auto" && instances.is_empty() {
         warnings.push(json!(
@@ -552,6 +591,66 @@ mod tests {
         let layers = out["layered_asset"]["layers"].as_array().unwrap();
         assert_eq!(layers.len(), 3);
         assert!(layers.iter().all(|layer| layer["kind"] != "object"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_text_emits_protected_text_layers() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hgripe_layer_split_text_{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        // A light canvas with a row of small dark "glyph" strokes: the
+        // heuristic detector picks the line up as one text region.
+        let image_path = root.join("poster.png");
+        let mut image = RgbaImage::from_pixel(100, 60, Rgba([245, 245, 245, 255]));
+        for g in 0..15u32 {
+            let gx = 10 + g * 4;
+            for y in 20..25 {
+                for x in gx..gx + 2 {
+                    image.put_pixel(x, y, Rgba([10, 10, 10, 255]));
+                }
+            }
+        }
+        image.save(&image_path).unwrap();
+        let mut inputs = BTreeMap::new();
+        inputs.insert("image".to_string(), json!(image_path.to_string_lossy()));
+        let out = execute_studio_smart_layer_split(
+            &node(&root, &[("detect_text", json!(true))]),
+            &inputs,
+        )
+        .unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap().clone();
+        let texts: Vec<_> = layers
+            .iter()
+            .filter(|layer| layer["kind"] == "text")
+            .collect();
+        assert_eq!(texts.len(), 1, "expected one text layer in {layers:?}");
+        let review = out["layered_asset"]["split_report"]["suggested_review"]
+            .as_array()
+            .unwrap()
+            .clone();
+        for text in &texts {
+            assert_eq!(text["id"], "layer_text_1");
+            assert_eq!(text["source"], "algorithm");
+            let notes = text["notes"].as_array().unwrap();
+            assert!(notes[0].as_str().unwrap().starts_with("protected:"));
+            let mask = text["mask"]["path"].as_str().unwrap();
+            let rgba = text["rgba"]["path"].as_str().unwrap();
+            assert!(Path::new(mask).is_file(), "missing mask {mask}");
+            assert!(Path::new(rgba).is_file(), "missing rgba {rgba}");
+            assert!(
+                review.iter().any(|issue| issue["layer_id"] == text["id"]),
+                "no review issue for {}",
+                text["id"]
+            );
+        }
+        // Without the param, no text layers are emitted.
+        let out = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap();
+        assert!(layers.iter().all(|layer| layer["kind"] != "text"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
