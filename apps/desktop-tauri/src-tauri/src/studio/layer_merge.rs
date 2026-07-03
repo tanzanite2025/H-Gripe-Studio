@@ -221,7 +221,10 @@ mod tests {
         block_mask(10, 10, 13, 13).save(&b).unwrap();
         let out = merge_layer_masks_impl(
             &image_path.to_string_lossy(),
-            &[a.to_string_lossy().to_string(), b.to_string_lossy().to_string()],
+            &[
+                a.to_string_lossy().to_string(),
+                b.to_string_lossy().to_string(),
+            ],
             &root.to_string_lossy(),
             "merged_object",
         )
@@ -254,7 +257,9 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("at least two"), "{err}");
         let small = root.join("small_mask.png");
-        GrayImage::from_pixel(8, 8, Luma([255])).save(&small).unwrap();
+        GrayImage::from_pixel(8, 8, Luma([255]))
+            .save(&small)
+            .unwrap();
         let err = merge_layer_masks_impl(
             &image_path.to_string_lossy(),
             &[

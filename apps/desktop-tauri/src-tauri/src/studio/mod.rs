@@ -117,9 +117,9 @@ pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
 // re-exports the function, not the hidden `__cmd__cmd` helper that the Tauri
 // command macro generates beside it; the glob carries both.
 pub(crate) use exec::*;
-pub(crate) use layer_merge::*;
 pub(crate) use grade::*;
 pub(crate) use history::*;
+pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
 pub(crate) use persist::*;
 pub(crate) use schedule::StudioScheduler;
