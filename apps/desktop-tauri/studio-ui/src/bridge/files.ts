@@ -69,6 +69,28 @@ export async function mergeLayerMasks(req: {
   })) as MergedLayerArtifacts;
 }
 
+/**
+ * Split one layer's mask into per-object connected components on the backend,
+ * each with its own mask + RGBA cutout PNGs. Errors when the mask has fewer
+ * than two components above the minimum area. Returns `null` outside Tauri
+ * (browser preview) — the review panel hides splitting there.
+ */
+export async function splitLayerMask(req: {
+  imagePath: string;
+  maskPath: string;
+  outputDir?: string;
+  outputName: string;
+}): Promise<MergedLayerArtifacts[] | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  return (await invoke("split_layer_mask", {
+    imagePath: req.imagePath,
+    maskPath: req.maskPath,
+    outputDir: req.outputDir ?? "",
+    outputName: req.outputName,
+  })) as MergedLayerArtifacts[];
+}
+
 // Fields are snake_case to match the Rust `VideoProbeResult` serialization.
 export interface VideoProbeResult {
   width: number;

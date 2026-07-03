@@ -1,10 +1,12 @@
-//! `merge_layer_masks` Tauri command: Review Editor "merge layers" support
+//! Review Editor merge/split commands
 //! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 2 合并/拆分).
 //!
-//! Unions two or more layer masks of one layered image asset into a single
-//! merged layer's artifacts: a merged mask PNG plus the corresponding RGBA
-//! cutout of the source image. The UI keeps the asset JSON itself — this
-//! command only produces the pixel artifacts and the merged bbox.
+//! `merge_layer_masks` unions two or more layer masks of one layered image
+//! asset into a single merged layer's artifacts; `split_layer_mask` breaks one
+//! layer's mask into per-object connected components. Both write mask PNGs
+//! plus the corresponding RGBA cutouts of the source image. The UI keeps the
+//! asset JSON itself — these commands only produce the pixel artifacts and
+//! their bboxes.
 
 use std::path::{Path, PathBuf};
 
@@ -107,6 +109,79 @@ pub fn merge_layer_masks(
     merge_layer_masks_impl(&image_path, &mask_paths, &output_dir, &output_name)
 }
 
+fn split_layer_mask_impl(
+    image_path: &str,
+    mask_path: &str,
+    output_dir: &str,
+    output_name: &str,
+) -> Result<Vec<MergedLayerArtifacts>, String> {
+    if image_path.trim().is_empty() {
+        return Err("split needs the asset's source image path".to_string());
+    }
+    studio_reject_unsafe_basename(output_name)?;
+
+    let loaded = studio_image::load_working(
+        Path::new(image_path.trim()),
+        studio_image::DEFAULT_MAX_DECODE_PIXELS,
+    )?;
+    let working = loaded.image;
+    let (width, height) = (working.width, working.height);
+    let mask = image::open(Path::new(mask_path.trim()))
+        .map_err(|err| format!("failed to read mask {mask_path}: {err}"))?
+        .to_luma8();
+    if mask.dimensions() != (width, height) {
+        return Err(format!(
+            "mask {mask_path} is {}x{} but the canvas is {width}x{height}",
+            mask.width(),
+            mask.height()
+        ));
+    }
+    let parts = super::layer_split::instance_masks(&mask);
+    if parts.len() < 2 {
+        return Err(
+            "the mask has no more than one component above the minimum area — nothing to split"
+                .to_string(),
+        );
+    }
+
+    let dir = if output_dir.trim().is_empty() {
+        crate::runtime_paths()?.output_dir
+    } else {
+        PathBuf::from(output_dir.trim())
+    };
+    std::fs::create_dir_all(&dir)
+        .map_err(|err| format!("failed to create output dir {}: {err}", dir.display()))?;
+
+    let mut out = Vec::with_capacity(parts.len());
+    for (n, part) in parts.iter().enumerate() {
+        let ordinal = n + 1;
+        let mask_path = dir.join(format!("{output_name}_{ordinal}_mask.png"));
+        let rgba_path = dir.join(format!("{output_name}_{ordinal}.png"));
+        part.save(&mask_path)
+            .map_err(|err| format!("failed to write {}: {err}", mask_path.display()))?;
+        let rgba = pixel_ops::apply_alpha_mask_working(&working, part);
+        studio_image::write_working_output(&rgba_path, &rgba)?;
+        out.push(MergedLayerArtifacts {
+            mask_path: mask_path.to_string_lossy().to_string(),
+            rgba_path: rgba_path.to_string_lossy().to_string(),
+            bbox: super::layer_split::mask_bbox(part),
+            width,
+            height,
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn split_layer_mask(
+    image_path: String,
+    mask_path: String,
+    output_dir: String,
+    output_name: String,
+) -> Result<Vec<MergedLayerArtifacts>, String> {
+    split_layer_mask_impl(&image_path, &mask_path, &output_dir, &output_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +266,60 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("canvas"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn splits_a_mask_into_component_artifacts() {
+        let root = temp_dir("split");
+        let image_path = root.join("scene.png");
+        RgbaImage::from_pixel(16, 16, Rgba([90, 90, 90, 255]))
+            .save(&image_path)
+            .unwrap();
+        let mask_path = root.join("two_blobs_mask.png");
+        let mut mask = block_mask(1, 1, 4, 4);
+        for y in 10..=13 {
+            for x in 10..=13 {
+                mask.put_pixel(x, y, Luma([255]));
+            }
+        }
+        mask.save(&mask_path).unwrap();
+        let parts = split_layer_mask_impl(
+            &image_path.to_string_lossy(),
+            &mask_path.to_string_lossy(),
+            &root.to_string_lossy(),
+            "split_object",
+        )
+        .unwrap();
+        assert_eq!(parts.len(), 2);
+        // largest-first ordering; both blobs are equal here so just check bboxes
+        let bboxes: Vec<[u32; 4]> = parts.iter().map(|p| p.bbox).collect();
+        assert!(bboxes.contains(&[1, 1, 4, 4]));
+        assert!(bboxes.contains(&[10, 10, 13, 13]));
+        for part in &parts {
+            assert!(Path::new(&part.mask_path).is_file());
+            assert!(Path::new(&part.rgba_path).is_file());
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn split_rejects_single_component_masks() {
+        let root = temp_dir("split_single");
+        let image_path = root.join("scene.png");
+        RgbaImage::from_pixel(16, 16, Rgba([90, 90, 90, 255]))
+            .save(&image_path)
+            .unwrap();
+        let mask_path = root.join("one_blob_mask.png");
+        block_mask(1, 1, 6, 6).save(&mask_path).unwrap();
+        let err = split_layer_mask_impl(
+            &image_path.to_string_lossy(),
+            &mask_path.to_string_lossy(),
+            &root.to_string_lossy(),
+            "split_object",
+        )
+        .unwrap_err();
+        assert!(err.contains("nothing to split"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

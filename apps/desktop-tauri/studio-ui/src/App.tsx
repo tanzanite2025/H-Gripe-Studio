@@ -45,7 +45,13 @@ import { useContextMenu } from "./editor/useContextMenu";
 import { useModals } from "./editor/useModals";
 import { loadPersistedGraph } from "./editor/persist";
 import { validateGraph } from "./runtime/dag";
-import { isTauri, listenFileDrop, mergeLayerMasks, primeIngest } from "./bridge/tauri";
+import {
+  isTauri,
+  listenFileDrop,
+  mergeLayerMasks,
+  primeIngest,
+  splitLayerMask,
+} from "./bridge/tauri";
 import { ProductionDrawer, type AddableAsset } from "./production/ProductionDrawer";
 import {
   loadDrawerMode,
@@ -67,6 +73,7 @@ import {
 import {
   findLayer,
   mergeLayersIntoAsset,
+  splitLayerInAsset,
   stubLayeredImageAsset,
   type LayeredImageAsset,
 } from "./production/layeredImage";
@@ -366,6 +373,49 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             ),
           );
           setSelectedLayerId((id) => (id && layerIds.includes(id) ? mergedId : id));
+        })
+        .catch((err) => setMessage(String(err)));
+    },
+    [selectedNode, layeredAsset, setNodes, setMessage],
+  );
+
+  // Review Editor "split layer": break the selected layer's mask into its
+  // connected components on the backend, then replace it in the node's stored
+  // asset with one part layer per component. Desktop-only.
+  const handleSplitLayer = useCallback(
+    (layerId: string) => {
+      const node = selectedNode;
+      const asset = layeredAsset;
+      if (!node || !asset) return;
+      const source = findLayer(asset, layerId);
+      if (!source || source.locked) return;
+      const splitTag = `layer_part_${Date.now().toString(36)}`;
+      void splitLayerMask({
+        imagePath: asset.base_image.path,
+        maskPath: source.mask.path,
+        outputName: `${asset.id}_${splitTag}`,
+      })
+        .then((artifacts) => {
+          if (!artifacts || artifacts.length < 2) return;
+          const next = splitLayerInAsset(
+            asset,
+            layerId,
+            artifacts.map((part, n) => ({
+              id: `${splitTag}_${n + 1}`,
+              name: `${source.name} part ${n + 1}`,
+              mask: { path: part.mask_path, width: part.width, height: part.height },
+              rgba: { path: part.rgba_path, width: part.width, height: part.height },
+              bbox: part.bbox,
+            })),
+          );
+          setNodes((ns) =>
+            ns.map((n) =>
+              n.id === node.id
+                ? { ...n, data: { ...(n.data as HgripeNodeData), layeredAsset: next } }
+                : n,
+            ),
+          );
+          setSelectedLayerId((id) => (id === layerId ? `${splitTag}_1` : id));
         })
         .catch((err) => setMessage(String(err)));
     },
@@ -957,6 +1007,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           layerVisibility={layerVisibility}
           onToggleLayerVisibility={handleToggleLayerVisibility}
           onMergeLayers={isTauri() ? handleMergeLayers : undefined}
+          onSplitLayer={isTauri() ? handleSplitLayer : undefined}
         />
       </NodeEditingContext.Provider>
       {menu && (

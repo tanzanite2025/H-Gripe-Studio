@@ -309,6 +309,55 @@ export function mergeLayersIntoAsset(
   };
 }
 
+/**
+ * Apply a Review Editor "split layer" to an asset: replace the (unlocked)
+ * split layer with the user-sourced part layers at its position. Parts trust
+ * a bit less than their source layer (connected components can cut one object
+ * in two) and each part is flagged for review. Pure asset transformation —
+ * the pixel artifacts come from the backend's `split_layer_mask` command.
+ */
+export function splitLayerInAsset(
+  asset: LayeredImageAsset,
+  layerId: string,
+  parts: {
+    id: string;
+    name: string;
+    mask: ImageRef;
+    rgba: ImageRef;
+    bbox: [number, number, number, number];
+  }[],
+): LayeredImageAsset {
+  const source = findLayer(asset, layerId);
+  if (!source || source.locked || parts.length < 2) return asset;
+  const partLayers: LayerCandidate[] = parts.map((part) => ({
+    id: part.id,
+    name: part.name,
+    kind: source.kind === "background" ? "background" : "object",
+    bbox: part.bbox,
+    mask: part.mask,
+    rgba: part.rgba,
+    confidence: Math.max(source.confidence - 0.15, 0.1),
+    source: "user",
+    visible: true,
+    notes: [`split from ${source.name} (connected component)`],
+  }));
+  return {
+    ...asset,
+    layers: asset.layers.flatMap((layer) => (layer.id === layerId ? partLayers : [layer])),
+    split_report: {
+      ...asset.split_report,
+      suggested_review: [
+        ...asset.split_report.suggested_review.filter((issue) => issue.layer_id !== layerId),
+        ...partLayers.map((layer) => ({
+          layer_id: layer.id,
+          severity: "warning" as const,
+          message: "split part — verify it is one whole object",
+        })),
+      ],
+    },
+  };
+}
+
 /** Find a layer by id, or null when the asset does not carry it. */
 export function findLayer(
   asset: LayeredImageAsset,
