@@ -5,7 +5,8 @@
   "identifier": "com.hgripe.desktop",
   "build": {
     "frontendDist": "../dist",
-    "beforeDevCommand": "npm --prefix studio-ui ci && npm --prefix studio-ui run build",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix studio-ui run dev",
     "beforeBuildCommand": "npm --prefix studio-ui ci && npm --prefix studio-ui run build"
   },
   "app": {

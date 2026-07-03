@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Edge, Node } from "@xyflow/react";
-import { createHistoryStack, type GraphSnapshot } from "./history";
+import { createHistoryStack, findHeavyGraphData, type GraphSnapshot } from "./history";
 
 function snap(label: string): GraphSnapshot {
   return { nodes: [{ id: label, position: { x: 0, y: 0 }, data: {} } as Node], edges: [] as Edge[] };
@@ -61,5 +61,44 @@ describe("createHistoryStack", () => {
     h.clear();
     expect(h.canUndo()).toBe(false);
     expect(h.canRedo()).toBe(false);
+  });
+});
+
+describe("findHeavyGraphData", () => {
+  function withData(data: Record<string, unknown>): GraphSnapshot {
+    return { nodes: [{ id: "n1", position: { x: 0, y: 0 }, data } as Node], edges: [] };
+  }
+
+  it("passes light reference data (paths, ids, nested params)", () => {
+    expect(
+      findHeavyGraphData(
+        withData({
+          kind: "imageSource",
+          imagePath: "C:/media/photo.png",
+          params: { path: "C:/media/photo.png", nested: { ids: ["a", "b"] } },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("flags data: URIs embedded in node data", () => {
+    const heavy = findHeavyGraphData(
+      withData({ kind: "imageSource", thumb: `data:image/png;base64,${"A".repeat(2000)}` }),
+    );
+    expect(heavy).toContain("data: URI");
+    expect(heavy).toContain("n1");
+  });
+
+  it("flags oversized strings nested inside params", () => {
+    const heavy = findHeavyGraphData(
+      withData({ kind: "prompt", params: { log: "x".repeat(70 * 1024) } }),
+    );
+    expect(heavy).toContain("string over");
+  });
+
+  it("tolerates circular references in node data", () => {
+    const cyc: Record<string, unknown> = { kind: "group" };
+    cyc.self = cyc;
+    expect(findHeavyGraphData(withData(cyc))).toBeNull();
   });
 });
