@@ -53,6 +53,7 @@
 mod api_call;
 mod color;
 mod color_match;
+mod color_match_cpu;
 mod crop;
 mod detail_repaint;
 mod detail_watchdog;
