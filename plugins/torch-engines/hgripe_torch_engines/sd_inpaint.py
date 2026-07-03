@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import CONTROLNET_OFF, InpaintUnavailable, model_cache_dir
+from inpaint_backends import CONTROLNET_OFF, InpaintUnavailable, model_cache_dir
 
 _DEFAULT_WEIGHT_DIR = "sd-inpaint"
 _DEFAULT_CONTROLNET_WEIGHT_DIR = "controlnet-canny"

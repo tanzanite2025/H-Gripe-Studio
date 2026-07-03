@@ -26,7 +26,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import BackendUnavailable, model_cache_dir, resolve_device, resolve_precision
+from sr_backends import BackendUnavailable, model_cache_dir, resolve_device, resolve_precision
 
 _DEFAULT_WEIGHT_NAME = "RealESRGAN_x4plus.pth"
 

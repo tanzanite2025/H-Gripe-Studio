@@ -6,8 +6,12 @@ paste-back) lives in ``detail_repaint_cli.py`` and is always available; the
 remote ``image.edit`` provider call owned by the Rust/TS orchestrator. This
 package is the ``engine`` seam from ``docs/phase2-algorithm-roadmap.md`` §3:
 additional **local** GPU inpaint engines (``sd_inpaint``, ``sdxl_inpaint``,
-``flux_fill``) register here and are selected per run by the node's ``engine``
-param, consuming the *same* prepare manifest so the contract is unchanged.
+``flux_fill``) are selected per run by the node's ``engine`` param, consuming
+the *same* prepare manifest so the contract is unchanged. Their
+torch/diffusers implementations ship in the opt-in torch engine plugin
+(``plugins/torch-engines``), discovered at runtime via
+``sr_backends.load_torch_plugin``; without the plugin only ``provider`` is
+selectable — core carries zero torch/diffusers code.
 
 Design rules (mirroring the ``sr_backends`` / ``detector_backends`` seams):
 
@@ -33,7 +37,7 @@ from typing import Any, Protocol
 
 # Reuse the one model-cache resolver (torch-free, defined for the SR seam) so
 # downloadable weights for every node land in the same place.
-from sr_backends import _engine_weight, model_cache_dir
+from sr_backends import _engine_weight, load_torch_plugin, model_cache_dir, torch_plugin_status
 
 PROVIDER_ENGINE = "provider"
 
@@ -111,18 +115,13 @@ class InpaintBackend(Protocol):
 
 # ---- registry ------------------------------------------------------------
 
-# Imported lazily so this module stays torch/diffusers-free at import time.
+# Plugin-discovered so core carries no torch/diffusers code: the engines are
+# registered only when the opt-in plugin package is installed.
 def _registry() -> dict[str, InpaintBackend]:
-    from .flux_fill import FluxFillBackend
-    from .sd_inpaint import StableDiffusionInpaintBackend
-    from .sdxl_inpaint import StableDiffusionXLInpaintBackend
-
-    backends: list[InpaintBackend] = [
-        StableDiffusionInpaintBackend(),
-        StableDiffusionXLInpaintBackend(),
-        FluxFillBackend(),
-    ]
-    return {b.id: b for b in backends}
+    plugin = load_torch_plugin()
+    if plugin is None:
+        return {}
+    return {b.id: b for b in plugin.inpaint_backend_list()}
 
 
 def known_engines() -> list[str]:
@@ -172,4 +171,8 @@ def probe() -> dict[str, Any]:
             "accelerated": True,
             "weight": _engine_weight(backend),
         }
-    return {"engines": engines, "model_cache_dir": str(model_cache_dir())}
+    return {
+        "engines": engines,
+        "model_cache_dir": str(model_cache_dir()),
+        "plugin": torch_plugin_status(),
+    }

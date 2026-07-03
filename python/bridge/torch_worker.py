@@ -8,8 +8,9 @@ The Rust host (``studio/torch_worker.rs``) spawns exactly one of these and keeps
 it alive for the life of the desktop process, then talks to it with
 newline-delimited JSON: one request object per line on ``stdin``, one response
 object per line on ``stdout``. Because the process is long-lived, the torch
-backends' process-global warm caches (``sr_backends.realesrgan._WARM_UPSAMPLERS``,
-``inpaint_backends.sd_inpaint._WARM_PIPELINES``) survive across requests, so the
+engine plugin's process-global warm caches (``hgripe_torch_engines.realesrgan.
+_WARM_UPSAMPLERS``, ``hgripe_torch_engines.sd_inpaint._WARM_PIPELINES``)
+survive across requests, so the
 ~64 MB Real-ESRGAN weight / multi-GB SD-inpaint pipeline is built once per
 ``(weight, device, precision)`` instead of reloaded on every run — the dominant
 latency the old per-call subprocess paid.

@@ -15,10 +15,13 @@ import pytest
 
 # ``sr_backends`` lives one directory up (``python/bridge``); make it importable.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The torch engines live in the opt-in plugin package (``plugins/torch-engines``).
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "plugins" / "torch-engines"))
 
 import sr_backends  # noqa: E402
 from sr_backends import BackendUnavailable, probe, resolve  # noqa: E402
-from sr_backends.realesrgan import RealEsrganBackend  # noqa: E402
+
+from hgripe_torch_engines.realesrgan import RealEsrganBackend  # noqa: E402
 
 
 def test_onnx_providers_prefers_cuda_when_present() -> None:
@@ -186,8 +189,8 @@ _DIFFUSION_BACKENDS = [
 
 
 def _diffusion_backend(engine: str):
-    from sr_backends.ccsr import CcsrBackend
-    from sr_backends.supir import SupirBackend
+    from hgripe_torch_engines.ccsr import CcsrBackend
+    from hgripe_torch_engines.supir import SupirBackend
 
     return {"ccsr": CcsrBackend, "supir": SupirBackend}[engine]()
 

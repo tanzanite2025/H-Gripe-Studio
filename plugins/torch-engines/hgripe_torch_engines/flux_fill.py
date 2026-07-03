@@ -1,24 +1,30 @@
-"""Stable Diffusion XL inpaint backend (opt-in, GPU/CPU via diffusers + torch).
+"""Flux Fill inpaint backend (opt-in, GPU/CPU via diffusers + torch).
 
-The roadmap's SDXL follow-up to ``sd_inpaint`` (§3.2/§3.3): same seam, same
-contract, a higher-quality 1024-native inpaint checkpoint. Stays **opt-in**:
-used only when the node's ``engine`` param is ``sdxl_inpaint`` *and* both the
-optional deps (``torch`` + ``diffusers``) and the model weight are present;
-otherwise the caller emits an empty repaint set and the orchestrator falls
-back to the always-available remote ``image.edit`` provider path.
+The roadmap's Flux Fill follow-up to ``sd_inpaint`` (§3.2/§3.3): same seam,
+same contract, driven by the FLUX.1-Fill flow-matching transformer instead of
+a UNet. Stays **opt-in**: used only when the node's ``engine`` param is
+``flux_fill`` *and* both the optional deps (``torch`` + ``diffusers``) and the
+model weight are present; otherwise the caller emits an empty repaint set and
+the orchestrator falls back to the always-available remote ``image.edit``
+provider path.
+
+Flux Fill is not a denoise-from-source pipeline: it has **no**
+``negative_prompt`` and **no** ``strength`` input (the fill is always a full
+regeneration of the masked area). Those node params are accepted and ignored
+so the call contract stays identical across engines.
 
 Nothing heavy is imported at module load — ``torch`` / ``diffusers`` are only
 touched inside :meth:`available` (via :func:`importlib.util.find_spec`) and
 :meth:`inpaint`.
 
 Weight resolution order:
-1. ``HGRIPE_SDXL_INPAINT_MODEL`` (explicit path or HF repo id, for dev / CI), else
-2. ``<model cache>/sdxl-inpaint`` where the cache dir is ``HGRIPE_MODEL_CACHE``
+1. ``HGRIPE_FLUX_FILL_MODEL`` (explicit path or HF repo id, for dev / CI), else
+2. ``<model cache>/flux-fill`` where the cache dir is ``HGRIPE_MODEL_CACHE``
    or the bundled ``resources/models`` dir.
 
-The weight is **not** bundled in the installer (an SDXL inpaint checkpoint is
-~7 GB); ``scripts`` can fetch it into the cache dir, exactly like the SD
-inpaint / SAM 2 / ViTMatte / Real-ESRGAN weights.
+The weight is **not** bundled in the installer (FLUX.1-Fill is ~24 GB);
+``scripts`` can fetch it into the cache dir, exactly like the SD inpaint /
+SAM 2 / ViTMatte / Real-ESRGAN weights.
 """
 
 from __future__ import annotations
@@ -28,30 +34,32 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import CONTROLNET_OFF, InpaintUnavailable, model_cache_dir
+from inpaint_backends import CONTROLNET_OFF, InpaintUnavailable, model_cache_dir
+
 from .sd_inpaint import _warm_pipeline
 
-_DEFAULT_WEIGHT_DIR = "sdxl-inpaint"
+_DEFAULT_WEIGHT_DIR = "flux-fill"
+
+#: Flux's VAE downsamples by 8 and the transformer packs 2x2 latent patches,
+#: so the working size must be a multiple of 16.
+_SIZE_MULTIPLE = 16
 
 
 def _construct_pipeline(weight: str, device: str, precision: str) -> Any:
-    """Build an SDXL inpaint pipeline (imports heavy deps lazily)."""
+    """Build a Flux Fill pipeline (imports heavy deps lazily)."""
     import torch
-    from diffusers import StableDiffusionXLInpaintPipeline
+    from diffusers import FluxFillPipeline
 
     dtype = torch.float16 if precision == "fp16" else torch.float32
-    pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
-        weight,
-        torch_dtype=dtype,
-    )
+    pipe = FluxFillPipeline.from_pretrained(weight, torch_dtype=dtype)
     return pipe.to(device)
 
 
-class StableDiffusionXLInpaintBackend:
-    id = "sdxl_inpaint"
+class FluxFillBackend:
+    id = "flux_fill"
 
     def weight_path(self) -> Path:
-        override = (os.environ.get("HGRIPE_SDXL_INPAINT_MODEL") or "").strip()
+        override = (os.environ.get("HGRIPE_FLUX_FILL_MODEL") or "").strip()
         if override:
             return Path(override)
         return model_cache_dir() / _DEFAULT_WEIGHT_DIR
@@ -66,7 +74,7 @@ class StableDiffusionXLInpaintBackend:
             return (
                 False,
                 f"weight not found: {weight} "
-                "(set HGRIPE_SDXL_INPAINT_MODEL or fetch into HGRIPE_MODEL_CACHE)",
+                "(set HGRIPE_FLUX_FILL_MODEL or fetch into HGRIPE_MODEL_CACHE)",
             )
         return True, "ready"
 
@@ -84,11 +92,12 @@ class StableDiffusionXLInpaintBackend:
         precision: str | None = None,
         controlnet: str = CONTROLNET_OFF,
     ) -> tuple[Any, str, str]:
-        """Inpaint the white area of ``mask`` over ``crop`` with SDXL.
+        """Fill the white area of ``mask`` over ``crop`` with Flux Fill.
 
         Same geometry contract as ``sd_inpaint``: the crop+mask are padded up
-        to the pipeline's multiple-of-8 requirement, run, and cropped back.
-        Returns ``(image, device_used, precision_used)``. Raises
+        to the pipeline's multiple-of-16 requirement, run, and cropped back.
+        ``negative_prompt`` and ``strength`` are ignored (Flux Fill has neither
+        input). Returns ``(image, device_used, precision_used)``. Raises
         :class:`InpaintUnavailable` if deps/weights vanished since the probe,
         or when ControlNet conditioning is requested (only ``sd_inpaint``
         supports it today — raising is truthful; silently ignoring would lie).
@@ -113,8 +122,8 @@ class StableDiffusionXLInpaintBackend:
         rgb = crop.convert("RGB")
         msk = mask.convert("L")
         orig_w, orig_h = rgb.size
-        pad_w = (8 - orig_w % 8) % 8
-        pad_h = (8 - orig_h % 8) % 8
+        pad_w = (_SIZE_MULTIPLE - orig_w % _SIZE_MULTIPLE) % _SIZE_MULTIPLE
+        pad_h = (_SIZE_MULTIPLE - orig_h % _SIZE_MULTIPLE) % _SIZE_MULTIPLE
         if pad_w or pad_h:
             padded_rgb = Image.new("RGB", (orig_w + pad_w, orig_h + pad_h))
             padded_rgb.paste(rgb, (0, 0))
@@ -128,14 +137,10 @@ class StableDiffusionXLInpaintBackend:
 
         result = pipe(
             prompt=prompt,
-            negative_prompt=negative_prompt or None,
             image=rgb,
             mask_image=msk,
-            # SDXL inpaint expects the working resolution passed explicitly so
-            # it does not resize the crop to its 1024 native size.
             width=rgb.size[0],
             height=rgb.size[1],
-            strength=float(strength),
             guidance_scale=float(guidance_scale),
             num_inference_steps=int(steps),
             generator=generator,

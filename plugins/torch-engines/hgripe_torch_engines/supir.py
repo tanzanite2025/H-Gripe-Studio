@@ -9,7 +9,7 @@ caller falls back to the always-available CPU Lanczos path with a recorded
 reason.
 
 Nothing heavy is imported at module load; the loading/inference path is the
-shared diffusion SR helper in :mod:`sr_backends.ccsr` (generic
+shared diffusion SR helper in :mod:`hgripe_torch_engines.ccsr` (generic
 ``DiffusionPipeline.from_pretrained`` over the snapshot's declared pipeline,
 with the process-global warm cache).
 
@@ -25,7 +25,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import model_cache_dir
+from sr_backends import model_cache_dir
+
 from .ccsr import diffusion_sr_available, diffusion_sr_upscale
 
 _DEFAULT_WEIGHT_DIR = "supir"
