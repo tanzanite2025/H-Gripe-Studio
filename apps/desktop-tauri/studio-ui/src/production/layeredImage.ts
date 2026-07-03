@@ -48,6 +48,8 @@ export interface LayerCandidate {
   source: LayerCandidateSource;
   visible: boolean;
   locked?: boolean;
+  /** Keep these pixels untouched when editing other layers (Phase 3 文字/logo). */
+  protected?: boolean;
   notes?: string[];
 }
 
@@ -355,6 +357,26 @@ export function splitLayerInAsset(
         })),
       ],
     },
+  };
+}
+
+/**
+ * Apply a Review Editor "mark protected" toggle to an asset: set or clear the
+ * (unlocked) layer's `protected` flag so downstream edits keep its pixels.
+ * Pure asset transformation — no artifacts change.
+ */
+export function setLayerProtected(
+  asset: LayeredImageAsset,
+  layerId: string,
+  isProtected: boolean,
+): LayeredImageAsset {
+  const layer = findLayer(asset, layerId);
+  if (!layer || layer.locked || (layer.protected ?? false) === isProtected) return asset;
+  return {
+    ...asset,
+    layers: asset.layers.map((l) =>
+      l.id === layerId ? { ...l, protected: isProtected } : l,
+    ),
   };
 }
 

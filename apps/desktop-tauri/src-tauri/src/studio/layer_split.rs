@@ -391,6 +391,7 @@ pub(crate) fn execute_studio_smart_layer_split(
             "confidence": 0.3,
             "source": "algorithm",
             "visible": true,
+            "protected": true,
             "notes": ["protected: likely text — keep when editing surrounding layers"],
         }));
         suggested_review.push(review(
@@ -421,6 +422,7 @@ pub(crate) fn execute_studio_smart_layer_split(
             "confidence": 0.3,
             "source": "algorithm",
             "visible": true,
+            "protected": true,
             "notes": ["protected: likely logo / brand mark — keep when editing surrounding layers"],
         }));
         suggested_review.push(review(
@@ -724,6 +726,7 @@ mod tests {
         for text in &texts {
             assert_eq!(text["id"], "layer_text_1");
             assert_eq!(text["source"], "algorithm");
+            assert_eq!(text["protected"], true);
             let notes = text["notes"].as_array().unwrap();
             assert!(notes[0].as_str().unwrap().starts_with("protected:"));
             let mask = text["mask"]["path"].as_str().unwrap();
@@ -787,6 +790,7 @@ mod tests {
         let logo = logos[0];
         assert_eq!(logo["id"], "layer_logo_1");
         assert_eq!(logo["source"], "algorithm");
+        assert_eq!(logo["protected"], true);
         let notes = logo["notes"].as_array().unwrap();
         assert!(notes[0].as_str().unwrap().starts_with("protected:"));
         let mask = logo["mask"]["path"].as_str().unwrap();

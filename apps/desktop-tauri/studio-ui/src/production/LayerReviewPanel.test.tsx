@@ -59,6 +59,48 @@ describe("LayerReviewPanel", () => {
     expect(onSelectLayer).toHaveBeenCalledWith(null);
   });
 
+  it("shows a protected badge and toggles protection on unlocked layers", () => {
+    const protectedAsset = {
+      ...asset,
+      layers: asset.layers.map((layer) =>
+        layer.id === STUB_SUBJECT_LAYER_ID ? { ...layer, protected: true } : layer,
+      ),
+    };
+    const onToggleProtected = vi.fn();
+    const { container } = render(
+      <LayerReviewPanel
+        asset={protectedAsset}
+        selectedLayerId={null}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+        onToggleProtected={onToggleProtected}
+      />,
+    );
+    expect(container.querySelectorAll(".layer-review-protected")).toHaveLength(1);
+    // protect toggles on the unlocked layers only (background + subject)
+    const toggles = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".layer-review-protect"),
+    );
+    expect(toggles).toHaveLength(2);
+    expect(toggles[1].getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggles[0]);
+    expect(onToggleProtected).toHaveBeenCalledWith(STUB_BACKGROUND_LAYER_ID);
+  });
+
+  it("hides protect toggles when the callback is omitted", () => {
+    const { container } = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={null}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+      />,
+    );
+    expect(container.querySelector(".layer-review-protect")).toBeNull();
+  });
+
   it("marks the locked original and surfaces split-report review issues", () => {
     const { container } = render(
       <LayerReviewPanel

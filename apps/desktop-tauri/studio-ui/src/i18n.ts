@@ -604,6 +604,15 @@ export const messages = {
     zh: "原图层已锁定——编辑只会生成新图层，绝不覆盖原图",
   },
   "layers.issues": { en: "{n} review", zh: "{n} 项待审" },
+  "layers.protected": { en: "protected", zh: "保护" },
+  "layers.protectedTitle": {
+    en: "protected layer — keep its pixels when editing other layers",
+    zh: "受保护图层——编辑其它图层时保留其像素",
+  },
+  "layers.protectTitle": {
+    en: "mark / unmark this layer as protected",
+    zh: "标记或取消该图层的保护",
+  },
   "layers.issuesTitle": {
     en: "the split report suggests reviewing this layer before production use",
     zh: "拆分报告建议在生产使用前审阅该图层",

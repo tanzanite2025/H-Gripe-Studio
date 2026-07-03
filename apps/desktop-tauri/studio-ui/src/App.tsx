@@ -73,6 +73,7 @@ import {
 import {
   findLayer,
   mergeLayersIntoAsset,
+  setLayerProtected,
   splitLayerInAsset,
   stubLayeredImageAsset,
   type LayeredImageAsset,
@@ -332,6 +333,28 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       setLayerVisibility((vis) => ({ ...vis, [layerId]: !current }));
     },
     [layerVisibility, layeredAsset],
+  );
+
+  // Review Editor "mark protected": flip the layer's protected flag in the
+  // node's stored asset. Pure asset transform — works in every runtime.
+  const handleToggleProtected = useCallback(
+    (layerId: string) => {
+      const node = selectedNode;
+      const asset = layeredAsset;
+      if (!node || !asset) return;
+      const layer = findLayer(asset, layerId);
+      if (!layer || layer.locked) return;
+      const next = setLayerProtected(asset, layerId, !(layer.protected ?? false));
+      if (next === asset) return;
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === node.id
+            ? { ...n, data: { ...(n.data as HgripeNodeData), layeredAsset: next } }
+            : n,
+        ),
+      );
+    },
+    [selectedNode, layeredAsset, setNodes],
   );
 
   // Review Editor "merge layers": union the checked layers' masks on the
@@ -1008,6 +1031,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onToggleLayerVisibility={handleToggleLayerVisibility}
           onMergeLayers={isTauri() ? handleMergeLayers : undefined}
           onSplitLayer={isTauri() ? handleSplitLayer : undefined}
+          onToggleProtected={handleToggleProtected}
         />
       </NodeEditingContext.Provider>
       {menu && (
