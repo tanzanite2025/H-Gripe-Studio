@@ -341,12 +341,20 @@ function VideoSourceCard({ path, posterTimestamp }: { path: string; posterTimest
 function PathRow({ label, path }: { label: string; path: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current != null) window.clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
   const copy = () => {
     void navigator.clipboard
       ?.writeText(path)
       .then(() => {
         setCopied(true);
-        window.setTimeout(() => setCopied(false), 1200);
+        if (copiedTimer.current != null) window.clearTimeout(copiedTimer.current);
+        copiedTimer.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch(() => {
         /* clipboard may be unavailable */

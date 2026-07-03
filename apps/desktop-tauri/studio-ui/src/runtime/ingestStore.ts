@@ -22,8 +22,25 @@ export interface IngestState {
 
 type Listener = (state: IngestState) => void;
 
+// The cache holds thumbnail `data:` URLs, so it must be bounded: entries are
+// kept in recency order (Map insertion order, refreshed on touch) and the
+// oldest unsubscribed paths are evicted past the cap. Evicted paths fall back
+// to the cards' own lazy-thumbnail path.
+const MAX_CACHED_PATHS = 256;
+
 const cache = new Map<string, IngestState>();
 const listeners = new Map<string, Set<Listener>>();
+
+/** Store `state` as most-recent and evict the oldest idle paths past the cap. */
+function cachePut(path: string, state: IngestState): void {
+  cache.delete(path);
+  cache.set(path, state);
+  if (cache.size <= MAX_CACHED_PATHS) return;
+  for (const key of cache.keys()) {
+    if (cache.size <= MAX_CACHED_PATHS) break;
+    if (key !== path && !listeners.has(key)) cache.delete(key);
+  }
+}
 
 let started = false;
 let unlisten: UnlistenFn | null = null;
@@ -45,7 +62,7 @@ function applyEvent(prev: IngestState, ev: IngestProgress): IngestState {
 /** Fold one event into the cache and notify that path's listeners. */
 function dispatch(ev: IngestProgress): void {
   const next = applyEvent(cache.get(ev.path) ?? {}, ev);
-  cache.set(ev.path, next);
+  cachePut(ev.path, next);
   listeners.get(ev.path)?.forEach((fn) => fn(next));
 }
 
@@ -75,7 +92,10 @@ export function subscribeIngest(path: string, fn: Listener): () => void {
   }
   set.add(fn);
   const cached = cache.get(path);
-  if (cached) fn(cached);
+  if (cached) {
+    cachePut(path, cached); // subscribing counts as a touch
+    fn(cached);
+  }
   return () => {
     const s = listeners.get(path);
     if (!s) return;
