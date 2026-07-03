@@ -86,4 +86,31 @@ describe("lowerWorkflowGraph", () => {
       .sort();
     expect(targets).toEqual(["image", "quality_report"]);
   });
+
+  it("lowers videoProcessing rows to videoAssemble / videoTrim", () => {
+    const g = graph({
+      nodes: [
+        { id: "vid", kind: "videoSource", position: pos, params: { path: "a.mp4" } },
+        {
+          id: "proc",
+          kind: "videoProcessing",
+          position: pos,
+          params: { "trim.start_sec": 1, "trim.end_sec": 5, "assemble.fps": 30 },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "vid", sourcePort: "video", target: "proc", targetPort: "trim.in" },
+      ],
+    });
+    const { graph: lowered, origin } = lowerWorkflowGraph(g);
+    // Only the wired trim row is created.
+    expect(lowered.nodes.map((n) => n.kind).sort()).toEqual(["videoSource", "videoTrim"]);
+    const trim = lowered.nodes.find((n) => n.kind === "videoTrim")!;
+    expect(origin.get(trim.id)).toBe("proc");
+    expect(trim.params).toEqual({ start_sec: 1, end_sec: 5 });
+    expect(lowered.edges).toEqual([
+      { id: "e1", source: "vid", sourcePort: "video", target: trim.id, targetPort: "video" },
+    ]);
+    expect(validateGraph(lowered)).toEqual([]);
+  });
 });

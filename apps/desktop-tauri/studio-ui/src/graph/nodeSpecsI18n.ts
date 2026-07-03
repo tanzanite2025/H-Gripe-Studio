@@ -244,6 +244,30 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "repair.out": "修复图像",
     },
   },
+  videoProcessing: {
+    title: "视频处理",
+    description:
+      "一张集成的视频处理生产卡片，按语义行组织：合成（把帧序列编码为视频）和剪辑（从片段中截取时间范围）。想用哪个操作就连接哪一行——每行有自己的输入/输出连接点，运行时拆解为对应的内部操作（视频合成、视频剪辑）。",
+    params: {
+      "assemble.fps": { label: "合成：帧率", hint: "输出帧率" },
+      "assemble.codec": {
+        label: "合成：编码器",
+        hint: "ffmpeg 编码器；libx264 兼容性最好",
+      },
+      "trim.start_sec": { label: "剪辑：起始秒", hint: "截取起点（从开头算起的秒数）" },
+      "trim.end_sec": { label: "剪辑：结束秒", hint: "截取终点（秒；0 = 到片段结尾）" },
+      "trim.codec": {
+        label: "剪辑：编码器",
+        hint: "重编码用的 ffmpeg 编码器；libx264 兼容性最好",
+      },
+    },
+    ports: {
+      "assemble.in": "合成帧序列",
+      "trim.in": "剪辑",
+      "assemble.out": "合成视频",
+      "trim.out": "剪辑视频",
+    },
+  },
   smartLayerSplit: {
     title: "智能图层拆分",
     description:

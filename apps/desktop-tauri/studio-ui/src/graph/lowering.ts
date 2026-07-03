@@ -3,16 +3,16 @@
 // docs/plans/active/NODE_CARD_PRODUCT_BOUNDARY_PLAN.md, "Runtime Contract":
 // visible production card -> optional lowering to hidden primitive nodes).
 //
-// The only lowered kind today is `imageProcessing`: each semantic row
-// (layerSplit / enhance / grade / crop / mask / repair) becomes one leaf node
-// when the graph actually wires that row, and the card's `row.in` / `row.out`
-// edges are rewritten onto the leaf's real ports. Both runtimes consume the
-// lowered graph (the browser-preview DAG and the Rust `run_studio_graph`
-// backend), so neither needs to know about the card kind.
+// Lowering is data-driven: `LOWERED_CARD_ROWS` maps each integrated card kind
+// to its row definitions (semantic row -> leaf node kind + port maps). Each
+// row becomes one leaf node when the graph actually wires that row, and the
+// card's `row.in` / `row.out` edges are rewritten onto the leaf's real ports.
+// Both runtimes consume the lowered graph (the browser-preview DAG and the
+// Rust `run_studio_graph` backend), so neither needs to know about the card
+// kinds. New integrated cards (audio processing, grading, …) only need a
+// NodeSpec with `row.`-prefixed port/param ids plus one entry in this table.
 
 import type { GraphEdge, GraphNode, WorkflowGraph } from "./model";
-
-export const IMAGE_PROCESSING_KIND = "imageProcessing";
 
 /** Separator between a card id and its lowered row node id. */
 const ROW_ID_SEP = "::";
@@ -28,7 +28,7 @@ interface RowDef {
   outputs: Record<string, string>;
 }
 
-export const IMAGE_PROCESSING_ROWS: RowDef[] = [
+const IMAGE_PROCESSING_ROWS: RowDef[] = [
   {
     row: "layerSplit",
     kind: "smartLayerSplit",
@@ -67,11 +67,40 @@ export const IMAGE_PROCESSING_ROWS: RowDef[] = [
   },
 ];
 
-const ROW_BY_INPUT = new Map<string, RowDef>();
-const ROW_BY_OUTPUT = new Map<string, RowDef>();
-for (const def of IMAGE_PROCESSING_ROWS) {
-  for (const id of Object.keys(def.inputs)) ROW_BY_INPUT.set(id, def);
-  for (const id of Object.keys(def.outputs)) ROW_BY_OUTPUT.set(id, def);
+const VIDEO_PROCESSING_ROWS: RowDef[] = [
+  {
+    row: "assemble",
+    kind: "videoAssemble",
+    inputs: { "assemble.in": "frames" },
+    outputs: { "assemble.out": "video" },
+  },
+  {
+    row: "trim",
+    kind: "videoTrim",
+    inputs: { "trim.in": "video" },
+    outputs: { "trim.out": "video" },
+  },
+];
+
+/** Integrated card kind -> the semantic rows it lowers to. */
+export const LOWERED_CARD_ROWS: Record<string, RowDef[]> = {
+  imageProcessing: IMAGE_PROCESSING_ROWS,
+  videoProcessing: VIDEO_PROCESSING_ROWS,
+};
+
+interface RowLookup {
+  byInput: Map<string, RowDef>;
+  byOutput: Map<string, RowDef>;
+}
+
+const ROW_LOOKUP = new Map<string, RowLookup>();
+for (const [cardKind, rows] of Object.entries(LOWERED_CARD_ROWS)) {
+  const lookup: RowLookup = { byInput: new Map(), byOutput: new Map() };
+  for (const def of rows) {
+    for (const id of Object.keys(def.inputs)) lookup.byInput.set(id, def);
+    for (const id of Object.keys(def.outputs)) lookup.byOutput.set(id, def);
+  }
+  ROW_LOOKUP.set(cardKind, lookup);
 }
 
 function rowNodeId(cardId: string, row: string): string {
@@ -100,16 +129,17 @@ export function originNodeId(origin: Map<string, string>, nodeId: string): strin
 }
 
 /**
- * Lower every `imageProcessing` card into one hidden leaf node per row that
- * the graph actually uses (a row is used when any edge touches one of its
- * ports). Edges on `row.in` / `row.out` are rewritten onto the leaf node's
- * real ports; everything else passes through untouched.
+ * Lower every integrated card (see `LOWERED_CARD_ROWS`) into one hidden leaf
+ * node per row that the graph actually uses (a row is used when any edge
+ * touches one of its ports). Edges on `row.in` / `row.out` are rewritten onto
+ * the leaf node's real ports; everything else passes through untouched.
  */
 export function lowerWorkflowGraph(graph: WorkflowGraph): LoweredGraph {
   const origin = new Map<string, string>();
-  const cards = new Map<string, GraphNode>();
+  const cards = new Map<string, RowLookup>();
   for (const node of graph.nodes) {
-    if (node.kind === IMAGE_PROCESSING_KIND) cards.set(node.id, node);
+    const lookup = ROW_LOOKUP.get(node.kind);
+    if (lookup) cards.set(node.id, lookup);
   }
   if (cards.size === 0) return { graph, origin };
 
@@ -122,13 +152,13 @@ export function lowerWorkflowGraph(graph: WorkflowGraph): LoweredGraph {
     set.add(def);
   };
   for (const edge of graph.edges) {
-    if (cards.has(edge.target)) markRow(edge.target, ROW_BY_INPUT.get(edge.targetPort));
-    if (cards.has(edge.source)) markRow(edge.source, ROW_BY_OUTPUT.get(edge.sourcePort));
+    markRow(edge.target, cards.get(edge.target)?.byInput.get(edge.targetPort));
+    markRow(edge.source, cards.get(edge.source)?.byOutput.get(edge.sourcePort));
   }
 
   const nodes: GraphNode[] = [];
   for (const node of graph.nodes) {
-    if (node.kind !== IMAGE_PROCESSING_KIND) {
+    if (!cards.has(node.id)) {
       nodes.push(node);
       continue;
     }
@@ -146,8 +176,9 @@ export function lowerWorkflowGraph(graph: WorkflowGraph): LoweredGraph {
 
   const edges: GraphEdge[] = graph.edges.map((edge) => {
     let next = edge;
-    if (cards.has(next.target)) {
-      const def = ROW_BY_INPUT.get(next.targetPort);
+    const targetLookup = cards.get(next.target);
+    if (targetLookup) {
+      const def = targetLookup.byInput.get(next.targetPort);
       if (!def) return next;
       next = {
         ...next,
@@ -155,8 +186,9 @@ export function lowerWorkflowGraph(graph: WorkflowGraph): LoweredGraph {
         targetPort: def.inputs[next.targetPort],
       };
     }
-    if (cards.has(next.source)) {
-      const def = ROW_BY_OUTPUT.get(next.sourcePort);
+    const sourceLookup = cards.get(next.source);
+    if (sourceLookup) {
+      const def = sourceLookup.byOutput.get(next.sourcePort);
       if (!def) return next;
       next = {
         ...next,
