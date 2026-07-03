@@ -7,6 +7,11 @@ export default defineConfig({
   plugins: [react()],
   // Relative base so assets resolve correctly when served via tauri://localhost.
   base: "./",
+  // Tauri's `devUrl` points here; a fixed port keeps the two in sync.
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
   build: {
     outDir: "../dist",
     emptyOutDir: true,

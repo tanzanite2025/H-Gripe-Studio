@@ -23,12 +23,46 @@ export interface HistoryStack {
   clear(): void;
 }
 
+// Graph data boundary: node data must hold only light references — paths,
+// ids, protocol objects. Heavy payloads (base64 previews, raw pixels, big
+// logs) belong in caches/files keyed by reference; anything stored on a node
+// is multiplied by the history depth. `findHeavyGraphData` flags violations
+// so they surface as a console warning the moment they are introduced.
+const HEAVY_STRING_CHARS = 64 * 1024;
+
+/** Returns a description of the first heavy value found in node data, or null. */
+export function findHeavyGraphData(snapshot: GraphSnapshot): string | null {
+  for (const node of snapshot.nodes) {
+    const seen = new Set<object>();
+    const stack: unknown[] = [node.data];
+    while (stack.length > 0) {
+      const v = stack.pop();
+      if (typeof v === "string") {
+        if (v.startsWith("data:") && v.length > 1024) {
+          return `node ${node.id} (${String((node.data as { kind?: unknown })?.kind ?? "?")}): data: URI in node data`;
+        }
+        if (v.length > HEAVY_STRING_CHARS) {
+          return `node ${node.id} (${String((node.data as { kind?: unknown })?.kind ?? "?")}): string over ${HEAVY_STRING_CHARS} chars in node data`;
+        }
+      } else if (typeof v === "object" && v !== null && !seen.has(v)) {
+        seen.add(v);
+        stack.push(...Object.values(v));
+      }
+    }
+  }
+  return null;
+}
+
 export function createHistoryStack(limit = 100): HistoryStack {
   let past: GraphSnapshot[] = [];
   let future: GraphSnapshot[] = [];
 
   return {
     push(current) {
+      const heavy = findHeavyGraphData(current);
+      if (heavy) {
+        console.warn(`[history] heavy graph data — keep node data to light refs: ${heavy}`);
+      }
       past.push(current);
       if (past.length > limit) past.shift();
       future = [];
