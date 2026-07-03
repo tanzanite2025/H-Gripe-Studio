@@ -675,8 +675,8 @@ export const messages = {
   "drawer.trackAudio": { en: "A", zh: "音" },
   "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
   "drawer.gradePlaceholder": {
-    en: "The Grade tab will edit the current target (image / video clip) with the shared hgripe-grade kernel once GradeEditModal is extracted into an embeddable GradePanel.",
-    zh: "调色 Tab 将在 GradeEditModal 抽成可嵌入 GradePanel 后，用同一个 hgripe-grade 内核编辑当前目标（图片 / 视频 clip）。",
+    en: "Select an image — a bin image asset, a still clip, or a node with an image output — to grade it here with the shared hgripe-grade kernel. Video-frame grading arrives with the next step.",
+    zh: "选择一张图片——素材区的图片、时间线上的静帧 clip 或带图片输出的节点——即可在这里用同一个 hgripe-grade 内核调色。视频帧调色将在下一步加入。",
   },
 } satisfies Record<string, { en: string; zh: string }>;
 

@@ -56,7 +56,7 @@ import {
   type DrawerTab,
 } from "./production/drawerState";
 import { addAsset, assetKindForNodeKind, removeAsset, type MediaAsset } from "./production/mediaBin";
-import { assetTarget, nodeOutputTarget, type ProductionTarget } from "./production/productionTarget";
+import { assetTarget, nodeOutputTarget, targetKey, type ProductionTarget } from "./production/productionTarget";
 import {
   appendClip,
   createTimeline,
@@ -129,6 +129,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineModel>(() => createTimeline());
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  // Per-target grade documents (JSON strings) keyed by targetKey, edited by
+  // the drawer's Grade tab through the embeddable GradePanel.
+  const [gradeDocs, setGradeDocs] = useState<Record<string, string>>({});
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -329,6 +332,36 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     openMediaEdit,
     connectedImagePath,
   } = useModals({ nodes, edges });
+
+  // Image the drawer's Grade tab previews for the current target: image bin
+  // assets, still clips (over their source image) and image node outputs.
+  // Grading video-clip frames is plan step 6.
+  const gradeImagePath = useMemo<string | null>(() => {
+    if (!productionTarget) return null;
+    switch (productionTarget.kind) {
+      case "asset": {
+        const asset = binAssets.find((a) => a.id === productionTarget.assetId);
+        return asset && asset.kind === "image" ? asset.path : null;
+      }
+      case "video_clip": {
+        const found = findClip(timeline, productionTarget.clipId);
+        if (!found || found.clip.kind !== "still") return null;
+        return binAssets.find((a) => a.id === found.clip.assetId)?.path ?? null;
+      }
+      case "node_output":
+        return connectedImagePath(productionTarget.nodeId);
+      default:
+        return null;
+    }
+  }, [productionTarget, binAssets, timeline, connectedImagePath]);
+
+  const handleGradeCommit = useCallback(
+    (gradeDoc: string) => {
+      if (!productionTarget) return;
+      setGradeDocs((docs) => ({ ...docs, [targetKey(productionTarget)]: gradeDoc }));
+    },
+    [productionTarget],
+  );
 
   // Node/graph editing actions: add/delete/duplicate, param edits, clipboard,
   // focus/selection, tidy layout, and bound-edit spawning.
@@ -723,6 +756,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSelectClip={handleSelectClip}
           onAddActiveToTimeline={handleAddActiveToTimeline}
           onRemoveClip={handleRemoveClip}
+          gradeImagePath={gradeImagePath}
+          gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
+          onGradeCommit={handleGradeCommit}
         />
       </NodeEditingContext.Provider>
       {menu && (
