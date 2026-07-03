@@ -26,12 +26,15 @@ function engineProbeKind(kind: string, paramKey: string): string | null {
 }
 
 interface InspectorProps {
-  node: Node | null;
+  node: Node;
   onParamChange: (nodeId: string, key: string, value: unknown) => void;
 }
 
-// Right-side panel. Full-resolution media preview belongs here (not inside the
-// node card), so the canvas stays light and previews never blow up node size.
+// Right-side panel. Mounted only while a node is selected (the shell renders a
+// plain placeholder otherwise), so no inspector state or effects exist while
+// nothing is inspected. Full-resolution media preview belongs here (not inside
+// the node card), so the canvas stays light and previews never blow up node
+// size.
 export function Inspector({ node, onParamChange }: InspectorProps) {
   const [viewerPath, setViewerPath] = useState<string | null>(null);
   // Engine dropdowns read only the node spec — selecting an engine is picking
@@ -43,9 +46,8 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
   const lang = useContext(LangContext);
   const t = useT();
 
-  const nodeKind = node ? String((node.data as HgripeNodeData).kind) : null;
+  const nodeKind = String((node.data as HgripeNodeData).kind);
   const hasEngineParam =
-    nodeKind !== null &&
     nodeKind !== "group" &&
     nodeSpec(nodeKind).params.some((p) => engineProbeKind(nodeKind, p.key) !== null);
 
@@ -56,14 +58,6 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
       .catch(() => setEngineProbe(null))
       .finally(() => setProbing(false));
   };
-
-  if (!node) {
-    return (
-      <aside className="inspector">
-        <p className="muted">{t("inspector.selectNode")}</p>
-      </aside>
-    );
-  }
 
   const data = node.data as HgripeNodeData;
 
