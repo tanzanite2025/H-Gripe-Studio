@@ -491,6 +491,40 @@ button:disabled { opacity: 0.6; cursor: default; }
 .port-latent { background: var(--t-latent); }
 .port-any { background: var(--t-any); }
 
+/* function blocks: one framed row per port, tinted by the port's type colour;
+   the connection dot shares that colour and stays vertically centred on its
+   block however tall the block grows (labels, inline params, …). */
+.node-ports { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 2px; }
+.port-block {
+  --block-color: var(--t-any);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 20px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--block-color) 40%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--block-color) 6%, transparent);
+}
+.port-block-in { border-left: 3px solid var(--block-color); }
+.port-block-out { align-items: flex-end; border-right: 3px solid var(--block-color); }
+.port-block.port-type-image { --block-color: var(--t-image); }
+.port-block.port-type-text { --block-color: var(--t-text); }
+.port-block.port-type-model { --block-color: var(--t-model); }
+.port-block.port-type-number { --block-color: var(--t-number); }
+.port-block.port-type-latent { --block-color: var(--t-latent); }
+.port-block.port-type-video { --block-color: var(--t-any); }
+.port-block .port { top: 50%; }
+.port-block-in .port { left: -14px; }
+.port-block-out .port { right: -14px; }
+.port-label { font-size: 10px; line-height: 1.2; color: var(--muted); }
+/* zoom-LOD: collapse blocks to slim colour bars; the dots stay centred. */
+.node.lod .node-ports { gap: 2px; padding: 4px 6px 2px; }
+.node.lod .port-label { display: none; }
+.node.lod .port-block { min-height: 8px; padding: 0; }
+
 /* palette (left rail) */
 .palette {
   flex: 0 0 auto;
