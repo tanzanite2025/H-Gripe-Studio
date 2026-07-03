@@ -34,6 +34,8 @@ export interface ProductionDrawerProps {
   onRemoveClip: (clipId: string) => void;
   /** Image path the Grade tab previews for the current target, when resolvable. */
   gradeImagePath: string | null;
+  /** Video whose frame the Grade tab previews for video-clip targets. */
+  gradeVideoPath: string | null;
   /** The current target's stored grade doc (JSON string), if any. */
   gradeDoc: string | null;
   onGradeCommit: (gradeDoc: string) => void;
@@ -68,6 +70,7 @@ export function ProductionDrawer({
   onAddActiveToTimeline,
   onRemoveClip,
   gradeImagePath,
+  gradeVideoPath,
   gradeDoc,
   onGradeCommit,
 }: ProductionDrawerProps) {
@@ -254,10 +257,11 @@ export function ProductionDrawer({
         </div>
       ) : (
         <div className="production-drawer-body production-grade">
-          {gradeImagePath ? (
+          {gradeImagePath || gradeVideoPath ? (
             <GradePanel
               key={targetKey(target)}
               imagePath={gradeImagePath}
+              videoPath={gradeVideoPath}
               initialDoc={gradeDoc}
               onCommit={(commit) => onGradeCommit(commit.gradeDoc)}
             />

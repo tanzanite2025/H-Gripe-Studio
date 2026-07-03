@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { generateThumbnail, gradePreview } from "../bridge/tauri";
+import { generateThumbnail, gradePreview, videoFrameGradePreview, videoProbe } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
@@ -29,6 +29,14 @@ export interface GradeCommit {
 
 export interface GradePanelProps {
   imagePath?: string | null;
+  /**
+   * Grade a video frame instead of an image: the frame nearest
+   * `videoTimestampSec` (default 0) is decoded through the native media
+   * engine into the same working surface stills use. Takes precedence over
+   * `imagePath` when set.
+   */
+  videoPath?: string | null;
+  videoTimestampSec?: number;
   /** The target's current grade doc (JSON string), if any. */
   initialDoc?: string | null;
   onCommit: (commit: GradeCommit) => void;
@@ -142,7 +150,14 @@ async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<string | 
   return canvas.toDataURL("image/png");
 }
 
-export function GradePanel({ imagePath, initialDoc, onCommit, applyLabelKey }: GradePanelProps) {
+export function GradePanel({
+  imagePath,
+  videoPath,
+  videoTimestampSec = 0,
+  initialDoc,
+  onCommit,
+  applyLabelKey,
+}: GradePanelProps) {
   const t = useT();
   const [ops, setOps] = useState<GradeOp[]>(() => parseInitialOps(initialDoc));
   const [addKind, setAddKind] = useState<AddableOp>("exposure");
@@ -155,19 +170,24 @@ export function GradePanel({ imagePath, initialDoc, onCommit, applyLabelKey }: G
   const previewSeq = useRef(0);
 
   useEffect(() => {
-    if (!imagePath) return;
     let cancelled = false;
-    generateThumbnail({ path: imagePath, size: 1280 })
-      .then((thumb) => {
-        if (!cancelled && thumb.data_url) setUnderlay(thumb.data_url);
-      })
-      .catch(() => {
-        /* no underlay: the backend preview may still work */
-      });
+    const load = async () => {
+      // Video targets underlay with the poster frame nearest the timestamp;
+      // image targets with their own thumbnail.
+      const path = videoPath
+        ? (await videoProbe(videoPath, videoTimestampSec)).poster_path
+        : imagePath;
+      if (!path || cancelled) return;
+      const thumb = await generateThumbnail({ path, size: 1280 });
+      if (!cancelled && thumb.data_url) setUnderlay(thumb.data_url);
+    };
+    load().catch(() => {
+      /* no underlay: the backend preview may still work */
+    });
     return () => {
       cancelled = true;
     };
-  }, [imagePath]);
+  }, [imagePath, videoPath, videoTimestampSec]);
 
   const doc = useMemo(() => docFromOps(ops), [ops]);
 
@@ -176,9 +196,11 @@ export function GradePanel({ imagePath, initialDoc, onCommit, applyLabelKey }: G
     const seq = ++previewSeq.current;
     const timer = window.setTimeout(async () => {
       setPreviewError(null);
-      if (imagePath) {
+      if (videoPath || imagePath) {
         try {
-          const result = await gradePreview(imagePath, doc);
+          const result = videoPath
+            ? await videoFrameGradePreview(videoPath, videoTimestampSec, doc)
+            : await gradePreview(imagePath!, doc);
           if (previewSeq.current !== seq) return;
           if (result) {
             setPreview(result.data_url);
@@ -203,7 +225,7 @@ export function GradePanel({ imagePath, initialDoc, onCommit, applyLabelKey }: G
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [doc, imagePath, underlay]);
+  }, [doc, imagePath, videoPath, videoTimestampSec, underlay]);
 
   const updateOp = useCallback((index: number, next: GradeOp) => {
     setOps((prev) => prev.map((op, i) => (i === index ? next : op)));
