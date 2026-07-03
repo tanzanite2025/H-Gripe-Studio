@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { paletteGroups, type NodeSpec } from "../graph/nodeSpecs";
+import { paletteGroups, type NodeSpec, type PaletteCategory } from "../graph/nodeSpecs";
 import { GROUP_ZH, localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT, type MsgKey } from "../i18n";
 
@@ -8,11 +8,13 @@ interface PaletteProps {
   onAdd: (kind: string) => void;
 }
 
-const CATEGORY_LABEL: Record<NodeSpec["category"], MsgKey> = {
-  input: "palette.catInput",
+// `internal` primitives never appear in the palette, so they carry no label.
+const CATEGORY_LABEL: Record<PaletteCategory, MsgKey> = {
+  source: "palette.catSource",
   generate: "palette.catGenerate",
-  control: "palette.catControl",
-  utility: "palette.catUtility",
+  process: "palette.catProcess",
+  review: "palette.catReview",
+  workflow: "palette.catWorkflow",
   output: "palette.catOutput",
 };
 

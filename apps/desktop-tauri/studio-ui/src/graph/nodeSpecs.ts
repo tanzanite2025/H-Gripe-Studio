@@ -75,8 +75,19 @@ export interface NodeSpec {
   title: string;
   /** Short description shown in the inspector / node palette. */
   description: string;
-  /** Palette grouping. */
-  category: "input" | "generate" | "control" | "output" | "utility";
+  /**
+   * Palette grouping. Categories are production-facing so the palette reads
+   * like a studio tool (see NODE_CARD_PRODUCT_BOUNDARY_PLAN.md):
+   * - `source`   the user places an input object on the canvas.
+   * - `generate` a model/provider generation step.
+   * - `process`  a production media operation (split/enhance/grade/crop/mask/repair).
+   * - `review`   the user confirms or inspects a meaningful result.
+   * - `workflow` changes how the graph is executed (e.g. batch fan-out).
+   * - `output`   produces a deliverable.
+   * - `internal` implementation primitives kept only for saved-workflow /
+   *   runtime compatibility; never shown in the palette.
+   */
+  category: "source" | "generate" | "process" | "review" | "workflow" | "output" | "internal";
   /** Where the node runs; drives palette local/API grouping + broker routing. */
   executor: Executor;
   /**
@@ -101,7 +112,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     executor: "graph",
     title: "Prompt",
     description: "A text prompt fed into generation nodes.",
-    category: "input",
+    category: "source",
     inputs: [],
     outputs: [port("text", "text", "text")],
     params: [
@@ -121,7 +132,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Prompt Optimize",
     description:
       "Initial text node. Enter a prompt, then optionally optimize it — `local` applies model-free cleanup/booster presets, `api` rewrites it through an LLM provider profile (local server or cloud). Outputs the (optimized) prompt text.",
-    category: "input",
+    category: "source",
     inputs: [port("text", "text", "text")],
     outputs: [port("text", "text", "text")],
     params: [
@@ -223,7 +234,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Batch",
     description:
       "Sweeps a list of text items (one per line). A normal Run emits the first item; use \"Run ×N\" to fan out one run per item.",
-    category: "input",
+    category: "workflow",
     inputs: [],
     outputs: [port("item", "item", "text")],
     params: [
@@ -243,7 +254,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     executor: "graph",
     title: "Image Source",
     description: "An image file on disk, used as a reference / input image.",
-    category: "input",
+    category: "source",
     inputs: [],
     outputs: [port("image", "image", "image")],
     params: [
@@ -265,7 +276,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     executor: "graph",
     title: "Video Source",
     description: "A video file on disk; shows a poster frame and carries the path downstream.",
-    category: "input",
+    category: "source",
     inputs: [],
     outputs: [port("video", "video", "video")],
     params: [
@@ -294,7 +305,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     executor: "graph",
     title: "PSD Template",
     description: "A .psd template path carried through to export.",
-    category: "input",
+    category: "source",
     inputs: [],
     outputs: [port("template", "template", "any")],
     params: [
@@ -317,7 +328,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     palette: "internal",
     title: "Number",
     description: "A numeric value (seed, count, …) fed into other nodes.",
-    category: "input",
+    category: "internal",
     inputs: [],
     outputs: [port("value", "value", "number")],
     params: [
@@ -384,7 +395,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Compare",
     description:
       "Compares two values and emits 1 (true) or 0 (false). Numeric when both sides parse as numbers, else string comparison. Wire `result` into an If's `cond`.",
-    category: "control",
+    category: "internal",
     inputs: [port("a", "a", "any"), port("b", "b", "any")],
     outputs: [port("result", "result", "number")],
     params: [
@@ -406,7 +417,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Logic",
     description:
       "Boolean logic on the truthiness of its inputs, emitting 1 (true) or 0 (false). `not` uses only `a`. Wire `result` into an If's `cond`.",
-    category: "control",
+    category: "internal",
     inputs: [port("a", "a", "any"), port("b", "b", "any")],
     outputs: [port("result", "result", "number")],
     params: [
@@ -428,7 +439,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "If",
     description:
       "Conditional gate: forwards `value` to the `true` or `false` output based on a condition. The branch that is not taken is pruned (its downstream nodes are skipped).",
-    category: "control",
+    category: "internal",
     inputs: [port("value", "value", "any"), port("cond", "cond", "any")],
     outputs: [port("true", "true", "any"), port("false", "false", "any")],
     params: [
@@ -451,7 +462,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Switch",
     description:
       "Multi-way router: forwards `value` to the output matching `index` (0/1/2), else to `default`. Unselected branches are pruned (skipped).",
-    category: "control",
+    category: "internal",
     inputs: [port("value", "value", "any"), port("index", "index", "number")],
     outputs: [
       port("0", "0", "any"),
@@ -479,7 +490,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Reroute",
     description:
       "Pass-through relay: forwards its input unchanged. Use it to tidy long edges and route wires around the canvas.",
-    category: "utility",
+    category: "internal",
     inputs: [port("in", "in", "any")],
     outputs: [port("out", "out", "any")],
     params: [],
@@ -491,7 +502,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Preview",
     description:
       "Display a thumbnail of an image. The original path is preserved for export.",
-    category: "output",
+    category: "review",
     inputs: [port("image", "image", "image")],
     outputs: [],
     params: [],
@@ -520,7 +531,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "PSD Context Analyze",
     description:
       "Read a PSD template into a structured visual context: background colour & lighting heuristics, placeholder geometry + safe area, a placeholder mask & background preview, and a prompt suffix for downstream generation.",
-    category: "input",
+    category: "process",
     inputs: [port("template", "template", "any")],
     outputs: [
       port("visual_context", "visual context", "any"),
@@ -578,7 +589,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Light & Color Match",
     description:
       "Nudge a generated subject's light & colour toward the PSD background so the composite stops looking pasted-on: Reinhard Lab transfer / histogram match weighted toward shadows & highlights, sparing brand colours. Emits the matched image, a match report, and a prompt suffix.",
-    category: "control",
+    category: "process",
     inputs: [
       port("image", "image", "image"),
       port("visual_context", "visual context", "any"),
@@ -692,7 +703,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Subject Mask / Matte",
     description:
       "Select the subject and produce a mask / cutout / alpha triplet. Phase 1 runs in-process in native Rust (no python bridge): magic-wand flood select + brush/eraser strokes (carried in edit_paths), morphology (grow/shrink, fill holes) and a final feather. Emits the mask, alpha image, cutout, and an enriched matte report. Auto-subject model modes (SAM/RMBG/BiRefNet) are Phase 2.",
-    category: "control",
+    category: "process",
     inputs: [
       port("image", "image", "image"),
       port("reference", "reference", "image"),
@@ -814,7 +825,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Smart Layer Split",
     description:
       "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. The desktop runtime segments the subject in-process (model backend when a weight resolves, else the deterministic builtin CPU segmenter) and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
-    category: "control",
+    category: "process",
     inputs: [port("image", "image", "image")],
     outputs: [
       port("layered_asset", "layered asset", "any"),
@@ -894,7 +905,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Crop",
     description:
       "Crop an image — the first non-mask edit, validating the unified auto/manual + binding model. Runs in-process in native Rust on the Compute lane. Manual mode crops to the editor-drawn box (recorded as crop_box in image pixels, the human-spatial-intent lane); auto_subject mode crops to the subject — it segments a base matte with the same Subject Mask Compute-lane segmenter, takes its bounding box and pads it by the subject margin (the algorithm-derived lane). An optional aspect ratio adjusts the box (centred, clamped to the image) after either lane. Emits the cropped image and a crop report.",
-    category: "control",
+    category: "process",
     inputs: [port("image", "image", "image")],
     outputs: [port("image", "image", "image"), port("crop_report", "crop report", "any")],
     params: [
@@ -960,7 +971,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Grade",
     description:
       "Colour-grade an image with the hgripe-grade kernel (docs/design/grade-kernel.md) — an op stack (exposure, white balance, contrast, saturation, RGB mixer, colour warper, sharpen/denoise with adjustable radius, film grain, 1D/3D LUTs) authored in the grading dialog and stored as grade_doc. The dialog previews live through the kernel (GPU when the app is built with grade-gpu and an adapter is present, else the row-parallel CPU reference path); the run path grades the full-resolution 16-bit working surface in its own colour space, so a wide-gamut source stays 16-bit + ICC. Emits the graded image and a grade report.",
-    category: "control",
+    category: "process",
     inputs: [port("image", "image", "image")],
     outputs: [port("image", "image", "image"), port("grade_report", "grade report", "any")],
     params: [
@@ -997,7 +1008,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Mask Edge Refine",
     description:
       "Clean a cut-out subject's matte so it drops into a PSD placeholder without white halos or fringing: erode/dilate morphology, guided-filter edge snapping, feather, and edge colour decontamination. Connect the Subject Mask 'trimap' output to protect its unknown band (hair / fur / glass continuous alpha) from the erode/feather clean-up so fine detail survives. Emits the refined image, refined mask, and an edge report. Presets hide the detail; pick 'custom' to expose every parameter.",
-    category: "control",
+    category: "process",
     inputs: [
       port("image", "image", "image"),
       port("mask", "mask", "image"),
@@ -1126,7 +1137,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Image Enhance",
     description:
       "Upscale (Lanczos) and sharpen (unsharp mask) a low-resolution subject so it fills a PSD placeholder crisply at print DPI. Connect placeholder bounds to auto-size, or set explicit target pixels. CPU-only in Phase 1 (no GPU super-resolution). Emits the enhanced image, the applied scale factor, and an enhance report. Presets hide the detail; pick 'custom' to expose denoise/texture/scale.",
-    category: "control",
+    category: "process",
     inputs: [
       port("image", "image", "image"),
       port("target_bounds", "target bounds", "any"),
@@ -1280,7 +1291,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Detail Watchdog",
     description:
       "Scan a candidate image for local breakdowns (global/region blur, alpha-rim halos, colour mismatch vs the connected background, below-target resolution) and emit a QualityReport so the workflow can decide whether to re-run or hand-fix. Detect-only in Phase 1 (no automatic repaint): 'fixed_image' is the unchanged input. CPU-only (no ML) — semantic targets needing a GPU/VLM (hands/text/logo) are reported skipped. Connect a VisualContext and/or placeholder bounds for the resolution and colour checks.",
-    category: "control",
+    category: "review",
     inputs: [
       port("image", "image", "image"),
       port("visual_context", "visual context", "any"),
@@ -1352,7 +1363,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     title: "Detail Repaint",
     description:
       "Localized repaint of the issue regions a Detail Watchdog flagged. Crops each repaintable issue (suggested_action in 'Repaint actions') with padding, writes an inpaint mask, sends each crop through the broker's image.edit operation (same provider/credentials path as Generate), then pastes the results back with a feathered seam. Outputs the fixed image and a RepaintReport. With no edit-capable provider configured (empty / 'mock') every region is left unrepainted and the image passes through unchanged.",
-    category: "control",
+    category: "process",
     inputs: [
       port("image", "image", "image"),
       port("quality_report", "quality report", "any"),
@@ -1681,9 +1692,15 @@ export function defaultParams(kind: string): Record<string, unknown> {
   return out;
 }
 
-/** Node kinds grouped by palette category, in display order. */
-export function paletteGroups(): { category: NodeSpec["category"]; specs: NodeSpec[] }[] {
-  const order: NodeSpec["category"][] = ["input", "generate", "control", "utility", "output"];
+/**
+ * Node kinds grouped by palette category, in display order. The order mirrors
+ * a production flow (source -> generate -> process -> review -> output);
+ * `internal` primitives are never listed.
+ */
+export type PaletteCategory = Exclude<NodeSpec["category"], "internal">;
+
+export function paletteGroups(): { category: PaletteCategory; specs: NodeSpec[] }[] {
+  const order: PaletteCategory[] = ["source", "generate", "process", "review", "workflow", "output"];
   return order.map((category) => ({
     category,
     specs: Object.values(NODE_SPECS).filter((s) => s.category === category && s.palette !== "internal"),
