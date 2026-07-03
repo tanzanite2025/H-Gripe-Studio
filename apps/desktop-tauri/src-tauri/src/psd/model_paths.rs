@@ -124,30 +124,6 @@ fn normalise(mut config: ModelPathsConfig) -> ModelPathsConfig {
     config
 }
 
-/// Apply the persisted weight paths as env vars on a bridge subprocess. A var
-/// already set on the parent process (dev / CI) is left untouched, preserving
-/// the documented "env override first" resolution order.
-pub(crate) fn apply_model_env(cmd: &mut std::process::Command) {
-    let config = load_model_paths_config();
-    if let Some(dir) = config
-        .model_cache_dir
-        .as_deref()
-        .filter(|d| !d.trim().is_empty())
-    {
-        if std::env::var_os(MODEL_CACHE_ENV).is_none() {
-            cmd.env(MODEL_CACHE_ENV, dir);
-        }
-    }
-    for (engine, env_var) in ENGINE_ENV_VARS {
-        let Some(path) = config.weights.get(engine).filter(|p| !p.trim().is_empty()) else {
-            continue;
-        };
-        if std::env::var_os(env_var).is_none() {
-            cmd.env(env_var, path);
-        }
-    }
-}
-
 fn build_report(config: ModelPathsConfig) -> ModelPathsReport {
     let entries = ENGINE_ENV_VARS
         .iter()
@@ -190,14 +166,11 @@ pub(crate) fn get_model_paths() -> Result<ModelPathsReport, String> {
 }
 
 /// Persist an updated local-model weight-path config and return the resulting
-/// report. Empty/blank entries clear their override. The warm torch worker is
-/// restarted so an updated weight path takes effect on the next run rather
-/// than after an app restart.
+/// report. Empty/blank entries clear their override.
 #[tauri::command]
 pub(crate) fn set_model_paths(config: ModelPathsConfig) -> Result<ModelPathsReport, String> {
     let config = normalise(config);
     save_model_paths_config(&config)?;
-    crate::studio::torch_worker::reset();
     Ok(build_report(config))
 }
 

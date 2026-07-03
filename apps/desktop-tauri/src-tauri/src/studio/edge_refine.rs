@@ -1,9 +1,7 @@
-//! The `refineMaskEdge` node executor. The default `cpu` engine runs the
-//! in-process native-Rust heuristic ([`super::edge_refine_cpu`]); a learned
-//! matting engine — or a source the fast path cannot decode — is served by
-//! the Python bridge (`crate::psd::refine_mask_edge`). Both paths clean up a
-//! cut-out subject's matte and expose the refined image, the refined mask,
-//! and an edge report as flat output ports with identical shape.
+//! The `refineMaskEdge` node executor. The `cpu` engine runs the in-process
+//! native-Rust heuristic ([`super::edge_refine_cpu`]) — the only supported
+//! backend. It cleans up a cut-out subject's matte and exposes the refined
+//! image, the refined mask, and an edge report as flat output ports.
 
 use std::collections::BTreeMap;
 
@@ -14,7 +12,7 @@ use super::graph::{
     bool_param, number_param, optional, resolve_output_dir, studio_output_map,
     studio_value_to_string, StudioGraphNode,
 };
-use crate::psd::{refine_mask_edge, RefineEdgeResult};
+use crate::psd::RefineEdgeResult;
 
 pub(super) fn execute_studio_refine_mask_edge(
     node: &StudioGraphNode,
@@ -42,59 +40,40 @@ pub(super) fn execute_studio_refine_mask_edge(
     // (default `auto`); ignored by the CPU heuristic.
     let device = optional(studio_value_to_string(node.params.get("device")));
 
-    // The default `cpu` engine runs in-process; a learned matting engine — or
-    // a source the fast path cannot decode — falls through to Python.
     let engine_is_cpu = engine
         .as_deref()
         .map(|e| e.trim().eq_ignore_ascii_case("cpu"))
         .unwrap_or(true);
-    if engine_is_cpu {
-        let cpu_params = CpuEdgeRefineParams {
-            image_path: image.clone(),
-            mask_path: mask.clone(),
-            background_path: background.clone(),
-            trimap_path: trimap.clone(),
-            preset: preset.clone(),
-            erode_px,
-            dilate_px,
-            feather_px,
-            guided_radius,
-            edge_decontaminate,
-            background_blend_strength,
-            output_dir: output_dir.clone(),
-            output_name: output_name.clone(),
-            device_requested: device.clone().unwrap_or_else(|| "auto".to_string()),
-        };
-        if let Some(result) = edge_refine_cpu::try_refine(&cpu_params)? {
-            return to_output_map(result);
-        }
+    if !engine_is_cpu {
+        return Err(format!(
+            "Mask Edge Refine engine `{}` is no longer available; only the native `cpu` engine is supported",
+            engine.as_deref().unwrap_or_default().trim()
+        ));
     }
 
-    let result = refine_mask_edge(
-        None,
-        image,
-        mask,
-        background,
-        optional(studio_value_to_string(inputs.get("placeholder_mask"))),
-        trimap,
+    let cpu_params = CpuEdgeRefineParams {
+        image_path: image.clone(),
+        mask_path: mask,
+        background_path: background,
+        trimap_path: trimap,
         preset,
-        Some(erode_px),
-        Some(dilate_px),
-        Some(feather_px),
-        Some(guided_radius),
-        Some(edge_decontaminate),
-        Some(background_blend_strength),
-        Some(output_dir),
+        erode_px,
+        dilate_px,
+        feather_px,
+        guided_radius,
+        edge_decontaminate,
+        background_blend_strength,
+        output_dir,
         output_name,
-        engine,
-        device,
-    )?;
-
+        device_requested: device.unwrap_or_else(|| "auto".to_string()),
+    };
+    let result = edge_refine_cpu::try_refine(&cpu_params)?.ok_or_else(|| {
+        format!("Mask Edge Refine could not decode {image}: unsupported source for the native path")
+    })?;
     to_output_map(result)
 }
 
-/// Encode a [`RefineEdgeResult`] into the node's flat output ports. Shared by
-/// the in-process and Python paths so both emit an identical output shape.
+/// Encode a [`RefineEdgeResult`] into the node's flat output ports.
 fn to_output_map(result: RefineEdgeResult) -> Result<BTreeMap<String, Value>, String> {
     let report = serde_json::to_value(&result.edge_report)
         .map_err(|err| format!("failed to encode EdgeReport: {err}"))?;
@@ -120,8 +99,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_image_input() {
-        // No connected `image` input: must fail fast before shelling out to the
-        // python bridge, with a clear message.
+        // No connected `image` input: must fail fast with a clear message.
         let err = execute_studio_refine_mask_edge(&node(), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("connected image input"), "{err}");
     }
@@ -135,9 +113,9 @@ mod tests {
     }
 
     #[test]
-    fn param_defaults_match_python_bridge() {
-        // The defaults wired here must mirror edge_refine_cli.py's argparse
-        // defaults so an unconfigured node behaves identically to the CLI.
+    fn param_defaults_are_stable() {
+        // The defaults wired here are the documented node defaults; keep them
+        // stable so an unconfigured node behaves consistently across releases.
         let n = node();
         assert_eq!(number_param(&n, "erode_px", 1.0), 1.0);
         assert_eq!(number_param(&n, "dilate_px", 0.0), 0.0);

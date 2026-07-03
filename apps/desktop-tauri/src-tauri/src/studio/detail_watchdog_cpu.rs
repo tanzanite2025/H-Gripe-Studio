@@ -76,22 +76,22 @@ fn thresholds_for(mode: &str) -> Option<Thresholds> {
 }
 
 /// Resolved node parameters for one watchdog run, mirroring the CLI arguments.
-pub(super) struct CpuDetailWatchdogParams {
-    pub(super) image_path: String,
-    pub(super) visual_context: Option<String>,
-    pub(super) target_bounds: Option<String>,
-    pub(super) watch_targets: Option<String>,
-    pub(super) mode: Option<String>,
-    pub(super) output_dir: String,
-    pub(super) output_name: Option<String>,
-    pub(super) device_requested: String,
+pub(crate) struct CpuDetailWatchdogParams {
+    pub(crate) image_path: String,
+    pub(crate) visual_context: Option<String>,
+    pub(crate) target_bounds: Option<String>,
+    pub(crate) watch_targets: Option<String>,
+    pub(crate) mode: Option<String>,
+    pub(crate) output_dir: String,
+    pub(crate) output_name: Option<String>,
+    pub(crate) device_requested: String,
 }
 
 /// Run the rule-layer watchdog in-process. Returns `Ok(Some(result))` on the
 /// fast path, or `Ok(None)` when a source cannot be decoded here and the
 /// caller should defer to the Python bridge, which surfaces the canonical
 /// error message.
-pub(super) fn try_watch(
+pub(crate) fn try_watch(
     p: &CpuDetailWatchdogParams,
 ) -> Result<Option<DetectQualityResult>, String> {
     let image_path = p.image_path.trim();

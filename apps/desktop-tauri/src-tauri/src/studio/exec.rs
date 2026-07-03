@@ -207,14 +207,14 @@ fn studio_logic_result(params: &BTreeMap<String, Value>, inputs: &BTreeMap<Strin
 /// Where a Studio node runs. Authoritative server-side mirror of the
 /// `executor` field on the TS `NodeSpec` (studio-ui/src/graph/nodeSpecs.ts).
 /// Routing is driven by this classification (never by a client-supplied
-/// field), so a `local` card can only reach `python/bridge` handlers and an
-/// `api` card can only reach the broker — they can't be swapped by a crafted
-/// graph. See docs/card-executor-split-and-psd-chain-hardening.md.
+/// field), so a `local` card can only reach the local in-process handlers and
+/// an `api` card can only reach the broker — they can't be swapped by a
+/// crafted graph. See docs/card-executor-split-and-psd-chain-hardening.md.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StudioExecutor {
     /// Pure in-process node (no backend call, no network).
     Graph,
-    /// Always a `python/bridge` CLI; must not touch the network.
+    /// Local in-process PSD/card work; must not touch the network.
     Local,
     /// In-process native-Rust image / model work; must not touch the network.
     /// (No broker handle, exactly like `Local`, so a `Compute` card can never
@@ -382,7 +382,7 @@ fn execute_studio_graph_node(
     }
 }
 
-/// Local nodes: every arm shells out to a `python/bridge` CLI via `psd.rs`.
+/// Local nodes: every arm runs in-process PSD/card work via `psd.rs`.
 /// This handler is intentionally given no broker/network access, so a local
 /// card can never make a provider call.
 fn execute_studio_local_node(
@@ -734,14 +734,14 @@ mod tests {
     #[test]
     fn class_handlers_reject_foreign_kinds() {
         let inputs = BTreeMap::new();
-        // An API kind must never be runnable through the local (python-only)
-        // path, and a local kind must never run through the graph path.
+        // An API kind must never be runnable through the local path, and a
+        // local kind must never run through the graph path.
         let err = execute_studio_local_node(&node_with_kind("generate"), &inputs).unwrap_err();
         assert!(err.contains("not a local node"), "{err}");
         let err = execute_studio_graph_node(&node_with_kind("psdExport"), &inputs).unwrap_err();
         assert!(err.contains("not a graph node"), "{err}");
-        // A native-Rust compute kind must never run through the local (python)
-        // path, and a python-bridge kind must never run through compute.
+        // A native-Rust compute kind must never run through the local path,
+        // and a local kind must never run through compute.
         let err = execute_studio_local_node(&node_with_kind("subjectMask"), &inputs).unwrap_err();
         assert!(err.contains("not a local node"), "{err}");
         let err =

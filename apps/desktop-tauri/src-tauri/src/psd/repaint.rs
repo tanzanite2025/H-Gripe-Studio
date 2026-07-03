@@ -1,15 +1,17 @@
-//! Detail Repaint pipeline: prepare repaintable regions, composite provider
-//! results back, and the local (in-process torch) repaint path. Split out of
-//! `psd.rs`; command names and result shapes are unchanged.
+//! Detail Repaint pipeline: prepare repaintable regions and composite
+//! provider results back, both running in-process on the native Rust path
+//! (`crate::studio::detail_repaint_cpu`). Split out of `psd.rs`; command names
+//! and result shapes are unchanged.
 
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::RepaintReport;
-
-use super::{
-    apply_model_env, detail_repaint_script, no_window, project_python, reject_unsafe_output_name,
-    resolve_project_dir, run_bridge_oneshot, run_torch_cli,
+use crate::studio::detail_repaint_cpu::{
+    try_composite, try_prepare, CpuCompositeParams, CpuPrepareParams,
 };
+
+use super::reject_unsafe_output_name;
+
 /// One issue region prepared for repaint: the padded crop + same-size inpaint
 /// mask the orchestrator sends to the provider, plus the geometry the composite
 /// step needs to paste the result back. Fields are `snake_case` to match the
@@ -85,8 +87,7 @@ pub(crate) struct CompositeRepaintResult {
 /// `image.edit` operation before calling [`composite_repaint`] to paste the
 /// results back.
 ///
-/// Shells out to `python/bridge/detail_repaint_cli.py prepare` using the
-/// project's bundled Python (Pillow + numpy; no OpenCV, no ML). Only issues
+/// Runs natively in Rust (`crate::studio::detail_repaint_cpu`). Only issues
 /// whose `suggested_action` is in `repaint_actions` (default `detail_redraw`)
 /// and at/above `min_confidence` are selected, highest-confidence first, capped
 /// at `max_regions`.
@@ -104,57 +105,23 @@ pub(crate) fn prepare_repaint_regions(
     output_dir: Option<String>,
     output_name: Option<String>,
 ) -> Result<PrepareRepaintResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = detail_repaint_script(&dir)?;
+    let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("prepare")
-        .arg("--image")
-        .arg(&image)
-        .arg("--quality-report")
-        .arg(quality_report.as_deref().unwrap_or(""))
-        .arg("--repaint-actions")
-        .arg(repaint_actions.as_deref().unwrap_or(""))
-        .arg("--min-confidence")
-        .arg(min_confidence.unwrap_or(0.0).to_string())
-        .arg("--padding")
-        .arg(padding.unwrap_or(24).to_string())
-        .arg("--max-regions")
-        .arg(max_regions.unwrap_or(8).to_string())
-        .arg("--output-dir")
-        .arg(output_dir.as_deref().unwrap_or(""))
-        .arg("--output-name")
-        .arg(output_name.as_deref().unwrap_or(""))
-        .current_dir(&dir);
-    if invert_mask.unwrap_or(false) {
-        cmd.arg("--invert-mask");
-    }
-    apply_model_env(&mut cmd);
-    no_window(&mut cmd);
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default prepare path runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "prepare_repaint_regions legacy bridge failed: {}",
-            stderr.trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<PrepareRepaintResult>(stdout.trim()).map_err(|err| {
+    let params = CpuPrepareParams {
+        image_path: image,
+        quality_report,
+        repaint_actions,
+        min_confidence: min_confidence.unwrap_or(0.0),
+        padding: padding.unwrap_or(24),
+        max_regions: max_regions.unwrap_or(8),
+        invert_mask: invert_mask.unwrap_or(false),
+        output_dir: output_dir.unwrap_or_default(),
+        output_name,
+    };
+    try_prepare(&params)?.ok_or_else(|| {
         format!(
-            "could not parse prepare_repaint_regions output: {err} (raw: {})",
-            stdout.trim()
+            "prepare_repaint_regions could not decode {}: unsupported source for the native repaint path",
+            params.image_path
         )
     })
 }
@@ -166,8 +133,8 @@ pub(crate) fn prepare_repaint_regions(
 ///
 /// `manifest` is the JSON returned by [`prepare_repaint_regions`]; `repainted`
 /// is a JSON list of `{index, path}` mapping each region to the crop the
-/// provider returned (regions with no entry stay unrepainted). Shells out to
-/// `python/bridge/detail_repaint_cli.py composite`.
+/// provider returned (regions with no entry stay unrepainted). Runs natively
+/// in Rust (`crate::studio::detail_repaint_cpu`).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn composite_repaint(
@@ -180,52 +147,21 @@ pub(crate) fn composite_repaint(
     output_dir: Option<String>,
     output_name: Option<String>,
 ) -> Result<CompositeRepaintResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    let script = detail_repaint_script(&dir)?;
+    let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let mut cmd = std::process::Command::new(&python);
-    cmd.arg(&script)
-        .arg("composite")
-        .arg("--image")
-        .arg(&image)
-        .arg("--manifest")
-        .arg(&manifest)
-        .arg("--repainted")
-        .arg(&repainted)
-        .arg("--feather-px")
-        .arg(feather_px.unwrap_or(0.0).to_string())
-        .arg("--blend")
-        .arg(blend.as_deref().unwrap_or("feather"))
-        .arg("--output-dir")
-        .arg(output_dir.as_deref().unwrap_or(""))
-        .arg("--output-name")
-        .arg(output_name.as_deref().unwrap_or(""))
-        .current_dir(&dir);
-    apply_model_env(&mut cmd);
-    no_window(&mut cmd);
-
-    let output = cmd
-        .output()
-        .map_err(|err| {
-            format!(
-                "optional legacy Python bridge failed to launch {}: {err} (the default composite path runs natively in Rust)",
-                python.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "composite_repaint legacy bridge failed: {}",
-            stderr.trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<CompositeRepaintResult>(stdout.trim()).map_err(|err| {
+    let params = CpuCompositeParams {
+        image_path: image,
+        manifest,
+        repainted,
+        feather_px: feather_px.unwrap_or(0.0),
+        blend,
+        output_dir: output_dir.unwrap_or_default(),
+        output_name,
+    };
+    try_composite(&params)?.ok_or_else(|| {
         format!(
-            "could not parse composite_repaint output: {err} (raw: {})",
-            stdout.trim()
+            "composite_repaint could not decode {}: unsupported source for the native repaint path",
+            params.image_path
         )
     })
 }
@@ -285,16 +221,11 @@ pub(crate) struct LocalRepaintResult {
     pub(crate) repainted_count: u32,
 }
 
-/// Run the opt-in **local** inpaint backend over a prepare manifest, an
-/// alternative to the remote `image.edit` provider for the **Detail Repaint**
-/// node (Phase 2, `docs/phase2-algorithm-roadmap.md` §3). `provider` (the
-/// default) or any backend whose optional deps/weights are missing yields an
-/// empty `repainted` list and a recorded reason, so the orchestrator falls back
-/// to the remote provider — this never hard-fails on a box without the model.
-///
-/// `manifest` is the JSON returned by [`prepare_repaint_regions`]; the returned
-/// `repainted` list feeds straight into [`composite_repaint`]. Shells out to
-/// `python/bridge/detail_repaint_cli.py repaint`.
+/// The **local** inpaint seam for the **Detail Repaint** node. The Python
+/// torch backends were removed with the Python bridge, so every engine now
+/// resolves to the remote `provider` path: this returns an empty `repainted`
+/// list (with a recorded fallback reason when a local engine was requested),
+/// so the orchestrator runs its remote `image.edit` loop instead.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn local_repaint_regions(
@@ -313,63 +244,48 @@ pub(crate) fn local_repaint_regions(
     output_dir: Option<String>,
     output_name: Option<String>,
 ) -> Result<LocalRepaintResult, String> {
-    let dir = resolve_project_dir(&dir)?;
-    let python = project_python(&dir);
-    // Existence check (keeps the precise "not found" message); the launch path
-    // below re-resolves the script itself.
-    detail_repaint_script(&dir)?;
+    let _ = (
+        dir,
+        prompt,
+        prompt_map,
+        negative_prompt,
+        strength,
+        guidance_scale,
+        steps,
+        seed,
+        output_dir,
+    );
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
 
-    let engine = engine.as_deref().unwrap_or("provider");
-    let argv: Vec<String> = vec![
-        "repaint".into(),
-        "--manifest".into(),
-        manifest,
-        "--engine".into(),
-        engine.into(),
-        "--prompt".into(),
-        prompt.as_deref().unwrap_or("").into(),
-        "--prompt-map".into(),
-        prompt_map.as_deref().unwrap_or("").into(),
-        "--negative-prompt".into(),
-        negative_prompt.as_deref().unwrap_or("").into(),
-        "--strength".into(),
-        strength.unwrap_or(0.75).to_string(),
-        "--guidance-scale".into(),
-        guidance_scale.unwrap_or(7.5).to_string(),
-        "--steps".into(),
-        steps.unwrap_or(30).to_string(),
-        "--seed".into(),
-        seed.unwrap_or(-1).to_string(),
-        "--precision".into(),
-        precision.as_deref().unwrap_or("auto").into(),
-        "--controlnet".into(),
-        controlnet.as_deref().unwrap_or("off").into(),
-        "--output-dir".into(),
-        output_dir.as_deref().unwrap_or("").into(),
-        "--output-name".into(),
-        output_name.as_deref().unwrap_or("").into(),
-    ];
-
-    // Only the torch backends load a heavy pipeline per call, so only they are
-    // routed through the warm worker; the default `provider` (remote
-    // `image.edit`) and any other engine stay a one-shot.
-    let stdout = if matches!(engine, "sd_inpaint" | "sdxl_inpaint" | "flux_fill") {
-        run_torch_cli(
-            &python,
-            &dir,
-            "detail_repaint_cli.py",
-            "detail_repaint",
-            &argv,
-        )
+    let engine_requested = engine
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .unwrap_or("provider")
+        .to_string();
+    let requested_count = serde_json::from_str::<PrepareRepaintResult>(manifest.trim())
+        .map(|m| m.regions.len() as u32)
+        .unwrap_or(0);
+    let engine_fallback_reason = if engine_requested == "provider" {
+        None
     } else {
-        run_bridge_oneshot(&python, &dir, "detail_repaint_cli.py", &argv)
-    }
-    .map_err(|err| format!("local_repaint_regions failed: {err}"))?;
-    serde_json::from_str::<LocalRepaintResult>(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse local_repaint_regions output: {err} (raw: {})",
-            stdout.trim()
-        )
+        Some(format!(
+            "local engine '{engine_requested}' is no longer available (the Python torch backends were removed); using the remote provider"
+        ))
+    };
+
+    Ok(LocalRepaintResult {
+        repainted: Vec::new(),
+        skipped: Vec::new(),
+        engine: "provider".to_string(),
+        engine_requested,
+        engine_fallback_reason,
+        backend_model: None,
+        device: None,
+        precision: None,
+        precision_requested: precision.as_deref().unwrap_or("auto").to_string(),
+        controlnet_requested: controlnet.as_deref().unwrap_or("off").to_string(),
+        requested_count,
+        repainted_count: 0,
     })
 }

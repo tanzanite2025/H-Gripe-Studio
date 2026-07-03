@@ -63,14 +63,12 @@ fn main() {
         .manage(StudioRunCancels::default())
         .manage(StudioScheduler::default())
         .setup(|app| {
-            // Capture the bundled resource directory so the PSD nodes can fall
-            // back to the `h-gripe.project.json` + `python/bridge` subtree
-            // shipped via `bundle.resources` when running from a packaged
-            // install.
+            // Capture the bundled resource directory so nodes can resolve
+            // resources shipped via `bundle.resources` when running from a
+            // packaged install.
             use tauri::Manager;
             let resource_dir = app.path().resource_dir().ok();
-            psd::set_resource_dir(resource_dir.clone());
-            // The auto-subject model is bundled under the same resource dir; the
+            // The auto-subject model is bundled under the resource dir; the
             // handle-free `Compute` segmenter needs it captured here to resolve
             // the weight in a packaged install.
             studio::set_subject_model_resource_dir(resource_dir);

@@ -1,48 +1,23 @@
 //! The `videoTrim` node executor: cuts a `[start_sec, end_sec)` range out of a
-//! video file. Default builds go through the native in-process FFmpeg encoder
+//! video file through the native in-process FFmpeg encoder
 //! (`ffmpeg_native::trim_video`); builds without the `native-ffmpeg` feature
-//! fall back to the long-lived PyAV worker's `trim` command. Both paths
-//! decode-and-re-encode, so the cut is frame-accurate rather than snapping to
-//! keyframes; audio is not carried over (the media engine is video-only).
+//! surface an error. The cut decodes-and-re-encodes, so it is frame-accurate
+//! rather than snapping to keyframes; audio is not carried over (the media
+//! engine is video-only).
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(not(feature = "native-ffmpeg"))]
-use serde::Deserialize;
-use serde_json::{json, Value};
+#[cfg(any(feature = "native-ffmpeg", test))]
+use serde_json::json;
+use serde_json::Value;
 
+#[cfg(feature = "native-ffmpeg")]
+use super::graph::studio_output_map;
 use super::graph::{
-    number_param, optional, resolve_output_dir, studio_output_map, studio_value_to_string,
-    StudioGraphNode,
+    number_param, optional, resolve_output_dir, studio_value_to_string, StudioGraphNode,
 };
-#[cfg(not(feature = "native-ffmpeg"))]
-use crate::psd::{project_python, resolve_project_dir};
-
-/// Shape of the worker's `trim` payload.
-#[cfg(not(feature = "native-ffmpeg"))]
-#[derive(Debug, Deserialize)]
-struct TrimPayload {
-    #[serde(default)]
-    video_path: String,
-    #[serde(default)]
-    frame_count: u64,
-    #[serde(default)]
-    width: u32,
-    #[serde(default)]
-    height: u32,
-    #[serde(default)]
-    fps: Option<f64>,
-    #[serde(default)]
-    duration_sec: Option<f64>,
-    #[serde(default)]
-    start_sec: Option<f64>,
-    #[serde(default)]
-    end_sec: Option<f64>,
-    #[serde(default)]
-    codec: Option<String>,
-}
 
 /// The source video path: the `video` input when connected, else the param.
 fn resolve_video(node: &StudioGraphNode, inputs: &BTreeMap<String, Value>) -> Option<String> {
@@ -130,48 +105,8 @@ pub(super) fn execute_studio_video_trim(
     }
     #[cfg(not(feature = "native-ffmpeg"))]
     {
-        let dir = resolve_project_dir(&None)?;
-        let python = project_python(&dir);
-        let mut args = json!({
-            "video": video,
-            "out": out_path,
-            "start_sec": start_sec,
-            "codec": codec,
-        });
-        if let Some(end) = end_sec {
-            args["end_sec"] = json!(end);
-        }
-        let stdout = super::video_worker::run(&python, &dir, "trim", &args)?;
-        let payload: TrimPayload = serde_json::from_str(stdout.trim()).map_err(|err| {
-            format!(
-                "could not parse video trim result: {err} (raw: {})",
-                stdout.trim()
-            )
-        })?;
-
-        let video_path = if payload.video_path.is_empty() {
-            out_path
-        } else {
-            payload.video_path
-        };
-        Ok(studio_output_map([
-            ("video", json!(video_path)),
-            ("frame_count", json!(payload.frame_count)),
-            ("duration_sec", json!(payload.duration_sec)),
-            (
-                "trim_report",
-                json!({
-                    "width": payload.width,
-                    "height": payload.height,
-                    "fps": payload.fps,
-                    "codec": payload.codec,
-                    "frame_count": payload.frame_count,
-                    "duration_sec": payload.duration_sec,
-                    "start_sec": payload.start_sec,
-                    "end_sec": payload.end_sec,
-                }),
-            ),
-        ]))
+        let _ = (codec, out_path);
+        Err("Video Trim requires the `native-ffmpeg` build (vendored libav encoders)".to_string())
     }
 }
 

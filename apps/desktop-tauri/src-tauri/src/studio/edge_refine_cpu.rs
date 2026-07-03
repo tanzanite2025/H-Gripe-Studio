@@ -32,21 +32,21 @@ use crate::psd::{reject_unsafe_output_name, EdgeReport, RefineEdgeResult};
 const EPS: f32 = 1e-6;
 
 /// Resolved node parameters for one refine run, mirroring the CLI arguments.
-pub(super) struct CpuEdgeRefineParams {
-    pub(super) image_path: String,
-    pub(super) mask_path: Option<String>,
-    pub(super) background_path: Option<String>,
-    pub(super) trimap_path: Option<String>,
-    pub(super) preset: Option<String>,
-    pub(super) erode_px: i64,
-    pub(super) dilate_px: i64,
-    pub(super) feather_px: f64,
-    pub(super) guided_radius: i64,
-    pub(super) edge_decontaminate: bool,
-    pub(super) background_blend_strength: f64,
-    pub(super) output_dir: String,
-    pub(super) output_name: Option<String>,
-    pub(super) device_requested: String,
+pub(crate) struct CpuEdgeRefineParams {
+    pub(crate) image_path: String,
+    pub(crate) mask_path: Option<String>,
+    pub(crate) background_path: Option<String>,
+    pub(crate) trimap_path: Option<String>,
+    pub(crate) preset: Option<String>,
+    pub(crate) erode_px: i64,
+    pub(crate) dilate_px: i64,
+    pub(crate) feather_px: f64,
+    pub(crate) guided_radius: i64,
+    pub(crate) edge_decontaminate: bool,
+    pub(crate) background_blend_strength: f64,
+    pub(crate) output_dir: String,
+    pub(crate) output_name: Option<String>,
+    pub(crate) device_requested: String,
 }
 
 /// Resolved (erode, dilate, feather, guided radius, decontaminate, blend) for
@@ -114,7 +114,7 @@ fn resolve_preset(p: &CpuEdgeRefineParams) -> Result<(String, Resolved), String>
 /// fast path, or `Ok(None)` when the source (or an auxiliary mask/trimap)
 /// cannot be decoded here and the caller should defer to the Python bridge,
 /// which surfaces the canonical error message.
-pub(super) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeResult>, String> {
+pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeResult>, String> {
     let path = Path::new(&p.image_path);
     if !path.is_file() {
         // Let the Python path surface the canonical "subject image not found".
