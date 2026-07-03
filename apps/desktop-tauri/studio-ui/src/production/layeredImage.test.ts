@@ -4,6 +4,7 @@ import {
   findLayer,
   layeredAssetManifest,
   LAYER_SPLIT_STUB_ENGINE,
+  parseLayeredImageAsset,
   STUB_BACKGROUND_LAYER_ID,
   STUB_ORIGINAL_LAYER_ID,
   STUB_SUBJECT_LAYER_ID,
@@ -71,5 +72,33 @@ describe("stubLayeredImageAsset", () => {
       locked: true,
       confidence: 1,
     });
+  });
+});
+
+describe("parseLayeredImageAsset", () => {
+  const asset = stubLayeredImageAsset({
+    imagePath: "/a/b.png",
+    nodeId: "n1",
+    createdAt: "0",
+  });
+
+  it("accepts a well-formed asset round-tripped through JSON", () => {
+    const parsed = parseLayeredImageAsset(JSON.parse(JSON.stringify(asset)));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.id).toBe("layered-n1");
+    expect(parsed?.layers).toHaveLength(3);
+  });
+
+  it("rejects non-objects and structurally broken assets", () => {
+    expect(parseLayeredImageAsset(null)).toBeNull();
+    expect(parseLayeredImageAsset("layered")).toBeNull();
+    expect(parseLayeredImageAsset({})).toBeNull();
+    expect(parseLayeredImageAsset({ ...asset, canvas: { width: "12" } })).toBeNull();
+    expect(parseLayeredImageAsset({ ...asset, base_image: { path: 5 } })).toBeNull();
+    expect(parseLayeredImageAsset({ ...asset, layers: "not-an-array" })).toBeNull();
+    expect(
+      parseLayeredImageAsset({ ...asset, layers: [{ id: "x", name: "y", kind: "subject" }] }),
+    ).toBeNull();
+    expect(parseLayeredImageAsset({ ...asset, split_report: null })).toBeNull();
   });
 });

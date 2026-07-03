@@ -82,6 +82,51 @@ export interface LayeredImageAsset {
   split_report: LayerSplitReport;
 }
 
+/**
+ * Validate an untyped run output as a `LayeredImageAsset` (structural check of
+ * the fields the UI relies on). The desktop runtime's `smartLayerSplit` emits
+ * this shape on its `layered_asset` port; anything else yields `null` so the
+ * caller can fall back to the stub.
+ */
+export function parseLayeredImageAsset(value: unknown): LayeredImageAsset | null {
+  if (typeof value !== "object" || value === null) return null;
+  const asset = value as Record<string, unknown>;
+  const canvas = asset.canvas as Record<string, unknown> | undefined;
+  const imageRef = (v: unknown): v is ImageRef =>
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).path === "string";
+  if (
+    typeof asset.id !== "string" ||
+    typeof asset.source_asset_id !== "string" ||
+    typeof canvas !== "object" ||
+    canvas === null ||
+    typeof canvas.width !== "number" ||
+    typeof canvas.height !== "number" ||
+    !imageRef(asset.base_image) ||
+    !imageRef(asset.preview_composite) ||
+    !Array.isArray(asset.layers) ||
+    typeof asset.split_report !== "object" ||
+    asset.split_report === null
+  ) {
+    return null;
+  }
+  for (const layer of asset.layers) {
+    const l = layer as Record<string, unknown>;
+    if (
+      typeof l !== "object" ||
+      l === null ||
+      typeof l.id !== "string" ||
+      typeof l.name !== "string" ||
+      typeof l.kind !== "string" ||
+      !imageRef(l.mask)
+    ) {
+      return null;
+    }
+  }
+  return value as LayeredImageAsset;
+}
+
 /** Engine tag written by the protocol stub (keep in sync with layer_split.rs). */
 export const LAYER_SPLIT_STUB_ENGINE = "layer-split-stub/0.1";
 
