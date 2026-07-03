@@ -359,6 +359,22 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     }
   }, [productionTarget, binAssets, timeline, connectedImagePath]);
 
+  // Right-click on an image bin asset / still clip: reopen the existing
+  // unified image editor (mask + crop) on the asset's source node, so the
+  // drawer never grows a second image-editing surface.
+  const handleOpenImageEdit = useCallback(
+    (assetId: string) => {
+      const asset = binAssets.find((a) => a.id === assetId);
+      if (!asset || asset.kind !== "image") return;
+      if (asset.sourceNodeId && nodes.some((n) => n.id === asset.sourceNodeId)) {
+        openMediaEdit(asset.sourceNodeId);
+      } else {
+        setMessage(t("drawer.imageEditNoSource"));
+      }
+    },
+    [binAssets, nodes, openMediaEdit, setMessage, t],
+  );
+
   const handleGradeCommit = useCallback(
     (gradeDoc: string) => {
       if (!productionTarget) return;
@@ -760,6 +776,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSelectClip={handleSelectClip}
           onAddActiveToTimeline={handleAddActiveToTimeline}
           onRemoveClip={handleRemoveClip}
+          onOpenImageEdit={handleOpenImageEdit}
           gradeImagePath={gradeSource.imagePath}
           gradeVideoPath={gradeSource.videoPath}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
