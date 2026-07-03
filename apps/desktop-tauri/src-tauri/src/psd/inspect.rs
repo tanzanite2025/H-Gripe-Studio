@@ -190,6 +190,8 @@ struct RawLayer {
     opacity: u8,
     clipping: u8,
     visible: bool,
+    /// Absolute offset of the flags byte inside the record.
+    flags_offset: usize,
 }
 
 /// Parse a single layer record (bounds, channels, blend data, extra data with
@@ -214,6 +216,7 @@ fn parse_layer_record(cur: &mut Cursor<'_>, psb: bool) -> Result<RawLayer, Strin
     let blend: [u8; 4] = cur.take(4)?.try_into().unwrap();
     let opacity = cur.u8()?;
     let clipping = cur.u8()?;
+    let flags_offset = cur.pos;
     let flags = cur.u8()?;
     cur.u8()?; // filler
 
@@ -291,6 +294,7 @@ fn parse_layer_record(cur: &mut Cursor<'_>, psb: bool) -> Result<RawLayer, Strin
         opacity,
         clipping,
         visible: flags & 0x02 == 0,
+        flags_offset,
     })
 }
 
@@ -360,10 +364,59 @@ fn flatten(tree: &[LayerNode], rows: &mut Vec<NativeLayer>) {
     }
 }
 
-/// Parse a PSD/PSB template from raw bytes: header (canvas size, guarded by
-/// [`MAX_DECODE_PIXELS`]), layer records (with channel data locations), and
-/// the offset of the merged image data section. No pixel data is decoded.
-pub(crate) fn parse_psd_full(data: &[u8]) -> Result<ParsedPsd, String> {
+/// One raw record plus where its bytes (and its channel data bytes) live in
+/// the file — what the native compose writer needs to reassemble the layer
+/// info section around inserted records.
+pub(crate) struct RecordSpan {
+    /// 1 = the record is a group, 3 = end-of-group marker, 0 = normal layer.
+    pub(crate) divider: u8,
+    pub(crate) name: String,
+    pub(crate) smart_object: bool,
+    /// Record rectangle as (top, left, bottom, right) in canvas pixels.
+    pub(crate) rect: [i32; 4],
+    /// Byte range of the whole layer record.
+    pub(crate) record_range: (usize, usize),
+    /// Absolute offset of the record's flags byte (bit 1 = hidden).
+    pub(crate) flags_offset: usize,
+    /// Byte range of the record's channel data blocks.
+    pub(crate) channel_range: (usize, usize),
+}
+
+/// Header facts plus record/channel byte spans, for the compose writer.
+pub(crate) struct PsdSpans {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) depth: u16,
+    pub(crate) color_mode: u16,
+    pub(crate) psb: bool,
+    /// True when the layer count was negative (merged alpha present).
+    pub(crate) count_negative: bool,
+    /// Offset of the layer & mask info section's length field.
+    pub(crate) layer_mask_len_offset: usize,
+    /// First byte after the layer & mask info section.
+    pub(crate) layer_mask_end: usize,
+    /// First byte after the layer info sub-section (including its padding).
+    pub(crate) layer_info_end: usize,
+    pub(crate) records: Vec<RecordSpan>,
+}
+
+/// The shared single-pass parse behind [`parse_psd_full`] and
+/// [`parse_psd_spans`].
+struct ParsedRaw {
+    width: u32,
+    height: u32,
+    depth: u16,
+    color_mode: u16,
+    psb: bool,
+    count_negative: bool,
+    layer_mask_len_offset: usize,
+    layer_mask_end: usize,
+    layer_info_end: usize,
+    has_layer_info: bool,
+    records: Vec<(RawLayer, Vec<ChannelRef>, (usize, usize), (usize, usize))>,
+}
+
+fn parse_psd_raw(data: &[u8]) -> Result<ParsedRaw, String> {
     let mut cur = Cursor::new(data);
     if cur.take(4)? != b"8BPS" {
         return Err("not a PSD file (bad 8BPS signature)".to_string());
@@ -395,25 +448,42 @@ pub(crate) fn parse_psd_full(data: &[u8]) -> Result<ParsedPsd, String> {
     cur.skip(u64::from(resources_len))?;
 
     // Layer & mask info section, containing the layer info sub-section.
+    let layer_mask_len_offset = cur.pos;
     let layer_mask_len = cur.length(psb)?;
-    cur.pos
+    let layer_mask_end = cur
+        .pos
         .checked_add(usize::try_from(layer_mask_len).map_err(|_| "section overflow")?)
         .filter(|&end| end <= data.len())
         .ok_or("PSD layer & mask info section truncated")?;
-    let mut tree = Vec::new();
+    let mut records = Vec::new();
+    let mut layer_info_end = cur.pos;
+    let mut count_negative = false;
+    let mut has_layer_info = false;
     if layer_mask_len > 0 {
+        let layer_info_len_offset = cur.pos;
         let layer_info_len = cur.length(psb)?;
+        layer_info_end = layer_info_len_offset
+            + if psb { 8 } else { 4 }
+            + usize::try_from(layer_info_len).map_err(|_| "layer info overflow")?;
+        if layer_info_end > layer_mask_end {
+            return Err("PSD layer info section truncated".to_string());
+        }
         if layer_info_len > 0 {
+            has_layer_info = true;
             // Negative count: first alpha channel holds the merged transparency.
-            let count = cur.i16()?.unsigned_abs();
-            let mut records = Vec::with_capacity(usize::from(count));
+            let signed_count = cur.i16()?;
+            count_negative = signed_count < 0;
+            let count = signed_count.unsigned_abs();
+            let mut raw_records = Vec::with_capacity(usize::from(count));
             for _ in 0..count {
-                records.push(parse_layer_record(&mut cur, psb)?);
+                let start = cur.pos;
+                let record = parse_layer_record(&mut cur, psb)?;
+                raw_records.push((record, (start, cur.pos)));
             }
             // Channel data blocks follow all layer records, per layer in
             // record order; resolve each channel's byte range now.
-            let mut with_channels = Vec::with_capacity(records.len());
-            for record in records {
+            for (record, record_range) in raw_records {
+                let channel_start = cur.pos;
                 let mut channels = Vec::with_capacity(record.channel_lens.len());
                 for &(id, len) in &record.channel_lens {
                     let len = usize::try_from(len).map_err(|_| "channel length overflow")?;
@@ -421,19 +491,79 @@ pub(crate) fn parse_psd_full(data: &[u8]) -> Result<ParsedPsd, String> {
                     cur.skip(len as u64)?;
                     channels.push(ChannelRef { id, offset, len });
                 }
-                with_channels.push((record, channels));
+                records.push((record, channels, record_range, (channel_start, cur.pos)));
             }
-            tree = build_tree(with_channels);
         }
     }
 
-    Ok(ParsedPsd {
+    Ok(ParsedRaw {
         width,
         height,
         depth,
         color_mode,
         psb,
+        count_negative,
+        layer_mask_len_offset,
+        layer_mask_end,
+        layer_info_end,
+        has_layer_info,
+        records,
+    })
+}
+
+/// Parse a PSD/PSB template from raw bytes: header (canvas size, guarded by
+/// [`MAX_DECODE_PIXELS`]), layer records (with channel data locations), and
+/// the offset of the merged image data section. No pixel data is decoded.
+pub(crate) fn parse_psd_full(data: &[u8]) -> Result<ParsedPsd, String> {
+    let raw = parse_psd_raw(data)?;
+    let tree = build_tree(
+        raw.records
+            .into_iter()
+            .map(|(record, channels, _, _)| (record, channels))
+            .collect(),
+    );
+    Ok(ParsedPsd {
+        width: raw.width,
+        height: raw.height,
+        depth: raw.depth,
+        color_mode: raw.color_mode,
+        psb: raw.psb,
         tree,
+    })
+}
+
+/// Parse the byte spans the native compose writer needs. Errors when the file
+/// has no layer info sub-section to splice into (the legacy bridge handles
+/// those).
+pub(crate) fn parse_psd_spans(data: &[u8]) -> Result<PsdSpans, String> {
+    let raw = parse_psd_raw(data)?;
+    if !raw.has_layer_info {
+        return Err("PSD has no layer info section; legacy bridge required".to_string());
+    }
+    let records = raw
+        .records
+        .into_iter()
+        .map(|(record, _, record_range, channel_range)| RecordSpan {
+            divider: record.divider,
+            name: record.name,
+            smart_object: record.smart_object,
+            rect: record.rect,
+            record_range,
+            flags_offset: record.flags_offset,
+            channel_range,
+        })
+        .collect();
+    Ok(PsdSpans {
+        width: raw.width,
+        height: raw.height,
+        depth: raw.depth,
+        color_mode: raw.color_mode,
+        psb: raw.psb,
+        count_negative: raw.count_negative,
+        layer_mask_len_offset: raw.layer_mask_len_offset,
+        layer_mask_end: raw.layer_mask_end,
+        layer_info_end: raw.layer_info_end,
+        records,
     })
 }
 

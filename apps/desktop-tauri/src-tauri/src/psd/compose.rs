@@ -120,14 +120,16 @@ pub(crate) struct ComposePsdResult {
     pub(crate) smart_object_mode: String,
 }
 
-/// Compose a generated image into a PSD template's placeholder (true
-/// smart-object content replacement when applicable) and export
+/// Compose a generated image into a PSD template's placeholder and export
 /// `<filename>.psd` + `<filename>_preview.png` + `<filename>_metadata.json`.
 ///
-/// This shells out to `python/bridge/compose_psd_cli.py` using the project's
-/// bundled Python (`python_embeded` when present), reusing the proven, vendored
-/// psd-tools pipeline. `dir` is the project root (defaults to the process
-/// working dir); the rest map 1:1 onto the CLI flags.
+/// The default path runs natively in Rust (`super::write`): the generated
+/// image is inserted as a new pixel layer inside a `03_GENERATED` group,
+/// splicing the template's own bytes so everything else round-trips
+/// untouched. If the native writer rejects the job (smart-object content
+/// replacement, non-PNG or colour-managed sources, non-8-bit/RGB templates),
+/// the optional legacy Python bridge (`compose_psd_cli.py`) is tried as a
+/// fallback. `dir` is the project root (defaults to the process working dir).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compose_psd(
@@ -145,6 +147,69 @@ pub(crate) fn compose_psd(
     metadata: Option<String>,
     save_preview: Option<bool>,
 ) -> Result<ComposePsdResult, String> {
+    // Exports are written as `output_dir / f"{base}.psd"`, so a name with path
+    // separators or `..` could write outside the chosen folder. Validate it
+    // before either path uses the value.
+    let filename_value = filename.as_deref().unwrap_or("final");
+    studio_reject_unsafe_basename(filename_value)?;
+
+    let native_err = match super::write::compose_psd_native(&super::write::ComposeArgs {
+        template: &template,
+        image: &image,
+        mask: mask.as_deref().unwrap_or(""),
+        output_dir: &output_dir,
+        filename: filename_value,
+        placeholder: placeholder.as_deref().unwrap_or("{}"),
+        fit_mode: fit_mode.as_deref().unwrap_or("contain"),
+        z_order: z_order.as_deref().unwrap_or("above_background"),
+        smart_object_mode: smart_object_mode.as_deref().unwrap_or("disable"),
+        hide_placeholder: hide_placeholder.as_deref().unwrap_or("enable") == "enable",
+        metadata: metadata.as_deref().unwrap_or("{}"),
+        save_preview: save_preview.unwrap_or(true),
+    }) {
+        Ok(result) => return Ok(result),
+        Err(err) => err,
+    };
+
+    compose_psd_legacy(
+        dir,
+        template,
+        image,
+        mask,
+        output_dir,
+        filename_value,
+        placeholder,
+        fit_mode,
+        z_order,
+        smart_object_mode,
+        hide_placeholder,
+        metadata,
+        save_preview,
+    )
+    .map_err(|legacy_err| format!("native PSD compose failed: {native_err}; {legacy_err}"))
+}
+
+/// The optional legacy Python bridge behind [`compose_psd`]: shells out to
+/// `python/bridge/compose_psd_cli.py` using the project's bundled Python,
+/// reusing the vendored psd-tools + Pillow pipeline (including true
+/// smart-object content replacement). Only tried when the native writer
+/// rejects the job.
+#[allow(clippy::too_many_arguments)]
+fn compose_psd_legacy(
+    dir: Option<String>,
+    template: String,
+    image: String,
+    mask: Option<String>,
+    output_dir: String,
+    filename: &str,
+    placeholder: Option<String>,
+    fit_mode: Option<String>,
+    z_order: Option<String>,
+    smart_object_mode: Option<String>,
+    hide_placeholder: Option<String>,
+    metadata: Option<String>,
+    save_preview: Option<bool>,
+) -> Result<ComposePsdResult, String> {
     let dir = resolve_project_dir(&dir)?;
     let python = project_python(&dir);
     let script = dir.join("python").join("bridge").join("compose_psd_cli.py");
@@ -154,12 +219,6 @@ pub(crate) fn compose_psd(
             script.display()
         ));
     }
-
-    // The helper joins `filename` onto `output_dir` (`directory / f"{base}.psd"`),
-    // so a name with path separators or `..` could write outside the chosen
-    // folder. Validate it here before handing the value to the CLI.
-    let filename = filename.as_deref().unwrap_or("final");
-    studio_reject_unsafe_basename(filename)?;
 
     let mut cmd = std::process::Command::new(&python);
     cmd.arg(&script)
@@ -203,7 +262,7 @@ pub(crate) fn compose_psd(
         .output()
         .map_err(|err| {
             format!(
-                "legacy Python bridge failed to launch {}: {err} (PSD compose still requires the Python bridge; a native Rust PSD path is planned)",
+                "optional legacy Python bridge failed to launch {}: {err} (the default compose path runs natively in Rust)",
                 python.display()
             )
         })?;
