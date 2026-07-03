@@ -34,6 +34,8 @@ export interface ProductionDrawerProps {
   onRemoveClip: (clipId: string) => void;
   /** Right-click on an image asset / still clip: open the existing image editor. */
   onOpenImageEdit: (assetId: string) => void;
+  /** Right-click on an audio clip: open the minimal trim/gain/fade editor. */
+  onOpenAudioEdit: (clipId: string) => void;
   /** Image path the Grade tab previews for the current target, when resolvable. */
   gradeImagePath: string | null;
   /** Video whose frame the Grade tab previews for video-clip targets. */
@@ -72,6 +74,7 @@ export function ProductionDrawer({
   onAddActiveToTimeline,
   onRemoveClip,
   onOpenImageEdit,
+  onOpenAudioEdit,
   gradeImagePath,
   gradeVideoPath,
   gradeDoc,
@@ -239,12 +242,13 @@ export function ProductionDrawer({
                             }}
                             onClick={() => onSelectClip(selected ? null : clip.id)}
                             onContextMenu={(e) => {
-                              if (clip.kind !== "still") return;
+                              if (clip.kind === "video") return;
                               e.preventDefault();
                               onSelectClip(clip.id);
-                              onOpenImageEdit(clip.assetId);
+                              if (clip.kind === "still") onOpenImageEdit(clip.assetId);
+                              else onOpenAudioEdit(clip.id);
                             }}
-                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s${clip.kind === "still" ? ` · ${t("drawer.imageEditHint")}` : ""}`}
+                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s${clip.kind === "still" ? ` · ${t("drawer.imageEditHint")}` : clip.kind === "audio" ? ` · ${t("drawer.audioEditHint")}` : ""}`}
                           >
                             <span className="production-clip-name">{clipAssetName(clip.id)}</span>
                             {selected ? (

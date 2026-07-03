@@ -1245,3 +1245,33 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .production-clip-remove { color: var(--muted); padding: 0 2px; }
 .production-clip-remove:hover { color: var(--text); }
+
+/* ── On-demand audio editor (drawer step 8) ─────────────────────────── */
+.media-viewer.audio-edit { width: min(720px, 92vw); }
+.audio-edit-body {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 16px;
+  padding: 12px 16px 16px;
+}
+.audio-edit-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.audio-edit-envelope {
+  width: 100%;
+  height: 120px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.audio-edit-envelope polygon {
+  fill: rgba(122, 162, 247, 0.35);
+  stroke: var(--accent, #7aa2f7);
+  stroke-width: 1;
+}
+.audio-edit-controls { display: flex; flex-direction: column; }
+.audio-edit-controls .field { margin-top: 8px; }
+.audio-edit-controls small { margin-top: 12px; }
