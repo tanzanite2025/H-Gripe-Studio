@@ -9,6 +9,7 @@
 import { analyzePsdContext, composePsd, compositeRepaint, detectQualityIssues, enhanceImage, getOutputDir, localRepaintRegions, matchLightColor, prepareRepaintRegions, refineMaskEdge, runTaskJson } from "../bridge/tauri";
 import type { RepaintedCrop } from "../bridge/tauri";
 import type { Bounds, QualityReport, RepaintReport, VisualContext } from "../types/production";
+import { findLayer, stubLayeredImageAsset, STUB_ORIGINAL_LAYER_ID } from "../production/layeredImage";
 import type { ExecutorRegistry } from "./dag";
 import {
   optimizePromptLocally,
@@ -256,6 +257,28 @@ export const defaultExecutors: ExecutorRegistry = {
     }
     const image = result.output_files?.[0]?.path;
     return { image: image ?? null, result };
+  },
+
+  // Wraps the connected image into the stub LayeredImageAsset (locked original
+  // layer + background/subject candidates with placeholder masks). Pure
+  // protocol bridging: the real segmentation engine replaces this without
+  // changing the ports. Mirrors the Rust graph-lane arm in studio/layer_split.rs.
+  smartLayerSplit: async (ctx) => {
+    const image = (ctx.inputs.image as string | undefined) ?? null;
+    if (!image) throw new Error("Smart Layer Split needs a connected image input");
+    const asset = stubLayeredImageAsset({ imagePath: image, nodeId: ctx.nodeId });
+    const selectedKind = String(ctx.params.selected_kind ?? "subject");
+    const selected =
+      selectedKind === "original"
+        ? findLayer(asset, STUB_ORIGINAL_LAYER_ID)
+        : asset.layers.find((layer) => layer.kind === selectedKind) ?? null;
+    return {
+      layered_asset: asset,
+      composite_preview: asset.preview_composite.path,
+      selected_layer: selected?.rgba?.path ?? asset.base_image.path,
+      masks: asset.layers.map((layer) => ({ layer_id: layer.id, mask: layer.mask.path })),
+      split_report: asset.split_report,
+    };
   },
 
   // Crops the connected image. The real work runs in native Rust on the

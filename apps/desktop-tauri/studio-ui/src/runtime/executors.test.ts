@@ -49,6 +49,32 @@ describe("crop", () => {
   });
 });
 
+describe("smartLayerSplit", () => {
+  it("wraps the connected image into the stub layered asset and flat ports", async () => {
+    const out = await defaultExecutors.smartLayerSplit(
+      ctx("smartLayerSplit", { selected_kind: "subject" }, { image: "/a/b.png" }),
+    );
+    const asset = out.layered_asset as {
+      id: string;
+      layers: { id: string; kind: string; locked?: boolean }[];
+      split_report: { engine_version: string };
+    };
+    expect(asset.id).toBe("layered-smartLayerSplit-1");
+    expect(asset.layers).toHaveLength(3);
+    expect(asset.layers[0].locked).toBe(true);
+    expect(out.composite_preview).toBe("/a/b.png");
+    expect(out.selected_layer).toBe("/a/b.png");
+    expect(out.masks).toHaveLength(3);
+    expect(out.split_report).toBe(asset.split_report);
+  });
+
+  it("throws when no image is connected", async () => {
+    await expect(
+      defaultExecutors.smartLayerSplit(ctx("smartLayerSplit", {}, {})),
+    ).rejects.toThrow(/needs a connected image/i);
+  });
+});
+
 describe("batch", () => {
   it("parses non-empty trimmed lines", () => {
     expect(batchItems("a\n  b  \n\n c\n")).toEqual(["a", "b", "c"]);

@@ -73,6 +73,7 @@ mod history;
 pub(crate) mod image_buffer;
 mod image_enhance;
 pub(crate) mod image_enhance_cpu;
+mod layer_split;
 mod media_index;
 mod node_registry;
 mod onnx_pool;
