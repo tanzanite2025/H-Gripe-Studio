@@ -162,6 +162,44 @@ export function stubLayeredImageAsset(opts: {
   };
 }
 
+/**
+ * Flatten an asset into the first-version export manifest (basic layer names,
+ * bbox and alpha refs) recorded in PSD Export's `_metadata.json`.
+ */
+export function layeredAssetManifest(asset: LayeredImageAsset): {
+  asset_id: string;
+  source_asset_id: string;
+  engine_version: string;
+  canvas: LayeredImageAsset["canvas"];
+  composite_preview: string;
+  layers: {
+    id: string;
+    name: string;
+    kind: LayerCandidateKind;
+    bbox: [number, number, number, number];
+    alpha: string;
+    locked: boolean;
+    confidence: number;
+  }[];
+} {
+  return {
+    asset_id: asset.id,
+    source_asset_id: asset.source_asset_id,
+    engine_version: asset.split_report.engine_version,
+    canvas: asset.canvas,
+    composite_preview: asset.preview_composite.path,
+    layers: asset.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      kind: layer.kind,
+      bbox: layer.bbox,
+      alpha: layer.mask.path,
+      locked: layer.locked ?? false,
+      confidence: layer.confidence,
+    })),
+  };
+}
+
 /** Find a layer by id, or null when the asset does not carry it. */
 export function findLayer(
   asset: LayeredImageAsset,
