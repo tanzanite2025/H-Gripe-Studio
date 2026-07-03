@@ -204,6 +204,46 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       prompt_suffix: "提示词后缀",
     },
   },
+  imageProcessing: {
+    title: "图像处理",
+    description:
+      "一张集成的图像处理生产卡片，按语义行组织：图层拆分、增强、调色、裁剪/变换、蒙版/抠像、修复/重绘。想用哪个操作就连接哪一行——每行有自己的输入/输出连接点，运行时拆解为对应的内部操作（智能图层拆分、图像增强、调色、裁剪、主体蒙版、细节重绘）。",
+    params: {
+      "layerSplit.selected_kind": {
+        label: "图层拆分：选中图层",
+        hint: "layerSplit.out 行的资产将哪一层标记为选中",
+      },
+      "enhance.mode": { label: "增强：模式" },
+      "enhance.engine": {
+        label: "增强：引擎",
+        hint: "cpu 始终可用；模型引擎在权重缺失时回退到 cpu",
+      },
+      "grade.format": { label: "调色：输出格式" },
+      "crop.mode": { label: "裁剪：模式" },
+      "crop.aspect": { label: "裁剪：宽高比" },
+      "mask.mode": { label: "蒙版：模式" },
+      "mask.feather_px": { label: "蒙版：羽化像素" },
+      "repair.engine": {
+        label: "修复：引擎",
+        hint: "provider = 远程 image.edit；本地引擎在权重缺失时回退到提供方",
+      },
+    },
+    ports: {
+      "layerSplit.in": "图层拆分",
+      "enhance.in": "增强",
+      "grade.in": "调色",
+      "crop.in": "裁剪 / 变换",
+      "mask.in": "蒙版 / 抠像",
+      "repair.in": "修复 / 重绘",
+      "repair.report": "质量报告",
+      "layerSplit.out": "分层资产",
+      "enhance.out": "增强图像",
+      "grade.out": "调色图像",
+      "crop.out": "裁剪图像",
+      "mask.out": "蒙版",
+      "repair.out": "修复图像",
+    },
+  },
   smartLayerSplit: {
     title: "智能图层拆分",
     description:

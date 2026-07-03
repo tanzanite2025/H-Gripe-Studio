@@ -705,6 +705,116 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
       },
     ],
   },
+  // Integrated production card gathering the image operations into one panel
+  // of semantic rows (see NODE_CARD_PRODUCT_BOUNDARY_PLAN.md, "Image
+  // Processing Card"). Each row has stable `row.in` / `row.out` port ids so
+  // its connection dots sit on that row, and each row lowers at run time to
+  // the corresponding internal leaf node (see graph/lowering.ts). Row params
+  // are namespaced `<row>.<key>` and forwarded to the lowered node.
+  imageProcessing: {
+    kind: "imageProcessing",
+    family: "image",
+    executor: "compute",
+    title: "Image Processing",
+    description:
+      "One production card for image operations, as semantic rows: Layer Split, Enhance, Grade, Crop / Transform, Mask / Matte, and Repair / Repaint. Connect to the row you want — each row exposes its own input/output dots and runs as the matching internal operation (Smart Layer Split, Image Enhance, Grade, Crop, Subject Mask, Detail Repaint).",
+    category: "process",
+    inputs: [
+      port("layerSplit.in", "Layer Split", "image"),
+      port("enhance.in", "Enhance", "image"),
+      port("grade.in", "Grade", "image"),
+      port("crop.in", "Crop / Transform", "image"),
+      port("mask.in", "Mask / Matte", "image"),
+      port("repair.in", "Repair / Repaint", "image"),
+      port("repair.report", "quality report", "any"),
+    ],
+    outputs: [
+      port("layerSplit.out", "layered asset", "any"),
+      port("enhance.out", "enhanced image", "image"),
+      port("grade.out", "graded image", "image"),
+      port("crop.out", "cropped image", "image"),
+      port("mask.out", "mask", "image"),
+      port("repair.out", "repaired image", "image"),
+    ],
+    params: [
+      {
+        key: "layerSplit.selected_kind",
+        label: "Layer Split: selected layer",
+        control: "select",
+        options: ["subject", "background", "original"],
+        defaultValue: "subject",
+        hint: "which layer the layerSplit.out row's asset marks as selected",
+      },
+      {
+        key: "enhance.mode",
+        label: "Enhance: mode",
+        control: "select",
+        options: ["conservative", "texture_rebuild", "print_ready", "custom"],
+        defaultValue: "conservative",
+      },
+      {
+        key: "enhance.engine",
+        label: "Enhance: engine",
+        control: "select",
+        options: ["cpu", "realesrgan", "ccsr", "supir"],
+        defaultValue: "cpu",
+        hint: "cpu is always available; model engines fall back to cpu when weights are missing",
+      },
+      {
+        key: "grade.format",
+        label: "Grade: output format",
+        control: "select",
+        options: ["png", "tiff"],
+        defaultValue: "png",
+      },
+      {
+        key: "crop.mode",
+        label: "Crop: mode",
+        control: "select",
+        options: ["manual", "auto_subject"],
+        defaultValue: "manual",
+      },
+      {
+        key: "crop.aspect",
+        label: "Crop: aspect",
+        control: "select",
+        options: ["free", "1:1", "4:3", "3:2", "16:9", "2:3", "3:4", "9:16"],
+        defaultValue: "free",
+      },
+      {
+        key: "mask.mode",
+        label: "Mask: mode",
+        control: "select",
+        options: [
+          "hybrid",
+          "manual_brush",
+          "manual_pen",
+          "auto_subject",
+          "auto_product",
+          "auto_person",
+          "auto_transparent_object",
+        ],
+        defaultValue: "hybrid",
+      },
+      {
+        key: "mask.feather_px",
+        label: "Mask: feather px",
+        control: "slider",
+        min: 0,
+        max: 16,
+        step: 1,
+        defaultValue: 0,
+      },
+      {
+        key: "repair.engine",
+        label: "Repair: engine",
+        control: "select",
+        options: ["provider", "sd_inpaint", "sdxl_inpaint", "flux_fill"],
+        defaultValue: "provider",
+        hint: "provider = remote image.edit; local engines fall back to the provider when weights are missing",
+      },
+    ],
+  },
   subjectMask: {
     kind: "subjectMask",
     family: "mask",

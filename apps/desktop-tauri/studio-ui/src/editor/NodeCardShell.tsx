@@ -47,17 +47,105 @@ export function NodeCardShell({
       </div>
       {spec.inputs.length + spec.outputs.length > 0 && (
         <div className="node-ports">
-          {spec.inputs.map((p) => (
-            <PortBlock key={`in-${p.id}`} port={p} side="in">
-              {portContent?.[p.id]}
-            </PortBlock>
-          ))}
-          {spec.outputs.map((p) => (
-            <PortBlock key={`out-${p.id}`} port={p} side="out" />
-          ))}
+          {groupPortRows(spec).map((row) =>
+            row.paired ? (
+              <PairedPortRow key={`row-${row.key}`} row={row} portContent={portContent} />
+            ) : row.inputs.length > 0 ? (
+              <PortBlock key={`in-${row.key}`} port={row.inputs[0]} side="in">
+                {portContent?.[row.inputs[0].id]}
+              </PortBlock>
+            ) : (
+              <PortBlock key={`out-${row.key}`} port={row.outputs[0]} side="out" />
+            ),
+          )}
         </div>
       )}
       {children}
+    </div>
+  );
+}
+
+interface PortRowGroup {
+  key: string;
+  paired: boolean;
+  inputs: PortSpec[];
+  outputs: PortSpec[];
+}
+
+// Ports whose ids share a `row.` prefix (e.g. `grade.in` / `grade.out`) form
+// one semantic row with its inputs on the left and outputs on the right, so
+// both dots sit on the same visible row. Ports without a prefix keep their
+// own single block. Rows keep the order of first appearance (inputs, then
+// remaining output-only rows).
+export function groupPortRows(spec: NodeSpec): PortRowGroup[] {
+  const rows: PortRowGroup[] = [];
+  const byKey = new Map<string, PortRowGroup>();
+  const add = (port: PortSpec, side: "in" | "out") => {
+    const dot = port.id.indexOf(".");
+    if (dot <= 0) {
+      rows.push({
+        key: `${side}:${port.id}`,
+        paired: false,
+        inputs: side === "in" ? [port] : [],
+        outputs: side === "out" ? [port] : [],
+      });
+      return;
+    }
+    const key = port.id.slice(0, dot);
+    let row = byKey.get(key);
+    if (!row) {
+      row = { key, paired: true, inputs: [], outputs: [] };
+      byKey.set(key, row);
+      rows.push(row);
+    }
+    (side === "in" ? row.inputs : row.outputs).push(port);
+  };
+  for (const p of spec.inputs) add(p, "in");
+  for (const p of spec.outputs) add(p, "out");
+  return rows;
+}
+
+// A semantic row block: input dots on the left edge, output dots on the
+// right, all vertically centred on their own entry line within the row.
+function PairedPortRow({
+  row,
+  portContent,
+}: {
+  row: PortRowGroup;
+  portContent?: Record<string, ReactNode>;
+}) {
+  const type = (row.inputs[0] ?? row.outputs[0]).type;
+  return (
+    <div className={`port-block port-block-pair port-type-${type}`}>
+      <div className="port-side port-side-in">
+        {row.inputs.map((p) => (
+          <div key={p.id} className="port-entry">
+            <Handle
+              id={p.id}
+              type="target"
+              position={Position.Left}
+              className={`port port-${p.type}`}
+              title={`${p.label}: ${p.type}`}
+            />
+            <span className="port-label">{p.label}</span>
+            {portContent?.[p.id]}
+          </div>
+        ))}
+      </div>
+      <div className="port-side port-side-out">
+        {row.outputs.map((p) => (
+          <div key={p.id} className="port-entry port-entry-out">
+            <span className="port-label">{p.label}</span>
+            <Handle
+              id={p.id}
+              type="source"
+              position={Position.Right}
+              className={`port port-${p.type}`}
+              title={`${p.label}: ${p.type}`}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

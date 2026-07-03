@@ -519,6 +519,20 @@ button:disabled { opacity: 0.6; cursor: default; }
 .port-block .port { top: 50%; }
 .port-block-in .port { left: -14px; }
 .port-block-out .port { right: -14px; }
+/* semantic in+out row (e.g. `grade.in` / `grade.out`): inputs stack on the
+   left, outputs on the right; each entry carries its own centred dot. */
+.port-block-pair {
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 8px;
+  border-left: 3px solid var(--block-color);
+  border-right: 3px solid var(--block-color);
+}
+.port-side { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+.port-side-out { align-items: flex-end; }
+.port-entry { position: relative; display: flex; align-items: center; min-height: 14px; }
+.port-block-pair .port-side-in .port { left: -22px; }
+.port-block-pair .port-side-out .port { right: -22px; }
 .port-label { font-size: 10px; line-height: 1.2; color: var(--muted); }
 /* zoom-LOD: collapse blocks to slim colour bars; the dots stay centred. */
 .node.lod .node-ports { gap: 2px; padding: 4px 6px 2px; }
