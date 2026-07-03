@@ -1,0 +1,255 @@
+# Prompt Assistant System Plan
+
+> Status: active.
+> Purpose: define the software-level assistant / prompt conversation surface so
+> prompt creation does not get trapped inside canvas node cards.
+
+## Core Decision
+
+Prompt creation is a software-level workflow, not a canvas-node-only workflow.
+
+The canvas `Prompt` node is only the final text source that feeds the graph. It
+should stay simple: text in, text out. It must not become a full chat client,
+API-key editor, local-model manager, prompt history database, and node all at
+once.
+
+H-Gripe Studio needs a resident **Prompt Assistant** system:
+
+```text
+Prompt Assistant
+  -> choose API profile or local model
+  -> multi-turn conversation / rewrite / translate / structure / style
+  -> produce prompt drafts
+  -> insert selected text into Prompt / Generate / Prompt Optimize nodes
+```
+
+The assistant helps the user create usable prompt text. The graph consumes the
+confirmed prompt text.
+
+## Placement
+
+Do not put Prompt Assistant inside the bottom production drawer.
+
+The bottom drawer is reserved for:
+
+- Edit / Timeline
+- Grade
+
+When video editing expands upward, any assistant panel living in the bottom
+drawer will fight the timeline and grading workspace. The assistant must remain
+reachable even while the bottom drawer is open.
+
+Recommended shell:
+
+```text
+Right tool rail
+  P  Prompt Assistant
+  A  Assets / references
+  H  History
+  S  Settings
+
+Prompt Assistant opens as:
+  - an attached right panel, or
+  - a floating panel that can dock to the right edge,
+  - with remembered size and position.
+```
+
+When unused, only the narrow right rail remains. When used, the Prompt Assistant
+panel opens above the canvas and avoids the bottom drawer area.
+
+## Layering Rules
+
+Prompt Assistant is not a graph node.
+
+It may read the current graph selection, but it must not become part of graph
+execution unless the user explicitly inserts text into a node.
+
+| Surface | Role |
+| --- | --- |
+| Prompt Assistant panel | Conversation, drafting, rewriting, model selection, prompt library. |
+| `Prompt` node | Stores final text as a graph input. |
+| `Prompt Optimize` node | Reproducible graph step that transforms prompt text during execution. |
+| `Generate` node | Consumes prompt text and calls image generation. |
+| API Manager | Owns provider profiles and credentials. |
+| Local Model Manager | Owns installed local text / vision helper models. |
+
+This split keeps the canvas clean and keeps assistant state from polluting the
+serializable workflow graph.
+
+## Prompt Assistant Capabilities
+
+First version:
+
+- multi-turn conversation
+- free text prompt drafting
+- Chinese / English rewrite
+- style expansion
+- negative prompt drafting when the target card supports it
+- one-click insert into selected Prompt node
+- one-click create new Prompt node from current draft
+- copy current draft
+- keep local session history
+
+Later:
+
+- prompt templates / presets
+- project prompt library
+- reference-image-aware prompt drafting
+- layered-asset-aware prompt drafting
+- target-aware suggestions for Generate / Image Processing / Layered Asset
+- compare prompt drafts
+- save favorite prompt snippets
+
+## Model Selection
+
+The assistant can use API or local models, but it should not store raw provider
+configuration itself.
+
+It should reference global managers:
+
+```text
+Prompt Assistant
+  selected_backend:
+    kind: "api_profile" | "local_model"
+    ref: string
+```
+
+Examples:
+
+```text
+api_profile: openai-compatible-main
+local_model: qwen2.5-coder-7b-instruct
+local_model: small-prompt-rewriter
+```
+
+The assistant panel can show a compact selector:
+
+```text
+Backend: [API: OpenAI Compatible / gpt-4o-mini v]
+         [Configure]
+```
+
+or:
+
+```text
+Backend: [Local: Prompt Rewriter Small v]
+         [Manage Models]
+```
+
+The configure buttons open the global API Manager or Local Model Manager.
+
+## Insert Targets
+
+The assistant should support explicit insert actions instead of silently writing
+into the graph.
+
+Recommended actions:
+
+| Action | Behavior |
+| --- | --- |
+| Insert into selected Prompt node | Replaces or appends to selected `Prompt` node text. |
+| Create Prompt node | Creates a new `Prompt` node near current canvas focus. |
+| Send to selected Generate node | Writes prompt text into connected prompt source or creates one. |
+| Send to Prompt Optimize node | Writes draft into selected `Prompt Optimize` text field. |
+| Copy | Copies draft to clipboard without graph mutation. |
+
+If no valid target exists, the primary action should be `Create Prompt node`.
+
+## Conversation State
+
+Assistant conversation state is not the workflow graph.
+
+Store it separately:
+
+```ts
+interface PromptAssistantSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  backendRef: { kind: "api_profile" | "local_model"; ref: string };
+  messages: PromptAssistantMessage[];
+  drafts: PromptDraft[];
+  linkedProjectId?: string;
+}
+```
+
+The graph should only receive the final prompt text the user inserts.
+
+This avoids making graph runs depend on an informal chat transcript.
+
+## Relation To Prompt Optimize Node
+
+Prompt Assistant and `Prompt Optimize` solve different problems.
+
+Prompt Assistant:
+
+- interactive
+- exploratory
+- multi-turn
+- software-level UI
+- not part of DAG execution
+
+`Prompt Optimize` node:
+
+- deterministic graph step
+- saved with workflow
+- runs during graph execution
+- can be cached / reproduced
+
+Both can use the same API/local model managers, but they are not the same
+surface.
+
+## UI Contract
+
+The assistant should be available even when:
+
+- bottom production drawer is open
+- timeline is expanded
+- grade panel is active
+- image editor modal is closed
+- no canvas node is selected
+
+The right rail must remain clickable. The assistant panel should avoid covering
+critical timeline controls when the bottom drawer is open.
+
+Suggested layout:
+
+```text
+Canvas area
+  right rail always visible
+  assistant panel docks/floats from right
+
+Bottom drawer
+  edit/timeline + grade only
+```
+
+## Non-Goals
+
+- Do not turn the `Prompt` node into a chat UI.
+- Do not store API keys inside assistant sessions.
+- Do not make the assistant transcript part of graph execution.
+- Do not put the assistant inside the bottom production drawer.
+- Do not force every prompt draft to create a graph node.
+
+## Implementation Path
+
+1. Add right tool rail shell with a Prompt Assistant entry.
+2. Add Prompt Assistant floating/docked panel with local-only mock conversation.
+3. Add insert actions for selected Prompt node and create Prompt node.
+4. Wire API profile selection through the global API Manager.
+5. Wire local text model selection through the Local Model Manager.
+6. Add session persistence separate from workflow graph persistence.
+7. Add target-aware prompt insertion for Generate / Prompt Optimize.
+
+## Success Criteria
+
+The user can:
+
+1. Open Prompt Assistant from the right rail while the bottom drawer is open.
+2. Choose API or local model backend.
+3. Talk through several prompt revisions.
+4. Insert the chosen result into a Prompt node.
+5. Run the graph without the assistant transcript becoming part of the DAG.
+
+The canvas stays clean, and prompt creation becomes a first-class studio tool.
