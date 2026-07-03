@@ -40,6 +40,8 @@
 //! - [`subject_mask`]: the `subjectMask` node executor (native-Rust matte).
 //! - [`subject_matte`]: continuous alpha matting (ViTMatte / trimap, Compute lane).
 //! - [`subject_sam2`]: SAM 2 interactive point-prompt segmenter (Compute lane).
+//! - [`text_regions`]: heuristic text region detection for `smartLayerSplit`
+//!   (Phase 3 protected text-layer candidates).
 //! - [`video_assemble`]: the `videoAssemble` node executor (native FFmpeg
 //!   frame-sequence -> video encode).
 //! - [`video_trim`]: the `videoTrim` node executor (frame-accurate cut of a
@@ -92,6 +94,7 @@ mod subject_matte;
 mod subject_model;
 mod subject_sam2;
 mod subject_segment;
+mod text_regions;
 mod timeline_export;
 mod video_assemble;
 pub(crate) mod video_engine;

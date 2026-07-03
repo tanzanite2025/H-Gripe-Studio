@@ -831,6 +831,13 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "auto splits the subject mask into per-object instance layers (connected components, largest first) — desktop runtime only; every instance is flagged for review",
       },
       {
+        key: "detect_text",
+        label: "Detect text",
+        control: "checkbox",
+        defaultValue: false,
+        hint: "detect likely text lines as protected text layer candidates (heuristic edge-density detector) — desktop runtime only; every region is flagged for review",
+      },
+      {
         key: "output_dir",
         label: "Output dir",
         control: "path",
