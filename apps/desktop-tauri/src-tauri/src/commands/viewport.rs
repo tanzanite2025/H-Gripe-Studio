@@ -287,25 +287,42 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
             let size = width.max(height).clamp(64, 2048);
-            // Decode the frame through the native media engine and run the
-            // grading kernel over its sRGB proxy — the identity document when
-            // no grade doc is set.
-            let doc = grade_doc.unwrap_or(Value::Null);
-            let graded = crate::studio::video_frame_grade_preview(
-                entry.path.clone(),
+            if let Some(doc) = grade_doc {
+                // Graded frame: decode through the native media engine and run
+                // the grading kernel over its sRGB proxy.
+                let graded = crate::studio::video_frame_grade_preview(
+                    entry.path.clone(),
+                    time_sec,
+                    doc,
+                    Some(size),
+                )?;
+                return Ok(ViewportFrame {
+                    data_url: graded.data_url,
+                    width: graded.width,
+                    height: graded.height,
+                    backend: ViewportBackend {
+                        requested: "auto".to_string(),
+                        actual: graded.backend.to_string(),
+                        fallback_reason: None,
+                    },
+                });
+            }
+            // Ungraded frame (program monitor / scrubbing): resolve through the
+            // playback engine — dedicated decode thread, bounded warm frame
+            // cache, and latest-wins coalescing so a burst of seeks decodes
+            // only the newest — then present via the thumbnail pipeline.
+            let poster_dir = crate::cache_subdir(".posters")?;
+            let frame = crate::studio::video_engine::scrub_frame(
+                &poster_dir,
+                std::path::Path::new(&entry.path),
                 time_sec,
-                doc,
-                Some(size),
             )?;
+            let thumb = generate_thumbnail_inner(&frame.to_string_lossy(), size, None)?;
             Ok(ViewportFrame {
-                data_url: graded.data_url,
-                width: graded.width,
-                height: graded.height,
-                backend: ViewportBackend {
-                    requested: "auto".to_string(),
-                    actual: graded.backend.to_string(),
-                    fallback_reason: None,
-                },
+                data_url: thumb.data_url,
+                width: thumb.width,
+                height: thumb.height,
+                backend: cpu_backend(),
             })
         }
         #[cfg(not(feature = "native-ffmpeg"))]

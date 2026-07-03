@@ -523,6 +523,15 @@ export const messages = {
     en: "Empty timeline — select a bin asset and use \"Add to timeline\" to place it as a clip.",
     zh: "时间线为空——选中素材后用「加入时间线」放置为 clip。",
   },
+  "drawer.monitorTitle": { en: "Monitor", zh: "监视器" },
+  "drawer.monitorEmpty": {
+    en: "no clip under the playhead",
+    zh: "播放头下没有 clip",
+  },
+  "drawer.monitorScrubTitle": {
+    en: "scrub the program monitor playhead",
+    zh: "拖动节目监视器播放头",
+  },
   "drawer.trackVideo": { en: "V", zh: "视" },
   "drawer.trackAudio": { en: "A", zh: "音" },
   "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
