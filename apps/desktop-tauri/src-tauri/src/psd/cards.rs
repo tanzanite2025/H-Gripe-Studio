@@ -39,6 +39,18 @@ pub(crate) struct MatchReport {
     pub(crate) protect_saturation: bool,
     #[serde(default)]
     pub(crate) protect_brand_color: bool,
+    /// The subject's source colour mode label (e.g. `RGB`, `RGBA`, `CMYK`).
+    #[serde(default)]
+    pub(crate) source_mode: String,
+    /// The background's source colour mode label (absent without one).
+    #[serde(default)]
+    pub(crate) background_mode: Option<String>,
+    /// Whether a non-identity EXIF orientation was normalised away.
+    #[serde(default)]
+    pub(crate) exif_transposed: bool,
+    /// The decode budget the load was guarded with.
+    #[serde(default)]
+    pub(crate) max_decode_pixels: i64,
     /// `false` for `prompt_only`, zero strength, or no background reference.
     #[serde(default)]
     pub(crate) applied: bool,
