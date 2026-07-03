@@ -220,6 +220,25 @@ fn all_ops() -> Vec<GradeOp> {
             amount: 1e6,
             seed: 0,
         },
+        GradeOp::Blur { sigma: f32::NAN },
+        GradeOp::Blur { sigma: -1e6 },
+        GradeOp::Blur { sigma: 1e6 },
+        // Degenerate vignette: non-finite, off-range, zero feather.
+        GradeOp::Vignette {
+            amount: f32::NAN,
+            midpoint: f32::INFINITY,
+            feather: f32::NEG_INFINITY,
+        },
+        GradeOp::Vignette {
+            amount: -1e6,
+            midpoint: -10.0,
+            feather: 0.0,
+        },
+        GradeOp::Vignette {
+            amount: 1e6,
+            midpoint: 10.0,
+            feather: 1e6,
+        },
     ]
 }
 

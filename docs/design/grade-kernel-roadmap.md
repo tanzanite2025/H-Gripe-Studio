@@ -42,7 +42,9 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 ### 2. New ops (same triple-end pattern: Rust + TS goldens + WGSL)
 
-- **Vignette** — parametric ellipse, feather, encoded-signal gain.
+- ✅ **Vignette** — parametric ellipse, feather, encoded-signal gain — landed
+  (`GradeOp::Vignette { amount, midpoint, feather }`, all three ends +
+  goldens + panel UI).
 - **Halation / bloom** — thresholded highlight spread; needs a separable
   large-radius blur primitive (see §4).
 - **Glow / soft diffusion** — same blur primitive, screen-blended.
@@ -66,9 +68,10 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 ### 4. Spatial/kernel infrastructure
 
-- **Separable large-radius Gaussian blur primitive** — required by halation,
-  bloom, glow, dehaze, clarity. Two-pass (H then V), goldens like the
-  existing spatial family; GPU as two src→dst passes.
+- ✅ **Separable large-radius Gaussian blur primitive** — landed
+  (`GradeOp::Blur { sigma }`, σ ≤ 32 px, radius `ceil(3σ)`; two-pass
+  H then V on all three ends, goldens + panel UI). Halation, bloom, glow,
+  dehaze, clarity can now build on it.
 - **Non-integer sampling helper** (bilinear tap with edge clamp) — needed by
   chromatic aberration and any future warp/transform op.
 - **Tile/stripe processing for very large stills** — bounded memory for
@@ -127,7 +130,8 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 1. ✅ GPU preview in the dialog + expose the shipped ops (§1) — landed;
    temporal denoise in the video dialog is the remaining §1 item.
-2. Blur primitive (§4), then vignette + halation/bloom + glow (§2).
+2. ✅ Blur primitive (§4) + vignette (§2) — landed; halation/bloom + glow
+   (§2) are the natural next ops on top of the blur primitive.
 3. LUT export (§3) — small, high interchange value.
 4. Keyframe interpolation + GPU export renderer (§6) as the video dialog
    lands.

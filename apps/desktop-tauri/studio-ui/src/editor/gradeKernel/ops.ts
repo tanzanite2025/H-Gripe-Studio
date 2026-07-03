@@ -3,7 +3,7 @@
 
 import { hslToRgb, rgbToHsl } from "./hsl";
 import { lut1dSample, lut3dSample } from "./lut";
-import { denoise, filmGrain, sharpen } from "./spatial";
+import { denoise, filmGrain, gaussianBlur, sharpen, vignette } from "./spatial";
 import { monotoneSpline, multiplierSpline, periodicSpline } from "./spline";
 import { trcDecode, trcEncode } from "./trc";
 import { clamp01, LUMA, smoothstep, type GradeSurface, type Rgb } from "./types";
@@ -46,7 +46,9 @@ export type GradeOp =
   | { type: "color_warper"; points: WarpPoint[] }
   | { type: "sharpen"; amount: number; radius?: number }
   | { type: "denoise"; amount: number; radius?: number }
-  | { type: "film_grain"; amount: number; seed: number };
+  | { type: "film_grain"; amount: number; seed: number }
+  | { type: "blur"; sigma: number }
+  | { type: "vignette"; amount: number; midpoint?: number; feather?: number };
 
 /** One colour-warper control point (mirrors Rust `WarpPoint`). */
 export interface WarpPoint {
@@ -64,7 +66,13 @@ export interface WarpPoint {
  * only correct over a full frame (mirrors Rust `GradeOp::is_spatial`).
  */
 export function isSpatialOp(op: GradeOp): boolean {
-  return op.type === "sharpen" || op.type === "denoise" || op.type === "film_grain";
+  return (
+    op.type === "sharpen" ||
+    op.type === "denoise" ||
+    op.type === "film_grain" ||
+    op.type === "blur" ||
+    op.type === "vignette"
+  );
 }
 
 // Decode RGB to linear light, run `f`, re-encode (alpha untouched). The
@@ -317,6 +325,12 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       break;
     case "film_grain":
       filmGrain(surface, op.amount, op.seed);
+      break;
+    case "blur":
+      gaussianBlur(surface, op.sigma);
+      break;
+    case "vignette":
+      vignette(surface, op.amount, op.midpoint ?? 0.5, op.feather ?? 0.5);
       break;
   }
 }

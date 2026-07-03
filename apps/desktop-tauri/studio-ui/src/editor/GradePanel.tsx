@@ -4,6 +4,7 @@ import { generateThumbnail, gradePreview, videoFrameGradePreview, videoProbe } f
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
+  MAX_BLUR_SIGMA,
   MAX_RADIUS,
   parseCube,
   type GradeDoc,
@@ -55,6 +56,8 @@ const ADDABLE_OPS = [
   "sharpen",
   "denoise",
   "film_grain",
+  "blur",
+  "vignette",
 ] as const;
 type AddableOp = (typeof ADDABLE_OPS)[number];
 
@@ -71,6 +74,8 @@ const OP_LABEL_KEYS: Partial<Record<GradeOp["type"], MsgKey>> = {
   sharpen: "grade.op_sharpen",
   denoise: "grade.op_denoise",
   film_grain: "grade.op_film_grain",
+  blur: "grade.op_blur",
+  vignette: "grade.op_vignette",
   lut1d: "grade.op_lut1d",
   lut3d: "grade.op_lut3d",
 };
@@ -101,6 +106,10 @@ function defaultOp(kind: AddableOp): GradeOp {
       return { type: "denoise", amount: 0, radius: 1 };
     case "film_grain":
       return { type: "film_grain", amount: 0, seed: 1 };
+    case "blur":
+      return { type: "blur", sigma: 0 };
+    case "vignette":
+      return { type: "vignette", amount: 0, midpoint: 0.5, feather: 0.5 };
   }
 }
 
@@ -333,6 +342,16 @@ export function GradePanel({
                 onChange={(e) => updateOp(i, { ...op, seed: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
               />
             </label>
+          </>
+        );
+      case "blur":
+        return slider(t("grade.sigma"), op.sigma, 0, MAX_BLUR_SIGMA, 0.1, (sigma) => updateOp(i, { ...op, sigma }));
+      case "vignette":
+        return (
+          <>
+            {slider(t("grade.amount"), op.amount, -1, 1, 0.01, (amount) => updateOp(i, { ...op, amount }))}
+            {slider(t("grade.midpoint"), op.midpoint ?? 0.5, 0, 1, 0.01, (midpoint) => updateOp(i, { ...op, midpoint }))}
+            {slider(t("grade.feather"), op.feather ?? 0.5, 0.001, 1, 0.01, (feather) => updateOp(i, { ...op, feather }))}
           </>
         );
       case "rgb_mixer": {
