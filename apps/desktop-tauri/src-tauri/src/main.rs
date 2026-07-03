@@ -136,6 +136,7 @@ fn main() {
             studio::video_frame_grade_preview,
             commands::video::video_probe,
             commands::video::video_scrub,
+            studio::timeline_export,
             psd::prepare_repaint_regions,
             psd::local_repaint_regions,
             psd::composite_repaint

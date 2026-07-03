@@ -36,6 +36,8 @@ export interface ProductionDrawerProps {
   onOpenImageEdit: (assetId: string) => void;
   /** Right-click on an audio clip: open the minimal trim/gain/fade editor. */
   onOpenAudioEdit: (clipId: string) => void;
+  /** Export command: open the on-demand export dialog for the timeline. */
+  onOpenExport: () => void;
   /** Image path the Grade tab previews for the current target, when resolvable. */
   gradeImagePath: string | null;
   /** Video whose frame the Grade tab previews for video-clip targets. */
@@ -75,6 +77,7 @@ export function ProductionDrawer({
   onRemoveClip,
   onOpenImageEdit,
   onOpenAudioEdit,
+  onOpenExport,
   gradeImagePath,
   gradeVideoPath,
   gradeDoc,
@@ -214,6 +217,13 @@ export function ProductionDrawer({
                 title={t("drawer.addToTimelineTitle")}
               >
                 {t("drawer.addToTimeline")}
+              </button>
+              <button
+                onClick={onOpenExport}
+                disabled={timeline.tracks.every((track) => track.clips.length === 0)}
+                title={t("drawer.exportTitle")}
+              >
+                {t("drawer.export")}
               </button>
             </div>
             {timeline.tracks.every((track) => track.clips.length === 0) ? (

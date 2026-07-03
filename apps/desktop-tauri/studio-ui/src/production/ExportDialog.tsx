@@ -1,0 +1,147 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { timelineExport } from "../bridge/timelineExport";
+import { useT } from "../i18n";
+import type { MediaAsset } from "./mediaBin";
+import type { TimelineModel } from "./timeline";
+import {
+  buildRenderPlan,
+  DEFAULT_EXPORT_FPS,
+  expandStillFrames,
+  type RenderWarning,
+} from "./renderPlan";
+
+// On-demand export dialog (plan step 9): the drawer's export command builds
+// the timeline render plan, previews what will (and won't yet) be encoded,
+// and hands the expanded frame sequence to the backend FFmpeg encoder. Opens
+// on demand and never mounts with the drawer.
+
+interface ExportDialogProps {
+  timeline: TimelineModel;
+  assets: MediaAsset[];
+  onClose: () => void;
+}
+
+type ExportState =
+  | { phase: "idle" }
+  | { phase: "running" }
+  | { phase: "done"; videoPath: string; durationSec: number }
+  | { phase: "error"; message: string };
+
+export function ExportDialog({ timeline, assets, onClose }: ExportDialogProps) {
+  const t = useT();
+  const [fps, setFps] = useState(DEFAULT_EXPORT_FPS);
+  const [outputName, setOutputName] = useState("");
+  const [state, setState] = useState<ExportState>({ phase: "idle" });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const plan = useMemo(() => buildRenderPlan(timeline, assets, { fps }), [timeline, assets, fps]);
+  const frames = useMemo(() => expandStillFrames(plan), [plan]);
+  const canExport = plan.video.length > 0 && frames !== null && state.phase !== "running";
+
+  const warningText = (w: RenderWarning): string => {
+    switch (w.kind) {
+      case "missing_asset":
+        return t("export.warnMissingAsset", { id: w.assetId });
+      case "video_clip_skipped":
+        return t("export.warnVideoSkipped");
+      case "audio_not_mixed":
+        return t("export.warnAudioNotMixed", { n: w.clipCount });
+      case "gap":
+        return t("export.warnGap", { at: w.atSec.toFixed(1), len: w.lengthSec.toFixed(1) });
+    }
+  };
+
+  const runExport = async () => {
+    if (!frames || frames.length === 0) return;
+    setState({ phase: "running" });
+    try {
+      const result = await timelineExport(frames, plan.fps, {
+        outputName: outputName.trim() || undefined,
+      });
+      if (!result) {
+        setState({ phase: "error", message: t("export.noBackend") });
+        return;
+      }
+      setState({ phase: "done", videoPath: result.video_path, durationSec: result.duration_sec });
+    } catch (err) {
+      setState({ phase: "error", message: String(err) });
+    }
+  };
+
+  return (
+    <div className="media-viewer-backdrop" onClick={onClose}>
+      <div className="media-viewer export-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="media-viewer-bar">
+          <span className="media-viewer-name">{t("export.title")}</span>
+          <div className="media-viewer-actions">
+            <button className="primary" onClick={runExport} disabled={!canExport} title={t("export.runTitle")}>
+              {state.phase === "running" ? t("export.running") : t("export.run")}
+            </button>
+            <button onClick={onClose} title={t("export.closeTitle")}>
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="export-body">
+          <p className="export-summary">
+            {t("export.summary", {
+              clips: plan.video.length,
+              len: plan.durationSec.toFixed(1),
+              fps: plan.fps,
+            })}
+          </p>
+
+          <div className="export-fields">
+            <label className="field">
+              <span>{t("export.fps")}</span>
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={fps}
+                onChange={(e) => setFps(Math.max(1, Math.min(120, Number(e.target.value) || DEFAULT_EXPORT_FPS)))}
+              />
+            </label>
+            <label className="field">
+              <span>{t("export.outputName")}</span>
+              <input
+                type="text"
+                value={outputName}
+                placeholder={t("export.outputNamePlaceholder")}
+                onChange={(e) => setOutputName(e.target.value)}
+              />
+            </label>
+          </div>
+
+          {plan.video.length === 0 ? <p className="export-warning">{t("export.emptyPlan")}</p> : null}
+          {frames === null ? <p className="export-warning">{t("export.tooManyFrames")}</p> : null}
+          {plan.warnings.length > 0 ? (
+            <ul className="export-warnings">
+              {plan.warnings.map((w, i) => (
+                <li key={i} className="export-warning">
+                  {warningText(w)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {state.phase === "done" ? (
+            <p className="export-result" title={state.videoPath}>
+              {t("export.done", { path: state.videoPath, len: state.durationSec.toFixed(1) })}
+            </p>
+          ) : null}
+          {state.phase === "error" ? <p className="export-error">{state.message}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
