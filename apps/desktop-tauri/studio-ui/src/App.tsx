@@ -1123,7 +1123,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               />
             )}
           </div>
-          <Inspector node={selectedNode} onParamChange={onParamChange} />
+          {selectedNode ? (
+            <Inspector node={selectedNode} onParamChange={onParamChange} />
+          ) : (
+            <aside className="inspector">
+              <p className="muted">{t("inspector.selectNode")}</p>
+            </aside>
+          )}
         </div>
         <ProductionDrawer
           mode={drawerMode}
