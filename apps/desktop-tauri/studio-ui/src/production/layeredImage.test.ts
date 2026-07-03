@@ -6,6 +6,7 @@ import {
   LAYER_SPLIT_STUB_ENGINE,
   mergeLayersIntoAsset,
   parseLayeredImageAsset,
+  setLayerProtected,
   splitLayerInAsset,
   STUB_BACKGROUND_LAYER_ID,
   STUB_ORIGINAL_LAYER_ID,
@@ -191,5 +192,29 @@ describe("splitLayerInAsset", () => {
     expect(splitLayerInAsset(asset, STUB_ORIGINAL_LAYER_ID, parts)).toBe(asset);
     expect(splitLayerInAsset(asset, "nope", parts)).toBe(asset);
     expect(splitLayerInAsset(asset, STUB_SUBJECT_LAYER_ID, parts.slice(0, 1))).toBe(asset);
+  });
+});
+
+describe("setLayerProtected", () => {
+  const asset = stubLayeredImageAsset({
+    imagePath: "/a/b.png",
+    nodeId: "n1",
+    createdAt: "0",
+  });
+
+  it("sets and clears the protected flag without touching other layers", () => {
+    const marked = setLayerProtected(asset, STUB_SUBJECT_LAYER_ID, true);
+    expect(findLayer(marked, STUB_SUBJECT_LAYER_ID)!.protected).toBe(true);
+    expect(findLayer(marked, STUB_BACKGROUND_LAYER_ID)!.protected).toBeUndefined();
+    // the input asset is untouched
+    expect(findLayer(asset, STUB_SUBJECT_LAYER_ID)!.protected).toBeUndefined();
+    const cleared = setLayerProtected(marked, STUB_SUBJECT_LAYER_ID, false);
+    expect(findLayer(cleared, STUB_SUBJECT_LAYER_ID)!.protected).toBe(false);
+  });
+
+  it("is a no-op for locked/unknown layers or an unchanged flag", () => {
+    expect(setLayerProtected(asset, STUB_ORIGINAL_LAYER_ID, true)).toBe(asset);
+    expect(setLayerProtected(asset, "nope", true)).toBe(asset);
+    expect(setLayerProtected(asset, STUB_SUBJECT_LAYER_ID, false)).toBe(asset);
   });
 });

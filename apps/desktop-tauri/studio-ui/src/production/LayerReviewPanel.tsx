@@ -22,6 +22,11 @@ export interface LayerReviewPanelProps {
    * Omitted when splitting is unavailable (browser preview has no backend).
    */
   onSplitLayer?: (layerId: string) => void;
+  /**
+   * Mark / unmark an (unlocked) layer as protected so downstream edits keep
+   * its pixels. Omitted when the asset is read-only.
+   */
+  onToggleProtected?: (layerId: string) => void;
 }
 
 function layerVisible(layer: LayerCandidate, visibility: Record<string, boolean>): boolean {
@@ -102,6 +107,7 @@ export function LayerReviewPanel({
   onToggleVisibility,
   onMergeLayers,
   onSplitLayer,
+  onToggleProtected,
 }: LayerReviewPanelProps) {
   const t = useT();
   const [checked, setChecked] = useState<string[]>([]);
@@ -178,7 +184,22 @@ export function LayerReviewPanel({
                     {t("layers.issues", { n: issues })}
                   </span>
                 ) : null}
+                {layer.protected ? (
+                  <span className="layer-review-protected" title={t("layers.protectedTitle")}>
+                    {t("layers.protected")}
+                  </span>
+                ) : null}
               </button>
+              {onToggleProtected && !layer.locked ? (
+                <button
+                  className="layer-review-protect"
+                  onClick={() => onToggleProtected(layer.id)}
+                  title={t("layers.protectTitle")}
+                  aria-pressed={layer.protected ?? false}
+                >
+                  {layer.protected ? "🛡" : "○"}
+                </button>
+              ) : null}
               <button
                 className="layer-review-visibility"
                 onClick={() => onToggleVisibility(layer.id)}
