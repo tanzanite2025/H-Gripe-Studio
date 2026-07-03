@@ -333,25 +333,29 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     connectedImagePath,
   } = useModals({ nodes, edges });
 
-  // Image the drawer's Grade tab previews for the current target: image bin
-  // assets, still clips (over their source image) and image node outputs.
-  // Grading video-clip frames is plan step 6.
-  const gradeImagePath = useMemo<string | null>(() => {
-    if (!productionTarget) return null;
+  // What the drawer's Grade tab previews for the current target: image bin
+  // assets, still clips (over their source image) and image node outputs
+  // grade an image; video clips grade a frame of their source video.
+  const gradeSource = useMemo<{ imagePath: string | null; videoPath: string | null }>(() => {
+    const none = { imagePath: null, videoPath: null };
+    if (!productionTarget) return none;
     switch (productionTarget.kind) {
       case "asset": {
         const asset = binAssets.find((a) => a.id === productionTarget.assetId);
-        return asset && asset.kind === "image" ? asset.path : null;
+        return asset && asset.kind === "image" ? { imagePath: asset.path, videoPath: null } : none;
       }
       case "video_clip": {
         const found = findClip(timeline, productionTarget.clipId);
-        if (!found || found.clip.kind !== "still") return null;
-        return binAssets.find((a) => a.id === found.clip.assetId)?.path ?? null;
+        const asset = found ? binAssets.find((a) => a.id === found.clip.assetId) : undefined;
+        if (!found || !asset) return none;
+        return found.clip.kind === "still"
+          ? { imagePath: asset.path, videoPath: null }
+          : { imagePath: null, videoPath: asset.path };
       }
       case "node_output":
-        return connectedImagePath(productionTarget.nodeId);
+        return { imagePath: connectedImagePath(productionTarget.nodeId), videoPath: null };
       default:
-        return null;
+        return none;
     }
   }, [productionTarget, binAssets, timeline, connectedImagePath]);
 
@@ -756,7 +760,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSelectClip={handleSelectClip}
           onAddActiveToTimeline={handleAddActiveToTimeline}
           onRemoveClip={handleRemoveClip}
-          gradeImagePath={gradeImagePath}
+          gradeImagePath={gradeSource.imagePath}
+          gradeVideoPath={gradeSource.videoPath}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
           onGradeCommit={handleGradeCommit}
         />
