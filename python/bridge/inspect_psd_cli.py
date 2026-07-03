@@ -7,12 +7,11 @@ editor can validate a real PSD on disk *before* a run: that the template path
 actually points at a file, and that a configured placeholder layer name truly
 exists inside it, instead of only discovering the problem mid-compose.
 
-It deliberately reuses ``_layer_descriptor`` from
-``custom_nodes/hgripe_psd_nodes.py`` -- the same helper the ComfyUI PSD Template
-node uses to enumerate layers -- so layer naming / kind detection stays a single
-source of truth. Those helpers import cleanly without ``torch`` (heavy imports
-are deferred to call time), so this CLI runs with just ``Pillow`` + the vendored
-``psd_tools`` + ``attrs``.
+It deliberately reuses ``_layer_descriptor`` from ``hgripe_psd_nodes.py`` -- the
+same helper the PSD compose path uses to enumerate layers -- so layer naming /
+kind detection stays a single source of truth. Those helpers import cleanly
+without ``torch`` (heavy imports are deferred to call time), so this CLI runs
+with just ``Pillow`` + the vendored ``psd_tools`` + ``attrs``.
 
 Input is passed as CLI flags; a single JSON object is printed to stdout on
 success. A missing template path is reported as ``{"exists": false}`` (status
@@ -29,18 +28,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Resolve the repo root (this file lives at <root>/python/bridge/) and make both
-# the root (for ``custom_nodes``) and the vendored ``third_party`` importable,
-# exactly like ``compose_psd_cli.py`` and the ComfyUI nodes do.
+# Resolve the repo root (this file lives at <root>/python/bridge/) and make the
+# vendored ``third_party`` importable, exactly like ``compose_psd_cli.py`` does.
 _ROOT_DIR = Path(__file__).resolve().parents[2]
-for _candidate in (_ROOT_DIR, _ROOT_DIR / "third_party"):
-    if _candidate.is_dir() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
+_VENDOR_DIR = _ROOT_DIR / "third_party"
+if _VENDOR_DIR.is_dir() and str(_VENDOR_DIR) not in sys.path:
+    sys.path.insert(0, str(_VENDOR_DIR))
 
 # ``_layer_descriptor`` imports cleanly without torch and is the same helper the
-# ComfyUI PSD Template node uses, so reusing it keeps layer enumeration a single
-# source of truth with the nodes.
-from custom_nodes.hgripe_psd_nodes import _layer_descriptor  # noqa: E402
+# PSD compose path uses, so reusing it keeps layer enumeration a single source
+# of truth across the bridge CLIs.
+from hgripe_psd_nodes import _layer_descriptor  # noqa: E402
 
 # Refuse to open a PSD whose declared canvas is larger than this many pixels
 # (decompression-bomb guard, aligned with ``analyze_psd_cli`` / ``compose_psd_cli``).

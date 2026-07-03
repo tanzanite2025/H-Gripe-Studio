@@ -13,8 +13,8 @@ longer have to hand-describe the template's lighting.
 Phase 1 is deliberately heuristic and dependency-light: it uses only the
 vendored ``psd_tools`` + ``Pillow`` (no local VLM, no OpenCV). It reuses
 ``HGripePsdCompose._resolve_placeholder`` / ``_find_layer`` from
-``custom_nodes/hgripe_psd_nodes.py`` so placeholder + layer resolution stays a
-single source of truth with the ComfyUI nodes and the other bridge CLIs.
+``hgripe_psd_nodes.py`` so placeholder + layer resolution stays a single source
+of truth with the other bridge CLIs.
 
 The emitted JSON object matches the ``VisualContext`` contract defined once in
 ``apps/desktop-tauri/src-tauri/src/contracts.rs`` and mirrored in
@@ -32,18 +32,17 @@ from typing import Any
 
 import numpy as np
 
-# Resolve the repo root (this file lives at <root>/python/bridge/) and make both
-# the root (for ``custom_nodes``) and the vendored ``third_party`` importable,
-# exactly like the other bridge CLIs do.
+# Resolve the repo root (this file lives at <root>/python/bridge/) and make the
+# vendored ``third_party`` importable, exactly like the other bridge CLIs do.
 _ROOT_DIR = Path(__file__).resolve().parents[2]
-for _candidate in (_ROOT_DIR, _ROOT_DIR / "third_party"):
-    if _candidate.is_dir() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
+_VENDOR_DIR = _ROOT_DIR / "third_party"
+if _VENDOR_DIR.is_dir() and str(_VENDOR_DIR) not in sys.path:
+    sys.path.insert(0, str(_VENDOR_DIR))
 
 # These helpers import cleanly without torch (heavy imports inside
 # hgripe_psd_nodes are deferred to call time), so reusing them keeps placeholder
-# + layer resolution a single source of truth with the ComfyUI nodes.
-from custom_nodes.hgripe_psd_nodes import (  # noqa: E402
+# + layer resolution a single source of truth with the other bridge CLIs.
+from hgripe_psd_nodes import (  # noqa: E402
     HGripePsdCompose,
     _find_layer,
 )
