@@ -71,6 +71,44 @@ describe("nodeSpecs executor tagging", () => {
     }
   });
 
+  it("groups the palette by production category, in flow order", () => {
+    expect(paletteGroups().map((g) => g.category)).toEqual([
+      "source",
+      "generate",
+      "process",
+      "review",
+      "workflow",
+      "output",
+    ]);
+
+    const expected: Record<string, string> = {
+      prompt: "source",
+      imageSource: "source",
+      videoSource: "source",
+      psdTemplate: "source",
+      generate: "generate",
+      psdContextAnalyze: "process",
+      subjectMask: "process",
+      smartLayerSplit: "process",
+      crop: "process",
+      imageGrade: "process",
+      refineMaskEdge: "process",
+      imageEnhance: "process",
+      detailRepaint: "process",
+      matchLightColor: "process",
+      preview: "review",
+      detailWatchdog: "review",
+      batch: "workflow",
+      save: "output",
+      psdExport: "output",
+      videoAssemble: "output",
+      videoTrim: "output",
+    };
+    for (const [kind, category] of Object.entries(expected)) {
+      expect(NODE_SPECS[kind]?.category, kind).toBe(category);
+    }
+  });
+
   it("keeps implementation primitives out of the default palette", () => {
     const hidden = ["number", "compare", "logic", "if", "switch", "reroute"];
     const paletteKinds = new Set(paletteGroups().flatMap((group) => group.specs.map((spec) => spec.kind)));

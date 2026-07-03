@@ -12,11 +12,13 @@ const STATUS_COLOR: Partial<Record<NodeStatus, string>> = {
 };
 
 const CATEGORY_COLOR: Record<NodeSpec["category"], string> = {
-  input: "#6aa3ff",
+  source: "#6aa3ff",
   generate: "#b98cff",
-  control: "#ffa657",
-  utility: "#8a93a3",
+  process: "#ffa657",
+  review: "#ff8fa3",
+  workflow: "#b5cc4f",
   output: "#5fd0d0",
+  internal: "#8a93a3",
 };
 
 export function miniMapColor(status: NodeStatus | undefined, category: NodeSpec["category"]): string {
