@@ -340,9 +340,7 @@ pub(crate) fn execute_studio_smart_layer_split(
 
     let mut warnings: Vec<Value> = Vec::new();
     let mut suggested_review: Vec<Value> = Vec::new();
-    let review = |layer_id: &str, message: &str| {
-        json!({ "layer_id": layer_id, "severity": "warning", "message": message })
-    };
+    let review = |layer_id: &str, message: &str| json!({ "layer_id": layer_id, "severity": "warning", "message": message });
     if is_builtin {
         warnings.push(json!("builtin CPU segmentation (no model weight resolved)"));
         for id in [BACKGROUND_LAYER_ID, SUBJECT_LAYER_ID] {
@@ -442,7 +440,9 @@ pub(crate) fn execute_studio_smart_layer_split(
         ));
     }
     if detect_logo && logo_regions.is_empty() {
-        warnings.push(json!("logo detection found no mark-like regions near the canvas border"));
+        warnings.push(json!(
+            "logo detection found no mark-like regions near the canvas border"
+        ));
     }
     // The shadow candidate is a weight-free luminance heuristic: low
     // confidence and always flagged for review.
@@ -471,7 +471,9 @@ pub(crate) fn execute_studio_smart_layer_split(
         ));
     }
     if detect_shadow && shadow_region.is_none() {
-        warnings.push(json!("shadow detection found no shadow-like region next to the subject"));
+        warnings.push(json!(
+            "shadow detection found no shadow-like region next to the subject"
+        ));
     }
     // The reflection candidate is a weight-free mirrored-luminance heuristic:
     // low confidence and always flagged for review.
@@ -605,8 +607,8 @@ mod tests {
     #[test]
     fn requires_a_connected_image() {
         let root = std::env::temp_dir();
-        let err = execute_studio_smart_layer_split(&node(&root, &[]), &BTreeMap::new())
-            .unwrap_err();
+        let err =
+            execute_studio_smart_layer_split(&node(&root, &[]), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("connected image"), "{err}");
     }
 
@@ -840,7 +842,9 @@ mod tests {
         assert!(Path::new(mask).is_file(), "missing mask {mask}");
         assert!(Path::new(rgba).is_file(), "missing rgba {rgba}");
         assert!(
-            review.iter().any(|issue| issue["layer_id"] == "layer_logo_1"),
+            review
+                .iter()
+                .any(|issue| issue["layer_id"] == "layer_logo_1"),
             "no review issue for the logo layer"
         );
         // With text detection on too, a region claimed as text is not
@@ -924,7 +928,9 @@ mod tests {
                 .unwrap()
                 .clone();
             assert!(
-                review.iter().any(|issue| issue["layer_id"] == "layer_shadow"),
+                review
+                    .iter()
+                    .any(|issue| issue["layer_id"] == "layer_shadow"),
                 "no review issue for the shadow layer"
             );
         } else {

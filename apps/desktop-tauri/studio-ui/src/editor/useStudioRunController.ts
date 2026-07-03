@@ -23,6 +23,7 @@ import {
   type RunRecord,
 } from "./runhistory";
 import { useProjectScopedStore } from "./useProjectScopedStore";
+import { lowerWorkflowGraph, originNodeId } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
 import { parseLayeredImageAsset } from "../production/layeredImage";
 import { ancestorSubgraph, runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
@@ -162,6 +163,14 @@ export function useStudioRunController({
   // Node ids that reported "failed" during the in-flight run, in first-seen order.
   const runFailures = useRef<string[]>([]);
   const currentRunIdRef = useRef<string | null>(null);
+  // Lowered (hidden) node id -> visible card id for the in-flight run, so
+  // statuses/logs from lowered rows land on the card that owns them.
+  const loweredOrigin = useRef<Map<string, string>>(new Map());
+
+  const mapRunNodeId = useCallback(
+    (id: string) => originNodeId(loweredOrigin.current, id),
+    [],
+  );
 
   const setStatus = useCallback(
     (id: string, status: NodeStatus) => patchNode(id, { status }),
@@ -241,14 +250,20 @@ export function useStudioRunController({
     () => setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, durationMs: undefined, error: undefined } }))),
     [setNodes],
   );
-  const observer = useMemo(() => ({ onStatus: setStatus, onNodeRun: recordRun }), [setStatus, recordRun]);
+  const observer = useMemo(
+    () => ({
+      onStatus: (id: string, status: NodeStatus) => setStatus(mapRunNodeId(id), status),
+      onNodeRun: (id: string, info: NodeRunInfo) => recordRun(mapRunNodeId(id), info),
+    }),
+    [setStatus, recordRun, mapRunNodeId],
+  );
 
   const applyStudioRunResult = useCallback(
     (result: StudioGraphRunResult) => {
       const statuses = new Map(
-        Object.entries(result.statuses).map(([id, status]) => [id, toNodeStatus(status)]),
+        Object.entries(result.statuses).map(([id, status]) => [mapRunNodeId(id), toNodeStatus(status)]),
       );
-      const runs = new Map(result.node_runs.map((run) => [run.node_id, run]));
+      const runs = new Map(result.node_runs.map((run) => [mapRunNodeId(run.node_id), run]));
       setNodes((ns) =>
         ns.map((n) => {
           const d = n.data as HgripeNodeData;
@@ -265,11 +280,14 @@ export function useStudioRunController({
         }),
       );
     },
-    [setNodes],
+    [setNodes, mapRunNodeId],
   );
 
   const applyStudioRunEvent = useCallback(
-    (event: StudioGraphRunEvent) => {
+    (rawEvent: StudioGraphRunEvent) => {
+      const event = rawEvent.node_id
+        ? { ...rawEvent, node_id: mapRunNodeId(rawEvent.node_id) }
+        : rawEvent;
       if (!event.node_id) {
         if (event.message) pushLog("info", event.message);
         return;
@@ -310,7 +328,7 @@ export function useStudioRunController({
         }),
       );
     },
-    [setNodes, pushLog],
+    [setNodes, pushLog, mapRunNodeId],
   );
 
   const beginRustRun = useCallback(() => {
@@ -350,6 +368,8 @@ export function useStudioRunController({
       const paths: string[] = [];
       const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
       for (const node of graph.nodes) {
+        // Lowered row nodes have no visible card of their own kind to patch.
+        if (loweredOrigin.current.has(node.id)) continue;
         const out = result.outputs.get(node.id);
         if (node.kind === "preview" || node.kind === "crop") {
           // Surface the result image onto the card so confirming an edit (or a
@@ -441,8 +461,10 @@ export function useStudioRunController({
     let outcome: RunOutcome = "succeeded";
     pushLog("info", `▶ run started (${backend})`);
     try {
-      const graph = toWorkflowGraph(nodes, edges);
-      await warnPsdChain(graph);
+      const authored = toWorkflowGraph(nodes, edges);
+      await warnPsdChain(authored);
+      const { graph, origin } = lowerWorkflowGraph(authored);
+      loweredOrigin.current = origin;
       if (useRustBackend) {
         const runId = beginRustRun();
         try {
@@ -523,8 +545,10 @@ export function useStudioRunController({
       pushLog("info", `▶ run up to ${nodeId} started (${backend})`);
       try {
         const full = toWorkflowGraph(nodes, edges);
-        const graph = ancestorSubgraph(full, nodeId);
-        await warnPsdChain(graph);
+        const authored = ancestorSubgraph(full, nodeId);
+        await warnPsdChain(authored);
+        const { graph, origin } = lowerWorkflowGraph(authored);
+        loweredOrigin.current = origin;
         if (useRustBackend) {
           const runId = beginRustRun();
           try {
@@ -620,8 +644,10 @@ export function useStudioRunController({
     const browserToken = useRustBackend ? null : { cancelled: false };
     if (browserToken) browserCancel.current = browserToken;
     try {
-      const graph = toWorkflowGraph(nodes, edges);
-      await warnPsdChain(graph);
+      const authored = toWorkflowGraph(nodes, edges);
+      await warnPsdChain(authored);
+      const { graph, origin } = lowerWorkflowGraph(authored);
+      loweredOrigin.current = origin;
       const collected: string[] = [];
       for (let i = 0; i < batchCount; i++) {
         if (browserToken?.cancelled) throw new Error("batch cancelled");

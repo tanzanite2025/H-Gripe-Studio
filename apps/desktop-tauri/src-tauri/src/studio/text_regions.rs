@@ -244,8 +244,7 @@ pub(crate) fn logo_region_masks(image: &RgbaImage) -> Vec<GrayImage> {
         }
         let cx = f64::from(x0 + x1) / 2.0 / f64::from(width.max(1));
         let cy = f64::from(y0 + y1) / 2.0 / f64::from(height.max(1));
-        let near_border =
-            cx < band || cx > 1.0 - band || cy < band || cy > 1.0 - band;
+        let near_border = cx < band || cx > 1.0 - band || cy < band || cy > 1.0 - band;
         if !near_border {
             continue;
         }
