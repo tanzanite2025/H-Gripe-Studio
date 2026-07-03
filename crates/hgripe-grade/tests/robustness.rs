@@ -192,13 +192,26 @@ fn all_ops() -> Vec<GradeOp> {
             table: vec![0.0; 9],
         },
         // Degenerate spatial amounts: non-finite, negative, extreme.
-        GradeOp::Sharpen { amount: f32::NAN },
-        GradeOp::Sharpen { amount: -1e6 },
-        GradeOp::Sharpen { amount: 1e6 },
+        GradeOp::Sharpen {
+            amount: f32::NAN,
+            radius: 1,
+        },
+        GradeOp::Sharpen {
+            amount: -1e6,
+            radius: 0,
+        },
+        GradeOp::Sharpen {
+            amount: 1e6,
+            radius: u32::MAX,
+        },
         GradeOp::Denoise {
             amount: f32::INFINITY,
+            radius: 3,
         },
-        GradeOp::Denoise { amount: -10.0 },
+        GradeOp::Denoise {
+            amount: -10.0,
+            radius: 100,
+        },
         GradeOp::FilmGrain {
             amount: f32::NAN,
             seed: u32::MAX,

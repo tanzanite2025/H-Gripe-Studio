@@ -318,8 +318,54 @@ fn spatial_ops_match_cpu() {
     let Some(mut g) = grader() else { return };
     let surface = gradient(40, 30, GradeSpace::Srgb);
     for (name, op, tol) in [
-        ("sharpen", GradeOp::Sharpen { amount: 1.5 }, 1e-4f32),
-        ("denoise", GradeOp::Denoise { amount: 0.8 }, 1e-4),
+        (
+            "sharpen",
+            GradeOp::Sharpen {
+                amount: 1.5,
+                radius: 1,
+            },
+            1e-4f32,
+        ),
+        (
+            "sharpen r2",
+            GradeOp::Sharpen {
+                amount: 1.5,
+                radius: 2,
+            },
+            1e-4,
+        ),
+        (
+            "sharpen r3",
+            GradeOp::Sharpen {
+                amount: 1.5,
+                radius: 3,
+            },
+            1e-4,
+        ),
+        (
+            "denoise",
+            GradeOp::Denoise {
+                amount: 0.8,
+                radius: 1,
+            },
+            1e-4,
+        ),
+        (
+            "denoise r2",
+            GradeOp::Denoise {
+                amount: 0.8,
+                radius: 2,
+            },
+            1e-4,
+        ),
+        (
+            "denoise r3",
+            GradeOp::Denoise {
+                amount: 0.8,
+                radius: 3,
+            },
+            1e-4,
+        ),
         (
             "film_grain",
             GradeOp::FilmGrain {
@@ -429,7 +475,10 @@ fn multi_layer_docs_match_cpu_in_every_space() {
                         amount: 1.15,
                         pivot: 0.5,
                     },
-                    GradeOp::Sharpen { amount: 0.8 },
+                    GradeOp::Sharpen {
+                        amount: 0.8,
+                        radius: 2,
+                    },
                     GradeOp::Saturation { amount: 0.2 },
                 ]),
                 GradeLayer {

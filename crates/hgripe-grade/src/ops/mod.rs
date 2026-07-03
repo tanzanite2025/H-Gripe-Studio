@@ -22,6 +22,7 @@ use crate::surface::GradeSurface;
 use crate::trc::{trc_decode, trc_encode};
 
 pub use lut::parse_cube;
+pub use spatial::{temporal_denoise, MAX_RADIUS};
 pub use spline::MonotoneSpline;
 
 pub(crate) use hsl::rgb_to_hsl;
@@ -42,6 +43,10 @@ pub enum CurveChannel {
     Red,
     Green,
     Blue,
+}
+
+fn default_radius() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -160,14 +165,24 @@ pub enum GradeOp {
     /// points accumulate. No points is identity; non-finite points are
     /// skipped.
     ColorWarper { points: Vec<WarpPoint> },
-    /// Unsharp mask on encoded values: `v + amount × (v − blur3×3(v))`,
-    /// clamped. Spatial — see [`GradeOp::is_spatial`]. Neutral is
-    /// `amount = 0`.
-    Sharpen { amount: f32 },
-    /// Edge-preserving 3×3 bilateral denoise on encoded values, blended
-    /// with the original by `amount` (`0..=1`). Spatial — see
+    /// Unsharp mask on encoded values: `v + amount × (v − blur(v))`,
+    /// clamped; `blur` is the (2×`radius`+1)² box mean (`radius` clamps to
+    /// `1..=3`, i.e. 3×3 / 5×5 / 7×7; absent reads as 1). Spatial — see
     /// [`GradeOp::is_spatial`]. Neutral is `amount = 0`.
-    Denoise { amount: f32 },
+    Sharpen {
+        amount: f32,
+        #[serde(default = "default_radius")]
+        radius: u32,
+    },
+    /// Edge-preserving bilateral denoise on encoded values over the
+    /// (2×`radius`+1)² neighbourhood (`radius` clamps to `1..=3`; absent
+    /// reads as 1), blended with the original by `amount` (`0..=1`).
+    /// Spatial — see [`GradeOp::is_spatial`]. Neutral is `amount = 0`.
+    Denoise {
+        amount: f32,
+        #[serde(default = "default_radius")]
+        radius: u32,
+    },
     /// Monochrome film grain on encoded values: deterministic per-pixel
     /// noise in `[-1, 1)` from an integer hash of (x, y, `seed`), scaled by
     /// `amount` (`0..=1`). Spatial (position-dependent) — see
@@ -454,8 +469,8 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 surface.data[i + 2] = out[2];
             }
         }
-        GradeOp::Sharpen { amount } => spatial::sharpen(surface, *amount),
-        GradeOp::Denoise { amount } => spatial::denoise(surface, *amount),
+        GradeOp::Sharpen { amount, radius } => spatial::sharpen(surface, *amount, *radius),
+        GradeOp::Denoise { amount, radius } => spatial::denoise(surface, *amount, *radius),
         GradeOp::FilmGrain { amount, seed } => spatial::film_grain(surface, *amount, *seed),
     }
 }

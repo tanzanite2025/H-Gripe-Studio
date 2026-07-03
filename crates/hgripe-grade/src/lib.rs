@@ -26,7 +26,10 @@ pub use doc::apply_parallel;
 pub use doc::{apply, GradeDoc, GradeLayer};
 #[cfg(feature = "gpu")]
 pub use gpu::{GpuError, GpuGrader};
-pub use ops::{apply_op, parse_cube, CurveChannel, GradeOp, MonotoneSpline, WarpPoint};
+pub use ops::{
+    apply_op, parse_cube, temporal_denoise, CurveChannel, GradeOp, MonotoneSpline, WarpPoint,
+    MAX_RADIUS,
+};
 pub use qualifier::HslQualifier;
 pub use scopes::{histogram, vectorscope, waveform, Histogram, Vectorscope, Waveform};
 pub use surface::{GradeSpace, GradeSurface};

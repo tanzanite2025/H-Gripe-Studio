@@ -84,8 +84,14 @@ fn test_doc(n_px: usize) -> GradeDoc {
                 mask: None,
                 qualifier: None,
                 ops: vec![
-                    GradeOp::Sharpen { amount: 0.8 },
-                    GradeOp::Denoise { amount: 0.5 },
+                    GradeOp::Sharpen {
+                        amount: 0.8,
+                        radius: 2,
+                    },
+                    GradeOp::Denoise {
+                        amount: 0.5,
+                        radius: 3,
+                    },
                     GradeOp::FilmGrain {
                         amount: 0.1,
                         seed: 1234,

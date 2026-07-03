@@ -316,10 +316,10 @@ function applyOp(surface, op) {
       break;
     }
     case "sharpen":
-      sharpen(surface, op.amount);
+      sharpen(surface, op.amount, op.radius ?? 1);
       break;
     case "denoise":
-      denoise(surface, op.amount);
+      denoise(surface, op.amount, op.radius ?? 1);
       break;
     case "film_grain":
       filmGrain(surface, op.amount, op.seed);
@@ -477,60 +477,81 @@ function lut3dSample(size, table, rgb) {
 
 // ---- Spatial ops (wave 4): encoded-signal, full-frame neighbourhood maths ----
 
-// 3×3 neighbourhood of (x, y) with coordinates clamped to the frame edges.
-function taps3x3(x, y, w, h) {
+// Radii clamp to 1..=3 (3×3 / 5×5 / 7×7) on both kernel ends.
+const MAX_RADIUS = 3;
+const clampRadius = (radius) =>
+  Number.isFinite(radius) ? Math.min(Math.max(Math.trunc(radius), 1), MAX_RADIUS) : 1;
+
+// (2r+1)×(2r+1) neighbourhood of (x, y) with coordinates clamped to the
+// frame edges, row-major.
+function taps(x, y, w, h, r) {
   const out = [];
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
       out.push(Math.min(Math.max(y + dy, 0), h - 1) * w + Math.min(Math.max(x + dx, 0), w - 1));
     }
   }
   return out;
 }
 
-// Unsharp mask: out = v + amount × (v − blur3×3(v)), clamped to 0..=1.
-function sharpen(surface, amount) {
+// C(n, k) — binomial spatial weights (row 2r of Pascal's triangle).
+function binomial(n, k) {
+  let out = 1;
+  for (let j = 0; j < k; j++) out = (out * (n - j)) / (j + 1);
+  return out;
+}
+
+// Unsharp mask: out = v + amount × (v − blur(v)) with a (2r+1)² box mean,
+// clamped to 0..=1.
+function sharpen(surface, amount, radius) {
   const a = Number.isFinite(amount) ? Math.min(Math.max(amount, 0), 10) : 0;
+  const r = clampRadius(radius);
+  const count = (2 * r + 1) * (2 * r + 1);
   const { w, h } = surface;
   if (w === 0 || h === 0) return;
   const src = surface.data.map(clamp01);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const taps = taps3x3(x, y, w, h);
+      const ts = taps(x, y, w, h, r);
       const i = (y * w + x) * 4;
       for (let c = 0; c < 3; c++) {
         let sum = 0;
-        for (const t of taps) sum += src[t * 4 + c];
+        for (const t of ts) sum += src[t * 4 + c];
         const v = src[i + c];
-        surface.data[i + c] = clamp01(v + a * (v - sum / 9));
+        surface.data[i + c] = clamp01(v + a * (v - sum / count));
       }
     }
   }
 }
 
-// Binomial 3×3 spatial weights (1-2-1 ⊗ 1-2-1), row-major like taps3x3.
-const BILATERAL_SPATIAL = [1, 2, 1, 2, 4, 2, 1, 2, 1];
-
-// Edge-preserving 3×3 bilateral: binomial spatial × Gaussian range (σ = 0.1),
-// blended with the original by amount (0..=1).
-function denoise(surface, amount) {
+// Edge-preserving (2r+1)² bilateral: binomial spatial (C(2r, r+dx) ×
+// C(2r, r+dy)) × Gaussian range (σ = 0.1), blended with the original by
+// amount (0..=1).
+function denoise(surface, amount, radius) {
   const a = Number.isFinite(amount) ? clamp01(amount) : 0;
+  const r = clampRadius(radius);
   const { w, h } = surface;
   if (w === 0 || h === 0) return;
   const SIGMA = 0.1;
+  const spatial = [];
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      spatial.push(binomial(2 * r, r + dx) * binomial(2 * r, r + dy));
+    }
+  }
   const src = surface.data.map(clamp01);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const taps = taps3x3(x, y, w, h);
+      const ts = taps(x, y, w, h, r);
       const i = (y * w + x) * 4;
       for (let c = 0; c < 3; c++) {
         const v = src[i + c];
         let sum = 0;
         let weight = 0;
-        for (let k = 0; k < 9; k++) {
-          const u = src[taps[k] * 4 + c];
+        for (let k = 0; k < ts.length; k++) {
+          const u = src[ts[k] * 4 + c];
           const d = (u - v) / SIGMA;
-          const wgt = BILATERAL_SPATIAL[k] * Math.exp(-d * d);
+          const wgt = spatial[k] * Math.exp(-d * d);
           sum += wgt * u;
           weight += wgt;
         }
@@ -1044,6 +1065,17 @@ const spatialCases = [
       { type: "sharpen", amount: 1.2 },
     ])],
   }, spatialInput),
+  docCase("sharpen: radius 2 (5×5 box mean)", { layers: [layer([{ type: "sharpen", amount: 1.0, radius: 2 }])] }, spatialInput),
+  docCase("sharpen: radius 3 (7×7, mostly edge-clamped taps)", { layers: [layer([{ type: "sharpen", amount: 1.0, radius: 3 }])] }, spatialInput),
+  docCase("sharpen: out-of-range radius clamps to 3", { layers: [layer([{ type: "sharpen", amount: 1.0, radius: 9 }])] }, spatialInput),
+  docCase("denoise: radius 2 (5×5 binomial) keeps the edge", { layers: [layer([{ type: "denoise", amount: 1.0, radius: 2 }])] }, spatialInput),
+  docCase("denoise: radius 3 (7×7 binomial)", { layers: [layer([{ type: "denoise", amount: 1.0, radius: 3 }])] }, spatialInput),
+  docCase("spatial chain with radii under opacity", {
+    layers: [layer([
+      { type: "denoise", amount: 0.6, radius: 2 },
+      { type: "sharpen", amount: 0.8, radius: 3 },
+    ], { opacity: 0.85 })],
+  }, spatialInput),
 ];
 
 writeFileSync(
@@ -1051,6 +1083,62 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: spatialCases }, null, 2) + "\n",
 );
 console.log(`wrote ${spatialCases.length} spatial cases`);
+
+// ---- Temporal denoise cases: cross-frame, not a GradeOp — `kind: temporal`
+// runs `temporal_denoise(current, prev, amount)` on both ends ----
+
+// Motion-adaptive blend toward the previous frame: Gaussian range weight
+// (σ = 0.1) so big frame-to-frame differences (motion) are kept.
+function temporalDenoise(current, prev, amount) {
+  const a = Number.isFinite(amount) ? clamp01(amount) : 0;
+  if (
+    current.w !== prev.w ||
+    current.h !== prev.h ||
+    current.space !== prev.space ||
+    current.data.length !== prev.data.length
+  ) {
+    return;
+  }
+  const SIGMA = 0.1;
+  for (let i = 0; i < current.data.length; i++) {
+    if (i % 4 === 3) continue;
+    const v = clamp01(current.data[i]);
+    const u = clamp01(prev.data[i]);
+    const d = (u - v) / SIGMA;
+    const w = Math.exp(-d * d);
+    current.data[i] = clamp01(v + a * w * (u - v));
+  }
+}
+
+// The "previous frame": spatialInput plus small noise on some channels and
+// one large (motion-like) change, exercising both weight regimes.
+const temporalPrev = {
+  w: 4, h: 3, space: "srgb",
+  data: spatialInput.data.map((v, i) => {
+    if (i % 4 === 3) return v;
+    if (i === 0) return 0.9; // large change: motion, mostly kept
+    return clamp01(v + (i % 3 === 0 ? 0.03 : -0.02)); // small noise
+  }),
+};
+
+const temporalCase = (name, amount, prev, input, tolerance = 2e-5) => {
+  const current = { ...input, data: [...input.data] };
+  temporalDenoise(current, prev, amount);
+  return { name, amount, prev, input, expected: current.data, tolerance };
+};
+
+const temporalCases = [
+  temporalCase("temporal: amount 0 is a no-op", 0, temporalPrev, spatialInput),
+  temporalCase("temporal: noise converges, motion is kept", 1.0, temporalPrev, spatialInput),
+  temporalCase("temporal: half strength", 0.5, temporalPrev, spatialInput),
+  temporalCase("temporal: mismatched prev is a no-op", 1.0, { ...temporalPrev, w: 3, h: 4 }, spatialInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/temporal_denoise.json", import.meta.url),
+  JSON.stringify({ kind: "temporal", cases: temporalCases }, null, 2) + "\n",
+);
+console.log(`wrote ${temporalCases.length} temporal cases`);
 
 // ---- Scope cases (wave 3): read-only analysers over a surface ----
 // Scope maths is f64 on both ends (Rust widens to f64), so the integer
