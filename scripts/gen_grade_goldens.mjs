@@ -324,6 +324,12 @@ function applyOp(surface, op) {
     case "film_grain":
       filmGrain(surface, op.amount, op.seed);
       break;
+    case "blur":
+      gaussianBlur(surface, op.sigma);
+      break;
+    case "vignette":
+      vignette(surface, op.amount, op.midpoint ?? 0.5, op.feather ?? 0.5);
+      break;
     case "color_warper": {
       const points = op.points.filter((p) =>
         [p.hue, p.sat, p.hue_shift, p.sat_scale, p.hue_radius, p.sat_radius].every((v) => Number.isFinite(v)),
@@ -584,6 +590,79 @@ function filmGrain(surface, amount, seed) {
       const i = (y * w + x) * 4;
       for (let c = 0; c < 3; c++) {
         surface.data[i + c] = clamp01(clamp01(surface.data[i + c]) + a * noise);
+      }
+    }
+  }
+}
+
+// Separable large-radius Gaussian blur: two 1D passes (horizontal, then
+// vertical) over the normalised exp(−k²/(2σ²)) kernel with radius ceil(3σ)
+// and edge-clamped taps; sigma clamps to 0..=32.
+const MAX_BLUR_SIGMA = 32;
+function gaussianWeights(sigma) {
+  const s = Number.isFinite(sigma) ? Math.min(Math.max(sigma, 0), MAX_BLUR_SIGMA) : 0;
+  const r = Math.ceil(3 * s);
+  if (r === 0) return null;
+  const s2 = 2 * s * s;
+  const raw = [];
+  for (let k = -r; k <= r; k++) raw.push(Math.exp(-(k * k) / s2));
+  const sum = raw.reduce((acc, w) => acc + w, 0);
+  return [r, raw.map((w) => w / sum)];
+}
+
+function gaussianBlur(surface, sigma) {
+  const kernel = gaussianWeights(sigma);
+  if (!kernel) return;
+  const [r, weights] = kernel;
+  const { w, h } = surface;
+  if (w === 0 || h === 0) return;
+  const src = surface.data.map(clamp01);
+  const tmp = src.slice();
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let k = 0; k < weights.length; k++) {
+          const tx = Math.min(Math.max(x + k - r, 0), w - 1);
+          sum += weights[k] * src[(y * w + tx) * 4 + c];
+        }
+        tmp[i + c] = sum;
+      }
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let k = 0; k < weights.length; k++) {
+          const ty = Math.min(Math.max(y + k - r, 0), h - 1);
+          sum += weights[k] * tmp[(ty * w + x) * 4 + c];
+        }
+        surface.data[i + c] = clamp01(sum);
+      }
+    }
+  }
+}
+
+// Parametric vignette: with the corner distance normalised to 1, each
+// channel scales by 1 + amount × smoothstep((d − midpoint) / feather).
+function vignette(surface, amount, midpoint, feather) {
+  const a = Number.isFinite(amount) ? Math.min(Math.max(amount, -1), 1) : 0;
+  const m = Number.isFinite(midpoint) ? clamp01(midpoint) : 0.5;
+  const f = Number.isFinite(feather) ? Math.min(Math.max(feather, 1e-3), 1) : 0.5;
+  const { w, h } = surface;
+  if (w === 0 || h === 0) return;
+  for (let y = 0; y < h; y++) {
+    const ny = ((y + 0.5) / h) * 2 - 1;
+    for (let x = 0; x < w; x++) {
+      const nx = ((x + 0.5) / w) * 2 - 1;
+      const d = Math.sqrt(nx * nx + ny * ny) / Math.SQRT2;
+      const gain = 1 + a * smoothstep((d - m) / f);
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        surface.data[i + c] = clamp01(clamp01(surface.data[i + c]) * gain);
       }
     }
   }
@@ -1083,6 +1162,50 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: spatialCases }, null, 2) + "\n",
 );
 console.log(`wrote ${spatialCases.length} spatial cases`);
+
+// ---- Blur + vignette cases (waves 4 and 2): the separable Gaussian
+// primitive and the parametric radial gain ----
+
+// A 6x5 surface with a bright block and a dark corner: enough rows/columns
+// for the two 1D passes and edge-clamped taps to differ, plus off-centre
+// structure so the vignette's radial falloff is anisotropic.
+const blurInput = {
+  w: 6, h: 5, space: "srgb",
+  data: Array.from({ length: 30 }, (_, px) => {
+    const x = px % 6;
+    const y = Math.floor(px / 6);
+    const bright = x >= 2 && x <= 3 && y >= 1 && y <= 2;
+    return [bright ? 0.9 : 0.15, bright ? 0.8 : 0.2, bright ? 0.3 : 0.6, y === 4 ? 0.5 : 1.0];
+  }).flat(),
+};
+
+const blurVignetteCases = [
+  docCase("blur: sigma 0 is a no-op", { layers: [layer([{ type: "blur", sigma: 0 }])] }, blurInput),
+  docCase("blur: sigma 0.8 (radius 3)", { layers: [layer([{ type: "blur", sigma: 0.8 }])] }, blurInput, 5e-5),
+  docCase("blur: sigma 2 spreads the block", { layers: [layer([{ type: "blur", sigma: 2.0 }])] }, blurInput, 5e-5),
+  docCase("blur: large sigma flattens toward the mean", { layers: [layer([{ type: "blur", sigma: 8.0 }])] }, blurInput, 1e-4),
+  docCase("blur: out-of-range sigma clamps to 32", { layers: [layer([{ type: "blur", sigma: 99 }])] }, blurInput, 1e-4),
+  docCase("blur: chained after exposure in one layer", {
+    layers: [layer([{ type: "exposure", ev: 0.5 }, { type: "blur", sigma: 1.5 }])],
+  }, blurInput, 5e-5),
+  docCase("vignette: amount 0 is a no-op", { layers: [layer([{ type: "vignette", amount: 0, midpoint: 0.5, feather: 0.5 }])] }, blurInput),
+  docCase("vignette: darken edges", { layers: [layer([{ type: "vignette", amount: -0.8, midpoint: 0.4, feather: 0.5 }])] }, blurInput),
+  docCase("vignette: brighten edges", { layers: [layer([{ type: "vignette", amount: 0.6, midpoint: 0.3, feather: 0.6 }])] }, blurInput),
+  docCase("vignette: hard edge (small feather)", { layers: [layer([{ type: "vignette", amount: -1.0, midpoint: 0.6, feather: 0.001 }])] }, blurInput),
+  docCase("vignette: default midpoint/feather", { layers: [layer([{ type: "vignette", amount: -0.5 }])] }, blurInput),
+  docCase("blur then vignette under opacity", {
+    layers: [layer([
+      { type: "blur", sigma: 1.2 },
+      { type: "vignette", amount: -0.7, midpoint: 0.45, feather: 0.4 },
+    ], { opacity: 0.85 })],
+  }, blurInput, 5e-5),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_blur_vignette.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: blurVignetteCases }, null, 2) + "\n",
+);
+console.log(`wrote ${blurVignetteCases.length} blur/vignette cases`);
 
 // ---- Temporal denoise cases: cross-frame, not a GradeOp — `kind: temporal`
 // runs `temporal_denoise(current, prev, amount)` on both ends ----

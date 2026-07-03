@@ -3,7 +3,7 @@
 // they are only correct over a full frame. All three work on the encoded
 // signal, clamped to `0..=1`.
 
-import { clamp01, type GradeSurface } from "./types";
+import { clamp01, smoothstep, type GradeSurface } from "./types";
 
 /** Largest supported kernel radius (7×7); radii clamp to `1..=MAX_RADIUS`. */
 export const MAX_RADIUS = 3;
@@ -93,6 +93,90 @@ export function denoise(surface: GradeSurface, amount: number, radius = 1): void
         }
         const filtered = sum / weight;
         surface.data[i + c] = clamp01(v + a * (filtered - v));
+      }
+    }
+  }
+}
+
+/**
+ * Largest supported Gaussian blur sigma, in pixels; sigmas clamp to
+ * `0..=MAX_BLUR_SIGMA` and the kernel radius is `ceil(3σ)`.
+ */
+export const MAX_BLUR_SIGMA = 32;
+
+// The separable Gaussian kernel for `sigma`: `[radius, weights]` with
+// weights normalised (computed in f64, rounded to f32 — mirrors Rust
+// `gaussian_weights`), or null when the clamped sigma rounds to radius 0.
+function gaussianWeights(sigma: number): [number, Float32Array] | null {
+  const s = Number.isFinite(sigma) ? Math.min(Math.max(sigma, 0), MAX_BLUR_SIGMA) : 0;
+  const r = Math.ceil(3 * s);
+  if (r === 0) return null;
+  const s2 = 2 * s * s;
+  const raw: number[] = [];
+  for (let k = -r; k <= r; k++) raw.push(Math.exp(-(k * k) / s2));
+  const sum = raw.reduce((acc, w) => acc + w, 0);
+  return [r, Float32Array.from(raw, (w) => w / sum)];
+}
+
+// Separable large-radius Gaussian blur on encoded values: two 1D passes
+// (horizontal, then vertical) over the normalised kernel with edge-clamped
+// taps (mirrors Rust `gaussian_blur`; sigma clamps to `0..=32`, neutral 0).
+export function gaussianBlur(surface: GradeSurface, sigma: number): void {
+  const kernel = gaussianWeights(sigma);
+  if (!kernel) return;
+  const [r, weights] = kernel;
+  const { w, h } = surface;
+  if (w === 0 || h === 0) return;
+  const src = Float32Array.from(surface.data, clamp01);
+  const tmp = Float32Array.from(src);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let k = 0; k < weights.length; k++) {
+          const tx = Math.min(Math.max(x + k - r, 0), w - 1);
+          sum = Math.fround(sum + Math.fround(weights[k] * src[(y * w + tx) * 4 + c]));
+        }
+        tmp[i + c] = sum;
+      }
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let k = 0; k < weights.length; k++) {
+          const ty = Math.min(Math.max(y + k - r, 0), h - 1);
+          sum = Math.fround(sum + Math.fround(weights[k] * tmp[(ty * w + x) * 4 + c]));
+        }
+        surface.data[i + c] = clamp01(sum);
+      }
+    }
+  }
+}
+
+// Parametric vignette on encoded values: a radial gain over the frame's
+// centred ellipse — with the corner distance normalised to 1, each channel
+// scales by `1 + amount × smoothstep((d − midpoint) / feather)`, clamped
+// (mirrors Rust `vignette`; amount clamps to `−1..=1`, midpoint to `0..=1`,
+// feather to `1e-3..=1`).
+export function vignette(surface: GradeSurface, amount: number, midpoint: number, feather: number): void {
+  const a = Number.isFinite(amount) ? Math.min(Math.max(amount, -1), 1) : 0;
+  const m = Number.isFinite(midpoint) ? clamp01(midpoint) : 0.5;
+  const f = Number.isFinite(feather) ? Math.min(Math.max(feather, 1e-3), 1) : 0.5;
+  const { w, h } = surface;
+  if (w === 0 || h === 0) return;
+  for (let y = 0; y < h; y++) {
+    const ny = Math.fround(((y + 0.5) / h) * 2 - 1);
+    for (let x = 0; x < w; x++) {
+      const nx = Math.fround(((x + 0.5) / w) * 2 - 1);
+      const d = Math.fround(Math.sqrt(nx * nx + ny * ny) / Math.SQRT2);
+      const gain = 1 + a * smoothstep((d - m) / f);
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        surface.data[i + c] = clamp01(clamp01(surface.data[i + c]) * gain);
       }
     }
   }

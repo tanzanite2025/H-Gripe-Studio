@@ -22,7 +22,10 @@ use crate::surface::GradeSurface;
 use crate::trc::{trc_decode, trc_encode};
 
 pub use lut::parse_cube;
-pub use spatial::{temporal_denoise, MAX_RADIUS};
+pub use spatial::{temporal_denoise, MAX_BLUR_SIGMA, MAX_RADIUS};
+
+#[cfg(feature = "gpu")]
+pub(crate) use spatial::gaussian_weights;
 pub use spline::MonotoneSpline;
 
 pub(crate) use hsl::rgb_to_hsl;
@@ -188,6 +191,35 @@ pub enum GradeOp {
     /// `amount` (`0..=1`). Spatial (position-dependent) — see
     /// [`GradeOp::is_spatial`]. Neutral is `amount = 0`.
     FilmGrain { amount: f32, seed: u32 },
+    /// Separable large-radius Gaussian blur on encoded values: two 1D
+    /// passes (horizontal, vertical) over the normalised `exp(−k²/(2σ²))`
+    /// kernel with radius `ceil(3σ)` and edge-clamped taps. `sigma` is in
+    /// pixels, clamped to `0..=`[`MAX_BLUR_SIGMA`]. The blur primitive
+    /// halation / bloom / glow / dehaze build on. Spatial — see
+    /// [`GradeOp::is_spatial`]. Neutral is `sigma = 0`.
+    Blur { sigma: f32 },
+    /// Parametric vignette on encoded values: a radial gain over the
+    /// frame's centred ellipse. With the corner distance normalised to 1,
+    /// each channel scales by `1 + amount × smoothstep((d − midpoint) /
+    /// feather)`, clamped. `amount` clamps to `−1..=1` (negative darkens
+    /// the edges), `midpoint` to `0..=1`, `feather` to `1e-3..=1`. Spatial
+    /// (position-dependent) — see [`GradeOp::is_spatial`]. Neutral is
+    /// `amount = 0`.
+    Vignette {
+        amount: f32,
+        #[serde(default = "default_midpoint")]
+        midpoint: f32,
+        #[serde(default = "default_feather")]
+        feather: f32,
+    },
+}
+
+fn default_midpoint() -> f32 {
+    0.5
+}
+
+fn default_feather() -> f32 {
+    0.5
 }
 
 impl GradeOp {
@@ -198,7 +230,11 @@ impl GradeOp {
     pub fn is_spatial(&self) -> bool {
         matches!(
             self,
-            GradeOp::Sharpen { .. } | GradeOp::Denoise { .. } | GradeOp::FilmGrain { .. }
+            GradeOp::Sharpen { .. }
+                | GradeOp::Denoise { .. }
+                | GradeOp::FilmGrain { .. }
+                | GradeOp::Blur { .. }
+                | GradeOp::Vignette { .. }
         )
     }
 }
@@ -472,6 +508,12 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
         GradeOp::Sharpen { amount, radius } => spatial::sharpen(surface, *amount, *radius),
         GradeOp::Denoise { amount, radius } => spatial::denoise(surface, *amount, *radius),
         GradeOp::FilmGrain { amount, seed } => spatial::film_grain(surface, *amount, *seed),
+        GradeOp::Blur { sigma } => spatial::gaussian_blur(surface, *sigma),
+        GradeOp::Vignette {
+            amount,
+            midpoint,
+            feather,
+        } => spatial::vignette(surface, *amount, *midpoint, *feather),
     }
 }
 

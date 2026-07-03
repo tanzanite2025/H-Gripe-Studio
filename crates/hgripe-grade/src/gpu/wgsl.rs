@@ -15,7 +15,9 @@
 
 use crate::blend::BlendMode;
 use crate::doc::{GradeDoc, GradeLayer};
-use crate::ops::{planckian_gains, CurveChannel, GradeOp, MonotoneSpline, MAX_RADIUS};
+use crate::ops::{
+    gaussian_weights, planckian_gains, CurveChannel, GradeOp, MonotoneSpline, MAX_RADIUS,
+};
 use crate::qualifier::HslQualifier;
 use crate::surface::GradeSpace;
 
@@ -135,7 +137,22 @@ impl Builder {
         // run in place).
         let mut run: Vec<String> = Vec::new();
         for op in &layer.ops {
-            if op.is_spatial() {
+            if let GradeOp::Blur { sigma } = op {
+                // Separable: two 1D passes (horizontal, vertical), each
+                // flipping the work buffer. Radius 0 is a no-op (skipped,
+                // mirroring the CPU path).
+                let Some((r, weights)) = gaussian_weights(*sigma) else {
+                    continue;
+                };
+                if !run.is_empty() {
+                    self.per_pixel_pass(cur, &run);
+                    run.clear();
+                }
+                self.blur_pass(cur, r, &weights, true);
+                cur = cur.other();
+                self.blur_pass(cur, r, &weights, false);
+                cur = cur.other();
+            } else if op.is_spatial() {
                 if !run.is_empty() {
                     self.per_pixel_pass(cur, &run);
                     run.clear();
@@ -240,6 +257,26 @@ impl Builder {
                     a = lit(a),
                 )
             }
+            GradeOp::Vignette {
+                amount,
+                midpoint,
+                feather,
+            } => {
+                let a = finite_or(*amount, 0.0).clamp(-1.0, 1.0);
+                let m = finite_or(*midpoint, 0.5).clamp(0.0, 1.0);
+                let f = finite_or(*feather, 0.5).clamp(1e-3, 1.0);
+                format!(
+                    "let nx = (f32(x) + 0.5) / f32(W) * 2.0 - 1.0;\n\
+                     let ny = (f32(y) + 0.5) / f32(H) * 2.0 - 1.0;\n\
+                     let dv = sqrt(nx * nx + ny * ny) / sqrt(2.0);\n\
+                     let gain = 1.0 + {a} * sstep((dv - {m}) / {f});\n\
+                     let v = vec3f(clamp01({src}[i]), clamp01({src}[i + 1u]), clamp01({src}[i + 2u]));\n\
+                     let outv = clamp(v * gain, vec3f(0.0), vec3f(1.0));",
+                    a = lit(a),
+                    m = lit(m),
+                    f = lit(f),
+                )
+            }
             _ => unreachable!("spatial_pass only handles spatial ops"),
         };
         self.entries.push_str(&format!(
@@ -251,6 +288,56 @@ impl Builder {
              let y = i32(px / W);\n\
              let i = px * 4u;\n\
              {body}\n\
+             {dst}[i] = outv.x;\n{dst}[i + 1u] = outv.y;\n{dst}[i + 2u] = outv.z;\n\
+             {dst}[i + 3u] = {src}[i + 3u];\n}}\n"
+        ));
+        self.steps.push(Step::Dispatch(name));
+    }
+
+    // One 1D Gaussian blur pass reading `src` and writing the other work
+    // buffer: unrolled edge-clamped taps along one axis with the f64-baked
+    // weights as constants (mirrors `ops::spatial::gaussian_blur`). The
+    // horizontal pass clamps its inputs, the vertical pass reads the
+    // horizontal result raw and clamps the final sum, like the CPU path.
+    fn blur_pass(&mut self, src: Work, r: i64, weights: &[f32], horizontal: bool) {
+        let name = self.entry_name();
+        let dst = src.other().name();
+        let src = src.name();
+        let taps: String = weights
+            .iter()
+            .enumerate()
+            .map(|(k, wgt)| {
+                let d = k as i64 - r;
+                let (dx, dy) = if horizontal { (d, 0) } else { (0, d) };
+                let read = if horizontal {
+                    format!(
+                        "vec3f(clamp01({src}[t{k}]), clamp01({src}[t{k} + 1u]), clamp01({src}[t{k} + 2u]))"
+                    )
+                } else {
+                    format!("vec3f({src}[t{k}], {src}[t{k} + 1u], {src}[t{k} + 2u])")
+                };
+                format!(
+                    "let t{k} = tap(x, y, {dx}, {dy});\nsum += {wgt} * {read};\n",
+                    wgt = lit(*wgt),
+                )
+            })
+            .collect();
+        let outv = if horizontal {
+            "let outv = sum;"
+        } else {
+            "let outv = clamp(sum, vec3f(0.0), vec3f(1.0));"
+        };
+        self.entries.push_str(&format!(
+            "\n@compute @workgroup_size(256)\n\
+             fn {name}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
+             let px = gid.x;\n\
+             if (px >= N) {{ return; }}\n\
+             let x = i32(px % W);\n\
+             let y = i32(px / W);\n\
+             let i = px * 4u;\n\
+             var sum = vec3f(0.0);\n\
+             {taps}\
+             {outv}\n\
              {dst}[i] = outv.x;\n{dst}[i + 1u] = outv.y;\n{dst}[i + 2u] = outv.z;\n\
              {dst}[i + 3u] = {src}[i + 3u];\n}}\n"
         ));
@@ -571,8 +658,12 @@ impl Builder {
                 let off = self.push_table(table);
                 format!("rgb = lut3d({off}u, {size}u, clamp(rgb, vec3f(0.0), vec3f(1.0)));")
             }
-            GradeOp::Sharpen { .. } | GradeOp::Denoise { .. } | GradeOp::FilmGrain { .. } => {
-                unreachable!("spatial ops are scheduled by spatial_pass")
+            GradeOp::Sharpen { .. }
+            | GradeOp::Denoise { .. }
+            | GradeOp::FilmGrain { .. }
+            | GradeOp::Blur { .. }
+            | GradeOp::Vignette { .. } => {
+                unreachable!("spatial ops are scheduled by spatial_pass / blur_pass")
             }
         };
         format!("{{\n{body}\n}}")

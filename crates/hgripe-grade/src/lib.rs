@@ -28,7 +28,7 @@ pub use doc::{apply, GradeDoc, GradeLayer};
 pub use gpu::{GpuError, GpuGrader};
 pub use ops::{
     apply_op, parse_cube, temporal_denoise, CurveChannel, GradeOp, MonotoneSpline, WarpPoint,
-    MAX_RADIUS,
+    MAX_BLUR_SIGMA, MAX_RADIUS,
 };
 pub use qualifier::HslQualifier;
 pub use scopes::{histogram, vectorscope, waveform, Histogram, Vectorscope, Waveform};

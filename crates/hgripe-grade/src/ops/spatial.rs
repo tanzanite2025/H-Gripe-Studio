@@ -147,6 +147,118 @@ pub(super) fn film_grain(surface: &mut GradeSurface, amount: f32, seed: u32) {
     }
 }
 
+/// Largest supported Gaussian blur sigma, in pixels. Sigmas are clamped to
+/// `0..=MAX_BLUR_SIGMA`; the kernel radius is `ceil(3σ)` (up to
+/// 3 × MAX_BLUR_SIGMA taps each side), covering ~99.7% of the Gaussian.
+pub const MAX_BLUR_SIGMA: f32 = 32.0;
+
+/// The separable Gaussian kernel for `sigma`: `(radius, weights)` where
+/// `weights[k]` is the normalised weight of tap `k − radius`
+/// (`k = 0..=2×radius`). Weights are computed in f64 and cast once, so the
+/// CPU path and the WGSL codegen bake the same numbers. `None` when the
+/// clamped sigma rounds to radius 0 (the blur is a no-op).
+pub(crate) fn gaussian_weights(sigma: f32) -> Option<(i64, Vec<f32>)> {
+    let s = if sigma.is_finite() {
+        sigma.clamp(0.0, MAX_BLUR_SIGMA)
+    } else {
+        0.0
+    };
+    let r = (3.0 * f64::from(s)).ceil() as i64;
+    if r == 0 {
+        return None;
+    }
+    let s2 = 2.0 * f64::from(s) * f64::from(s);
+    let raw: Vec<f64> = (-r..=r).map(|k| (-((k * k) as f64) / s2).exp()).collect();
+    let sum: f64 = raw.iter().sum();
+    Some((r, raw.iter().map(|w| (w / sum) as f32).collect()))
+}
+
+/// Separable large-radius Gaussian blur on encoded values, clamped to
+/// `0..=1`: two 1D passes (horizontal, then vertical) over the normalised
+/// kernel `exp(−k²/(2σ²))` with edge-clamped taps. `sigma` is in pixels,
+/// clamped to `0..=MAX_BLUR_SIGMA` (non-finite reads as 0); neutral is
+/// `sigma = 0`. This is the blur primitive halation / bloom / glow / dehaze
+/// build on. Alpha is untouched.
+pub(super) fn gaussian_blur(surface: &mut GradeSurface, sigma: f32) {
+    let Some((r, weights)) = gaussian_weights(sigma) else {
+        return;
+    };
+    let (w, h) = (surface.w as usize, surface.h as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let src: Vec<f32> = surface.data.iter().map(|v| v.clamp(0.0, 1.0)).collect();
+    // Horizontal pass into a temporary plane…
+    let mut tmp = src.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            for c in 0..3 {
+                let mut sum = 0.0f32;
+                for (k, wgt) in weights.iter().enumerate() {
+                    sum += wgt * src[tap(x, y, k as i64 - r, 0, w, h) * 4 + c];
+                }
+                tmp[i + c] = sum;
+            }
+        }
+    }
+    // …then the vertical pass back into the surface.
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            for c in 0..3 {
+                let mut sum = 0.0f32;
+                for (k, wgt) in weights.iter().enumerate() {
+                    sum += wgt * tmp[tap(x, y, 0, k as i64 - r, w, h) * 4 + c];
+                }
+                surface.data[i + c] = sum.clamp(0.0, 1.0);
+            }
+        }
+    }
+}
+
+/// Parametric vignette on encoded values: a radial gain over the frame's
+/// centred ellipse. With normalised coordinates `nx, ny ∈ −1..=1` across
+/// the frame, `d = √(nx² + ny²) / √2` (0 at the centre, 1 in the corners),
+/// the falloff weight is `smoothstep((d − midpoint) / feather)` and each
+/// channel is scaled by `1 + amount × weight`, clamped to `0..=1`.
+/// `amount` clamps to `−1..=1` (negative darkens the edges; neutral 0,
+/// non-finite reads as 0), `midpoint` to `0..=1` (non-finite reads as 0.5),
+/// `feather` to `1e-3..=1` (non-finite reads as 0.5). Alpha is untouched.
+pub(super) fn vignette(surface: &mut GradeSurface, amount: f32, midpoint: f32, feather: f32) {
+    let a = if amount.is_finite() {
+        amount.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    let m = if midpoint.is_finite() {
+        midpoint.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let f = if feather.is_finite() {
+        feather.clamp(1e-3, 1.0)
+    } else {
+        0.5
+    };
+    let (w, h) = (surface.w as usize, surface.h as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    for y in 0..h {
+        let ny = (y as f32 + 0.5) / h as f32 * 2.0 - 1.0;
+        for x in 0..w {
+            let nx = (x as f32 + 0.5) / w as f32 * 2.0 - 1.0;
+            let d = (nx * nx + ny * ny).sqrt() / std::f32::consts::SQRT_2;
+            let gain = 1.0 + a * super::smoothstep((d - m) / f);
+            let i = (y * w + x) * 4;
+            for c in 0..3 {
+                surface.data[i + c] = (surface.data[i + c].clamp(0.0, 1.0) * gain).clamp(0.0, 1.0);
+            }
+        }
+    }
+}
+
 /// Motion-adaptive temporal denoise for video: blend the current frame
 /// toward the previous *graded* frame per channel, weighting each pixel by
 /// a Gaussian range term `exp(−((u − v)/σ)²)` (σ = 0.1) so large
@@ -324,6 +436,84 @@ mod tests {
         // Out-of-range radii clamp instead of misbehaving.
         let r9 = edge(9);
         assert_eq!(r3.data, r9.data, "radius clamps to 3");
+    }
+
+    #[test]
+    fn blur_zero_sigma_is_a_no_op_and_wider_sigma_flattens_more() {
+        let mut s = gradient(9, 7);
+        let before = s.data.clone();
+        apply_op(&mut s, &GradeOp::Blur { sigma: 0.0 });
+        assert_eq!(s.data, before, "sigma 0 is a no-op");
+
+        let spread = |sigma| {
+            let mut s = gradient(9, 7);
+            apply_op(&mut s, &GradeOp::Blur { sigma });
+            let vals: Vec<f32> = s.data.iter().step_by(4).copied().collect();
+            let max = vals.iter().cloned().fold(f32::MIN, f32::max);
+            let min = vals.iter().cloned().fold(f32::MAX, f32::min);
+            max - min
+        };
+        let s1 = spread(1.0);
+        let s4 = spread(4.0);
+        assert!(s4 < s1, "wider sigma flattens the gradient more");
+
+        // Out-of-range sigmas clamp instead of misbehaving.
+        let mut a = gradient(9, 7);
+        apply_op(&mut a, &GradeOp::Blur { sigma: 32.0 });
+        let mut b = gradient(9, 7);
+        apply_op(&mut b, &GradeOp::Blur { sigma: 1e9 });
+        assert_eq!(a.data, b.data, "sigma clamps to MAX_BLUR_SIGMA");
+    }
+
+    #[test]
+    fn blur_preserves_a_flat_field_and_alpha() {
+        let mut s = GradeSurface {
+            w: 5,
+            h: 4,
+            data: [0.3f32, 0.6, 0.9, 0.5].repeat(20),
+            space: GradeSpace::Srgb,
+        };
+        apply_op(&mut s, &GradeOp::Blur { sigma: 2.5 });
+        for px in s.data.chunks(4) {
+            assert!((px[0] - 0.3).abs() < 1e-5, "flat field kept");
+            assert!((px[1] - 0.6).abs() < 1e-5);
+            assert!((px[2] - 0.9).abs() < 1e-5);
+            assert_eq!(px[3], 0.5, "alpha untouched");
+        }
+    }
+
+    #[test]
+    fn vignette_darkens_corners_and_keeps_the_centre() {
+        let mut s = GradeSurface {
+            w: 9,
+            h: 9,
+            data: [0.8f32, 0.8, 0.8, 1.0].repeat(81),
+            space: GradeSpace::Srgb,
+        };
+        let before = s.data.clone();
+        apply_op(
+            &mut s,
+            &GradeOp::Vignette {
+                amount: 0.0,
+                midpoint: 0.5,
+                feather: 0.5,
+            },
+        );
+        assert_eq!(s.data, before, "amount 0 is a no-op");
+
+        apply_op(
+            &mut s,
+            &GradeOp::Vignette {
+                amount: -0.8,
+                midpoint: 0.3,
+                feather: 0.4,
+            },
+        );
+        let centre = s.data[(4 * 9 + 4) * 4];
+        let corner = s.data[0];
+        assert!(corner < centre, "corners darker than the centre");
+        assert!((centre - 0.8).abs() < 1e-3, "centre inside midpoint kept");
+        assert_eq!(s.data[3], 1.0, "alpha untouched");
     }
 
     #[test]

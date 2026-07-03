@@ -374,6 +374,28 @@ fn spatial_ops_match_cpu() {
             },
             1e-4,
         ),
+        // Blur accumulates many taps, so allow a little extra f32 noise.
+        ("blur s0.8", GradeOp::Blur { sigma: 0.8 }, 2e-4),
+        ("blur s2.5", GradeOp::Blur { sigma: 2.5 }, 2e-4),
+        ("blur s8", GradeOp::Blur { sigma: 8.0 }, 5e-4),
+        (
+            "vignette",
+            GradeOp::Vignette {
+                amount: -0.7,
+                midpoint: 0.4,
+                feather: 0.5,
+            },
+            1e-4,
+        ),
+        (
+            "vignette brighten",
+            GradeOp::Vignette {
+                amount: 0.5,
+                midpoint: 0.3,
+                feather: 0.2,
+            },
+            1e-4,
+        ),
     ] {
         let doc = GradeDoc {
             layers: vec![layer(vec![op])],

@@ -96,6 +96,12 @@ fn test_doc(n_px: usize) -> GradeDoc {
                         amount: 0.1,
                         seed: 1234,
                     },
+                    GradeOp::Blur { sigma: 1.5 },
+                    GradeOp::Vignette {
+                        amount: -0.5,
+                        midpoint: 0.4,
+                        feather: 0.5,
+                    },
                 ],
             },
             GradeLayer {

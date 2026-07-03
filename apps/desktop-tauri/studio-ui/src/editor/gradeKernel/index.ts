@@ -28,7 +28,16 @@ export {
   type VectorscopeScope,
   type WaveformScope,
 } from "./scopes";
-export { denoise, filmGrain, sharpen, temporalDenoise, MAX_RADIUS } from "./spatial";
+export {
+  denoise,
+  filmGrain,
+  gaussianBlur,
+  sharpen,
+  temporalDenoise,
+  vignette,
+  MAX_BLUR_SIGMA,
+  MAX_RADIUS,
+} from "./spatial";
 export { monotoneSpline } from "./spline";
 export { trcDecode, trcEncode } from "./trc";
 export { BLEND_MODES, type GradeBlendMode, type GradeSpace, type GradeSurface } from "./types";
