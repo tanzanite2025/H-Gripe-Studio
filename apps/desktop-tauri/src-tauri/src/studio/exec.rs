@@ -363,9 +363,6 @@ fn execute_studio_graph_node(
                 inputs.get("value").cloned().unwrap_or(Value::Null),
             )]))
         }
-        "smartLayerSplit" => {
-            super::layer_split::execute_studio_smart_layer_split(node, inputs)
-        }
         "preview" => Ok(studio_output_map([(
             "image",
             inputs.get("image").cloned().unwrap_or(Value::Null),
@@ -416,6 +413,7 @@ fn execute_studio_compute_node(
     match node.kind.as_str() {
         "subjectMask" => execute_studio_subject_mask(node, inputs, skip_write_ports),
         "crop" => execute_studio_crop(node, inputs, skip_write_ports),
+        "smartLayerSplit" => super::layer_split::execute_studio_smart_layer_split(node, inputs),
         "imageGrade" => super::grade::execute_studio_grade(node, inputs, skip_write_ports),
         other => Err(format!("node kind is not a compute node: {other}")),
     }
@@ -714,7 +712,6 @@ mod tests {
             "switch",
             "preview",
             "save",
-            "smartLayerSplit",
         ] {
             assert_eq!(studio_executor_for_kind(kind), Some(Graph), "{kind}");
         }
@@ -729,6 +726,7 @@ mod tests {
             assert_eq!(studio_executor_for_kind(kind), Some(Local), "{kind}");
         }
         assert_eq!(studio_executor_for_kind("subjectMask"), Some(Compute));
+        assert_eq!(studio_executor_for_kind("smartLayerSplit"), Some(Compute));
         assert_eq!(studio_executor_for_kind("generate"), Some(Api));
         assert_eq!(studio_executor_for_kind("detailRepaint"), Some(Api));
         assert_eq!(studio_executor_for_kind("promptOptimize"), Some(Hybrid));

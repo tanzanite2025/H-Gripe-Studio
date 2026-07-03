@@ -142,6 +142,7 @@ mod tests {
         // Native compute splits: ONNX matte on the GPU, crop is CPU geometry.
         assert_eq!(category_for_kind("subjectMask"), Some(Gpu));
         assert_eq!(category_for_kind("crop"), Some(CpuBound));
+        assert_eq!(category_for_kind("smartLayerSplit"), Some(CpuBound));
         // Broker / hybrid calls are network-bound, not GPU.
         assert_eq!(category_for_kind("generate"), Some(Network));
         assert_eq!(category_for_kind("detailRepaint"), Some(Network));
