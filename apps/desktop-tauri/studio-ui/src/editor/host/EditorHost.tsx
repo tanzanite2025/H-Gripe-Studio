@@ -1,0 +1,119 @@
+import { Suspense, lazy } from "react";
+import type { MaskDocument } from "../../types/production";
+import type { CropCommit } from "../CropEditModal";
+import type { GradeCommit } from "../GradePanel";
+
+// Editor Host: the application-level surface for the heavyweight editors
+// (mask / crop / grade / unified media edit). Editors here are software
+// features, not canvas features: a request carries only the edit target
+// (an image path + display title) and initial edit data, and commits hand a
+// result back to whoever opened the editor — the host knows nothing about
+// nodes, the graph, or React Flow. The canvas side owns the adapters that
+// derive a request from a node and fold a result back into params/new nodes.
+//
+// Editors are code-split: nothing loads until a request opens one.
+
+const MaskEditModal = lazy(() =>
+  import("../MaskEditModal").then((m) => ({ default: m.MaskEditModal })),
+);
+const CropEditModal = lazy(() =>
+  import("../CropEditModal").then((m) => ({ default: m.CropEditModal })),
+);
+const GradeEditModal = lazy(() =>
+  import("../GradeEditModal").then((m) => ({ default: m.GradeEditModal })),
+);
+const MediaEditModal = lazy(() =>
+  import("../MediaEditModal").then((m) => ({ default: m.MediaEditModal })),
+);
+
+/** What an editor edits: an asset/output reference, never node state. */
+export interface EditorTarget {
+  /** Backing image path (best-effort underlay); may be missing in preview. */
+  imagePath: string | null;
+  /** Display title for the editor chrome. */
+  title: string;
+}
+
+/** A request to open one editor over a target, with its commit sink. */
+export type EditorRequest =
+  | {
+      editor: "mask";
+      target: EditorTarget;
+      initial: MaskDocument | null;
+      wandTolerance: number;
+      onCommit: (edits: MaskDocument) => void;
+    }
+  | {
+      editor: "crop";
+      target: EditorTarget;
+      initialMode: "manual" | "auto_subject";
+      initialBox: [number, number, number, number] | null;
+      initialAspect: string;
+      initialMargin: number;
+      onCommit: (commit: CropCommit) => void;
+    }
+  | {
+      editor: "grade";
+      target: EditorTarget;
+      initialDoc: string | null;
+      onCommit: (commit: GradeCommit) => void;
+    }
+  | {
+      editor: "media";
+      target: EditorTarget;
+      onCommitMask: (edits: MaskDocument) => void;
+      onCommitCrop: (commit: CropCommit) => void;
+    };
+
+interface EditorHostProps {
+  request: EditorRequest | null;
+  onClose: () => void;
+}
+
+export function EditorHost({ request, onClose }: EditorHostProps) {
+  if (!request) return null;
+  return (
+    <Suspense fallback={null}>
+      {request.editor === "mask" && (
+        <MaskEditModal
+          title={request.target.title}
+          imagePath={request.target.imagePath}
+          initial={request.initial}
+          wandTolerance={request.wandTolerance}
+          onCommit={request.onCommit}
+          onClose={onClose}
+        />
+      )}
+      {request.editor === "crop" && (
+        <CropEditModal
+          title={request.target.title}
+          imagePath={request.target.imagePath}
+          initialMode={request.initialMode}
+          initialBox={request.initialBox}
+          initialAspect={request.initialAspect}
+          initialMargin={request.initialMargin}
+          onCommit={request.onCommit}
+          onClose={onClose}
+        />
+      )}
+      {request.editor === "grade" && (
+        <GradeEditModal
+          title={request.target.title}
+          imagePath={request.target.imagePath}
+          initialDoc={request.initialDoc}
+          onCommit={request.onCommit}
+          onClose={onClose}
+        />
+      )}
+      {request.editor === "media" && (
+        <MediaEditModal
+          title={request.target.title}
+          imagePath={request.target.imagePath}
+          onCommitMask={request.onCommitMask}
+          onCommitCrop={request.onCommitCrop}
+          onClose={onClose}
+        />
+      )}
+    </Suspense>
+  );
+}
