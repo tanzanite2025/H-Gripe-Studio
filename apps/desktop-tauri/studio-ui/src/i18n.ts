@@ -674,6 +674,11 @@ export const messages = {
   "drawer.trackVideo": { en: "V", zh: "视" },
   "drawer.trackAudio": { en: "A", zh: "音" },
   "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
+  "drawer.imageEditHint": { en: "right-click to open the image editor", zh: "右键打开图片编辑" },
+  "drawer.imageEditNoSource": {
+    en: "this asset's source node is gone — image editing needs its canvas card",
+    zh: "该素材的来源节点已不存在——图片编辑需要其画布卡片",
+  },
   "drawer.gradePlaceholder": {
     en: "Select a target — a bin image asset, a timeline clip (still or video), or a node with an image output — to grade it here with the shared hgripe-grade kernel.",
     zh: "选择一个目标——素材区的图片、时间线上的 clip（静帧或视频）或带图片输出的节点——即可在这里用同一个 hgripe-grade 内核调色。",

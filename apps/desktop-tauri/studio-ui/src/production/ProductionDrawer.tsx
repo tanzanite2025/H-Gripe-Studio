@@ -32,6 +32,8 @@ export interface ProductionDrawerProps {
   /** Append the active bin asset as a clip at the end of a compatible track. */
   onAddActiveToTimeline: () => void;
   onRemoveClip: (clipId: string) => void;
+  /** Right-click on an image asset / still clip: open the existing image editor. */
+  onOpenImageEdit: (assetId: string) => void;
   /** Image path the Grade tab previews for the current target, when resolvable. */
   gradeImagePath: string | null;
   /** Video whose frame the Grade tab previews for video-clip targets. */
@@ -69,6 +71,7 @@ export function ProductionDrawer({
   onSelectClip,
   onAddActiveToTimeline,
   onRemoveClip,
+  onOpenImageEdit,
   gradeImagePath,
   gradeVideoPath,
   gradeDoc,
@@ -172,7 +175,13 @@ export function ProductionDrawer({
                     <button
                       className="production-bin-item"
                       onClick={() => onSelectAsset(a.id === activeAssetId ? null : a.id)}
-                      title={a.path}
+                      onContextMenu={(e) => {
+                        if (a.kind !== "image") return;
+                        e.preventDefault();
+                        onSelectAsset(a.id);
+                        onOpenImageEdit(a.id);
+                      }}
+                      title={a.kind === "image" ? `${a.path} · ${t("drawer.imageEditHint")}` : a.path}
                     >
                       <span className={`production-bin-kind kind-${a.kind}`}>{t(kindKey(a.kind))}</span>
                       <span className="production-bin-name">{a.name}</span>
@@ -229,7 +238,13 @@ export function ProductionDrawer({
                               width: `${(clip.duration / total) * 100}%`,
                             }}
                             onClick={() => onSelectClip(selected ? null : clip.id)}
-                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s`}
+                            onContextMenu={(e) => {
+                              if (clip.kind !== "still") return;
+                              e.preventDefault();
+                              onSelectClip(clip.id);
+                              onOpenImageEdit(clip.assetId);
+                            }}
+                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s${clip.kind === "still" ? ` · ${t("drawer.imageEditHint")}` : ""}`}
                           >
                             <span className="production-clip-name">{clipAssetName(clip.id)}</span>
                             {selected ? (
