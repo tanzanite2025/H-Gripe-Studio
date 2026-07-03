@@ -21,9 +21,17 @@ grading (many stacked corrections per frame, no cumulative banding).
 - **Non-goal:** replacing the mask editor's u8 grayscale compositor. Mask
   surfaces are alpha coverage; 8-bit is semantically correct there and PS
   does the same. That kernel stays as-is.
-- **Non-goal:** GPU. First landing is CPU (scanline, optionally rayon).
-  The op model is designed so a GPU backend can be added behind the same op
-  graph later without changing the serialised format.
+- **Non-goal (first landing):** GPU. First landing is CPU (scanline,
+  optionally rayon). The op model is designed so a GPU backend can be added
+  behind the same op graph later without changing the serialised format.
+  That backend now exists behind the optional `gpu` feature (wgpu + WGSL):
+  `GpuGrader` compiles a `GradeDoc` into generated compute passes (per-pixel
+  runs fused into one pass, spatial ops as their own src→dst pass) and
+  replays the cached pipeline per frame. The CPU path stays the reference
+  implementation and fallback; the GPU output is preview-grade, validated
+  against CPU with f32 tolerances in `crates/hgripe-grade/tests/gpu.rs`
+  (curves are baked to 1024-sample LUTs), not bit-identical — the
+  bit-identical constraint below binds the CPU paths only.
 
 ## Placement and dependency policy (decided constraints)
 

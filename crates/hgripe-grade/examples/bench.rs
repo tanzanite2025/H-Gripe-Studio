@@ -115,6 +115,21 @@ fn main() {
         std::hint::black_box(&s);
     });
 
+    // The GPU path (`--features gpu`): the first apply pays codegen +
+    // shader compilation; the timed loop replays the cached plan, which is
+    // the per-frame cost for preview / video rendering.
+    #[cfg(feature = "gpu")]
+    match hgripe_grade::GpuGrader::new() {
+        Ok(mut grader) => {
+            time("gpu apply (wgpu, 3 layers, 1080p)", 5, || {
+                let mut s = input.clone();
+                grader.apply(&doc, &mut s).expect("GPU apply");
+                std::hint::black_box(&s);
+            });
+        }
+        Err(e) => println!("gpu apply skipped: {e}"),
+    }
+
     // Per-op timings on a single normal layer.
     let single_ops: Vec<(&str, GradeOp)> = vec![
         ("exposure", GradeOp::Exposure { ev: 0.5 }),

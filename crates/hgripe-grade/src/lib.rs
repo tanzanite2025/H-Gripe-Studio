@@ -11,6 +11,8 @@
 mod blend;
 mod composite;
 mod doc;
+#[cfg(feature = "gpu")]
+mod gpu;
 mod ops;
 mod qualifier;
 mod scopes;
@@ -22,6 +24,8 @@ pub use composite::composite_over;
 #[cfg(feature = "parallel")]
 pub use doc::apply_parallel;
 pub use doc::{apply, GradeDoc, GradeLayer};
+#[cfg(feature = "gpu")]
+pub use gpu::{GpuError, GpuGrader};
 pub use ops::{apply_op, parse_cube, CurveChannel, GradeOp, MonotoneSpline, WarpPoint};
 pub use qualifier::HslQualifier;
 pub use scopes::{histogram, vectorscope, waveform, Histogram, Vectorscope, Waveform};
