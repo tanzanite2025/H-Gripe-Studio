@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { LOWERED_CARD_ROWS } from "./lowering";
 import { NODE_SPECS, paletteGroups, type Executor, type NodeVisualFamily } from "./nodeSpecs";
 
 const VALID: Executor[] = ["graph", "local", "compute", "api", "hybrid"];
@@ -117,6 +118,19 @@ describe("nodeSpecs executor tagging", () => {
       expect(NODE_SPECS[kind], `${kind} still exists for saved workflows/runtime`).toBeTruthy();
       expect(NODE_SPECS[kind]?.palette, `${kind} is marked internal`).toBe("internal");
       expect(paletteKinds.has(kind), `${kind} is hidden from the default palette`).toBe(false);
+    }
+  });
+
+  it("keeps leaf nodes absorbed by an integrated card out of the default palette", () => {
+    const paletteKinds = new Set(paletteGroups().flatMap((group) => group.specs.map((spec) => spec.kind)));
+
+    for (const [cardKind, rows] of Object.entries(LOWERED_CARD_ROWS)) {
+      expect(paletteKinds.has(cardKind), `${cardKind} card is in the palette`).toBe(true);
+      for (const row of rows) {
+        expect(NODE_SPECS[row.kind], `${row.kind} still exists for saved workflows/lowering`).toBeTruthy();
+        expect(NODE_SPECS[row.kind]?.palette, `${row.kind} is marked internal`).toBe("internal");
+        expect(paletteKinds.has(row.kind), `${row.kind} is hidden from the default palette`).toBe(false);
+      }
     }
   });
 });

@@ -887,6 +887,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "subjectMask",
     family: "mask",
     executor: "compute",
+    palette: "internal",
     title: "Subject Mask / Matte",
     description:
       "Select the subject and produce a mask / cutout / alpha triplet. Phase 1 runs in-process in native Rust (no python bridge): magic-wand flood select + brush/eraser strokes (carried in edit_paths), morphology (grow/shrink, fill holes) and a final feather. Emits the mask, alpha image, cutout, and an enriched matte report. Auto-subject model modes (SAM/RMBG/BiRefNet) are Phase 2.",
@@ -1009,6 +1010,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "smartLayerSplit",
     family: "image",
     executor: "compute",
+    palette: "internal",
     title: "Smart Layer Split",
     description:
       "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. The desktop runtime segments the subject in-process (model backend when a weight resolves, else the deterministic builtin CPU segmenter) and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
@@ -1089,6 +1091,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "crop",
     family: "crop",
     executor: "compute",
+    palette: "internal",
     title: "Crop",
     description:
       "Crop an image — the first non-mask edit, validating the unified auto/manual + binding model. Runs in-process in native Rust on the Compute lane. Manual mode crops to the editor-drawn box (recorded as crop_box in image pixels, the human-spatial-intent lane); auto_subject mode crops to the subject — it segments a base matte with the same Subject Mask Compute-lane segmenter, takes its bounding box and pads it by the subject margin (the algorithm-derived lane). An optional aspect ratio adjusts the box (centred, clamped to the image) after either lane. Emits the cropped image and a crop report.",
@@ -1155,6 +1158,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "imageGrade",
     family: "grade",
     executor: "compute",
+    palette: "internal",
     title: "Grade",
     description:
       "Colour-grade an image with the hgripe-grade kernel (docs/design/grade-kernel.md) — an op stack (exposure, white balance, contrast, saturation, RGB mixer, colour warper, sharpen/denoise with adjustable radius, film grain, 1D/3D LUTs) authored in the grading dialog and stored as grade_doc. The dialog previews live through the kernel (GPU when the app is built with grade-gpu and an adapter is present, else the row-parallel CPU reference path); the run path grades the full-resolution 16-bit working surface in its own colour space, so a wide-gamut source stays 16-bit + ICC. Emits the graded image and a grade report.",
@@ -1321,6 +1325,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "imageEnhance",
     family: "compute",
     executor: "local",
+    palette: "internal",
     title: "Image Enhance",
     description:
       "Upscale (Lanczos) and sharpen (unsharp mask) a low-resolution subject so it fills a PSD placeholder crisply at print DPI. Connect placeholder bounds to auto-size, or set explicit target pixels. CPU-only in Phase 1 (no GPU super-resolution). Emits the enhanced image, the applied scale factor, and an enhance report. Presets hide the detail; pick 'custom' to expose denoise/texture/scale.",
@@ -1547,6 +1552,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "detailRepaint",
     family: "compute",
     executor: "api",
+    palette: "internal",
     title: "Detail Repaint",
     description:
       "Localized repaint of the issue regions a Detail Watchdog flagged. Crops each repaintable issue (suggested_action in 'Repaint actions') with padding, writes an inpaint mask, sends each crop through the broker's image.edit operation (same provider/credentials path as Generate), then pastes the results back with a feathered seam. Outputs the fixed image and a RepaintReport. With no edit-capable provider configured (empty / 'mock') every region is left unrepainted and the image passes through unchanged.",
@@ -1688,6 +1694,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "videoAssemble",
     family: "video",
     executor: "local",
+    palette: "internal",
     title: "Video Assemble",
     description:
       "Encode an ordered frame-image sequence into a video file through the media engine's FFmpeg backend (PyAV). Connect a frames list (or set the frames param, one path per line), pick fps and codec, and get an .mp4 on disk plus the encode report.",
@@ -1748,6 +1755,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "videoTrim",
     family: "video",
     executor: "local",
+    palette: "internal",
     title: "Video Trim",
     description:
       "Cut a time range out of a video file through the media engine's FFmpeg backend (PyAV). Connect a video (or set the video param), pick start/end seconds, and get a frame-accurate re-encoded clip on disk plus the trim report. Audio is not carried over.",
