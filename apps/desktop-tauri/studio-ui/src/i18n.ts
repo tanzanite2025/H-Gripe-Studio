@@ -628,6 +628,44 @@ export const messages = {
     en: " and applied by the backend on run. Point (SAM 2) prompts route auto modes to the SAM 2 segmenter — left-click includes, right-click excludes; Matting paints the trimap unknown band (resolved to soft alpha by ViTMatte / the builtin guided filter); Pen/Lasso paths are rasterised and boolean-combined (add/subtract/intersect).",
     zh: "，在运行时由后端应用。点 (SAM 2) 提示会把 auto 模式路由到 SAM 2 分割器——左键包含、右键排除；抠像 在三分图未知带上涂抹（由 ViTMatte / 内置引导滤波解算为软 alpha）；钢笔/套索 路径会被栅格化并布尔合并（添加/减去/交集）。",
   },
+
+  // ---- bottom production drawer (Edit / Timeline + Grade) ----
+  "drawer.title": { en: "Production", zh: "制作" },
+  "drawer.openTitle": {
+    en: "open the production drawer (edit / timeline and grade)",
+    zh: "打开制作抽屉（剪辑 / 时间线与调色）",
+  },
+  "drawer.collapseTitle": { en: "collapse the production drawer to a rail", zh: "将制作抽屉折叠为把手" },
+  "drawer.halfTitle": { en: "half-height drawer", zh: "半高抽屉" },
+  "drawer.fullTitle": { en: "full-height drawer", zh: "全高抽屉" },
+  "drawer.assetCount": { en: "{n} assets", zh: "{n} 个素材" },
+  "drawer.tabEdit": { en: "Edit / Timeline", zh: "剪辑 / 时间线" },
+  "drawer.tabGrade": { en: "Grade", zh: "调色" },
+  "drawer.targetNone": { en: "no target selected", zh: "未选择目标" },
+  "drawer.targetNode": { en: "node output", zh: "节点输出" },
+  "drawer.targetAsset": { en: "asset", zh: "素材" },
+  "drawer.binTitle": { en: "Media workspace", zh: "素材工作区" },
+  "drawer.binEmpty": {
+    en: "No media assets yet — select an Image Source or Video Source node on the canvas and add it here.",
+    zh: "尚无媒体素材——在画布上选中 图片源 或 视频源 节点后添加到这里。",
+  },
+  "drawer.addSelected": { en: "Add selected node", zh: "添加所选节点" },
+  "drawer.addSelectedTitle": {
+    en: "register the selected media node's file in the workspace bin (references only, nothing is copied)",
+    zh: "把所选媒体节点的文件登记到素材工作区（仅引用，不复制文件）",
+  },
+  "drawer.removeTitle": { en: "remove this asset reference from the bin", zh: "从素材区移除该引用" },
+  "drawer.kindImage": { en: "image", zh: "图片" },
+  "drawer.kindVideo": { en: "video", zh: "视频" },
+  "drawer.kindAudio": { en: "audio", zh: "音频" },
+  "drawer.timelinePlaceholder": {
+    en: "Multi-track timeline (still / video / audio clips) arrives in the next step; assets registered here will be placeable as clips.",
+    zh: "多轨时间线（静帧 / 视频 / 音频 clip）将在下一步加入；这里登记的素材届时可放入时间线。",
+  },
+  "drawer.gradePlaceholder": {
+    en: "The Grade tab will edit the current target (image / video clip) with the shared hgripe-grade kernel once GradeEditModal is extracted into an embeddable GradePanel.",
+    zh: "调色 Tab 将在 GradeEditModal 抽成可嵌入 GradePanel 后，用同一个 hgripe-grade 内核编辑当前目标（图片 / 视频 clip）。",
+  },
 } satisfies Record<string, { en: string; zh: string }>;
 
 export type MsgKey = keyof typeof messages;
