@@ -163,7 +163,12 @@ pub(crate) fn run_bridge_oneshot(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python bridge failed to launch {}: {err} (only opt-in legacy engines need Python)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }

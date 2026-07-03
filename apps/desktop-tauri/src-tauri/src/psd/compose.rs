@@ -201,7 +201,12 @@ pub(crate) fn compose_psd(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "legacy Python bridge failed to launch {}: {err} (PSD compose still requires the Python bridge; a native Rust PSD path is planned)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("compose_psd failed: {}", stderr.trim()));
@@ -281,7 +286,12 @@ pub(crate) fn inspect_psd(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "legacy Python bridge failed to launch {}: {err} (PSD inspect still requires the Python bridge; a native Rust PSD path is planned)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("inspect_psd failed: {}", stderr.trim()));
@@ -352,7 +362,12 @@ pub(crate) fn analyze_psd_context(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "legacy Python bridge failed to launch {}: {err} (PSD analyze still requires the Python bridge; a native Rust PSD path is planned)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("analyze_psd_context failed: {}", stderr.trim()));

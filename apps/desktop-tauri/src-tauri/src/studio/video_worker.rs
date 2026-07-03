@@ -145,7 +145,10 @@ fn spawn(python: &Path, dir: &Path) -> Result<Worker, String> {
 
     let mut child = cmd
         .spawn()
-        .map_err(|err| format!("failed to launch video worker {}: {err}", python.display()))?;
+        .map_err(|err| format!(
+                "failed to launch legacy PyAV video worker {}: {err} (the default video path decodes natively via FFmpeg)",
+                python.display()
+            ))?;
     let stdin = child
         .stdin
         .take()

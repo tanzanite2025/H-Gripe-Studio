@@ -137,10 +137,18 @@ pub(crate) fn prepare_repaint_regions(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python bridge failed to launch {}: {err} (the default prepare path runs natively in Rust)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("prepare_repaint_regions failed: {}", stderr.trim()));
+        return Err(format!(
+            "prepare_repaint_regions legacy bridge failed: {}",
+            stderr.trim()
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str::<PrepareRepaintResult>(stdout.trim()).map_err(|err| {
@@ -200,10 +208,18 @@ pub(crate) fn composite_repaint(
 
     let output = cmd
         .output()
-        .map_err(|err| format!("failed to launch {}: {err}", python.display()))?;
+        .map_err(|err| {
+            format!(
+                "optional legacy Python bridge failed to launch {}: {err} (the default composite path runs natively in Rust)",
+                python.display()
+            )
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("composite_repaint failed: {}", stderr.trim()));
+        return Err(format!(
+            "composite_repaint legacy bridge failed: {}",
+            stderr.trim()
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str::<CompositeRepaintResult>(stdout.trim()).map_err(|err| {
