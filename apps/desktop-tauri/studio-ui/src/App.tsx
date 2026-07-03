@@ -73,6 +73,7 @@ import {
   type AudioClipEdit,
 } from "./production/audioEdit";
 import { AudioEditModal } from "./production/AudioEditModal";
+import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
 import { useT } from "./i18n";
 
@@ -147,6 +148,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     Record<string, { edit: AudioClipEdit; sourceDurationSec: number }>
   >({});
   const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
+  // On-demand export dialog (plan step 9): opened by the drawer's export command.
+  const [exportOpen, setExportOpen] = useState(false);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -825,6 +828,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onRemoveClip={handleRemoveClip}
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}
+          onOpenExport={() => setExportOpen(true)}
           gradeImagePath={gradeSource.imagePath}
           gradeVideoPath={gradeSource.videoPath}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
@@ -938,6 +942,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           }}
           onClose={() => setGradeEditNodeId(null)}
         />
+      )}
+
+      {exportOpen && (
+        <ExportDialog timeline={timeline} assets={binAssets} onClose={() => setExportOpen(false)} />
       )}
 
       {audioEditClip && audioEditClipId && (

@@ -1275,3 +1275,33 @@ button:disabled { opacity: 0.6; cursor: default; }
 .audio-edit-controls { display: flex; flex-direction: column; }
 .audio-edit-controls .field { margin-top: 8px; }
 .audio-edit-controls small { margin-top: 12px; }
+
+/* ── On-demand timeline export dialog (drawer step 9) ───────────────── */
+.media-viewer.export-dialog { width: min(560px, 92vw); }
+.export-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+.export-summary { margin: 0; color: var(--text); }
+.export-fields { display: flex; gap: 16px; }
+.export-fields .field { flex: 1; }
+.export-fields input[type="number"] { width: 72px; }
+.export-warnings {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.export-warning { margin: 0; color: var(--muted); font-size: 12px; }
+.export-result {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-error { margin: 0; color: #f7768e; font-size: 12px; }

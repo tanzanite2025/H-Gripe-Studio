@@ -698,6 +698,49 @@ export const messages = {
     en: "schematic envelope — the sample waveform arrives with the audio decoder",
     zh: "示意包络——采样波形将随音频解码器一起加入",
   },
+  "drawer.export": { en: "export", zh: "导出" },
+  "drawer.exportTitle": { en: "open the timeline export dialog", zh: "打开时间线导出弹窗" },
+  "export.title": { en: "timeline export", zh: "时间线导出" },
+  "export.run": { en: "export", zh: "导出" },
+  "export.running": { en: "encoding…", zh: "编码中…" },
+  "export.runTitle": { en: "encode the still segments to a video via FFmpeg", zh: "通过 FFmpeg 将静帧段编码为视频" },
+  "export.closeTitle": { en: "close", zh: "关闭" },
+  "export.summary": {
+    en: "{clips} still segment(s) · {len}s at {fps} fps",
+    zh: "{clips} 个静帧段 · {len} 秒，{fps} fps",
+  },
+  "export.fps": { en: "fps", zh: "帧率" },
+  "export.outputName": { en: "output name", zh: "输出文件名" },
+  "export.outputNamePlaceholder": { en: "assembled-<time>.mp4", zh: "assembled-<时间>.mp4" },
+  "export.emptyPlan": {
+    en: "nothing to encode — add still-image clips to the video track first",
+    zh: "没有可编码的内容——请先向视频轨添加静帧 clip",
+  },
+  "export.tooManyFrames": {
+    en: "the plan exceeds the frame budget — shorten the timeline or lower the fps",
+    zh: "计划超出帧数上限——请缩短时间线或降低帧率",
+  },
+  "export.warnMissingAsset": {
+    en: "a clip references a missing bin asset ({id}) and is skipped",
+    zh: "有 clip 引用了不存在的素材（{id}），已跳过",
+  },
+  "export.warnVideoSkipped": {
+    en: "video clips are not encoded yet — this first export covers still clips",
+    zh: "视频 clip 暂未参与编码——第一版导出只覆盖静帧 clip",
+  },
+  "export.warnAudioNotMixed": {
+    en: "{n} audio clip(s) are not mixed/muxed yet — the audio lane lands later",
+    zh: "{n} 个音频 clip 暂未混音/封装——音频链路稍后加入",
+  },
+  "export.warnGap": {
+    en: "gap at {at}s ({len}s) — segments encode back-to-back",
+    zh: "{at} 秒处有 {len} 秒空隙——各段将紧接着编码",
+  },
+  "export.noBackend": {
+    en: "no encoder in browser preview — export runs on the desktop build",
+    zh: "浏览器预览没有编码器——请在桌面版中导出",
+  },
+  "export.done": { en: "exported {len}s → {path}", zh: "已导出 {len} 秒 → {path}" },
   "drawer.gradePlaceholder": {
     en: "Select a target — a bin image asset, a timeline clip (still or video), or a node with an image output — to grade it here with the shared hgripe-grade kernel.",
     zh: "选择一个目标——素材区的图片、时间线上的 clip（静帧或视频）或带图片输出的节点——即可在这里用同一个 hgripe-grade 内核调色。",
