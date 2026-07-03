@@ -14,6 +14,7 @@ use crate::studio::studio_reject_unsafe_basename;
 mod cards;
 mod compose;
 mod engines;
+mod inspect;
 mod model_paths;
 mod repaint;
 
