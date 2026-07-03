@@ -380,6 +380,8 @@ pub(crate) struct RecordSpan {
     pub(crate) flags_offset: usize,
     /// Byte range of the record's channel data blocks.
     pub(crate) channel_range: (usize, usize),
+    /// (id, data length) per channel, in record order.
+    pub(crate) channel_lens: Vec<(i16, u64)>,
 }
 
 /// Header facts plus record/channel byte spans, for the compose writer.
@@ -551,6 +553,7 @@ pub(crate) fn parse_psd_spans(data: &[u8]) -> Result<PsdSpans, String> {
             record_range,
             flags_offset: record.flags_offset,
             channel_range,
+            channel_lens: record.channel_lens,
         })
         .collect();
     Ok(PsdSpans {
