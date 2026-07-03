@@ -1,6 +1,13 @@
 # Grade kernel: the standalone f32 colour-grading core
 
-**Status:** Proposed (design). Nothing in this document is implemented yet.
+**Status:** Design baseline (implemented). The kernel described here is
+implemented and merged in `crates/hgripe-grade` (G0–G4 op set, module split,
+scopes, rayon parallel path, GPU backend, adjustable-radius spatial ops,
+temporal denoise). This document remains the design record for the kernel's
+constraints (colour contract, determinism, golden-vector discipline); for
+remaining work and upgrade directions, see
+[`grade-kernel-roadmap.md`](grade-kernel-roadmap.md), which is the entry
+point for future kernel work.
 This is the design for the colour-grading kernel that the image grading
 dialog and the future **video grading dialog** will share. It builds *on top
 of* the locked colour pipeline (`docs/design/colour-pipeline.md`) and does
