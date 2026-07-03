@@ -26,6 +26,7 @@ use std::ptr;
 use rusty_ffmpeg::ffi;
 
 use super::video_engine::{FrameSource, VideoMeta};
+use super::working_image::{WorkingImage, WorkingSpace};
 
 /// libav's "no timestamp" sentinel (`AV_NOPTS_VALUE`), defined here so we don't
 /// depend on the macro surviving into the generated bindings.
@@ -52,6 +53,24 @@ pub(crate) fn decode_still_rgba(path: &Path, max_pixels: u64) -> Result<image::R
         ));
     }
     decoder.decode_first_frame_rgba()
+}
+
+/// Decode the frame nearest `timestamp_sec` of a video into the canonical
+/// [`WorkingImage`] surface — the media/colour bridge (Batch 3): a decoded
+/// video frame enters the same working space every still image uses, so the
+/// grading kernel and any downstream card consume it without a PNG round-trip.
+///
+/// Video frames are display-referred 8-bit sRGB (no wide-gamut information to
+/// preserve and no ICC to carry), so the surface is tagged [`WorkingSpace::Srgb`]
+/// — the sRGB down-convert stays deferred to the model/output egress, exactly
+/// like a plain sRGB still (`docs/design/colour-pipeline.md`).
+pub(crate) fn decode_frame_working(
+    video: &Path,
+    timestamp_sec: f64,
+) -> Result<WorkingImage, String> {
+    let mut decoder = Decoder::open(video)?;
+    let rgba = decoder.decode_rgba_at(timestamp_sec)?;
+    Ok(WorkingImage::from_rgba8(&rgba, WorkingSpace::Srgb, None))
 }
 
 /// `width x height` of a still-image container's primary image, from the
@@ -369,6 +388,18 @@ impl Decoder {
     }
 
     fn decode_to_png(&mut self, timestamp_sec: f64, poster_out: &Path) -> Result<PathBuf, String> {
+        let image = self.decode_rgba_at(timestamp_sec)?;
+        image
+            .save(poster_out)
+            .map_err(|err| format!("failed to write poster {}: {err}", poster_out.display()))?;
+        Ok(poster_out.to_path_buf())
+    }
+
+    /// Seek to the keyframe at or before `timestamp_sec`, decode forward to the
+    /// frame at or past it, and return it as an RGBA surface. Shared by the
+    /// PNG poster path ([`decode_to_png`](Self::decode_to_png)) and the
+    /// [`WorkingImage`] media/colour bridge ([`decode_frame_working`]).
+    fn decode_rgba_at(&mut self, timestamp_sec: f64) -> Result<image::RgbaImage, String> {
         unsafe {
             // Target timestamp in the stream's time base: ts / (num/den).
             let q = self.time_base;
@@ -446,7 +477,7 @@ impl Decoder {
             }
 
             let result = if got {
-                self.frame_to_png(frame, poster_out)
+                self.frame_to_rgba(frame)
             } else {
                 Err("no frame decoded at the requested timestamp".to_string())
             };
@@ -457,19 +488,6 @@ impl Decoder {
             ffi::av_frame_free(&mut f);
             result
         }
-    }
-
-    /// Scale a decoded frame to RGBA and write it to `poster_out` as PNG.
-    unsafe fn frame_to_png(
-        &self,
-        frame: *mut ffi::AVFrame,
-        poster_out: &Path,
-    ) -> Result<PathBuf, String> {
-        let image = self.frame_to_rgba(frame)?;
-        image
-            .save(poster_out)
-            .map_err(|err| format!("failed to write poster {}: {err}", poster_out.display()))?;
-        Ok(poster_out.to_path_buf())
     }
 
     /// Convert a decoded frame to an RGBA surface via swscale.
@@ -959,5 +977,44 @@ mod tests {
         }
         let _ = std::fs::remove_file(&clip);
         let _ = std::fs::remove_file(&cut);
+    }
+
+    /// The media/colour bridge: a decoded video frame lands in the canonical
+    /// `WorkingImage` surface, sized to the clip and tagged `Srgb` (video is
+    /// display-referred 8-bit, no wide-gamut/ICC), and its sRGB egress matches
+    /// the PNG poster path byte-for-byte — same pixels, no round-trip drift.
+    #[test]
+    fn decode_frame_working_matches_poster_and_is_srgb() {
+        let dir = std::env::temp_dir();
+        let mut frames = Vec::new();
+        for i in 0..8u8 {
+            let path = dir.join(format!("hgripe_native_working_frame_{i}.png"));
+            image::RgbaImage::from_pixel(48, 32, image::Rgba([20 + i * 10, 90, 180, 255]))
+                .save(&path)
+                .unwrap();
+            frames.push(path.to_string_lossy().to_string());
+        }
+        let clip = dir.join("hgripe_native_working_test.mp4");
+        assemble_frames(&frames, &clip, 6.0, "libx264").unwrap();
+
+        let working = decode_frame_working(&clip, 0.3).unwrap();
+        assert_eq!((working.width, working.height), (48, 32));
+        assert_eq!(working.space, WorkingSpace::Srgb);
+        assert!(working.icc.is_none());
+        assert_eq!(working.pixels.len(), 48 * 32 * 4);
+
+        // The sRGB egress of the WorkingImage is byte-identical to decoding the
+        // same frame straight to a poster PNG — the bridge adds no drift.
+        let mut source = NativeFfmpegFrameSource::new();
+        let poster = dir.join("hgripe_native_working_poster.png");
+        let written = source.decode_frame(&clip, 0.3, &poster).unwrap();
+        let poster_rgba = image::open(&written).unwrap().to_rgba8();
+        assert_eq!(working.to_srgb_rgba8(), poster_rgba);
+
+        for frame in &frames {
+            let _ = std::fs::remove_file(frame);
+        }
+        let _ = std::fs::remove_file(&clip);
+        let _ = std::fs::remove_file(&poster);
     }
 }

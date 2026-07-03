@@ -132,6 +132,8 @@ fn main() {
             psd::get_model_paths,
             psd::set_model_paths,
             studio::grade_preview,
+            #[cfg(feature = "native-ffmpeg")]
+            studio::video_frame_grade_preview,
             commands::video::video_probe,
             commands::video::video_scrub,
             psd::prepare_repaint_regions,

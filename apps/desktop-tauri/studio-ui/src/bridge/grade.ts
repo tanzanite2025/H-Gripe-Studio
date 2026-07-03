@@ -29,3 +29,24 @@ export async function gradePreview(
     maxDim,
   })) as GradePreviewResult;
 }
+
+// Video grading preview: decode the frame nearest `timestampSec` through the
+// native media engine into the canonical working surface (the same space
+// stills use) and grade it — the media/colour bridge, so a video frame reaches
+// the kernel without a PNG round-trip. Only available on native-ffmpeg desktop
+// builds; returns `null` outside Tauri (webview TS-mirror fallback).
+export async function videoFrameGradePreview(
+  video: string,
+  timestampSec: number,
+  doc: GradeDoc,
+  maxDim = 1280,
+): Promise<GradePreviewResult | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  return (await invoke("video_frame_grade_preview", {
+    video,
+    timestampSec,
+    doc,
+    maxDim,
+  })) as GradePreviewResult;
+}
