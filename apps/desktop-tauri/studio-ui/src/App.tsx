@@ -63,8 +63,16 @@ import {
   findClip,
   removeClip,
   removeClipsForAsset,
+  trimClip,
   type TimelineModel,
 } from "./production/timeline";
+import {
+  clampAudioEdit,
+  defaultAudioEdit,
+  editedDuration,
+  type AudioClipEdit,
+} from "./production/audioEdit";
+import { AudioEditModal } from "./production/AudioEditModal";
 import { startIngestListener } from "./runtime/ingestStore";
 import { useT } from "./i18n";
 
@@ -132,6 +140,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // Per-target grade documents (JSON strings) keyed by targetKey, edited by
   // the drawer's Grade tab through the embeddable GradePanel.
   const [gradeDocs, setGradeDocs] = useState<Record<string, string>>({});
+  // Per-clip non-destructive audio edits (trim/gain/fade), plus the source
+  // duration assumed when the clip was first opened (until audio probing
+  // lands, the clip's untrimmed length stands in for the media length).
+  const [audioEdits, setAudioEdits] = useState<
+    Record<string, { edit: AudioClipEdit; sourceDurationSec: number }>
+  >({});
+  const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -374,6 +389,38 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     },
     [binAssets, nodes, openMediaEdit, setMessage, t],
   );
+
+  // Right-click on an audio clip: open the minimal trim/gain/fade editor.
+  const handleOpenAudioEdit = useCallback(
+    (clipId: string) => {
+      const found = findClip(timeline, clipId);
+      if (found && found.clip.kind === "audio") setAudioEditClipId(clipId);
+    },
+    [timeline],
+  );
+
+  const handleAudioEditCommit = useCallback(
+    (edit: AudioClipEdit) => {
+      if (!audioEditClipId) return;
+      const found = findClip(timeline, audioEditClipId);
+      if (!found) {
+        setAudioEditClipId(null);
+        return;
+      }
+      const sourceDurationSec =
+        audioEdits[audioEditClipId]?.sourceDurationSec ?? found.clip.duration;
+      const clamped = clampAudioEdit(edit, sourceDurationSec);
+      setAudioEdits((prev) => ({ ...prev, [audioEditClipId]: { edit: clamped, sourceDurationSec } }));
+      // Reflect the trim on the timeline: the clip plays only the trimmed span.
+      setTimeline(
+        trimClip(timeline, audioEditClipId, { duration: editedDuration(clamped, sourceDurationSec) }),
+      );
+      setAudioEditClipId(null);
+    },
+    [audioEditClipId, audioEdits, timeline],
+  );
+
+  const audioEditClip = audioEditClipId ? findClip(timeline, audioEditClipId) : null;
 
   const handleGradeCommit = useCallback(
     (gradeDoc: string) => {
@@ -777,6 +824,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onAddActiveToTimeline={handleAddActiveToTimeline}
           onRemoveClip={handleRemoveClip}
           onOpenImageEdit={handleOpenImageEdit}
+          onOpenAudioEdit={handleOpenAudioEdit}
           gradeImagePath={gradeSource.imagePath}
           gradeVideoPath={gradeSource.videoPath}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
@@ -889,6 +937,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             onParamChange(gradeEditNode.id, "grade_doc", commit.gradeDoc);
           }}
           onClose={() => setGradeEditNodeId(null)}
+        />
+      )}
+
+      {audioEditClip && audioEditClipId && (
+        <AudioEditModal
+          title={
+            binAssets.find((a) => a.id === audioEditClip.clip.assetId)?.name ??
+            audioEditClip.clip.assetId
+          }
+          sourceDurationSec={
+            audioEdits[audioEditClipId]?.sourceDurationSec ?? audioEditClip.clip.duration
+          }
+          initialEdit={audioEdits[audioEditClipId]?.edit ?? defaultAudioEdit()}
+          onCommit={handleAudioEditCommit}
+          onClose={() => setAudioEditClipId(null)}
         />
       )}
 
