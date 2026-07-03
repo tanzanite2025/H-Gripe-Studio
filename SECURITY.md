@@ -2,8 +2,8 @@
 
 ## Scope
 
-H-Gripe Studio is a local-first desktop application (Tauri + Rust backend +
-Python bridge). It runs on the user's own machine, stores everything under a
+H-Gripe Studio is a local-first desktop application (Tauri + native Rust
+backend). It runs on the user's own machine, stores everything under a
 single local workspace (`user/hgripe`), and reaches the network only to call the
 remote AI providers the user configures. Our threat model assumes:
 
@@ -31,8 +31,8 @@ The clearest examples, using only built-in functionality:
   read/write outside the expected workspace/output directories**, or
   **credential/data exfiltration** (e.g. leaking `credentials.json`, inline API
   keys, or Authorization headers).
-- A PSD or image input that, when processed by a built-in card / the Python
-  bridge, escapes its sandboxed directories or executes code.
+- A PSD or image input that, when processed by a built-in card, escapes its
+  sandboxed directories or executes code.
 - Logs, history records, or `doctor`/diagnostics output that leak secret values
   that are supposed to be redacted.
 
@@ -72,7 +72,7 @@ feature rather than opening a public issue.
 Please include:
 
 1. A description of the vulnerability and the affected component (desktop app /
-   `hgripe-api` broker / Python bridge).
+   `hgripe-api` broker).
 2. Reproduction steps, ideally with a minimal workflow file or proof-of-concept.
 3. The H-Gripe Studio version, install method (release / build from source), and OS.
 4. An explanation of how this affects a typical local user as described in the

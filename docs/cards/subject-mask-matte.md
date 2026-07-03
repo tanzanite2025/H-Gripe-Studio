@@ -1,10 +1,10 @@
 # Subject Mask / Matte Editor card
 
-Backend: **native Rust** (in-process), not the `python/bridge`. This is the first
-card whose image processing lives in Rust (`image` + `imageproc`), so it also
-establishes the reusable `studio_image` hardening util that later Rust cards
-share. Phase 2 segmentation / matting models also run in Rust (`ort` / `candle`),
-so the card never splits across a Python boundary.
+Backend: **native Rust** (in-process). This was the first card whose image
+processing lived in Rust (`image` + `imageproc`) — since Phase 7 (#314) every
+card is native — and it established the reusable `studio_image` hardening util
+the other Rust cards share. Segmentation / matting models also run in Rust
+(`ort`).
 
 The PSD-first subject-selection card. It answers *where the subject is, what to
 keep, which edges go semi-transparent, and what needs manual fixing* — and hands
@@ -18,18 +18,16 @@ behind the same ports.
 
 ## Backend / executor lane
 
-The existing `StudioExecutor::Local` is defined structurally as *"always a
-`python/bridge` CLI; must not touch the network"* (`exec.rs`). A native-Rust,
-in-process card does **not** fit that lane — routing it through `Local` would
-break the invariant that `Local` == python-bridge.
-
-**Decision:** add a new executor class for in-process Rust compute and route this
-card through it:
+Historically `StudioExecutor::Local` meant *"always a `python/bridge` CLI;
+must not touch the network"*, so this native in-process card introduced the
+separate `Compute` class. Post Phase 7 both `Local` and `Compute` run native
+Rust in-process with no network handle; the structural no-network guarantee is
+unchanged:
 
 ```
 StudioExecutor::Graph    pure in-process graph node, no heavy work
-StudioExecutor::Local    always a python/bridge CLI, no network   (existing 7 cards)
-StudioExecutor::Compute  in-process Rust image/model work, no network   (NEW — subjectMask)
+StudioExecutor::Local    in-process native Rust card, no network (formerly python/bridge CLI)
+StudioExecutor::Compute  in-process Rust image/model work, no network (subjectMask)
 StudioExecutor::Api      provider call through the broker
 StudioExecutor::Hybrid   graph + api
 ```
@@ -45,9 +43,9 @@ would move the relevant mode to `Api` / `Hybrid`.
 
 ## `studio_image` (new reusable util)
 
-The Python cards share hardened loaders (`_load_rgba` / `_load_mask`). Rust cards
-need the same guarantees, so this card introduces `studio_image` (a new module
-under `src-tauri/src/studio/`) that every later Rust card reuses:
+The legacy Python cards shared hardened loaders (`_load_rgba` / `_load_mask`).
+Rust cards need the same guarantees, so this card introduced `studio_image`
+(under `src-tauri/src/studio/`) which every Rust card now reuses:
 
 | Fn | Guarantee |
 | --- | --- |
@@ -56,8 +54,8 @@ under `src-tauri/src/studio/`) that every later Rust card reuses:
 | colour-space normalise | CMYK → sRGB (ICC when embedded), 16-bit / float → 8-bit, palette / grayscale → RGBA; record `source_mode`. |
 | `apply_exif_orientation` | Normalise only a real, non-identity orientation; record `exif_transposed`. |
 
-The `image` crate decodes most of this; CMYK-ICC and EXIF are added here so the
-behaviour matches the Python loaders the other cards already use.
+The `image` crate decodes most of this; CMYK-ICC and EXIF are added here,
+matching the behaviour of the legacy Python loaders.
 
 ## Responsibility split (node / preview modal / mask-edit modal)
 

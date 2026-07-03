@@ -2,7 +2,9 @@
 
 Executor: **API** (orchestrates a provider `image.edit` between two local pixel
 steps). Pixel backend: `prepare_repaint_regions` / `composite_repaint` Tauri
-commands → `detail_repaint_cli.py` (Pillow + numpy, CPU-only).
+commands → `studio/detail_repaint_cpu.rs` (native Rust, CPU-only). The Python
+bridge (and its opt-in local diffusers inpaint engines) was deleted in Phase 7
+(#314); the provider `image.edit` path is the only repaint backend.
 
 The Phase-2 follow-up to the detect-only **Detail Watchdog**: Watchdog reports
 *where* an image breaks down (a `QualityReport`); Detail Repaint takes those
@@ -93,16 +95,16 @@ the paste-back carry honest colour; the source's original mode is recorded as
 | `RGB` / `RGBA` / `L` / `LA` | Used directly; alpha (when present) is preserved. |
 | `P` (palette) | Expanded to RGBA; transparency in `info` is treated as alpha. |
 | `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
-| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit via numpy before RGB conversion. |
+| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
 
 ## Boundary behaviour
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing / blank `image` input | Rust handler errors `Detail Repaint needs a connected image input` before shelling out. |
-| Missing image file on disk | `FileNotFoundError: candidate image not found: <path>`. |
-| Input larger than `max_decode_pixels` | `ValueError: input image too large to decode safely: WxH ...` (before decode). |
-| Invalid `quality_report` / `manifest` / `repainted` JSON | `ValueError: invalid <label> JSON: ...`. |
+| Missing / blank `image` input | Rust handler errors `Detail Repaint needs a connected image input`. |
+| Missing image file on disk | `candidate image not found: <path>`. |
+| Input larger than `max_decode_pixels` | `input image too large to decode safely: WxH ...` (before decode). |
+| Invalid `quality_report` / `manifest` / `repainted` JSON | `invalid <label> JSON: ...`. |
 | No repaintable issues | `prepare.selected_count == 0`; composite is `unchanged`. |
 | Issue not repaintable / below confidence / over cap / no bbox | Recorded in `prepare.skipped` with a `reason`. |
 | Provider returned nothing for a region | That region's composite status is `no_repaint`; others still composite (`partial`). |
@@ -132,23 +134,12 @@ the paste-back carry honest colour; the source's original mode is recorded as
 
 ## Tests
 
-- `python/bridge/tests/test_detail_repaint_cli.py` — issue selection / action /
+- `src-tauri/src/studio/detail_repaint_cpu.rs` — issue selection / action /
   confidence / region cap, mask polarity (+ invert), padding, the feathered
   paste-back, the **Poisson seam blend** (offset diffusion, gradient
   preservation, alpha isolation, tiny-region feather fallback, unknown-mode
   rejection), **alpha isolation** (RGB-only blend, original alpha preserved),
   **box-filter downsampling**, no-repaint passthrough, decode guard, CMYK source
-  mode, EXIF reporting, invalid JSON, missing image (run:
-  `pytest python/bridge/tests`).
-- `python/bridge/tests/test_inpaint_backends.py` — the engine seam (resolve /
-  probe / weight paths / unavailable fallback / ControlNet gating), plus the
-  gated `test_{sd_inpaint,sdxl_inpaint,flux_fill}_real_inference_with_tiny_snapshot`
-  real-inference e2es: each synthesises a tiny random-weight snapshot in
-  diffusers format (no download; SD inpaint UNet / dual-encoder SDXL /
-  flow-matching Flux transformer, built by `tests/tiny_diffusers.py`) and runs
-  the real `from_pretrained` → denoise loop → VAE decode through the CLI
-  `repaint` subcommand. They skip without `torch` / `diffusers` /
-  `transformers`; the manual-dispatch **`python bridge (diffusers inference)`**
-  CI lane installs the CPU torch stack and runs them for real.
+  mode, EXIF reporting, invalid JSON, missing image (run: `cargo test`).
 - `src-tauri/src/studio/exec.rs` — `PrepareRepaintResult` / `RepaintReport`
   deserialization of the v1 hardening fields (plus legacy JSON defaults).

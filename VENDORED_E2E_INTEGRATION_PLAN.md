@@ -1,5 +1,11 @@
 # Vendored Runtime End-to-End Integration Plan
 
+> **状态更新（Phase 7，#314）：** Python runtime、`third_party/psd_tools`、PyAV
+> fallback 与所有 Python torch/onnx 引擎已从仓库彻底删除。本文档中“去除
+> Python 桥 / 移除 PyAV / 删除 psd_tools”类目标均已完成：native FFmpeg 是唯一
+> 视频路径，Rust PSD 子集（analyze / compose / export）是唯一 PSD 路径。尚未
+> 完成的主要是 P3（hgripe-grade 接入）与 ONNX 小模型链的持续扩展。
+
 ## 目的
 
 H-Gripe Studio 已经开始把关键库 fork / vendor 到仓库内，并切断上游自动漂移。
@@ -24,7 +30,7 @@ H-Gripe Studio 已经开始把关键库 fork / vendor 到仓库内，并切断�
 | --- | --- | --- | --- |
 | `third_party/moxcms` | 色彩管理 fork | 是，最高优先级 | 成为全软件色彩管线核心 |
 | `third_party/ffmpeg` | 本地 FFmpeg/libav | 是，最高优先级 | 成为视频和媒体引擎核心 |
-| `third_party/psd_tools` | Python PSD 过渡库 | 不建议长期深度投入 | 作为参考实现，最终迁到 Rust PSD 子集 |
+| ~~`third_party/psd_tools`~~ | Python PSD 过渡库（已删除，Phase 7） | — | 已迁到 Rust PSD 子集（`psd/analyze.rs` / `psd/compose.rs` / `psd/write.rs`） |
 | `third_party/cargo-vendor` | Cargo 依赖快照 | 不适合业务集成 | 只做离线构建和版本锁定 |
 | `crates/hgripe-api` | API 调用 crate | 是，但属于业务协议层 | 保持干净，和本地像素内核分离 |
 | future `crates/hgripe-grade` | 调色 / 合成内核 | 是，极高价值 | 统一图片和视频调色 |
@@ -94,37 +100,21 @@ video file
 - 画布生成结果拖到时间线后的素材处理。
 - 最终导出。
 
-当前不理想的状态：
+已完成（Phase 7 后）：
 
-- native FFmpeg 还是 feature path。
-- PyAV / Python 仍然是 fallback。
-- trim / assemble 仍容易被 Python worker 牵住。
-- 解码帧如果大量落盘为 PNG，会损失端到端性能。
+- ✅ desktop 默认启用 native FFmpeg（唯一路径）。
+- ✅ PyAV / Python fallback 已删除。
+- ✅ trim / assemble / encode 均为 native（`video_trim.rs` / `video_assemble.rs`）。
 
-长期目标：
+长期目标（仍待做）：
 
-- desktop 默认启用 native FFmpeg。
-- 移除 PyAV 作为正常运行路径。
-- 对视频帧建立内存级 frame buffer / cache。
+- 对视频帧建立内存级 frame buffer / cache 的持续优化。
 - 调色和剪辑直接消费 Rust 解码帧，而不是临时文件。
 
-## 3. psd_tools: 只作为过渡和参考
+## 3. psd_tools: 已删除（Phase 7 完成）
 
-`third_party/psd_tools` 当前有价值，因为 PSD 很复杂，它能让现有 PSD 节点先跑起来。
-
-但它不适合继续深度端到端扩展，原因：
-
-- 它是 Python 库，和零 Python runtime 目标冲突。
-- PSD 处理如果继续堆在 Python 上，未来 Rust 内核和 Python PSD 会分裂。
-- 性能热点会被进程边界、Pillow/numpy、文件中转限制住。
-
-正确用法：
-
-- 用它生成 PSD golden fixtures。
-- 用它对照真实 PSD 结构。
-- 用它保留现有功能直到 Rust PSD 子集完成。
-
-长期替代：
+`third_party/psd_tools` 已在 Phase 7（#314）从仓库删除：它的过渡使命已完成，
+Rust PSD 子集接替了全部生产路径。下面的“长期替代”链路即现状：
 
 ```text
 PSD template
@@ -135,7 +125,7 @@ PSD template
   -> Photoshop cleanup compatible output
 ```
 
-Rust PSD 不需要一开始完整覆盖 Photoshop 全格式。优先做 H-Gripe 生产需要的子集：
+Rust PSD 不需要完整覆盖 Photoshop 全格式。已覆盖 H-Gripe 生产需要的子集：
 
 - 文档尺寸和色彩标记。
 - 图层列表和分组。
@@ -249,12 +239,12 @@ psd engine
 当前如果云端正在写调色内核，本地不要改已有 kernel 代码和 `docs/design/grade-kernel.md`。
 先用本文件固定集成边界即可。
 
-### P1: FFmpeg 默认化
+### P1: FFmpeg 默认化 — ✅ 完成（Phase 7 收尾）
 
-- native FFmpeg 从 feature path 变成 desktop 默认路径。
-- 去掉正常运行里的 PyAV 依赖。
-- 补齐 trim / assemble / encode。
-- 确保视频帧能进入未来 grade surface。
+- ✅ native FFmpeg 是 desktop 唯一路径。
+- ✅ PyAV 依赖已删除。
+- ✅ trim / assemble / encode 已补齐。
+- 待做：确保视频帧能进入未来 grade surface。
 
 ### P2: moxcms 全链路化
 
@@ -269,12 +259,12 @@ psd engine
 - 视频帧调色再接。
 - LUT、曲线、色轮、levels、blend mode 统一。
 
-### P4: Rust PSD 子集
+### P4: Rust PSD 子集 — ✅ 完成（Phase 7 收尾）
 
-- 先 inspect / analyze。
-- 再 layered export。
-- 最后 smart-object / placeholder replacement。
-- 删除 `psd_tools` 前必须有真实 PSD 模板 golden。
+- ✅ inspect / analyze（`psd/analyze.rs`）。
+- ✅ layered export（`psd/compose.rs` + `psd/write.rs`）。
+- ✅ smart-object / placeholder replacement（`psd/smart.rs`）。
+- ✅ `psd_tools` 已删除（golden 覆盖后，#314）。
 
 ### P5: ONNX 小模型辅助闭环
 
@@ -314,8 +304,8 @@ psd engine
 不应该端到端深挖：
 
 1. `cargo-vendor` - 只做构建锁定。
-2. `psd_tools` - 只做 Python 过渡和参考实现。
-3. Python Torch / Diffusers - 不进入核心，最多外部插件化。
+2. ~~`psd_tools`~~ - 过渡使命完成，已删除（Phase 7）。
+3. Python Torch / Diffusers - 不进入核心（相关 Python 插件引擎已随 Phase 7 删除）。
 
 最终目标不是“仓库里有很多自维护库”，而是：
 

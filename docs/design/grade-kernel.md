@@ -46,9 +46,9 @@ grading (many stacked corrections per frame, no cumulative banding).
   `crates/hgripe-api`, depended on by `hgripe-desktop`. Not a module inside
   `src-tauri/src/studio` — the kernel must be compilable, testable, and
   fuzzable on its own, and its public API is the only coupling surface.
-- **Pure Rust, no Python.** Grading is a per-frame hot path; the Python
-  bridge's process/serialisation overhead and deployment weight are
-  disqualifying. The bridge never participates in grading.
+- **Pure Rust, no Python.** Grading is a per-frame hot path; a subprocess's
+  process/serialisation overhead would be disqualifying. (Moot since Phase 7,
+  #314 — there is no Python runtime in the repo at all.)
 - **Minimal, locked dependencies.** The kernel core (blend math, adjustment
   math, LUT application) is dependency-free `f32` array code. Allowed
   dependencies, all already in the tree and covered by the vendoring policy

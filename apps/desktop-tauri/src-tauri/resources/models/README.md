@@ -132,25 +132,14 @@ export HGRIPE_VITMATTE_MODEL=/path/to/vitmatte.onnx
 export HGRIPE_WATCHDOG_MODEL=/path/to/watchdog_defect.onnx
 ```
 
-### Detail Watchdog ML detector (opt-in, no weight shipped)
+### Detail Watchdog ML detector (deleted with the Python bridge)
 
-The Detail Watchdog node always runs its CPU rule layer; the `onnx_defect`
-`engine` is an **opt-in** learned detector that graduates the `hands` / `text` /
-`logo` watch targets (recorded as `skipped` by the rule layer) into real
-findings. No trained weight is published yet, so the engine probes as
-*unavailable* and the node falls back to the rule-only report until a blob is
-provided.
-
-- **Weight:** `watchdog_defect.onnx`, resolved from `HGRIPE_WATCHDOG_MODEL`
-  (explicit path) or `<HGRIPE_MODEL_CACHE>/watchdog_defect.onnx` (else this
-  bundled dir). Not committed and not bundled in the installer.
-- **Contract:** input `[1,3,H,W]` float32 RGB `0..1` (letterboxed, aspect
-  preserved); outputs `boxes` `[N,4]` `xyxy` / `scores` `[N]` / `labels` `[N]`
-  (matched by name, else positional). An optional sidecar
-  `watchdog_defect.onnx.labels.json` maps class ids to target names, e.g.
-  `{"0": "hands", "1": "text", "2": "logo"}`.
-- **Probe:** `python python/bridge/detail_watchdog_cli.py --probe-engines`
-  reports which engines are usable right now (for the UI to grey out).
+The Detail Watchdog node always runs its native CPU rule layer. The old
+`onnx_defect` learned detector (which graduated the `hands` / `text` / `logo`
+watch targets into real findings) was a Python-bridge backend and was deleted
+in Phase 7 (#314); those targets are recorded as `skipped` until a native
+detector lands. The `probe_engines` Tauri command reports which engines are
+usable (for the UI to grey out) — today only the always-on `rules` baseline.
 
 ## Verify ViTMatte end-to-end
 

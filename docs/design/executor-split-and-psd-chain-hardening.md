@@ -6,7 +6,12 @@ for it. The first-class `executor` split is the `StudioExecutor` enum
 `apps/desktop-tauri/src-tauri/src/studio/exec.rs`, classified by
 `studio_executor_for_kind` and mirrored by the `executor` field in
 `studio-ui/src/graph/nodeSpecs.ts`; the PSD chain input-hardening checklist has
-likewise shipped across the bridge CLIs.
+likewise shipped across the local cards.
+Post **Phase 7 (#314)** the Python bridge this doc describes as the `Local`
+lane's implementation was deleted: `Local` handlers now run **in-process native
+Rust** (`studio/*.rs`, `psd/*.rs`), not `python/bridge/*_cli.py` subprocesses.
+The lane semantics ("local, never networks") are unchanged; read the
+`python/bridge` mentions below as historical.
 Scope: defines (1) a first-class `executor` (local vs API) dimension for node
 cards + the broker routing rules that enforce it, and (2) a per-chain
 "do it to the extreme" checklist for the eight PSD processing chains.

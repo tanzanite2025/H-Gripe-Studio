@@ -53,8 +53,8 @@ treats it as a regular edge so nothing downstream needs to special-case it.
 
 `FlowCanvas` currently only handles **palette** drags (`DND_NODE_KIND`, an
 in-app node-kind string) in `onDrop`. OS **file** drops need a separate path,
-and crucially must yield an **absolute filesystem path** (the Rust / Python
-backends all work on disk paths):
+and crucially must yield an **absolute filesystem path** (the Rust backends
+all work on disk paths):
 
 | Environment | Mechanism | Gives path? |
 | --- | --- | --- |
@@ -116,19 +116,19 @@ card button (opens an editor), the algorithm-derived lane is a right-click entry
 Video is **not** an image and gets its own card, editor set, and backend. It
 was scoped separately because it needed real video decoding — which has since
 landed as the **media engine** (`studio/video_engine.rs`: decoder seam +
-frame cache + latest-wins playback thread, with a PyAV backend and an opt-in
-vendored native-ffmpeg backend; `video_scrub` for timeline dragging — see
-`design/editor-resource-model.md` §Staged rollout). Encode/export is still
-missing, so video edits (trim, frame-crop, …) remain a distinct later op set.
+frame cache + latest-wins playback thread on the vendored native-ffmpeg
+backend; the legacy PyAV backend was deleted in Phase 7, #314; `video_scrub`
+for timeline dragging — see `design/editor-resource-model.md` §Staged
+rollout). Encode/export exists as the **Video Assemble** card
+(`studio/video_assemble.rs`, native FFmpeg encoders).
 
-The **first version** of the video card is now implemented: dropping a video
-file creates a `videoSource` node whose `video_probe` Tauri command shells out
-to `python/bridge/video_probe_cli.py` (PyAV, which bundles ffmpeg — no system
-install) to read metadata (duration / resolution / fps / codec) and decode a
-**poster frame** to a cached PNG. The card shows that poster through the
-existing `generate_thumbnail` pipeline plus a `name · W×H · m:ss · fps` info
-row, and carries the original path downstream on a `video` output port. Video
-**editing** (trim / frame-crop) is still a later track.
+The **first version** of the video card is implemented: dropping a video
+file creates a `videoSource` node whose `video_probe` Tauri command uses the
+native media engine to read metadata (duration / resolution / fps / codec)
+and decode a **poster frame** to a cached PNG. The card shows that poster
+through the existing `generate_thumbnail` pipeline plus a
+`name · W×H · m:ss · fps` info row, and carries the original path downstream
+on a `video` output port.
 
 ## Auto (computed) vs Manual — how the split is decided
 

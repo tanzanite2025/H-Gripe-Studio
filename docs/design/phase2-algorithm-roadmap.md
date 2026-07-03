@@ -1,9 +1,13 @@
 # Phase 2 Algorithm Roadmap — Super-Resolution, Detail Watchdog, Detail Repaint
 
-> **Status:** Design proposal (Issue #4). This document does **not** implement
-> any Phase 2 algorithm; it records the current Phase 1 baseline, the target
-> production-grade behaviour, and a concrete integration plan so the work can be
-> scheduled and reviewed.
+> **Status:** Historical (Issue #4). The Phase 2 backends described below were
+> implemented on the **Python bridge** and were **deleted with it in Phase 7
+> (#314)** — every `python/bridge/…` path, torch/onnxruntime backend, and
+> Python CI lane in this document no longer exists. What survives is the
+> per-card `engine` seam *contract* (param + report fields + `probe_engines`),
+> now served by the native Rust cards; see
+> [`../implementation-status.md`](../implementation-status.md) §2 for the live
+> status. Kept as design reference for future **native** re-implementations.
 
 ## 0. Context
 
