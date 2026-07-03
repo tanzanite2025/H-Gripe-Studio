@@ -177,6 +177,7 @@ export function FlowCanvas({
       onDrop={onDrop}
       onlyRenderVisibleElements
       deleteKeyCode={["Backspace", "Delete"]}
+      proOptions={{ hideAttribution: true }}
       fitView
     >
       <Background />
