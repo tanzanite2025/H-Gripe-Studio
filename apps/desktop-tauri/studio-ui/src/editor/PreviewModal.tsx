@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { generateThumbnail } from "../bridge/tauri";
+import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 
 // Shared "review gate" modal.
 //
@@ -40,30 +40,14 @@ interface PreviewModalProps {
 }
 
 function PreviewImage({ path }: { path: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Presented through the viewport host (image_edit viewport, CPU transport);
+  // null in browser preview, where we degrade to a path-only card.
+  const viewport = useViewportUnderlay("image_edit", path, 1280);
 
-  useEffect(() => {
-    let cancelled = false;
-    setSrc(null);
-    setError(null);
-    generateThumbnail({ path, size: 1280 })
-      .then((t) => {
-        if (cancelled) return;
-        if (t.data_url) setSrc(t.data_url);
-        else setError("preview unavailable (backend mocked)");
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path]);
-
-  if (error) return <p className="muted">{error}</p>;
-  if (!src) return <p className="muted">loading…</p>;
-  return <img className="media-viewer-img" src={src} alt={basename(path)} />;
+  if (viewport.underlay)
+    return <img className="media-viewer-img" src={viewport.underlay} alt={basename(path)} />;
+  if (viewport.settled) return <p className="muted">preview unavailable (backend mocked)</p>;
+  return <p className="muted">loading…</p>;
 }
 
 export function PreviewModal({ title, layers, caption, onEdit, onClose }: PreviewModalProps) {

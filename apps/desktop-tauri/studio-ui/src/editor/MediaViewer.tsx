@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { generateThumbnail } from "../bridge/tauri";
+import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 
 // Large image extensions we know how to display. Anything else falls back to a
 // "open externally" hint rather than trying to decode it in the webview.
@@ -21,11 +21,13 @@ interface MediaViewerProps {
 // original in the webview; the original path stays the source of truth and is
 // shown for copy / external open.
 export function MediaViewer({ path, onClose }: MediaViewerProps) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [actualSize, setActualSize] = useState(false);
   const isImage = IMAGE_RE.test(path);
+  // Presented through the viewport host (image_edit viewport, CPU transport):
+  // stays null in browser preview, where we degrade to a path-only card.
+  const viewport = useViewportUnderlay("image_edit", isImage ? path : undefined, 1280);
+  const src = viewport.underlay;
+  const dims = viewport.dims;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -35,31 +37,6 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    if (!isImage) return;
-    let cancelled = false;
-    setSrc(null);
-    setError(null);
-    // Request a large, crisp preview (capped) — high quality without loading
-    // the raw original into the webview.
-    generateThumbnail({ path, size: 1280 })
-      .then((t) => {
-        if (cancelled) return;
-        if (t.data_url) {
-          setSrc(t.data_url);
-          setDims({ w: t.width, h: t.height });
-        } else {
-          // Browser preview (backend mocked) returns an empty data URL.
-          setError("preview unavailable (backend mocked)");
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, isImage]);
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
@@ -83,10 +60,10 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
         <div className={`media-viewer-stage ${actualSize ? "actual" : "fit"}`}>
           {!isImage ? (
             <p className="muted">No inline preview for this file type. Original path:</p>
-          ) : error ? (
-            <p className="muted">{error}</p>
           ) : src ? (
             <img className="media-viewer-img" src={src} alt={basename(path)} />
+          ) : viewport.settled ? (
+            <p className="muted">preview unavailable (backend mocked)</p>
           ) : (
             <p className="muted">loading…</p>
           )}
