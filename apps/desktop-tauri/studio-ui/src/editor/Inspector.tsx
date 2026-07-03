@@ -1,14 +1,25 @@
 import { useContext, useEffect, useState } from "react";
 import type { Node } from "@xyflow/react";
 import { nodeSpec } from "../graph/nodeSpecs";
+import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";
-import { probeEngines, type EngineProbeReport } from "../bridge/engineProbe";
+import { probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
 import { ParamField } from "./ParamField";
 import { ProfilePicker } from "./ProfilePicker";
 import { OutputPicker } from "./OutputPicker";
 import { MediaViewer } from "./MediaViewer";
 import type { HgripeNodeData } from "./HgripeNode";
+
+// Which probe `node_kind` covers a param's `engine` select: `engine` is the
+// node's own kind; an integrated card's `<row>.engine` is the leaf kind that
+// row lowers to (the probe reports leaf kinds, not card kinds).
+function engineProbeKind(kind: string, paramKey: string): string | null {
+  if (paramKey === "engine") return kind;
+  if (!paramKey.endsWith(".engine")) return null;
+  const row = paramKey.slice(0, -".engine".length);
+  return LOWERED_CARD_ROWS[kind]?.find((def) => def.row === row)?.kind ?? null;
+}
 
 interface InspectorProps {
   node: Node | null;
@@ -23,18 +34,26 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
   const lang = useContext(LangContext);
   const t = useT();
 
-  // Probe the opt-in ML `engine` seams once so the inspector can grey out
-  // engines whose deps/weights are missing on this box. Failures are non-fatal:
-  // we leave every option enabled rather than blocking selection on a probe.
+  // Demand-driven engine probe: only when the selected node actually exposes
+  // an `engine` param does the inspector ask for the (cached, single-flight)
+  // capability report to grey out engines whose deps/weights are missing.
+  // Failures are non-fatal: we leave every option enabled rather than blocking
+  // selection on a probe.
+  const nodeKind = node ? String((node.data as HgripeNodeData).kind) : null;
+  const needsEngineProbe =
+    nodeKind !== null &&
+    nodeKind !== "group" &&
+    nodeSpec(nodeKind).params.some((p) => engineProbeKind(nodeKind, p.key) !== null);
   useEffect(() => {
+    if (!needsEngineProbe) return;
     let alive = true;
-    probeEngines()
+    probeEnginesCached()
       .then((report) => alive && setEngineProbe(report))
       .catch(() => alive && setEngineProbe(null));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [needsEngineProbe]);
 
   if (!node) {
     return (
@@ -97,11 +116,12 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
         // For the opt-in `engine` select, grey out engines the probe reports as
         // unavailable on this box (the CPU/`rules` baseline stays enabled). A
         // probe that did not run (browser preview, error) leaves all enabled.
-        const card = engineProbe?.cards.find((c) => c.node_kind === data.kind);
+        const probeKind = engineProbeKind(data.kind, p.key);
+        const card = probeKind
+          ? engineProbe?.cards.find((c) => c.node_kind === probeKind)
+          : undefined;
         const optionStates =
-          p.key === "engine" && card && !card.error && Object.keys(card.engines).length > 0
-            ? card.engines
-            : undefined;
+          card && !card.error && Object.keys(card.engines).length > 0 ? card.engines : undefined;
         const selectedState = optionStates?.[String(raw ?? "")];
         const selectedUnavailable = selectedState && !selectedState.available;
         // For an available GPU-capable engine, note whether it would actually
