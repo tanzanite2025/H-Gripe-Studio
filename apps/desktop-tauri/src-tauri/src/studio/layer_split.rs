@@ -54,7 +54,7 @@ const MAX_INSTANCES: usize = 8;
 
 /// `[x1, y1, x2, y2]` extents of the selected pixels, or `[0, 0, 0, 0]` when
 /// the mask is empty (the protocol's "unknown" bbox).
-fn mask_bbox(mask: &GrayImage) -> [u32; 4] {
+pub(crate) fn mask_bbox(mask: &GrayImage) -> [u32; 4] {
     let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
     let mut any = false;
     for (x, y, pixel) in mask.enumerate_pixels() {

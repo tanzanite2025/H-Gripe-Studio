@@ -130,4 +130,51 @@ describe("LayerReviewPanel", () => {
     fireEvent.click(toggles[1]);
     expect(onToggleVisibility).toHaveBeenCalledWith(STUB_BACKGROUND_LAYER_ID);
   });
+
+  it("merges checked unlocked layers when a merge handler is provided", () => {
+    const onMergeLayers = vi.fn();
+    const { container } = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={null}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+        onMergeLayers={onMergeLayers}
+      />,
+    );
+    // no checkbox on the locked original layer
+    const checks = Array.from(
+      container.querySelectorAll<HTMLInputElement>(".layer-review-check"),
+    );
+    expect(checks).toHaveLength(2);
+    const merge = container.querySelector<HTMLButtonElement>(".layer-review-merge");
+    expect(merge).not.toBeNull();
+    expect(merge!.disabled).toBe(true);
+    fireEvent.click(checks[0]);
+    expect(merge!.disabled).toBe(true);
+    fireEvent.click(checks[1]);
+    expect(merge!.disabled).toBe(false);
+    fireEvent.click(merge!);
+    expect(onMergeLayers).toHaveBeenCalledWith([
+      STUB_BACKGROUND_LAYER_ID,
+      STUB_SUBJECT_LAYER_ID,
+    ]);
+    // selection clears after the merge request
+    expect(merge!.disabled).toBe(true);
+  });
+
+  it("hides merge affordances without a merge handler (browser preview)", () => {
+    const { container } = render(
+      <LayerReviewPanel
+        asset={asset}
+        selectedLayerId={null}
+        onSelectLayer={() => {}}
+        visibility={{}}
+        onToggleVisibility={() => {}}
+      />,
+    );
+    expect(container.querySelector(".layer-review-check")).toBeNull();
+    expect(container.querySelector(".layer-review-merge")).toBeNull();
+  });
 });

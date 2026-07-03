@@ -615,6 +615,15 @@ export const messages = {
     en: "switch the preview between the layer's RGBA and its mask",
     zh: "在图层 RGBA 与蒙版之间切换预览",
   },
+  "layers.merge": { en: "merge {n} layers", zh: "合并 {n} 个图层" },
+  "layers.mergeTitle": {
+    en: "union the checked layers' masks into one merged layer",
+    zh: "把勾选图层的蒙版合并为一个图层",
+  },
+  "layers.mergeCheckTitle": {
+    en: "check to include this layer in a merge",
+    zh: "勾选以纳入合并",
+  },
   "layers.previewUnavailable": {
     en: "preview unavailable (browser preview / backend mocked)",
     zh: "预览不可用（浏览器预览 / 后端为模拟）",

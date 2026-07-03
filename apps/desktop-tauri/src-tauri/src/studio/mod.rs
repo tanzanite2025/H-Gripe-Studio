@@ -73,6 +73,7 @@ mod history;
 pub(crate) mod image_buffer;
 mod image_enhance;
 pub(crate) mod image_enhance_cpu;
+mod layer_merge;
 mod layer_split;
 mod media_index;
 mod node_registry;
@@ -107,6 +108,7 @@ pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
 // re-exports the function, not the hidden `__cmd__cmd` helper that the Tauri
 // command macro generates beside it; the glob carries both.
 pub(crate) use exec::*;
+pub(crate) use layer_merge::*;
 pub(crate) use grade::*;
 pub(crate) use history::*;
 pub(crate) use media_index::*;

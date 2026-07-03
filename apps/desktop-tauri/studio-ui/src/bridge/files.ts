@@ -38,6 +38,37 @@ export async function generateThumbnail(req: ThumbnailRequest): Promise<Thumbnai
   })) as ThumbnailResult;
 }
 
+// Fields are snake_case to match the Rust `MergedLayerArtifacts` serialization.
+export interface MergedLayerArtifacts {
+  mask_path: string;
+  rgba_path: string;
+  /** `[x1, y1, x2, y2]` extents of the merged mask (`[0,0,0,0]` = empty). */
+  bbox: [number, number, number, number];
+  width: number;
+  height: number;
+}
+
+/**
+ * Union two or more layer masks of a layered image asset into one merged
+ * layer's artifacts (mask + RGBA cutout PNGs) on the backend. Returns `null`
+ * outside Tauri (browser preview) — the review panel disables merging there.
+ */
+export async function mergeLayerMasks(req: {
+  imagePath: string;
+  maskPaths: string[];
+  outputDir?: string;
+  outputName: string;
+}): Promise<MergedLayerArtifacts | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  return (await invoke("merge_layer_masks", {
+    imagePath: req.imagePath,
+    maskPaths: req.maskPaths,
+    outputDir: req.outputDir ?? "",
+    outputName: req.outputName,
+  })) as MergedLayerArtifacts;
+}
+
 // Fields are snake_case to match the Rust `VideoProbeResult` serialization.
 export interface VideoProbeResult {
   width: number;
