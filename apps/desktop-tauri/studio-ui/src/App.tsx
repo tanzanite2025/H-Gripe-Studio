@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -17,6 +17,7 @@ import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
+import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
 import {
@@ -93,22 +94,6 @@ import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
 import { useT } from "./i18n";
-
-// Editor-level surfaces (mask/crop/grade/media editors) are heavyweight and
-// open rarely, so they are code-split out of the main bundle: nothing loads
-// until the user actually opens one.
-const MaskEditModal = lazy(() =>
-  import("./editor/MaskEditModal").then((m) => ({ default: m.MaskEditModal })),
-);
-const CropEditModal = lazy(() =>
-  import("./editor/CropEditModal").then((m) => ({ default: m.CropEditModal })),
-);
-const GradeEditModal = lazy(() =>
-  import("./editor/GradeEditModal").then((m) => ({ default: m.GradeEditModal })),
-);
-const MediaEditModal = lazy(() =>
-  import("./editor/MediaEditModal").then((m) => ({ default: m.MediaEditModal })),
-);
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -886,6 +871,134 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode],
   );
 
+  // Canvas -> EditorHost adapter. The editors are application-level surfaces
+  // that only see a target (image path + title) and initial edit data; this is
+  // the one place that derives a request from node state and folds a commit
+  // back into the graph (param update / bound-edit node) and the run pipeline.
+  const editorRequest: EditorRequest | null = maskEditNode
+    ? {
+        editor: "mask",
+        target: {
+          title: t((maskEditNode.data as HgripeNodeData).kind === "subjectMask" ? "mask.titleSubject" : "mask.titleDefault"),
+          imagePath: connectedImagePath(maskEditNode.id) ?? null,
+        },
+        initial: normalizeEditPaths((maskEditNode.data as HgripeNodeData).params.edit_paths),
+        wandTolerance: Number((maskEditNode.data as HgripeNodeData).params.wand_tolerance ?? 24),
+        onCommit: (edits) => {
+          // Commit the edit, then run up to this node so the result shows
+          // immediately (the effect fires once `nodes` reflects the commit).
+          pendingRunNode.current = maskEditNode.id;
+          onParamChange(maskEditNode.id, "edit_paths", edits);
+        },
+      }
+    : cropEditNode
+      ? {
+          editor: "crop",
+          target: { title: t("crop.title"), imagePath: connectedImagePath(cropEditNode.id) ?? null },
+          initialMode:
+            (cropEditNode.data as HgripeNodeData).params.mode === "auto_subject"
+              ? "auto_subject"
+              : "manual",
+          initialBox:
+            Array.isArray((cropEditNode.data as HgripeNodeData).params.crop_box) &&
+            ((cropEditNode.data as HgripeNodeData).params.crop_box as unknown[]).length === 4
+              ? ((cropEditNode.data as HgripeNodeData).params.crop_box as [
+                  number,
+                  number,
+                  number,
+                  number,
+                ])
+              : null,
+          initialAspect: String((cropEditNode.data as HgripeNodeData).params.aspect ?? "free"),
+          initialMargin: Number((cropEditNode.data as HgripeNodeData).params.margin_pct ?? 6),
+          onCommit: (commit) => {
+            // Fold the editor's auto/manual choice into the node's params, then
+            // run up to this node so the cropped result shows immediately. Both
+            // lanes resolve through the same Compute-lane render pipeline.
+            const id = cropEditNode.id;
+            takeSnapshot();
+            setNodes((ns) =>
+              ns.map((n) =>
+                n.id === id
+                  ? {
+                      ...n,
+                      data: {
+                        ...(n.data as HgripeNodeData),
+                        params: {
+                          ...(n.data as HgripeNodeData).params,
+                          mode: commit.mode,
+                          aspect: commit.aspect,
+                          margin_pct: commit.marginPct,
+                          crop_box: commit.cropBox,
+                        },
+                      },
+                    }
+                  : n,
+              ),
+            );
+            pendingRunNode.current = id;
+          },
+        }
+      : gradeEditNode
+        ? {
+            editor: "grade",
+            target: { title: t("grade.title"), imagePath: connectedImagePath(gradeEditNode.id) ?? null },
+            initialDoc:
+              typeof (gradeEditNode.data as HgripeNodeData).params.grade_doc === "string"
+                ? ((gradeEditNode.data as HgripeNodeData).params.grade_doc as string)
+                : null,
+            onCommit: (commit) => {
+              // Fold the dialog's op stack into the node's grade_doc, then run
+              // up to this node so the graded result shows immediately.
+              pendingRunNode.current = gradeEditNode.id;
+              onParamChange(gradeEditNode.id, "grade_doc", commit.gradeDoc);
+            },
+          }
+        : mediaEditSource
+          ? {
+              editor: "media",
+              target: {
+                title: t("node.mediaEdit"),
+                imagePath:
+                  (mediaEditSource.data as HgripeNodeData).imagePath ??
+                  (typeof (mediaEditSource.data as HgripeNodeData).params?.path === "string"
+                    ? ((mediaEditSource.data as HgripeNodeData).params.path as string)
+                    : null),
+              },
+              // Apply spawns exactly one bound edit node of the chosen kind from
+              // the source (never mutating it) and runs it — same pipeline as the
+              // right-click auto entries, but seeded with the manual edits.
+              onCommitMask: (edits) => {
+                addBoundEdit(mediaEditSource.id, "subjectMask", {
+                  params: { edit_paths: edits },
+                  openEditor: false,
+                  run: true,
+                });
+                setMediaEditSourceId(null);
+              },
+              onCommitCrop: (commit) => {
+                addBoundEdit(mediaEditSource.id, "crop", {
+                  params: {
+                    mode: commit.mode,
+                    aspect: commit.aspect,
+                    margin_pct: commit.marginPct,
+                    crop_box: commit.cropBox,
+                  },
+                  openEditor: false,
+                  run: true,
+                });
+                setMediaEditSourceId(null);
+              },
+            }
+          : null;
+
+  const closeEditor = () => {
+    setMaskEditNodeId(null);
+    setCropEditNodeId(null);
+    setGradeEditNodeId(null);
+    setMediaEditSourceId(null);
+  };
+
   return (
     <div className="app">
       <Toolbar
@@ -1067,99 +1180,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         />
       )}
 
-      {maskEditNode && (
-        <Suspense fallback={null}>
-        <MaskEditModal
-          title={t((maskEditNode.data as HgripeNodeData).kind === "subjectMask" ? "mask.titleSubject" : "mask.titleDefault")}
-          imagePath={connectedImagePath(maskEditNode.id)}
-          initial={normalizeEditPaths((maskEditNode.data as HgripeNodeData).params.edit_paths)}
-          wandTolerance={Number((maskEditNode.data as HgripeNodeData).params.wand_tolerance ?? 24)}
-          onCommit={(edits) => {
-            // Commit the edit, then run up to this node so the result shows
-            // immediately (the effect fires once `nodes` reflects the commit).
-            pendingRunNode.current = maskEditNode.id;
-            onParamChange(maskEditNode.id, "edit_paths", edits);
-          }}
-          onClose={() => setMaskEditNodeId(null)}
-        />
-        </Suspense>
-      )}
-
-      {cropEditNode && (
-        <Suspense fallback={null}>
-        <CropEditModal
-          title={t("crop.title")}
-          imagePath={connectedImagePath(cropEditNode.id)}
-          initialMode={
-            (cropEditNode.data as HgripeNodeData).params.mode === "auto_subject"
-              ? "auto_subject"
-              : "manual"
-          }
-          initialBox={
-            Array.isArray((cropEditNode.data as HgripeNodeData).params.crop_box) &&
-            ((cropEditNode.data as HgripeNodeData).params.crop_box as unknown[]).length === 4
-              ? ((cropEditNode.data as HgripeNodeData).params.crop_box as [
-                  number,
-                  number,
-                  number,
-                  number,
-                ])
-              : null
-          }
-          initialAspect={String((cropEditNode.data as HgripeNodeData).params.aspect ?? "free")}
-          initialMargin={Number((cropEditNode.data as HgripeNodeData).params.margin_pct ?? 6)}
-          onCommit={(commit) => {
-            // Fold the editor's auto/manual choice into the node's params, then
-            // run up to this node so the cropped result shows immediately. Both
-            // lanes resolve through the same Compute-lane render pipeline.
-            const id = cropEditNode.id;
-            takeSnapshot();
-            setNodes((ns) =>
-              ns.map((n) =>
-                n.id === id
-                  ? {
-                      ...n,
-                      data: {
-                        ...(n.data as HgripeNodeData),
-                        params: {
-                          ...(n.data as HgripeNodeData).params,
-                          mode: commit.mode,
-                          aspect: commit.aspect,
-                          margin_pct: commit.marginPct,
-                          crop_box: commit.cropBox,
-                        },
-                      },
-                    }
-                  : n,
-              ),
-            );
-            pendingRunNode.current = id;
-          }}
-          onClose={() => setCropEditNodeId(null)}
-        />
-        </Suspense>
-      )}
-
-      {gradeEditNode && (
-        <Suspense fallback={null}>
-        <GradeEditModal
-          title={t("grade.title")}
-          imagePath={connectedImagePath(gradeEditNode.id)}
-          initialDoc={
-            typeof (gradeEditNode.data as HgripeNodeData).params.grade_doc === "string"
-              ? ((gradeEditNode.data as HgripeNodeData).params.grade_doc as string)
-              : null
-          }
-          onCommit={(commit) => {
-            // Fold the dialog's op stack into the node's grade_doc, then run
-            // up to this node so the graded result shows immediately.
-            pendingRunNode.current = gradeEditNode.id;
-            onParamChange(gradeEditNode.id, "grade_doc", commit.gradeDoc);
-          }}
-          onClose={() => setGradeEditNodeId(null)}
-        />
-        </Suspense>
-      )}
+      <EditorHost request={editorRequest} onClose={closeEditor} />
 
       {exportOpen && (
         <ExportDialog timeline={timeline} assets={binAssets} onClose={() => setExportOpen(false)} />
@@ -1180,44 +1201,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         />
       )}
 
-      {mediaEditSource && (
-        <Suspense fallback={null}>
-        <MediaEditModal
-          title={t("node.mediaEdit")}
-          imagePath={
-            (mediaEditSource.data as HgripeNodeData).imagePath ??
-            (typeof (mediaEditSource.data as HgripeNodeData).params?.path === "string"
-              ? ((mediaEditSource.data as HgripeNodeData).params.path as string)
-              : null)
-          }
-          // Apply spawns exactly one bound edit node of the chosen kind from the
-          // source (never mutating it) and runs it — same pipeline as the
-          // right-click auto entries, but seeded with the manual edits.
-          onCommitMask={(edits) => {
-            addBoundEdit(mediaEditSource.id, "subjectMask", {
-              params: { edit_paths: edits },
-              openEditor: false,
-              run: true,
-            });
-            setMediaEditSourceId(null);
-          }}
-          onCommitCrop={(commit) => {
-            addBoundEdit(mediaEditSource.id, "crop", {
-              params: {
-                mode: commit.mode,
-                aspect: commit.aspect,
-                margin_pct: commit.marginPct,
-                crop_box: commit.cropBox,
-              },
-              openEditor: false,
-              run: true,
-            });
-            setMediaEditSourceId(null);
-          }}
-          onClose={() => setMediaEditSourceId(null)}
-        />
-        </Suspense>
-      )}
     </div>
   );
 }
