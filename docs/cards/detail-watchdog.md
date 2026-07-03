@@ -1,14 +1,14 @@
 # Detail Watchdog card
 
-Executor: **local** (always `python/bridge/detail_watchdog_cli.py`, never networks).
-Backend: `detect_quality_issues` Tauri command → `detail_watchdog_cli.py` (Pillow + numpy, CPU-only in Phase 1).
+Executor: **local** (in-process native Rust, never networks).
+Backend: `detect_quality_issues` Tauri command → `studio/detail_watchdog_cpu.rs` (native Rust, CPU-only). The Python bridge was deleted in Phase 7 (#314).
 
 Scans a candidate image for local quality breakdowns and emits a structured
 `QualityReport` so the workflow can decide whether to re-run, hand-fix, or
 repaint a region before composing into the PSD. This document is the card's
 contract: what it accepts, what it guarantees, and how it behaves at the edges.
 Phase 1 is **detect + report only** (it never repaints — `fixed_image` is the
-input unchanged). The CPU **rule layer** (Pillow + numpy, no ML) is the
+input unchanged). The CPU **rule layer** (native Rust, no ML) is the
 always-available baseline and always runs. Semantic detection of hands,
 packaging text and logo deformation needs a learned detector: the rule layer
 never guesses at them, recording them as `skipped` instead. They graduate to
@@ -63,17 +63,17 @@ source's original mode is recorded as `source_mode`:
 | `RGB` / `RGBA` / `L` / `LA` | Used directly; alpha (when present) feeds halo detection. |
 | `P` (palette) | Expanded to RGB(A); transparency in `info` is treated as alpha. |
 | `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
-| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit via numpy before RGB conversion. |
+| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
 
 ## Boundary behaviour
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing / blank `image` input | Rust handler errors `Detail Watchdog needs a connected image input` before shelling out. |
-| Missing image file on disk | `FileNotFoundError: candidate image not found: <path>`. |
-| Input larger than `max_decode_pixels` | `ValueError: input image too large to decode safely: WxH ...` (before decode). |
-| Unknown `mode` | `ValueError: unknown mode ...; expected one of [...]`. |
-| Unknown `watch_targets` entry | `ValueError: unknown watch target(s): [...]; expected [...]`. |
+| Missing / blank `image` input | Rust handler errors `Detail Watchdog needs a connected image input`. |
+| Missing image file on disk | `candidate image not found: <path>`. |
+| Input larger than `max_decode_pixels` | `input image too large to decode safely: WxH ...` (before decode). |
+| Unknown `mode` | `unknown mode ...; expected one of [...]`. |
+| Unknown `watch_targets` entry | `unknown watch target(s): [...]; expected [...]`. |
 | Unknown `engine` | Rule-only report; `engine: rules`, `engine_fallback_reason: "unknown engine '...'"` (no error). |
 | ML `engine` requested, dep/weight missing | Rule-only report; `engine: rules`, `engine_fallback_reason` explains (missing `onnxruntime` or weight); covered targets stay `skipped`. |
 | EXIF-rotated input | Orientation normalised via the orientation tag; `exif_transposed: true`. |
@@ -98,35 +98,17 @@ top of the rule layer), `backend_model` (the loaded weight file name, else
 
 ## Engine seam (opt-in ML detectors)
 
-The rule layer is the always-on baseline; learned detectors are **additive**
-passes selected by `engine` and registered in `python/bridge/detector_backends/`
-(mirroring the Image Enhance `sr_backends` super-resolution seam). A detector
-declares the watch targets it covers, an `available()` probe (lazy — it never
-imports `onnxruntime`/`torch` just to report availability), and a `detect()`
-that emits issues into the **same** `QualityReport` contract, so the downstream
-Detail Repaint consumer needs no change. Findings merge on top of the rule
-findings; the targets a detector covers graduate out of `skipped_targets`.
+The rule layer is the always-on baseline; the `engine` param and the
+`QualityReport` contract keep the seam for learned detectors, but **no ML
+detector is currently implemented**: the Python `onnx_defect` backend was
+deleted with the Python bridge in Phase 7 (#314). Requesting `onnx_defect`
+falls back to the rule-only report with an `engine_fallback_reason`, and the
+`probe_engines` capability probe reports only the `rules` baseline. A future
+native (`ort`) detector would slot back in behind this same contract.
 
 | Engine | Deps | Weight | Covers | Emits |
 | --- | --- | --- | --- | --- |
 | `rules` | none | none | `face`, `product_edges` (+ global blur / colour) | `low_resolution`, `face_blur`, `edge_halo`, `color_mismatch` |
-| `onnx_defect` | `onnxruntime` | `watchdog_defect.onnx` | `hands`, `text`, `logo` | `malformed_hands`, `garbled_text`, `deformed_logo` (all `suggested_action: detail_redraw`) |
-
-`onnx_defect` resolves its weight from `HGRIPE_WATCHDOG_MODEL` (explicit path)
-or `<model cache>/watchdog_defect.onnx` (`HGRIPE_MODEL_CACHE`, else the bundled
-`resources/models`); the weight is **not** shipped in the installer. Model
-contract: input `[1,3,H,W]` float32 RGB `0..1` (letterboxed), outputs either
-`boxes` `[N,4]` xyxy / `scores` `[N]` / `labels` `[N]`, or a DB-style
-segmentation **probability map** `[1,1,H,W]` (thresholded and split into
-connected components, one detection per component). An optional sidecar
-`<weight>.labels.json` describes the weight: either the bare class-id → target
-map, or `{"labels": {...}, "normalize": "imagenet"}` to also request ImageNet
-input normalisation. A weight that covers only some targets keeps the others
-truthfully `skipped`. `scripts/fetch-watchdog-text.{sh,ps1}` fetches a real
-trained text detector — the PP-OCRv3 det ONNX export (PaddleOCR, Apache-2.0,
-~2.4 MB) — plus its sidecar, graduating the `text` target. Run
-`detail_watchdog_cli.py --probe-engines` for the UI capability probe (which
-engines are usable right now).
 
 ## Outputs (ports)
 
@@ -139,45 +121,12 @@ engines are usable right now).
 
 ## Tests
 
-- `python/bridge/tests/test_detail_watchdog_cli.py` — sharp image passes and
+- `src-tauri/src/studio/detail_watchdog_cpu.rs` — sharp image passes and
   reports the hardening fields, low-resolution below target, edge halo on a rim,
   unsupported targets recorded as skipped, overlay written / suppressed, decode
-  guard, CMYK and palette source mode, plain image not over-reported as
-  transposed (Pillow 12), the advisory mask, invalid mode / watch target,
-  missing image (run: `pytest python/bridge/tests`).
+  guard, CMYK and palette source mode, the advisory mask, invalid mode / watch
+  target, missing image, and the `engine` dispatch (default `rules`,
+  unknown-engine fallback) (run: `cargo test`).
 - `src-tauri/src/studio/detail_watchdog.rs` — the connected-image-input guard
   and `WatchdogReport` deserialization of the v1 hardening fields, the engine-
   seam telemetry fields, and legacy JSON defaults.
-- `python/bridge/tests/test_detector_backends.py` — the detector registry /
-  probe, unknown-engine and missing-weight fallback, the sidecar label map
-  (both forms, incl. `normalize`), a gated end-to-end pass that synthesises a
-  tiny ONNX detector (skipped unless `onnx` + `onnxruntime` import, mirroring
-  the ViTMatte opt-in gate), and the gated
-  `test_onnx_defect_real_inference_when_weight_present` e2e: the real trained
-  PP-OCRv3 text-detection weight through the CLI — `text` graduates to real
-  `garbled_text` findings on rendered text while hands/logo stay skipped. It
-  skips without `onnxruntime` + the weight; the manual-dispatch
-  **`python bridge (watchdog text e2e)`** CI lane fetches the sha256-checked
-  weight (`scripts/fetch-watchdog-text.sh`) and runs it for real.
-- `python/bridge/tests/test_detail_watchdog_cli.py` — also the `--engine`
-  dispatch: default `rules`, unknown-engine fallback, unavailable-ML fallback.
-
-## Verifying `onnx_defect` end-to-end
-
-Real inference needs `onnxruntime` + a detector weight, which the per-PR CI
-matrix does not install. Two verifiable paths exist:
-
-- **CI (opt-in):** manually dispatch the CI workflow — the
-  `python bridge (watchdog text e2e)` job installs `onnxruntime`, fetches the
-  sha256-checked PP-OCRv3 weight via `scripts/fetch-watchdog-text.sh`, and runs
-  the gated real-inference test (which skips on every normal run).
-- **Manually:**
-
-```
-pip install onnxruntime
-bash scripts/fetch-watchdog-text.sh
-HGRIPE_WATCHDOG_MODEL=apps/desktop-tauri/src-tauri/resources/models/watchdog_defect.onnx \
-python python/bridge/detail_watchdog_cli.py --image candidate.png \
-  --engine onnx_defect --watch-targets text --output-dir out
-# watchdog_report.engine == "onnx_defect"; garbled_text findings on text regions
-```

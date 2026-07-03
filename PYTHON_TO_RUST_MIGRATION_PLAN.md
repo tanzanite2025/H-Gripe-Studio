@@ -1,5 +1,11 @@
 # Python to Rust Migration Plan
 
+> **Status: complete.** Phase 7 (#314) executed the full deletion — the
+> repository now has zero Python runtime, no `python/bridge`, no
+> `third_party/psd_tools`, no PyAV, and a `no-python-spawn` CI gate. This
+> document is kept as the historical record of the migration; the "current
+> state" descriptions below reflect the pre-migration codebase.
+
 ## Core Decision
 
 H-Gripe Studio should move toward a zero-Python desktop runtime.

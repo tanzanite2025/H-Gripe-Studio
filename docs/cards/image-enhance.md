@@ -1,14 +1,13 @@
 # Image Enhance / Super Resolution card
 
-Executor: **local** (always `python/bridge/image_enhance_cli.py`, never networks).
-Backend: `enhance_image` Tauri command → `image_enhance_cli.py` (Pillow + numpy CPU default; opt-in model engines via `python/bridge/sr_backends/`).
+Executor: **local** (in-process native Rust, never networks).
+Backend: `enhance_image` Tauri command → `studio/image_enhance_cpu.rs` (native Rust, CPU-only). The Python bridge — and with it the opt-in torch SR engines (`realesrgan` / `ccsr` / `supir`) — was deleted in Phase 7 (#314).
 
 Upscales and restores a low-resolution subject so it fills a PSD placeholder at
 print DPI without going soft. This document is the card's contract: what it
-accepts, what it guarantees, and how it behaves at the edges. Heavier GPU
-super-resolution backends (SupIR / CCSR; **Real-ESRGAN landed as opt-in**) slot
-in behind the `engine` param without changing this contract — see
-[Engines](#engines).
+accepts, what it guarantees, and how it behaves at the edges. The `engine`
+param remains the seam for heavier super-resolution backends, but none is
+currently implemented — see [Engines](#engines).
 
 ## Inputs (ports)
 
@@ -22,7 +21,7 @@ in behind the `engine` param without changing this contract — see
 | Param | Type | Default | Range / values | Notes |
 | --- | --- | --- | --- | --- |
 | `mode` | enum | `conservative` | `conservative` \| `texture_rebuild` \| `print_ready` \| `custom` | Presets set denoise/texture; `custom` uses the sliders below. |
-| `engine` | enum | `cpu` | `cpu` \| `realesrgan` \| `ccsr` \| `supir` | Upscale backend. `cpu` is the built-in Lanczos+sharpen (always available); the model engines are opt-in and each **falls back to `cpu`** when its deps/weight are missing. See [Engines](#engines). |
+| `engine` | enum | `cpu` | `cpu` | Upscale backend. `cpu` is the built-in Lanczos+sharpen (always available). Legacy ML engine ids (`realesrgan` / `ccsr` / `supir`) are still accepted but **fall back to `cpu`** with an `engine_fallback_reason` — their Python backends were deleted in Phase 7. See [Engines](#engines). |
 | `target_width` | int px | `0` | `>= 0` (0 = auto) | Explicit target wins over `target_bounds`. |
 | `target_height` | int px | `0` | `>= 0` (0 = auto) | |
 | `target_dpi` | int | `300` | `>= 1` | Written into the output PNG metadata only. |
@@ -75,9 +74,9 @@ denoise/sharpen never bleed a halo across a matte edge.
 > pipeline (P1–P5) has **landed**: this card sits at the model/preview
 > boundary, so its 8-bit sRGB working space below is the *decided contract*,
 > not a gap. ProPhoto-tagged 16-bit manual products (the Rust chain's
-> outputs) are colour-managed to sRGB at ingress (shared `wide_gamut.py`,
-> #202; the cpu fast path drops the stale profile on output, #203), and the
-> colour resample runs in linear light on both engines (#205).
+> outputs) are colour-managed to sRGB at ingress (#202; the cpu path drops
+> the stale profile on output, #203), and the colour resample runs in linear
+> light (#205).
 
 The input is normalised to an 8-bit RGB working space and the
 original `source_mode` is recorded:
@@ -87,27 +86,26 @@ original `source_mode` is recorded:
 | `RGB` / `RGBA` / `L` / `LA` | Used directly; an embedded ICC profile is preserved on output (`icc_preserved: true`). |
 | `P` (palette) | Expanded to RGB(A); transparency in `info` is treated as alpha. |
 | `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert; profile not carried over (`icc_preserved: false`). |
-| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit via numpy before RGB conversion. |
+| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
 
-### `engine = cpu` in-process fast path (Rust)
+### `engine = cpu` in-process pipeline (Rust)
 
-The default `cpu` engine no longer always shells out: `studio/image_enhance_cpu.rs`
-reproduces the CLI's `cpu` pipeline **in-process** (Lanczos3 / box resample,
-unsharp, edge-preserving median denoise, independent alpha track) so a run of
-common inputs skips the Python subprocess entirely. It is behaviour-preserving
-by construction — anything it cannot reproduce faithfully returns `Ok(None)` and
-falls straight through to `image_enhance_cli.py`, so no input regresses.
+The `cpu` engine runs entirely in-process: `studio/image_enhance_cpu.rs`
+implements the pipeline (Lanczos3 / box resample, unsharp, edge-preserving
+median denoise, independent alpha track). It was originally built as a
+behaviour-preserving fast path mirroring the Python CLI and is now, post
+Phase 7, the only implementation.
 
 | Source colour | In-process (Rust) | Notes |
 | --- | --- | --- |
-| 8-bit `RGB` / `RGBA` / `L` / `LA` | ✅ | Embedded ICC re-embedded on output (iCCP) + DPI (pHYs), matching the CLI `save`. |
+| 8-bit `RGB` / `RGBA` / `L` / `LA` | ✅ | Embedded ICC re-embedded on output (iCCP) + DPI (pHYs). |
 | 16-bit `Rgb16` / `Rgba16` / `La16` | ✅ | High byte kept (PIL / `into_rgba8` parity). |
-| single-channel 16-bit (`I;16`, `L16`) | ✅ | Range-scaled by the source's own peak to 8-bit (numpy parity), not a naive `>>8`. |
-| `CMYK` (TIFF) | ✅ | Raw ink samples + embedded ICC read via `cmyk_decode` (bypassing the `image` crate, which drops them at decode), then colour-managed to sRGB via `cmyk_transform` (the profile's A2B LUT through `moxcms`, else PIL's naive formula). Output is sRGB, so the source CMYK profile is dropped (`icc_preserved: false`), matching Python. See below. |
+| single-channel 16-bit (`I;16`, `L16`) | ✅ | Range-scaled by the source's own peak to 8-bit, not a naive `>>8`. |
+| `CMYK` (TIFF) | ✅ | Raw ink samples + embedded ICC read via `cmyk_decode` (bypassing the `image` crate, which drops them at decode), then colour-managed to sRGB via `cmyk_transform` (the profile's A2B LUT through `moxcms`, else PIL's naive formula). Output is sRGB, so the source CMYK profile is dropped (`icc_preserved: false`). See below. |
 | `CMYK` (Adobe JPEG) | ✅ | APP14 transform-0 JPEGs store *inverted* ink (0 = full ink); `cmyk_decode` undoes it (`255 - v`) so the samples match TIFF Separated, then the same `cmyk_transform` path applies. |
 | `CMYK` (YCCK JPEG) | ✅ | APP14 transform-2 JPEGs (`zune` reports a `YCCK` input colourspace). Instead of `zune`'s lossy YCCK→RGB (which drops the ICC), the output colourspace is pinned to `YCCK` so `zune` copies the raw Y/Cb/Cr/K planes through; `cmyk_decode` reconstructs CMYK (libjpeg's `ycck_cmyk_convert`) and undoes the inversion, keeping the ICC, then the same `cmyk_transform` path applies. |
-| `CMYK` (unmarked JPEG) | ✅ | A 4-component JPEG with no APP14 Adobe marker (`zune` defaults it to `CMYK`). Pillow inverts the stored ink to the device direction whether or not the marker is present, so `cmyk_decode` treats it exactly like Adobe CMYK (`255 - v`) and the same `cmyk_transform` path applies. |
-| `Rgb32F` / `Rgba32F` (float) | ⛔ defers to Python | |
+| `CMYK` (unmarked JPEG) | ✅ | A 4-component JPEG with no APP14 Adobe marker (`zune` defaults it to `CMYK`). Treated exactly like Adobe CMYK (`255 - v`); the same `cmyk_transform` path applies. |
+| `Rgb32F` / `Rgba32F` (float) | ⛔ decoded via the generic `image`-crate path | (the historical "defer to Python" fallback is gone) |
 
 Landed: [#172](https://github.com/tanzanite2025/H-Gripe-Studio/pull/172)
 (8-bit fast path), [#174](https://github.com/tanzanite2025/H-Gripe-Studio/pull/174)
@@ -134,9 +132,10 @@ independently reviewable, CI-verifiable steps:
   byte-exact) when there is no usable profile.
 - **c3 — wired behind the gate ([#178](https://github.com/tanzanite2025/H-Gripe-Studio/pull/178)).**
   `try_enhance` routes **TIFF** CMYK through `cmyk_decode` + `cmyk_to_rgb8` →
-  the normal pipeline → sRGB PNG (source profile dropped, `icc_preserved: false`,
-  matching Python). CMYK **JPEGs** and any decode/transform miss return
-  `Ok(None)` → Python.
+  the normal pipeline → sRGB PNG (source profile dropped, `icc_preserved: false`).
+  At the time, CMYK **JPEGs** and any decode/transform miss returned
+  `Ok(None)` → the then-extant Python fallback (since removed; c3b/c3c below
+  closed the JPEG gaps natively).
 - **c3b — Adobe CMYK JPEG in-process.**
   `cmyk_decode` now also takes **Adobe** CMYK JPEGs (an APP14 marker with
   transform 0): Adobe stores inverted ink (0 = full ink) that PIL/libjpeg
@@ -157,7 +156,7 @@ independently reviewable, CI-verifiable steps:
     (`cmyk_decode::is_cmyk_family_jpeg`, via `zune`'s input colourspace) and
     reclassifies CMYK-family JPEGs as `Cmyk8` so they reach the CMYK fast path;
     `decode_cmyk` still returns `None` for shapes it won't take (float, etc.),
-    keeping those on Python.
+    which now fall through to the generic `image`-crate decode.
   - **YCCK decode.** `zune` only offers a lossy YCCK→RGB that drops the ICC.
     Instead the output colourspace is pinned to `YCCK`, so `zune`'s same
     4-channel straight-through copy hands back the raw Y/Cb/Cr/K planes with the
@@ -170,13 +169,12 @@ independently reviewable, CI-verifiable steps:
     emits transform 0) is decoded + transformed in Rust and compared to Pillow's
     RGB within tolerance.
 - **c4 — colour-accuracy regression + docs (this section).** The naive CMYK→sRGB
-  table is asserted **byte-for-byte on both sides** — Rust
-  (`cmyk_transform` test `naive_matches_pil_convert_rgb`) and Python
-  (`test_cmyk_naive_transform_matches_rust_reference`, running live Pillow) — so
-  the CMYK fast path is a zero-ΔE cross-language regression: a shift in
-  either engine breaks CI. The ICC (profiled) path is checked against a
-  littleCMS reference locally (moxcms is not byte-identical to littleCMS; small
-  ΔE), skipped on runners without a system CMYK profile.
+  table is asserted byte-for-byte in Rust against a PIL-derived reference
+  (`cmyk_transform` test `naive_matches_pil_convert_rgb`). The ICC (profiled)
+  path is checked against a littleCMS reference locally (moxcms is not
+  byte-identical to littleCMS; small ΔE), skipped on runners without a system
+  CMYK profile. (The live-Pillow cross-language half of this regression was
+  deleted with the Python CI in Phase 7.)
 - **c5 — ICC fidelity: tetrahedral interpolation + rendering intent
   ([#185](https://github.com/tanzanite2025/H-Gripe-Studio/pull/185)).** The
   profiled path now walks the CMYK A2B LUT with **tetrahedral** interpolation
@@ -197,17 +195,15 @@ independently reviewable, CI-verifiable steps:
   stripped, regenerable via `scripts/gen_unmarked_cmyk_jpeg_fixture.py`) is
   decoded + transformed in Rust and compared to Pillow's RGB within tolerance.
 
-Because there is no local Rust toolchain, each step leans on CI + the fixture
-assertions rather than manual inspection.
 
 ## Boundary behaviour
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing / blank `image` input | Rust handler errors `Image Enhance needs a connected image input` before shelling out. |
-| Missing file on disk | `FileNotFoundError: base image not found: <path>`. |
-| Unknown `mode` | `ValueError: unknown mode ...`. |
-| Input larger than `max_decode_pixels` | `ValueError: input image too large to decode safely: WxH ...` (before decode). |
+| Missing / blank `image` input | Rust handler errors `Image Enhance needs a connected image input`. |
+| Missing file on disk | `base image not found: <path>`. |
+| Unknown `mode` | `unknown mode ...`. |
+| Input larger than `max_decode_pixels` | `input image too large to decode safely: WxH ...` (before decode). |
 | Cut-out subject (has alpha) | Alpha isolated; matte stays binary (no semi-transparent halo). |
 | EXIF-rotated photo | Orientation normalised; `exif_transposed: true`. |
 | Broken EXIF block | Ignored; enhancement proceeds. |
@@ -216,36 +212,16 @@ assertions rather than manual inspection.
 ## Engines
 
 The `engine` param is the **local-card backend seam** from
-`docs/design/executor-split-and-psd-chain-hardening.md` (§2.5 / §3.4): adding an
-engine extends the registry + the CLI only, with no dispatch changes.
+`docs/design/executor-split-and-psd-chain-hardening.md` (§2.5 / §3.4). Post
+Phase 7 (#314) only the `cpu` baseline exists: the Python torch SR engines
+(`realesrgan` / `ccsr` / `supir`) were deleted with the Python bridge.
+Requesting one falls back to `cpu` with an `engine_fallback_reason`, and the
+`probe_engines` capability probe reports only `cpu`. A future native SR
+backend (e.g. via `ort`) would slot back in behind this same seam.
 
 | Engine | Deps | Weight | Behaviour |
 | --- | --- | --- | --- |
-| `cpu` (default) | vendored Pillow + numpy | none | Lanczos resample + unsharp mask + edge-preserving median denoise. Always available; the fallback for every other engine. |
-| `realesrgan` | `torch` + `realesrgan` (optional, **not** bundled) | `RealESRGAN_x4plus.pth` in the model cache | Real-ESRGAN x4 in one pass (tiled), then Lanczos to the exact requested factor. CUDA when present, else CPU. |
-| `ccsr` | `torch` + `diffusers` (optional, **not** bundled) | diffusers-format snapshot dir `<model cache>/ccsr` (or `HGRIPE_CCSR_MODEL`) | Content-Consistent diffusion SR — more faithful / less hallucinated; the snapshot's declared pipeline runs once, then Lanczos to the exact requested factor. CUDA when present, else CPU. |
-| `supir` | `torch` + `diffusers` (optional, **not** bundled) | diffusers-format snapshot dir `<model cache>/supir` (or `HGRIPE_SUPIR_MODEL`) | SupIR diffusion SR — max perceptual quality, SDXL-scale (heavy); same shared pipeline path and warm cache as `ccsr`. |
-
-Rules (`python/bridge/sr_backends/`):
-
-- **Opt-in & CPU-safe.** A non-`cpu` engine is used only when explicitly
-  requested *and* its deps + weight are present. On any miss (no deps, no
-  weight, a downscale target, an unknown name, or a runtime error) the node
-  **falls back to the `cpu` path** and records `engine_fallback_reason` — it
-  never hard-fails.
-- **Weights are not bundled.** `realesrgan` resolves its weight from
-  `HGRIPE_REALESRGAN_MODEL` (explicit path) or `<model cache>/RealESRGAN_x4plus.pth`,
-  where the cache dir is `HGRIPE_MODEL_CACHE` or the bundled `resources/models`
-  dir (same convention as the SAM 2 / ViTMatte weights). `ccsr` / `supir`
-  resolve a diffusers-format snapshot *directory* the same way
-  (`HGRIPE_CCSR_MODEL` / `HGRIPE_SUPIR_MODEL`, else `<model cache>/ccsr` /
-  `<model cache>/supir`).
-- **Model replaces the CPU steps.** When a model engine runs it performs
-  restoration + upscaling itself, so the CPU denoise/unsharp passes are skipped
-  (`denoise_method` is the engine id, `texture_strength` reported as `0.0`).
-- **Capability probe.** `image_enhance_cli.py --probe-engines` prints which
-  engines are usable right now (`{engines: {<id>: {available, reason, …}}, model_cache_dir}`)
-  so the UI can grey out unavailable engines.
+| `cpu` (default) | none (native Rust) | none | Lanczos resample + unsharp mask + edge-preserving median denoise. Always available. |
 
 ## `enhance_report` fields
 
@@ -258,41 +234,8 @@ Rules (`python/bridge/sr_backends/`):
 
 ## Tests
 
-- `python/bridge/tests/test_image_enhance_cli.py` — alpha isolation, CMYK /
+- `src-tauri/src/studio/image_enhance_cpu.rs` — alpha isolation, CMYK /
   high-bit handling, downscale path, decode guard, target resolution, clamp,
-  logo guard, output naming, ICC preservation, and the **engine seam** (default
-  `cpu`, unknown-engine fallback, `realesrgan` unavailable fallback, downscale
-  skip, a fake-backend dispatch + telemetry, `--probe-engines`, plus the gated
-  `test_realesrgan_real_inference_when_stack_present` real-inference e2e that
-  skips without torch/realesrgan/the weight, and the gated
-  `test_diffusion_sr_real_inference_with_tiny_snapshot[ccsr|supir]` e2e that
-  synthesises a tiny random-weight img2img snapshot in diffusers format (no
-  download) and runs the real `DiffusionPipeline.from_pretrained` → denoise
-  loop → VAE decode; it skips without `torch`/`diffusers`/`transformers` and
-  runs on the manual-dispatch **`python bridge (diffusers inference)`** lane)
-  — run: `pytest python/bridge/tests`.
-- `python/bridge/tests/test_sr_backends.py` — registry `resolve`, capability
-  `probe`, weight-path resolution, and the Real-ESRGAN / CCSR / SupIR
-  unavailable/raise paths.
+  logo guard, output naming, ICC preservation, and the CMYK decode/transform
+  fixtures (`tests/fixtures/cmyk_*.jpg`) (run: `cargo test`).
 - `src-tauri/src/studio/image_enhance.rs` — the connected-image-input guard.
-
-## Verifying `realesrgan` end-to-end
-
-Real inference needs `torch` + `realesrgan` + the weight, which the per-PR CI
-matrix does not install. Two verifiable paths exist (mirroring the ViTMatte
-e2e):
-
-- **CI (opt-in):** manually dispatch the CI workflow — the
-  `python bridge (realesrgan e2e)` job installs the CPU torch stack, fetches
-  the sha256-checked weight via `scripts/fetch-realesrgan.sh`, and runs the
-  gated `test_realesrgan_real_inference_when_stack_present` test (which skips
-  on every normal run).
-- **Manually:**
-
-```
-pip install torch realesrgan
-bash scripts/fetch-realesrgan.sh   # or HGRIPE_REALESRGAN_MODEL=/path/to/RealESRGAN_x4plus.pth
-python python/bridge/image_enhance_cli.py --probe-engines        # realesrgan -> available: true
-python python/bridge/image_enhance_cli.py --image in.png --engine realesrgan \
-  --target-width 1024 --output-dir out                          # enhance_report.engine == "realesrgan"
-```

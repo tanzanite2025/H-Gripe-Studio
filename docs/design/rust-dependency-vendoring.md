@@ -3,7 +3,8 @@
 **Status:** Active policy.
 
 H-Gripe Studio keeps Rust dependencies reproducible by cutting Cargo's default
-network path to crates.io. Python packages are intentionally out of scope here.
+network path to crates.io. (There is no Python runtime since Phase 7, #314,
+so Rust crates are the only language-package surface to vendor.)
 
 ## Layout
 
@@ -29,7 +30,6 @@ wire it with `[patch.crates-io]` like `moxcms`.
 
 ## What is not covered
 
-- Python bridge dependencies.
 - Node/npm dependencies.
 - Runtime/model downloads.
 - Build scripts that download non-crate artifacts. In particular, the ORT

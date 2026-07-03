@@ -1,8 +1,9 @@
 # PSD Export (compose) card
 
-Executor: **local** (always `python/bridge/compose_psd_cli.py`, never networks).
-Backend: `compose_psd` Tauri command → `compose_psd_cli.py` (Pillow + vendored
-`psd_tools`, CPU-only).
+Executor: **local** (in-process native Rust, never networks).
+Backend: `compose_psd` Tauri command → the native PSD writer
+(`psd/compose.rs` + `psd/write.rs` + `psd/smart.rs`, CPU-only). The Python
+bridge and vendored `psd_tools` were deleted in Phase 7 (#314).
 
 The **final assembler** of the PSD chain: it writes a generated image into a PSD
 template's placeholder — using true smart-object content replacement when the
@@ -54,7 +55,7 @@ pixel layer (`03_GENERATED`) at `z_order`, optionally hiding the placeholder.
 > of truth). That pipeline (P1–P5) has **landed**: this card sits at the
 > model/preview boundary, so the 8-bit sRGB working space below is the
 > *decided contract*, not a gap. ProPhoto-tagged 16-bit manual products are
-> colour-managed to sRGB at ingress (shared `wide_gamut.py`, #202).
+> colour-managed to sRGB at ingress (wide-gamut ingress in the native decode path, #202).
 
 The generated image is normalised to an 8-bit RGBA working space and
 the original `source_mode` is recorded:
@@ -64,7 +65,7 @@ the original `source_mode` is recorded:
 | `RGB` / `RGBA` / `L` / `LA` | Promoted to RGBA directly. |
 | `P` (palette) | Expanded to RGBA; transparency in `info` is treated as alpha. |
 | `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
-| `I` / `I;16*` / `F` (high bit) | Data range tone-scaled down to 8-bit via numpy before RGB(A) conversion. |
+| `I` / `I;16*` / `F` (high bit) | Data range tone-scaled down to 8-bit before RGB(A) conversion. |
 
 The optional mask is loaded as 8-bit `L` (high-bit mattes tone-scaled, not
 clipped), resized to the image, and multiplied into the existing alpha so a
@@ -74,11 +75,11 @@ pre-cut subject is never re-opened.
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing `template` / `image` / `mask` file | `FileNotFoundError: <which> not found: <path>`. |
-| Placeholder layer name not in template | `ValueError: placeholder layer '<name>' was not found in template`. |
+| Missing `template` / `image` / `mask` file | `<which> not found: <path>`. |
+| Placeholder layer name not in template | `placeholder layer '<name>' was not found in template`. |
 | Zero-area placeholder box | Falls back to the whole canvas. |
-| Invalid `placeholder` / `metadata` JSON | `ValueError: ... must be valid JSON` / `... must be a JSON object`. |
-| Input image / mask larger than `max_decode_pixels` | `ValueError: input image too large to decode safely: <path> WxH ...` (before decode). |
+| Invalid `placeholder` / `metadata` JSON | `... must be valid JSON` / `... must be a JSON object`. |
+| Input image / mask larger than `max_decode_pixels` | `input image too large to decode safely: <path> WxH ...` (before decode). |
 | EXIF-rotated image | Orientation normalised; `exif_transposed: true`. |
 | Broken EXIF block | Ignored; compose proceeds. |
 | Unsafe `filename` (`..`, separators) | Rejected server-side. |
@@ -100,7 +101,7 @@ The same fields (plus `created_at`, `template_path`, `source_image`,
 
 ## Tests
 
-- `python/bridge/tests/test_compose_psd_cli.py` — triplet + report shape, mask
-  alpha multiply, CMYK / high-bit / grayscale handling, the input / mask decode
-  guard, metadata merge, and the missing-file / invalid-JSON errors
-  (run: `pytest python/bridge/tests`).
+- `src-tauri/src/psd/compose.rs` / `psd/write.rs` / `psd/smart.rs` — triplet +
+  report shape, mask alpha multiply, CMYK / high-bit / grayscale handling, the
+  input / mask decode guard, metadata merge, the missing-file / invalid-JSON
+  errors, and golden round-trip tests of the written PSD (run: `cargo test`).

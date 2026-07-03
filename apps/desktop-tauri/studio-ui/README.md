@@ -86,7 +86,7 @@ id) alongside the flat error string, and the run log renders that context.
 The runner also keeps a persistent media index/cache (`.media-index/` under the
 output dir): a node whose kind/params/inputs and upstream media files are
 unchanged is served from the previous run's outputs and reported as `cached`.
-Compute and python-bridge nodes always participate; API nodes only when pinned
+Local and compute nodes always participate; API nodes only when pinned
 by an explicit `seed` (an unseeded generation is a deliberate re-roll), and a
 boolean `cache` param overrides either way. `list_studio_media_index` /
 `clear_studio_media_index` expose and reset the index.
@@ -103,9 +103,9 @@ workflow save/load beyond autosave now exists (explicit Save/Open + project
 folder, above). FFmpeg-backed video assembly/export exists as the
 **Video Assemble** output card: it encodes an ordered frame-image sequence into
 a video file (fps/codec/output params) through the media engine — in-process
-via the vendored native FFmpeg (`native-ffmpeg`, the default; see
-`third_party/ffmpeg/VENDOR.md`), with the legacy PyAV worker as the
-no-default-features fallback.
+via the vendored native FFmpeg (`native-ffmpeg`; see
+`third_party/ffmpeg/VENDOR.md`). The legacy PyAV worker was deleted in
+Phase 7 (#314).
 
 The desktop app intentionally has no Credentials / Profiles account-management
 surface. Provider profiles and credential refs are local API config files consumed

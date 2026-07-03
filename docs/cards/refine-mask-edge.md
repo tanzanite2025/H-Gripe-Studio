@@ -1,16 +1,17 @@
 # Refine Mask Edge card
 
-Executor: **local** (always `python/bridge/edge_refine_cli.py`, never networks).
-Backend: `refine_mask_edge` Tauri command → `edge_refine_cli.py` (Pillow + numpy, CPU-only in Phase 1).
+Executor: **local** (in-process native Rust, never networks).
+Backend: `refine_mask_edge` Tauri command → `studio/edge_refine_cpu.rs` (native Rust, CPU-only). The Python bridge was deleted in Phase 7 (#314).
 
 Cleans up a cut-out subject's matte for PSD compositing: bites the fringe in,
 snaps the matte to the subject's own luminance edges, feathers the transition,
 and optionally decontaminates / re-colours the edge band so the seam matches the
 target background. This document is the card's contract: what it accepts, what
 it guarantees, and how it behaves at the edges. The pipeline is a heuristic
-morphology + numpy guided-filter (He et al.) + Gaussian feather; an OpenCV
-`guidedFilter` / learned matting backend is a future `profile_ref` mode behind
-this same contract.
+morphology + guided filter (He et al.) + Gaussian feather; a learned matting
+backend is a future `engine` mode behind this same contract (the Python
+`onnx_matting` backend was deleted with the Python bridge in Phase 7, #314 —
+requesting it falls back to the `cpu` baseline).
 
 ## Inputs (ports)
 
@@ -57,7 +58,7 @@ refined; the connected `background` is resampled the same way.
 
 1. **Morphology** — `erode_px` Min filter then `dilate_px` Max filter.
 2. **Guided filter** — when `guided_radius > 0`, snaps the matte to the
-   subject's luminance edges (numpy box-filter guided filter, `eps = 1e-3`).
+   subject's luminance edges (box-filter guided filter, `eps = 1e-3`).
 3. **Feather** — Gaussian blur of radius `feather_px` for a stair-free
    transition.
 4. **Edge band** — `min(α, 1-α) * 2`: pixels that are neither solidly in nor
@@ -82,7 +83,7 @@ alpha (hair / fur / glass) intact rather than eroding/feathering it as fringe.
 > of truth). That pipeline (P1–P5) has **landed**: this card sits at the
 > model/preview boundary, so the 8-bit sRGB working space below is the
 > *decided contract*, not a gap. ProPhoto-tagged 16-bit manual products are
-> colour-managed to sRGB at ingress (shared `wide_gamut.py`, #202).
+> colour-managed to sRGB at ingress (wide-gamut ingress in the native decode path, #202).
 
 Inputs are normalised to an 8-bit RGB working space so
 decontamination and background blend sample honest colour; the subject's
@@ -93,18 +94,18 @@ original mode is recorded as `source_mode`:
 | `RGB` / `RGBA` / `L` / `LA` | Used directly; alpha (when present) is the matte. |
 | `P` (palette) | Expanded to RGB(A); transparency in `info` is treated as alpha. |
 | `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
-| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit via numpy before RGB conversion. |
+| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
 
 ## Boundary behaviour
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing / blank `image` input | Rust handler errors `Mask Edge Refine needs a connected image input` before shelling out. |
-| Missing image file on disk | `FileNotFoundError: subject image not found: <path>`. |
-| Missing background file on disk | `FileNotFoundError: background image not found: <path>`. |
+| Missing / blank `image` input | Rust handler errors `Mask Edge Refine needs a connected image input`. |
+| Missing image file on disk | `subject image not found: <path>`. |
+| Missing background file on disk | `background image not found: <path>`. |
 | No transitional edge (fully opaque / empty matte) | Refinement is a no-op; `edge_band_px: 0` and a `note` records why. |
-| Input larger than `max_decode_pixels` | `ValueError: input image too large to decode safely: WxH ...` (before decode). |
-| Unknown `preset` | `ValueError: unknown preset ...; expected one of [...]`. |
+| Input larger than `max_decode_pixels` | `input image too large to decode safely: WxH ...` (before decode). |
+| Unknown `preset` | `unknown preset ...; expected one of [...]`. |
 | EXIF-rotated input | Orientation normalised; `exif_transposed: true`. |
 | Unsafe `output_name` (`..`, separators) | Rejected server-side. |
 
@@ -127,39 +128,16 @@ there was no transitional edge to refine.
 
 ## Tests
 
-- `python/bridge/tests/test_edge_refine_cli.py` — erosion reduces coverage,
+- `src-tauri/src/studio/edge_refine_cpu.rs` — erosion reduces coverage,
   feather widens the band, guided filter snaps to the luminance edge,
   decontamination pulls subject colour into the band, background blend, explicit
   mask precedence, the no-edge note, preset parsing, decode guard, CMYK source
   mode, invalid preset, missing image / background, output naming, and trimap
   unknown-band protection (the protected matte tracks the original soft alpha
-  where erosion would otherwise bite it away), plus the **engine seam**
-  (default `cpu`, unavailable / unknown-engine / no-trimap fallbacks,
-  `--probe-engines`) and the gated
-  `test_onnx_matting_real_inference_when_weight_present` e2e: the real trained
-  ViTMatte ONNX weight through the CLI, `engine == "onnx_matting"` with no
-  fallback. It skips without `onnxruntime` + the weight; the manual-dispatch
-  **`python bridge (vitmatte matting e2e)`** CI lane fetches the sha256-checked
-  weight (`scripts/fetch-vitmatte.sh`, the same file the Rust `subject_matte`
-  e2e uses) and runs it for real (run: `pytest python/bridge/tests`).
+  where erosion would otherwise bite it away) (run: `cargo test`).
 - `src-tauri/src/studio/edge_refine.rs` — the connected-image-input guard and
-  param defaults matching the Python bridge.
+  param defaults.
 
-## Verifying `onnx_matting` end-to-end
-
-Real inference needs `onnxruntime` + a matting weight, which the per-PR CI
-matrix does not install. Two verifiable paths exist:
-
-- **CI (opt-in):** manually dispatch the CI workflow — the
-  `python bridge (vitmatte matting e2e)` job installs `onnxruntime`, fetches
-  the sha256-checked ViTMatte weight via `scripts/fetch-vitmatte.sh`, and runs
-  the gated real-inference test (which skips on every normal run).
-- **Manually:**
-
-```
-pip install onnxruntime
-bash scripts/fetch-vitmatte.sh
-HGRIPE_MATTING_MODEL=apps/desktop-tauri/src-tauri/resources/models/vitmatte.onnx \
-python python/bridge/edge_refine_cli.py --image subject.png --trimap trimap.png \
-  --engine onnx_matting --output-dir out       # edge_report.engine == "onnx_matting"
-```
+Note: continuous-alpha ViTMatte matting still exists as the **Subject Mask**
+card's native `ort` matting path (`studio/subject_matte.rs`); this card's own
+`onnx_matting` engine was Python-only and was removed in Phase 7.

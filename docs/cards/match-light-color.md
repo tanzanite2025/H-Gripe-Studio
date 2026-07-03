@@ -1,7 +1,7 @@
 # Match Light & Color card
 
-Executor: **local** (always `python/bridge/color_match_cli.py`, never networks).
-Backend: `match_light_color` Tauri command → `color_match_cli.py` (Pillow + numpy, CPU-only in Phase 1).
+Executor: **local** (in-process native Rust, never networks).
+Backend: `match_light_color` Tauri command → `studio/color_match_cpu.rs` (native Rust, CPU-only). The Python bridge was deleted in Phase 7 (#314).
 
 Nudges a generated/cut-out subject toward a PSD background's light & colour so a
 composite stops looking pasted-on. This document is the card's contract: what it
@@ -71,10 +71,9 @@ saturated pixels.
 > of truth). That pipeline (P1–P5) has **landed**: this card sits at the
 > model/preview boundary, so the 8-bit sRGB working space below is the
 > *decided contract*, not a gap. ProPhoto-tagged 16-bit manual products are
-> colour-managed to sRGB at ingress (shared `wide_gamut.py`, #202).
+> colour-managed to sRGB at ingress (wide-gamut ingress in the native decode path, #202).
 
-Both inputs are normalised to an 8-bit RGB working space (the
-matching Lab conversion uses Pillow's `LAB`); the subject's original mode is
+Both inputs are normalised to an 8-bit RGB working space; the subject's original mode is
 recorded as `source_mode`, the background's as `background_mode`:
 
 | Source mode | Handling |
@@ -82,14 +81,14 @@ recorded as `source_mode`, the background's as `background_mode`:
 | `RGB` / `RGBA` / `L` / `LA` | Used directly; alpha (when present) defines the region. |
 | `P` (palette) | Expanded to RGB(A); transparency in `info` is treated as alpha. |
 | `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
-| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit via numpy before RGB conversion. |
+| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
 
 ## Boundary behaviour
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing / blank `image` input | Rust handler errors `Light & Color Match needs a connected image input` before shelling out. |
-| Missing file on disk | `FileNotFoundError: subject image not found: <path>` (or `background image not found`). |
+| Missing / blank `image` input | Rust handler errors `Light & Color Match needs a connected image input`. |
+| Missing file on disk | `subject image not found: <path>` (or `background image not found`). |
 | No `background` connected (pixel mode) | Subject passed through unchanged; `applied: false`, `note` records why. |
 | `strength = 0` | Pass-through; `applied: false`. |
 | Unknown `mode` | `ValueError: unknown mode ...`. |
@@ -119,10 +118,9 @@ recorded as `source_mode`, the background's as `background_mode`:
 
 ## Tests
 
-- `python/bridge/tests/test_color_match_cli.py` — transfer moves the mean toward
+- `src-tauri/src/studio/color_match_cpu.rs` — transfer moves the mean toward
   the background, hybrid stats, `protect_saturation` keeps chroma, background-
   alpha weighting, subject transparent region untouched, decode guard, CMYK /
-  high-bit source modes, invalid context, output naming (run:
-  `pytest python/bridge/tests`).
+  high-bit source modes, invalid context, output naming (run: `cargo test`).
 - `src-tauri/src/studio/color_match.rs` — the connected-image-input guard and
   param defaults.

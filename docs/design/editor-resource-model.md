@@ -11,6 +11,12 @@ This started as a **planning document**; the staged rollout below is now
 still the forward-looking contract for adding new editor tools — see the
 per-step ✅ notes for what shipped and the PRs that shipped it.
 
+> **Phase 7 update (#314):** the Python runtime was deleted after this rollout
+> landed. The torch worker (`torch_worker.rs`) and the PyAV `FrameSource`
+> fallback were removed with it — ONNX (`ort` warm pool) and native ffmpeg are
+> the only model/video mechanisms today. Python-worker mentions below are
+> historical.
+
 ## Origin state (the constraints that shaped this plan)
 
 > Snapshot of the codebase *before* this rollout, kept for context. Every
@@ -39,9 +45,9 @@ per-step ✅ notes for what shipped and the PRs that shipped it.
 5. **~~Video is poster-frame only.~~** `video_probe_cli.py` (PyAV) extracted a
    single frame; there was no playback / scrubbing / seek. **Fixed in step 5**:
    a media engine (decoder seam + LRU frame cache + dedicated playback thread)
-   with two `FrameSource` backends — the long-lived PyAV worker and an
-   in-process **native ffmpeg** decoder (vendored libav, `native-ffmpeg`
-   feature). Export/encode is still future work.
+   with an in-process **native ffmpeg** decoder (vendored libav,
+   `native-ffmpeg` feature); the interim PyAV worker backend was deleted in
+   Phase 7. Export/encode has since landed too (Video Assemble / Trim).
 
 ## The host is Rust (not Python)
 
@@ -55,12 +61,12 @@ splits by engine:
 
 | Engine | Warm pool lives in | Mechanism |
 | --- | --- | --- |
-| ONNX (matting, harmonize, defect, …) | **Rust, in-process** | cache `ort::Session` in Tauri managed state — **no subprocess, no IPC** |
-| torch (realesrgan, sd_inpaint) | **a long-lived Python worker** | spawned & kept alive **by Rust**; talks over stdin / a local socket |
+| ONNX (matting, SAM 2, …) | **Rust, in-process** | cache `ort::Session` in Tauri managed state — **no subprocess, no IPC** |
 | video decode / encode | **Rust, native** | ffmpeg bindings + dedicated threads |
 
-Python is therefore only ever a **Rust-managed worker** for the torch-only
-engines — never the host. ONNX and video belong natively in Rust.
+(The torch engines' long-lived Python worker row that used to sit here was
+deleted with the Python runtime in Phase 7 — there is no Python worker of any
+kind anymore.)
 
 ## Four lanes
 
@@ -125,10 +131,10 @@ too. This section is now a changelog of the rollout.
 3. ✅ **ONNX warm pool** (PR #147) — `studio/onnx_pool.rs` caches `ort::Session`
    in process-global managed state; `subject_model` / `subject_sam2` /
    `subject_matte` reuse it, killing per-call model reload.
-4. ✅ **torch long-lived Python worker** (PR #148) — `studio/torch_worker.rs`
-   spawns and keeps a torch worker alive; `image_enhance` (realesrgan) and
-   `detail_repaint` (sd_inpaint) reuse it, falling back to the one-shot
-   subprocess on worker failure.
+4. ✅→❌ **torch long-lived Python worker** (PR #148) — `studio/torch_worker.rs`
+   kept a torch worker alive for `image_enhance` (realesrgan) and
+   `detail_repaint` (sd_inpaint). **Deleted in Phase 7 (#314)** together with
+   the torch engines it served.
 5. ✅ **Video media engine** (PR #149) — `studio/video_engine.rs`: decoder seam
    (`FrameSource`) + LRU `frame_cache.rs` + a dedicated latest-wins playback
    thread; `video_scrub` command for timeline dragging. Decode is off the UI
@@ -136,12 +142,13 @@ too. This section is now a changelog of the rollout.
 6. ✅ **Native ffmpeg backend** (PR #150) — a second `FrameSource`
    (`studio/ffmpeg_native.rs`) decoding in-process with **vendored** LGPL-shared
    libav (`third_party/ffmpeg`, git-lfs; `native-ffmpeg` cargo feature, off by
-   default). `make_frame_source()` wraps it with a PyAV fallback so a per-clip
-   decode failure never regresses. Still future: trim / **export / encode**.
+   default at the time). The PyAV fallback wrapper was removed in Phase 7;
+   native ffmpeg is the only decoder. Trim / **export / encode** have since
+   landed (Video Trim / Video Assemble).
 
 ## Non-goals (for now)
 
 - Multi-GPU / distributed execution.
-- Reimplementing torch models in pure Rust (candle / burn) — out of scope; the
-  managed Python worker is the pragmatic path.
+- Reimplementing the deleted torch models in pure Rust (candle / burn) — still
+  out of scope; any future ML backend should arrive via the native `ort` path.
 - Streaming network video; this targets local files.

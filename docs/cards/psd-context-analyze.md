@@ -1,8 +1,9 @@
 # PSD Context Analyze card
 
-Executor: **local** (always `python/bridge/analyze_psd_cli.py`, never networks).
-Backend: `analyze_psd_context` Tauri command → `analyze_psd_cli.py`
-(`psd_tools` + Pillow + numpy, CPU-only in Phase 1).
+Executor: **local** (in-process native Rust, never networks).
+Backend: `analyze_psd_context` Tauri command → the native PSD reader
+(`psd/analyze.rs` + `studio/psd_analyze.rs`, CPU-only). The Python bridge and
+vendored `psd_tools` were deleted in Phase 7 (#314).
 
 Reads a PSD *template* and distils it into a machine-usable `VisualContext`:
 background colour / lighting heuristics, the target placeholder's geometry (plus
@@ -62,9 +63,9 @@ If the background is fully transparent, the whole frame is used as a fallback
 
 ## Placeholder geometry
 
-Placeholder bounds reuse the compose node's `_resolve_placeholder`
-(`custom_nodes/hgripe_psd_nodes.py`) so geometry stays a single source of truth
-with the PSD Compose card. The `safe_area` is the bounds inset by 5% on each
+Placeholder bounds reuse the compose node's placeholder resolution
+(`psd/compose.rs`) so geometry stays a single source of truth with the PSD
+Compose card. The `safe_area` is the bounds inset by 5% on each
 axis (clamped to non-negative width/height). A binary placeholder mask
 (`255` inside the bounds) is written for downstream nodes.
 
@@ -79,9 +80,9 @@ the other statistics, so transparent regions do not spike bin 0.
 
 | Condition | Behaviour |
 | --- | --- |
-| Missing `template` port **and** blank `psd_path` | Rust handler errors `PSD Context Analyze needs a PSD template ...` before shelling out. |
-| Template file not on disk | `FileNotFoundError: PSD template not found: <path>`. |
-| Canvas larger than `max_decode_pixels` | `ValueError: PSD canvas too large to composite safely: WxH ...` (before compositing). |
+| Missing `template` port **and** blank `psd_path` | Rust handler errors `PSD Context Analyze needs a PSD template ...`. |
+| Template file not on disk | `PSD template not found: <path>`. |
+| Canvas larger than `max_decode_pixels` | `PSD canvas too large to composite safely: WxH ...` (before compositing). |
 | `max_decode_pixels = 0` | Guard disabled. |
 | `background_layer` not found | Falls back to compositing the whole PSD. |
 | `target_placeholder` empty / not found | Whole canvas is used as the placeholder bounds. |
@@ -124,11 +125,11 @@ Matches the contract defined once in
 
 ## Tests
 
-- `python/bridge/tests/test_analyze_psd_cli.py` — palette ignores transparent
-  pixels, light-direction grid (corner / uniform / transparent-cell
-  suppression), warm vs cool colour temperature, report shape + histogram
-  artifact, safe-area inset, transparent region does not darken the mean,
+- `src-tauri/src/psd/analyze.rs` — palette ignores transparent pixels,
+  light-direction grid (corner / uniform / transparent-cell suppression),
+  warm vs cool colour temperature, report shape + histogram artifact,
+  safe-area inset, transparent region does not darken the mean,
   oversized-canvas guard (+ `0` disables), missing template, default
-  `max_decode_pixels` (run: `pytest python/bridge/tests`).
+  `max_decode_pixels` (run: `cargo test`).
 - `src-tauri/src/studio/psd_analyze.rs` — the missing-template guard, the
   `reference_layers` line parsing, and the optional-param helper.
