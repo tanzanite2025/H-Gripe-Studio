@@ -123,16 +123,23 @@ export function useDockLayout(storageKey: string, defaults: DockLayoutState) {
       e.preventDefault();
       const startX = e.clientX;
       const startW = layout.railWidth;
+      let lastX = startX;
       const onMove = (ev: PointerEvent) => {
+        lastX = ev.clientX;
         setLayout((prev) => setRailWidth(prev, startW + (startX - ev.clientX)));
       };
-      const onUp = (ev: PointerEvent) => {
+      // Finish on pointerup *or* pointercancel so the window listeners never
+      // outlive the drag (e.g. the pointer is captured away mid-drag).
+      const finish = (ev: PointerEvent) => {
         window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        update(setRailWidth(layout, startW + (startX - ev.clientX)));
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
+        const endX = ev.type === "pointerup" ? ev.clientX : lastX;
+        update(setRailWidth(layout, startW + (startX - endX)));
       };
       window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", finish);
     },
     [layout, update],
   );

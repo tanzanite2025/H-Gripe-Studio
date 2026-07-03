@@ -15,7 +15,7 @@
 //! plain process-global `static` guarded by a `Mutex` (the commands are
 //! handle-free), mirroring the thumbnail LRU.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 /// A registered media resource: its canonical path and cached header dims.
@@ -30,10 +30,27 @@ pub(crate) struct ResourceEntry {
     pub height: Option<u32>,
 }
 
-static REGISTRY: OnceLock<Mutex<HashMap<String, ResourceEntry>>> = OnceLock::new();
+/// Registry cap: entries are tiny (path + dims) but the process lives for the
+/// whole app session, so growth must still be bounded. Past the cap the oldest
+/// registrations are dropped (FIFO); a dropped resource is simply re-registered
+/// by its card on the next lookup, since the id is a pure function of the path.
+const MAX_ENTRIES: usize = 4096;
 
-fn registry() -> &'static Mutex<HashMap<String, ResourceEntry>> {
-    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+struct Registry {
+    map: HashMap<String, ResourceEntry>,
+    /// Insertion order of ids, oldest first, for FIFO eviction.
+    order: VecDeque<String>,
+}
+
+static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
+
+fn registry() -> &'static Mutex<Registry> {
+    REGISTRY.get_or_init(|| {
+        Mutex::new(Registry {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+        })
+    })
 }
 
 /// Stable `res-…` id for a resource, an FNV-1a 64-bit hash of its canonical
@@ -51,14 +68,28 @@ pub(crate) fn id_for(canonical_path: &str) -> String {
 /// Insert or refresh the entry for `id` (re-registering an edited file updates
 /// its cached dims).
 pub(crate) fn put(id: &str, entry: ResourceEntry) {
-    if let Ok(mut map) = registry().lock() {
-        map.insert(id.to_string(), entry);
+    if let Ok(mut reg) = registry().lock() {
+        put_bounded(&mut reg, id, entry, MAX_ENTRIES);
+    }
+}
+
+fn put_bounded(reg: &mut Registry, id: &str, entry: ResourceEntry, cap: usize) {
+    if reg.map.insert(id.to_string(), entry).is_none() {
+        reg.order.push_back(id.to_string());
+        while reg.map.len() > cap {
+            match reg.order.pop_front() {
+                Some(oldest) => {
+                    reg.map.remove(&oldest);
+                }
+                None => break,
+            }
+        }
     }
 }
 
 /// Look up a registered resource by id, or `None` if it was never registered.
 pub(crate) fn get(id: &str) -> Option<ResourceEntry> {
-    registry().lock().ok()?.get(id).cloned()
+    registry().lock().ok()?.map.get(id).cloned()
 }
 
 #[cfg(test)]
@@ -110,5 +141,29 @@ mod tests {
         );
         let got = get(&id).expect("entry present");
         assert_eq!((got.width, got.height), (Some(20), Some(30)));
+    }
+
+    #[test]
+    fn bounded_put_evicts_oldest_first() {
+        let mut reg = Registry {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+        };
+        let entry = |p: &str| ResourceEntry {
+            path: p.to_string(),
+            width: None,
+            height: None,
+        };
+        put_bounded(&mut reg, "a", entry("/a"), 2);
+        put_bounded(&mut reg, "b", entry("/b"), 2);
+        // Refreshing an existing id must not create a duplicate order slot.
+        put_bounded(&mut reg, "a", entry("/a2"), 2);
+        assert_eq!(reg.map.len(), 2);
+        // Third distinct id evicts the oldest ("a").
+        put_bounded(&mut reg, "c", entry("/c"), 2);
+        assert_eq!(reg.map.len(), 2);
+        assert!(!reg.map.contains_key("a"));
+        assert!(reg.map.contains_key("b"));
+        assert!(reg.map.contains_key("c"));
     }
 }

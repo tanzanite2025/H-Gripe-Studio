@@ -57,6 +57,10 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
     }
   };
 
+  // A long-press timer must not survive unmount (it would set state on a
+  // disposed component).
+  useEffect(() => clearTimer, []);
+
   const pick = (key: string, mt: MaskTool) => {
     setFaces((f) => ({ ...f, [key]: mt.id }));
     setFlyout(null);
