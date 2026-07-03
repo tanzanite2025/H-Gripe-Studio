@@ -822,6 +822,15 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "which layer the selected_layer output emits",
       },
       {
+        key: "instancing",
+        label: "Instancing",
+        control: "select",
+        options: ["off", "auto"],
+        defaultValue: "off",
+        inline: true,
+        hint: "auto splits the subject mask into per-object instance layers (connected components, largest first) — desktop runtime only; every instance is flagged for review",
+      },
+      {
         key: "output_dir",
         label: "Output dir",
         control: "path",
