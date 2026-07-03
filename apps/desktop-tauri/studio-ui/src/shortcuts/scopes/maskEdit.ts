@@ -76,8 +76,13 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "brush_harder", combo: "shift+]", status: "ready", hint: "Increase brush hardness (harder edge)." },
 ] as const;
 
-/** The combo a toolbar tool is bound to (for tooltips), if any. */
-const TOOL_COMBO: Readonly<Record<string, string>> = {
+/**
+ * The combo a toolbar tool is bound to (tooltips + the toolbar's shortcut
+ * badges). Keys are `maskTools` ids; values must stay consistent with the
+ * `tool_*` bindings above (guarded by a unit test). Tools with no PS key
+ * (SAM point, matting band, the whole-mask operation flyout) are absent.
+ */
+export const TOOL_COMBO: Readonly<Record<string, string>> = {
   brush: "b",
   eraser: "e",
   wand: "w",
@@ -91,7 +96,7 @@ const TOOL_COMBO: Readonly<Record<string, string>> = {
   hand: "h",
   rotate_view: "r",
   zoom: "z",
-  // Planned tools' reserved PS keys (tooltips on the greyed placeholders).
+  shape: "u",
   eyedropper: "i",
   heal: "j",
   clone: "s",

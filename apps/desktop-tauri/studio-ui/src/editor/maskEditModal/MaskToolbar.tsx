@@ -1,12 +1,13 @@
 // Left toolbar: PS-style single icon column. Tools are grouped into slots
 // (see MASK_TOOL_SLOTS); a multi-tool slot shows its last-used variant and
 // opens a flyout card of the variants on long-press / right-click, like the
-// Photoshop toolbar.
+// Photoshop toolbar. Each button carries its PS shortcut letter as a corner
+// badge (from the mask-edit scope's `toolCombo` table) alongside the tooltip.
 
 import { useContext, useEffect, useRef, useState } from "react";
 import { MASK_TOOL_SLOTS, maskTool, type MaskTool } from "../maskTools";
 import { localizeTool } from "../maskToolsI18n";
-import { comboLabel } from "../../shortcuts";
+import { comboLabel, parseCombo } from "../../shortcuts";
 import { toolCombo } from "../../shortcuts/scopes/maskEdit";
 import { LangContext } from "../../i18n";
 import { isPreviewableOp } from "../maskMorphology";
@@ -18,6 +19,12 @@ interface MaskToolbarProps {
 }
 
 const LONG_PRESS_MS = 350;
+
+/** The single key of a tool's combo, for the corner badge ("M" for `shift+m`). */
+function comboBadge(combo: string): string {
+  const key = parseCombo(combo).key;
+  return key.length === 1 ? key.toUpperCase() : "";
+}
 
 function isActive(mt: MaskTool, toolId: string): boolean {
   return toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id));
@@ -108,6 +115,9 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
                   }}
                 >
                   <ToolIcon id={face.id} />
+                  {combo && comboBadge(combo) ? (
+                    <kbd className="mask-tool-key" aria-hidden="true">{comboBadge(combo)}</kbd>
+                  ) : null}
                   {tools.length > 1 ? <span className="flyout-corner" aria-hidden="true" /> : null}
                 </button>
                 {flyout?.key === key ? (
@@ -122,7 +132,7 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
                             key={mt.id}
                             role="menuitem"
                             className={`mask-flyout-item ${isActive(mt, toolId) ? "active" : ""}`}
-                            title={mloc.hint}
+                            title={mcombo ? `${mloc.hint} (${comboLabel(mcombo)})` : mloc.hint}
                             onClick={() => pick(key, mt)}
                           >
                             <ToolIcon id={mt.id} />

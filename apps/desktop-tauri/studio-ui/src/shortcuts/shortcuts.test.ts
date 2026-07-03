@@ -12,8 +12,9 @@ import {
   useShortcutScope,
   type ShortcutBinding,
 } from "./core";
-import { MASK_EDIT_SHORTCUTS } from "./scopes/maskEdit";
+import { MASK_EDIT_SHORTCUTS, TOOL_COMBO } from "./scopes/maskEdit";
 import { MASK_SHORTCUT_ZH } from "./scopes/maskEditI18n";
+import { MASK_TOOLS } from "../editor/maskTools";
 
 const key = (init: KeyboardEventInit) => new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
 
@@ -69,6 +70,35 @@ describe("mask-edit shortcut table", () => {
     const ids = new Set(MASK_EDIT_SHORTCUTS.map((b) => b.id));
     for (const id of Object.keys(MASK_SHORTCUT_ZH)) {
       expect(ids.has(id), `MASK_SHORTCUT_ZH["${id}"] has no matching binding`).toBe(true);
+    }
+  });
+});
+
+describe("toolbar shortcut badges (TOOL_COMBO)", () => {
+  it("every entry names a registered tool", () => {
+    const toolIds = new Set(MASK_TOOLS.map((t) => t.id));
+    for (const id of Object.keys(TOOL_COMBO)) {
+      expect(toolIds.has(id), `TOOL_COMBO["${id}"] has no matching mask tool`).toBe(true);
+    }
+  });
+
+  it("every combo matches a ready binding in the scope table", () => {
+    const byCombo = new Map(MASK_EDIT_SHORTCUTS.map((b) => [canonicalCombo(b.combo), b]));
+    for (const [id, combo] of Object.entries(TOOL_COMBO)) {
+      const binding = byCombo.get(canonicalCombo(combo));
+      expect(binding, `TOOL_COMBO["${id}"] = "${combo}" is not in MASK_EDIT_SHORTCUTS`).toBeTruthy();
+      expect(binding?.status, `binding for TOOL_COMBO["${id}"]`).toBe("ready");
+    }
+  });
+
+  it("every ready tool_* binding has a badge entry", () => {
+    // Tool-selection bindings whose action id follows `tool_<...>`; the ids
+    // that intentionally have no toolbar badge are commands, not tools.
+    const nonToolIds = new Set(["tool_path_select"]);
+    const badgeCombos = new Set(Object.values(TOOL_COMBO).map(canonicalCombo));
+    for (const b of MASK_EDIT_SHORTCUTS) {
+      if (!b.id.startsWith("tool_") || b.status !== "ready" || nonToolIds.has(b.id)) continue;
+      expect(badgeCombos.has(canonicalCombo(b.combo)), `no TOOL_COMBO entry for "${b.id}" ("${b.combo}")`).toBe(true);
     }
   });
 });
