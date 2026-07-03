@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -17,10 +17,6 @@ import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
-import { MaskEditModal } from "./editor/MaskEditModal";
-import { CropEditModal } from "./editor/CropEditModal";
-import { GradeEditModal } from "./editor/GradeEditModal";
-import { MediaEditModal } from "./editor/MediaEditModal";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
 import {
@@ -97,6 +93,22 @@ import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
 import { useT } from "./i18n";
+
+// Editor-level surfaces (mask/crop/grade/media editors) are heavyweight and
+// open rarely, so they are code-split out of the main bundle: nothing loads
+// until the user actually opens one.
+const MaskEditModal = lazy(() =>
+  import("./editor/MaskEditModal").then((m) => ({ default: m.MaskEditModal })),
+);
+const CropEditModal = lazy(() =>
+  import("./editor/CropEditModal").then((m) => ({ default: m.CropEditModal })),
+);
+const GradeEditModal = lazy(() =>
+  import("./editor/GradeEditModal").then((m) => ({ default: m.GradeEditModal })),
+);
+const MediaEditModal = lazy(() =>
+  import("./editor/MediaEditModal").then((m) => ({ default: m.MediaEditModal })),
+);
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -1056,6 +1068,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       )}
 
       {maskEditNode && (
+        <Suspense fallback={null}>
         <MaskEditModal
           title={t((maskEditNode.data as HgripeNodeData).kind === "subjectMask" ? "mask.titleSubject" : "mask.titleDefault")}
           imagePath={connectedImagePath(maskEditNode.id)}
@@ -1069,9 +1082,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           }}
           onClose={() => setMaskEditNodeId(null)}
         />
+        </Suspense>
       )}
 
       {cropEditNode && (
+        <Suspense fallback={null}>
         <CropEditModal
           title={t("crop.title")}
           imagePath={connectedImagePath(cropEditNode.id)}
@@ -1122,9 +1137,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           }}
           onClose={() => setCropEditNodeId(null)}
         />
+        </Suspense>
       )}
 
       {gradeEditNode && (
+        <Suspense fallback={null}>
         <GradeEditModal
           title={t("grade.title")}
           imagePath={connectedImagePath(gradeEditNode.id)}
@@ -1141,6 +1158,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           }}
           onClose={() => setGradeEditNodeId(null)}
         />
+        </Suspense>
       )}
 
       {exportOpen && (
@@ -1163,6 +1181,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       )}
 
       {mediaEditSource && (
+        <Suspense fallback={null}>
         <MediaEditModal
           title={t("node.mediaEdit")}
           imagePath={
@@ -1197,6 +1216,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           }}
           onClose={() => setMediaEditSourceId(null)}
         />
+        </Suspense>
       )}
     </div>
   );
