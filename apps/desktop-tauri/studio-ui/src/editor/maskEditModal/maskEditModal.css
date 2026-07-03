@@ -68,6 +68,19 @@
 .mask-tool:hover:not(:disabled) { background: var(--ps-hover); }
 .mask-tool.active { background: #1f2c44; color: var(--accent); }
 .mask-tool-icon { display: block; }
+/* PS shortcut-letter badge in the button's top-right corner ("B" on the
+   brush). The flyout triangle keeps the bottom-right corner. */
+.mask-tool .mask-tool-key {
+  position: absolute;
+  right: 1px;
+  top: 0;
+  font-family: inherit;
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.mask-tool.active .mask-tool-key { opacity: 0.85; }
 /* PS's tiny corner triangle marking a slot that hides more variants. */
 .mask-tool .flyout-corner {
   position: absolute;
