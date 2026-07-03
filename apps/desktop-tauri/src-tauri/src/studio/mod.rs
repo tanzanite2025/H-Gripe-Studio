@@ -56,6 +56,7 @@ mod color_match;
 mod color_match_cpu;
 mod crop;
 mod detail_repaint;
+mod detail_repaint_cpu;
 mod detail_watchdog;
 mod detail_watchdog_cpu;
 mod edge_refine;
