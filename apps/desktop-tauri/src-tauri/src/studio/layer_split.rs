@@ -1,5 +1,6 @@
-//! `smartLayerSplit` compute node: Phase 1 subject/background separation
-//! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md).
+//! `smartLayerSplit` compute node: subject/background separation plus optional
+//! multi-object instancing (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md,
+//! Phases 1–2).
 //!
 //! Splits a flat image into a `LayeredImageAsset` — a locked original layer
 //! plus real background/subject candidates whose masks come from the shared
@@ -42,6 +43,15 @@ const SUBJECT_LAYER_ID: &str = "layer_subject";
 /// (mirrors `subject_mask::SELECTED_THRESHOLD`).
 const SELECTED_THRESHOLD: u8 = 128;
 
+/// A connected component must cover at least this fraction of the canvas to
+/// become its own object instance layer; smaller blobs stay in the combined
+/// subject candidate only.
+const MIN_INSTANCE_AREA_FRACTION: f64 = 0.002;
+
+/// Upper bound on emitted object instance layers (largest first); anything
+/// beyond stays in the combined subject candidate and is reported as a warning.
+const MAX_INSTANCES: usize = 8;
+
 /// `[x1, y1, x2, y2]` extents of the selected pixels, or `[0, 0, 0, 0]` when
 /// the mask is empty (the protocol's "unknown" bbox).
 fn mask_bbox(mask: &GrayImage) -> [u32; 4] {
@@ -61,6 +71,63 @@ fn mask_bbox(mask: &GrayImage) -> [u32; 4] {
     } else {
         [0, 0, 0, 0]
     }
+}
+
+/// Split a subject mask into per-object instance masks via 4-connected
+/// components over the selected pixels. Components are returned largest-first;
+/// blobs below [`MIN_INSTANCE_AREA_FRACTION`] of the canvas are dropped and
+/// at most [`MAX_INSTANCES`] are kept. Each instance mask preserves the
+/// original (soft) mask values inside its component.
+fn instance_masks(mask: &GrayImage) -> Vec<GrayImage> {
+    let (width, height) = mask.dimensions();
+    let total = u64::from(width) * u64::from(height);
+    if total == 0 {
+        return Vec::new();
+    }
+    let min_area = ((total as f64 * MIN_INSTANCE_AREA_FRACTION).ceil() as u64).max(1);
+    let index = |x: u32, y: u32| (y * width + x) as usize;
+    let mut label: Vec<u32> = vec![0; total as usize];
+    let mut components: Vec<(u64, GrayImage)> = Vec::new();
+    let mut next = 0u32;
+    let mut stack: Vec<(u32, u32)> = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            if mask.get_pixel(x, y).0[0] < SELECTED_THRESHOLD || label[index(x, y)] != 0 {
+                continue;
+            }
+            next += 1;
+            let mut area = 0u64;
+            let mut instance = GrayImage::from_pixel(width, height, Luma([0]));
+            stack.push((x, y));
+            label[index(x, y)] = next;
+            while let Some((cx, cy)) = stack.pop() {
+                area += 1;
+                instance.put_pixel(cx, cy, *mask.get_pixel(cx, cy));
+                let neighbours = [
+                    (cx.wrapping_sub(1), cy),
+                    (cx + 1, cy),
+                    (cx, cy.wrapping_sub(1)),
+                    (cx, cy + 1),
+                ];
+                for (nx, ny) in neighbours {
+                    if nx < width
+                        && ny < height
+                        && label[index(nx, ny)] == 0
+                        && mask.get_pixel(nx, ny).0[0] >= SELECTED_THRESHOLD
+                    {
+                        label[index(nx, ny)] = next;
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+            if area >= min_area {
+                components.push((area, instance));
+            }
+        }
+    }
+    components.sort_by(|a, b| b.0.cmp(&a.0));
+    components.truncate(MAX_INSTANCES);
+    components.into_iter().map(|(_, mask)| mask).collect()
 }
 
 fn invert_mask(mask: &GrayImage) -> GrayImage {
@@ -153,6 +220,22 @@ pub(crate) fn execute_studio_smart_layer_split(
     let background_rgba = pixel_ops::apply_alpha_mask_working(&working, &background_mask);
     studio_image::write_working_output(&background_rgba_path, &background_rgba)?;
 
+    // Phase 2 instancing: split the subject mask into per-object layers via
+    // connected components when requested.
+    let instancing = {
+        let raw = studio_value_to_string(node.params.get("instancing"));
+        if raw.is_empty() {
+            "off".to_string()
+        } else {
+            raw
+        }
+    };
+    let instances = if instancing == "auto" {
+        instance_masks(&subject_mask)
+    } else {
+        Vec::new()
+    };
+
     let subject_bbox = mask_bbox(&subject_mask);
     let is_builtin = provider == BUILTIN_PROVIDER;
     // The weight-free fallback is a colour heuristic — keep its candidates
@@ -165,8 +248,8 @@ pub(crate) fn execute_studio_smart_layer_split(
         .map(|d| d.as_millis().to_string())
         .unwrap_or_default();
     let candidate_note = format!("segmented by {provider}");
-    let layers = json!([
-        {
+    let mut layers = vec![
+        json!({
             "id": ORIGINAL_LAYER_ID,
             "name": "original image",
             "kind": "unknown",
@@ -178,8 +261,8 @@ pub(crate) fn execute_studio_smart_layer_split(
             "visible": true,
             "locked": true,
             "notes": ["locked original"],
-        },
-        {
+        }),
+        json!({
             "id": BACKGROUND_LAYER_ID,
             "name": "background candidate",
             "kind": "background",
@@ -189,9 +272,9 @@ pub(crate) fn execute_studio_smart_layer_split(
             "confidence": confidence,
             "source": if is_builtin { "algorithm" } else { "model" },
             "visible": true,
-            "notes": [candidate_note],
-        },
-        {
+            "notes": [candidate_note.clone()],
+        }),
+        json!({
             "id": SUBJECT_LAYER_ID,
             "name": "subject candidate",
             "kind": "subject",
@@ -201,24 +284,61 @@ pub(crate) fn execute_studio_smart_layer_split(
             "confidence": confidence,
             "source": if is_builtin { "algorithm" } else { "model" },
             "visible": true,
-            "notes": [candidate_note],
-        },
-    ]);
-    let (warnings, suggested_review) = if is_builtin {
-        let review = |layer_id: &str| {
-            json!({
-                "layer_id": layer_id,
-                "severity": "warning",
-                "message": "builtin CPU heuristic mask — review before production use",
-            })
-        };
-        (
-            json!(["builtin CPU segmentation (no model weight resolved)"]),
-            json!([review(BACKGROUND_LAYER_ID), review(SUBJECT_LAYER_ID)]),
-        )
-    } else {
-        (json!([]), json!([]))
+            "notes": [candidate_note.clone()],
+        }),
+    ];
+
+    let mut warnings: Vec<Value> = Vec::new();
+    let mut suggested_review: Vec<Value> = Vec::new();
+    let review = |layer_id: &str, message: &str| {
+        json!({ "layer_id": layer_id, "severity": "warning", "message": message })
     };
+    if is_builtin {
+        warnings.push(json!("builtin CPU segmentation (no model weight resolved)"));
+        for id in [BACKGROUND_LAYER_ID, SUBJECT_LAYER_ID] {
+            suggested_review.push(review(
+                id,
+                "builtin CPU heuristic mask — review before production use",
+            ));
+        }
+    }
+
+    // Instance layers are always lower-confidence than the combined subject:
+    // connected components can merge touching objects or split one object, so
+    // every instance is flagged for review.
+    let instance_confidence = (confidence - 0.15_f64).max(0.1);
+    for (n, instance_mask) in instances.iter().enumerate() {
+        let ordinal = n + 1;
+        let layer_id = format!("layer_object_{ordinal}");
+        let mask_path = dir.join(format!("{base}_object_{ordinal}_mask.png"));
+        let rgba_path = dir.join(format!("{base}_object_{ordinal}.png"));
+        save_mask(instance_mask, &mask_path)?;
+        let rgba = pixel_ops::apply_alpha_mask_working(&working, instance_mask);
+        studio_image::write_working_output(&rgba_path, &rgba)?;
+        layers.push(json!({
+            "id": layer_id,
+            "name": format!("object {ordinal}"),
+            "kind": "object",
+            "bbox": mask_bbox(instance_mask),
+            "mask": { "path": mask_path.to_string_lossy(), "width": width, "height": height },
+            "rgba": { "path": rgba_path.to_string_lossy(), "width": width, "height": height },
+            "confidence": instance_confidence,
+            "source": if is_builtin { "algorithm" } else { "model" },
+            "visible": true,
+            "notes": [format!("instance {ordinal} of the subject mask (connected component)")],
+        }));
+        suggested_review.push(review(
+            &layer_id,
+            "auto instance — verify it is one object (merge/split if needed)",
+        ));
+    }
+    if instancing == "auto" && instances.is_empty() {
+        warnings.push(json!(
+            "instancing found no components above the minimum area — only the combined subject is available"
+        ));
+    }
+    let layers = json!(layers);
+    let (warnings, suggested_review) = (json!(warnings), json!(suggested_review));
     let asset = json!({
         "id": format!("layered-{}", node.id),
         "source_asset_id": image_path,
@@ -363,6 +483,98 @@ mod tests {
         .unwrap();
         assert_eq!(out["selected_layer"], image_path.as_str());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn instancing_auto_emits_per_object_layers() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hgripe_layer_split_instances_{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        // A grey scene with a red block. The builtin fallback segmenter keeps
+        // a single largest component, so instancing yields one object layer
+        // here; multi-object masks (model backends) yield one layer per
+        // component — covered by `instance_masks_splits_components_and_drops_specks`.
+        let image_path = root.join("scene.png");
+        let mut image = RgbaImage::from_pixel(16, 16, Rgba([120, 120, 120, 255]));
+        for y in 2..6 {
+            for x in 2..6 {
+                image.put_pixel(x, y, Rgba([220, 20, 20, 255]));
+            }
+        }
+        image.save(&image_path).unwrap();
+        let mut inputs = BTreeMap::new();
+        inputs.insert("image".to_string(), json!(image_path.to_string_lossy()));
+        let out = execute_studio_smart_layer_split(
+            &node(&root, &[("instancing", json!("auto"))]),
+            &inputs,
+        )
+        .unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap().clone();
+        let objects: Vec<_> = layers
+            .iter()
+            .filter(|layer| layer["kind"] == "object")
+            .collect();
+        assert_eq!(objects.len(), 1, "{layers:?}");
+        assert_eq!(objects[0]["id"], "layer_object_1");
+        assert_eq!(objects[0]["name"], "object 1");
+        for object in &objects {
+            let mask = object["mask"]["path"].as_str().unwrap();
+            let rgba = object["rgba"]["path"].as_str().unwrap();
+            assert!(Path::new(mask).is_file(), "missing mask {mask}");
+            assert!(Path::new(rgba).is_file(), "missing rgba {rgba}");
+            let bbox = object["bbox"].as_array().unwrap();
+            assert_ne!(bbox[..], [json!(0), json!(0), json!(0), json!(0)][..]);
+        }
+        // Every instance is flagged for review.
+        let review = out["layered_asset"]["split_report"]["suggested_review"]
+            .as_array()
+            .unwrap()
+            .clone();
+        for object in &objects {
+            assert!(
+                review.iter().any(|issue| issue["layer_id"] == object["id"]),
+                "no review issue for {}",
+                object["id"]
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn instancing_off_keeps_the_phase_1_layers() {
+        let (root, image_path) = temp_scene("off");
+        let mut inputs = BTreeMap::new();
+        inputs.insert("image".to_string(), json!(image_path));
+        let out = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap();
+        let layers = out["layered_asset"]["layers"].as_array().unwrap();
+        assert_eq!(layers.len(), 3);
+        assert!(layers.iter().all(|layer| layer["kind"] != "object"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn instance_masks_splits_components_and_drops_specks() {
+        let mut mask = GrayImage::from_pixel(32, 32, Luma([0]));
+        for y in 2..10 {
+            for x in 2..10 {
+                mask.put_pixel(x, y, Luma([255]));
+            }
+        }
+        for y in 20..30 {
+            for x in 20..30 {
+                mask.put_pixel(x, y, Luma([255]));
+            }
+        }
+        // A 1px speck below the minimum area fraction is dropped.
+        mask.put_pixel(0, 31, Luma([255]));
+        let instances = instance_masks(&mask);
+        assert_eq!(instances.len(), 2);
+        // Largest-first ordering: the 10x10 block precedes the 8x8 block.
+        assert_eq!(mask_bbox(&instances[0]), [20, 20, 29, 29]);
+        assert_eq!(mask_bbox(&instances[1]), [2, 2, 9, 9]);
     }
 
     #[test]

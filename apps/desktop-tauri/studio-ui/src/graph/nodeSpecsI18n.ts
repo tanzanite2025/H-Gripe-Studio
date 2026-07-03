@@ -210,6 +210,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "把连接的图像拆分成 LayeredImageAsset：一个锁定的原图层，加上背景/主体候选层。桌面运行时在进程内分割主体（有模型权重用模型后端，否则用确定性的内置 CPU 分割器），并写出每层的 mask + RGBA PNG；浏览器预览保留占位 mask。下游节点、Review 编辑器、调色和时间线消费 layered_asset / 图层端口。",
     params: {
       selected_kind: { label: "选中图层", hint: "selected_layer 输出发出的图层" },
+      instancing: {
+        label: "实例分层",
+        hint: "auto 把主体 mask 按连通域拆成多个物体实例层（面积从大到小）——仅桌面运行时；每个实例都会标记待审",
+      },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: { label: "输出名", hint: "每层 PNG 的基础名（空 = <image>_split）" },
     },
