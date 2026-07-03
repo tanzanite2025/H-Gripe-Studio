@@ -94,8 +94,8 @@ fn poster_cache_path(video_path: &str, ts: f64) -> Result<PathBuf, String> {
     Ok(poster_dir.join(format!("{:016x}.png", hasher.finish())))
 }
 
-/// Worker-backed probe: read metadata and decode the poster through the warm
-/// PyAV worker (open container reused across calls), building the card result.
+/// Engine-backed probe: read metadata and decode the poster through the media
+/// engine's frame source (native libav by default), building the card result.
 fn video_probe_worker(
     python: &Path,
     dir: &Path,
@@ -103,7 +103,6 @@ fn video_probe_worker(
     ts: f64,
     poster_path: &Path,
 ) -> Result<VideoProbeResult, String> {
-    use crate::studio::video_engine::FrameSource;
     let mut source = crate::studio::video_engine::make_frame_source(python, dir);
     let meta = source.probe(video)?;
     source.decode_frame(video, ts, poster_path)?;

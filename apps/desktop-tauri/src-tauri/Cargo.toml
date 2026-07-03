@@ -10,14 +10,16 @@ name = "hgripe-desktop"
 path = "src/main.rs"
 
 [features]
-# Native in-process FFmpeg decoder backend (a second `FrameSource` behind the
-# media-engine seam), linked against the vendored LGPL *shared* libav* libraries
-# checked into `third_party/ffmpeg` via git-lfs — cut from upstream, locally
-# maintained, no system ffmpeg and no PyAV. Off by default so the ordinary build
-# stays PyAV-only; the CI `tauri (cargo test)` job opts in. The `FFMPEG_*`
-# link/binding env for `rusty_ffmpeg` lives in `.cargo/config.toml`, and
-# `build.rs` copies the runtime DLLs next to the test/app binaries. Decoder
-# failures fall back to the PyAV/one-shot path exactly as before.
+default = ["native-ffmpeg"]
+# Native in-process FFmpeg backend: decode (`FrameSource` behind the
+# media-engine seam) plus encode (`videoTrim`/`videoAssemble`), linked against
+# the vendored LGPL *shared* libav* libraries checked into `third_party/ffmpeg`
+# via git-lfs — cut from upstream, locally maintained, no system ffmpeg and no
+# PyAV. On by default: probe/decode/poster/trim/assemble all run in-process
+# through libav. Build with `--no-default-features` for the legacy PyAV-worker
+# paths. The `FFMPEG_*` link/binding env for `rusty_ffmpeg` lives in
+# `.cargo/config.toml`, and `build.rs` copies the runtime DLLs next to the
+# test/app binaries.
 native-ffmpeg = ["dep:rusty_ffmpeg"]
 # GPU backend for the grading dialog preview (`grade_preview`) and the
 # `imageGrade` node: compiles hgripe-grade's wgpu compute passes in. Off by

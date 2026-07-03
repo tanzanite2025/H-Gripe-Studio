@@ -1,13 +1,16 @@
 //! The `videoAssemble` node executor: encodes an ordered frame-image sequence
-//! into a video file through the media engine's FFmpeg backend (the long-lived
-//! PyAV worker's `assemble` command). This is the runner's video
-//! assembly/export card: connect frames (a batch's saved outputs, a directory
-//! of rendered stills), pick fps/codec, get an `.mp4` on disk.
+//! into a video file. Default builds go through the native in-process FFmpeg
+//! encoder (`ffmpeg_native::assemble_frames`); builds without the
+//! `native-ffmpeg` feature fall back to the long-lived PyAV worker's
+//! `assemble` command. This is the runner's video assembly/export card:
+//! connect frames (a batch's saved outputs, a directory of rendered stills),
+//! pick fps/codec, get an `.mp4` on disk.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(not(feature = "native-ffmpeg"))]
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -15,9 +18,11 @@ use super::graph::{
     number_param, optional, resolve_output_dir, studio_output_map, studio_value_to_string,
     StudioGraphNode,
 };
+#[cfg(not(feature = "native-ffmpeg"))]
 use crate::psd::{project_python, resolve_project_dir};
 
 /// Shape of the worker's `assemble` payload.
+#[cfg(not(feature = "native-ffmpeg"))]
 #[derive(Debug, Deserialize)]
 struct AssemblePayload {
     #[serde(default)]
@@ -103,43 +108,67 @@ pub(super) fn execute_studio_video_assemble(
         .unwrap_or_else(|| "libx264".to_string());
     let out_path = resolve_output_path(node)?;
 
-    let dir = resolve_project_dir(&None)?;
-    let python = project_python(&dir);
-    let args = json!({
-        "frames": frames,
-        "out": out_path,
-        "fps": fps,
-        "codec": codec,
-    });
-    let stdout = super::video_worker::run(&python, &dir, "assemble", &args)?;
-    let payload: AssemblePayload = serde_json::from_str(stdout.trim()).map_err(|err| {
-        format!(
-            "could not parse video assemble result: {err} (raw: {})",
-            stdout.trim()
-        )
-    })?;
+    #[cfg(feature = "native-ffmpeg")]
+    {
+        let stats =
+            super::ffmpeg_native::assemble_frames(&frames, Path::new(&out_path), fps, &codec)?;
+        Ok(studio_output_map([
+            ("video", json!(out_path)),
+            ("frame_count", json!(stats.frame_count)),
+            ("duration_sec", json!(stats.duration_sec)),
+            (
+                "assemble_report",
+                json!({
+                    "width": stats.width,
+                    "height": stats.height,
+                    "fps": stats.fps,
+                    "codec": stats.codec,
+                    "frame_count": stats.frame_count,
+                    "duration_sec": stats.duration_sec,
+                }),
+            ),
+        ]))
+    }
+    #[cfg(not(feature = "native-ffmpeg"))]
+    {
+        let dir = resolve_project_dir(&None)?;
+        let python = project_python(&dir);
+        let args = json!({
+            "frames": frames,
+            "out": out_path,
+            "fps": fps,
+            "codec": codec,
+        });
+        let stdout = super::video_worker::run(&python, &dir, "assemble", &args)?;
+        let payload: AssemblePayload = serde_json::from_str(stdout.trim()).map_err(|err| {
+            format!(
+                "could not parse video assemble result: {err} (raw: {})",
+                stdout.trim()
+            )
+        })?;
 
-    let video_path = if payload.video_path.is_empty() {
-        out_path
-    } else {
-        payload.video_path
-    };
-    Ok(studio_output_map([
-        ("video", json!(video_path)),
-        ("frame_count", json!(payload.frame_count)),
-        ("duration_sec", json!(payload.duration_sec)),
-        (
-            "assemble_report",
-            json!({
-                "width": payload.width,
-                "height": payload.height,
-                "fps": payload.fps,
-                "codec": payload.codec,
-                "frame_count": payload.frame_count,
-                "duration_sec": payload.duration_sec,
-            }),
-        ),
-    ]))
+        let video_path = if payload.video_path.is_empty() {
+            out_path
+        } else {
+            payload.video_path
+        };
+        Ok(studio_output_map([
+            ("video", json!(video_path)),
+            ("frame_count", json!(payload.frame_count)),
+            ("duration_sec", json!(payload.duration_sec)),
+            (
+                "assemble_report",
+                json!({
+                    "width": payload.width,
+                    "height": payload.height,
+                    "fps": payload.fps,
+                    "codec": payload.codec,
+                    "frame_count": payload.frame_count,
+                    "duration_sec": payload.duration_sec,
+                }),
+            ),
+        ]))
+    }
 }
 
 #[cfg(test)]

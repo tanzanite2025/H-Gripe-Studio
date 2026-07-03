@@ -6,10 +6,10 @@
 //! never stalls on an inference job (and vice-versa):
 //!
 //! * [`FrameSource`] — the **decoder seam**. Any backend that can probe a clip
-//!   and render a frame at a timestamp fits behind it. The first impl,
-//!   [`PyAvFrameSource`], delegates to the long-lived PyAV worker
-//!   ([`super::video_worker`]); a native-Rust ffmpeg decoder can replace it
-//!   later without touching the engine or the cache.
+//!   and render a frame at a timestamp fits behind it. The default impl is the
+//!   in-process libav decoder ([`super::ffmpeg_native`]); the legacy
+//!   [`PyAvFrameSource`] (the long-lived PyAV worker, [`super::video_worker`])
+//!   remains behind `--no-default-features` builds only.
 //! * [`super::frame_cache::FrameCache`] — a small LRU of recently decoded frame
 //!   PNGs, so scrubbing back over a timestamp is a cache hit, not a re-decode.
 //! * [`PlaybackEngine`] — a **dedicated decode thread** fed by a channel. Seek
@@ -28,6 +28,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use serde::Deserialize;
+#[cfg(not(feature = "native-ffmpeg"))]
 use serde_json::json;
 
 use super::frame_cache::{frame_key, FrameCache};
@@ -72,11 +73,13 @@ pub(crate) trait FrameSource: Send {
 /// [`FrameSource`] backed by the long-lived PyAV worker. Holds the `(python,
 /// dir)` context the worker needs; the worker itself keeps the ffmpeg container
 /// open across calls, so this struct is a thin request builder.
+#[cfg(not(feature = "native-ffmpeg"))]
 pub(crate) struct PyAvFrameSource {
     python: PathBuf,
     dir: PathBuf,
 }
 
+#[cfg(not(feature = "native-ffmpeg"))]
 impl PyAvFrameSource {
     pub(crate) fn new(python: PathBuf, dir: PathBuf) -> Self {
         Self { python, dir }
@@ -84,12 +87,14 @@ impl PyAvFrameSource {
 }
 
 /// Shape of the worker's `frame` payload; only the written path is needed here.
+#[cfg(not(feature = "native-ffmpeg"))]
 #[derive(Debug, Deserialize)]
 struct FramePayload {
     #[serde(default)]
     poster_path: String,
 }
 
+#[cfg(not(feature = "native-ffmpeg"))]
 impl FrameSource for PyAvFrameSource {
     fn probe(&mut self, video: &Path) -> Result<VideoMeta, String> {
         let args = json!({ "video": video.to_string_lossy() });
@@ -129,17 +134,16 @@ impl FrameSource for PyAvFrameSource {
 
 /// Build the decoder backend for `(python, dir)`.
 ///
-/// Default build: the PyAV worker ([`PyAvFrameSource`]). With `native-ffmpeg`:
-/// the in-process libav decoder, wrapped so a per-clip decode failure falls back
-/// to the PyAV worker rather than erroring the scrub. Either way the returned
-/// box is what the playback thread and the one-shot poster path decode through.
+/// Default build: the in-process libav decoder ([`super::ffmpeg_native`]) —
+/// no Python in the loop, decode errors surface as `Err` to the caller.
+/// Without `native-ffmpeg` (legacy/testing builds): the PyAV worker
+/// ([`PyAvFrameSource`]). Either way the returned box is what the playback
+/// thread and the one-shot poster path decode through.
 pub(crate) fn make_frame_source(python: &Path, dir: &Path) -> Box<dyn FrameSource> {
     #[cfg(feature = "native-ffmpeg")]
     {
-        Box::new(super::ffmpeg_native::FfmpegWithPyAvFallback::new(
-            python.to_path_buf(),
-            dir.to_path_buf(),
-        ))
+        let _ = (python, dir);
+        Box::new(super::ffmpeg_native::NativeFfmpegFrameSource::new())
     }
     #[cfg(not(feature = "native-ffmpeg"))]
     {
