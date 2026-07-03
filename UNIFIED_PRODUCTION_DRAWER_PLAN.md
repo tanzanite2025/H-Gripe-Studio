@@ -1,8 +1,10 @@
 # Unified Production Drawer Plan
 
-> Status: local planning draft. Do not treat this as merged product policy until
-> the cloud-side work is pulled back and reconciled with the existing dual-dock,
-> grade-kernel, media-card, and timeline documents.
+> Status: **第一阶段（下方 1–9）已全部落地**（PR #294–#300）：底部抽屉、
+> `ProductionTarget`、Edit/Timeline 工作区、多轨模型、可嵌入 `GradePanel`
+> （image + video_clip）、图片/音频右键按需编辑、timeline render plan +
+> FFmpeg 导出弹窗。后续方向（音频混音/封装、视频 clip 参与导出、keyframe
+> 调色等）尚未排期。
 
 ## 目的
 
@@ -324,17 +326,17 @@ one production drawer + optional side handles
 
 本文件补充：音频 kernel 和 timeline kernel 也必须声明自己的 lane，不要阻塞 UI 或抢占 GPU compute。
 
-## 第一阶段实现顺序
+## 第一阶段实现顺序（已全部落地，PR #294–#300）
 
-1. 新增底部 `ProductionDrawer` shell。
-2. 新增统一 selection context：`ProductionTarget`。
-3. 新增 `Edit / Timeline` Tab，内部包含轻量 media workspace / bin。
-4. 新增最小多轨模型：image still clip、video clip、audio clip。
-5. 把现有 `GradeEditModal` 抽成可嵌入的 `GradePanel`，保留 modal wrapper。
-6. `GradePanel` 支持 `image` 和 `video_clip` 两种 target。
-7. 图片右键从 Edit / Timeline 工作区打开现有 Image/Mask/Crop 编辑弹窗。
-8. 音频右键按需打开 waveform + trim + gain + fade 的最小弹窗。
-9. Export command 消费 timeline render plan，按需打开导出弹窗并调用 FFmpeg encode/mux。
+1. ✅ 新增底部 `ProductionDrawer` shell。(#294)
+2. ✅ 新增统一 selection context：`ProductionTarget`。(#294)
+3. ✅ 新增 `Edit / Timeline` Tab，内部包含轻量 media workspace / bin。(#294)
+4. ✅ 新增最小多轨模型：image still clip、video clip、audio clip。(#295)
+5. ✅ 把现有 `GradeEditModal` 抽成可嵌入的 `GradePanel`，保留 modal wrapper。(#296)
+6. ✅ `GradePanel` 支持 `image` 和 `video_clip` 两种 target。(#297)
+7. ✅ 图片右键从 Edit / Timeline 工作区打开现有 Image/Mask/Crop 编辑弹窗。(#298)
+8. ✅ 音频右键按需打开 waveform + trim + gain + fade 的最小弹窗。(#299)
+9. ✅ Export command 消费 timeline render plan，按需打开导出弹窗并调用 FFmpeg encode/mux。(#300)
 
 ## 非目标
 

@@ -331,14 +331,14 @@ weight is opt-in so real-inference CI is gated like ViTMatte.
   `third_party` subtree stays the lightweight CPU baseline.
 - **Capability probing:** ✅ each local card's CLI exposes `--probe-engines`, and
   the `probe_engines` Tauri command aggregates them into a **cross-card capability
-  report** (the `doctor`-style probe). The Dashboard surfaces it and the inspector
+  report** (the `doctor`-style probe). The inspector
   uses it to **grey out engines** whose deps/weights are missing on this box (the
   CPU/`rules` baseline stays enabled, so the node always falls back to CPU). ✅
   the report also carries **GPU/CUDA device detail** (the machine `runtime`
-  probe — Dashboard **Compute** section + the inspector's per-engine "runs on
+  probe — the inspector's per-engine "runs on
   GPU / falls back to CPU" badge) and a **cached-weight inventory** per engine
-  (each ML engine's non-bundled `weight` path / `present` / `size_mb`, surfaced
-  in the Dashboard so it is clear what is downloaded vs still missing). The ONNX
+  (each ML engine's non-bundled `weight` path / `present` / `size_mb`, so it is
+  clear what is downloaded vs still missing). The ONNX
   engines honour that badge: a shared `sr_backends.onnx_providers()` selects
   `CUDAExecutionProvider` first when ONNX Runtime exposes it (CPU always last),
   mirroring the torch backends' "cuda if available else cpu" auto behaviour
@@ -365,10 +365,12 @@ weight is opt-in so real-inference CI is gated like ViTMatte.
   `fp32` on a CPU run, the backends bind `torch.half()` accordingly, and the
   enhance / repaint reports record `precision_requested` + the `precision` the
   run *actually* used. The ONNX engines keep no `precision` knob (their
-  precision is fixed at export). The "local model manager" surface has landed:
-  the Dashboard **Local models** panel persists per-engine `weights_path`
-  overrides + the shared cache dir (`model_paths.json`), applied as env vars on
-  every bridge subprocess with real env vars still winning.
+  precision is fixed at export). The "local model manager" backend has landed
+  (`get_model_paths`/`set_model_paths` persist per-engine `weights_path`
+  overrides + the shared cache dir in `model_paths.json`, applied as env vars on
+  every bridge subprocess with real env vars still winning); its old Dashboard
+  panel was removed with the legacy shell tabs, pending a settings surface
+  inside the node editor.
 - **Determinism & safety:** seedable backends; keep the text/logo guards; require
   rule+ML agreement before any *automatic* (non-user-confirmed) repaint.
 - **Contracts are stable:** every Phase 2 backend emits the existing

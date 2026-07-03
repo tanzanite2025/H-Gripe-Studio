@@ -1,17 +1,16 @@
 # H-Gripe Studio (desktop front end)
 
-The Vite + React + TypeScript front end for H-Gripe Desktop. It hosts the shell
-panels (Dashboard / PSD Studio / Run Task / History / PSD, under
-[`src/shell/`](src/shell/)) and H-Gripe's own production node-graph
-editor built on [React Flow](https://reactflow.dev) (`@xyflow/react`, under
-[`src/editor/`](src/editor/)) as tabs of one app. The node editor is H-Gripe's
-own visual workflow canvas — the only node canvas in the app.
+The Vite + React + TypeScript front end for H-Gripe Desktop: H-Gripe's own
+production node-graph editor built on [React Flow](https://reactflow.dev)
+(`@xyflow/react`, under [`src/editor/`](src/editor/)). The app boots directly
+into the node editor — it is the whole UI. (The legacy shell tabs —
+Dashboard / PSD Studio / Run Task / History / PSD — have been removed; their
+roles live in canvas cards, the editor toolbar, and the production drawer.)
 
-> Status: **this is the whole desktop front end** (the former vanilla-TS shell
-> and this editor have been merged — no iframe). The build output is written to
-> `../dist` (gitignored) and served by Tauri as `frontendDist`. Shell-tab IPC
-> goes through [`src/bridge/desktop.ts`](src/bridge/desktop.ts); editor IPC
-> through [`src/bridge/tauri.ts`](src/bridge/tauri.ts). A plain `cargo run` does
+> Status: **this is the whole desktop front end**. The build output is written
+> to `../dist` (gitignored) and served by Tauri as `frontendDist`. IPC goes
+> through [`src/bridge/tauri.ts`](src/bridge/tauri.ts) and the other typed
+> wrappers under [`src/bridge/`](src/bridge/). A plain `cargo run` does
 > not build this; run `npm run build` first (the Tauri CLI does it via the
 > `before*` hooks in `tauri.conf.json`).
 
@@ -103,11 +102,13 @@ provider/API remote job control, not an H-Gripe account/cloud system. Durable
 workflow save/load beyond autosave now exists (explicit Save/Open + project
 folder, above). FFmpeg-backed video assembly/export exists as the
 **Video Assemble** output card: it encodes an ordered frame-image sequence into
-a video file (fps/codec/output params) through the media engine's PyAV worker
-`assemble` command.
+a video file (fps/codec/output params) through the media engine — in-process
+via the vendored native FFmpeg (`native-ffmpeg`, the default; see
+`third_party/ffmpeg/VENDOR.md`), with the legacy PyAV worker as the
+no-default-features fallback.
 
-The desktop shell intentionally has no Credentials / Profiles account-management
-tabs. Provider profiles and credential refs are local API config files consumed
+The desktop app intentionally has no Credentials / Profiles account-management
+surface. Provider profiles and credential refs are local API config files consumed
 by the broker; editing them stays in the CLI/file layer until a cleaner API
 configuration surface is designed.
 
@@ -161,8 +162,7 @@ configuration surface is designed.
 - **Lazy thumbnails**: preview nodes request `generate_thumbnail` only when they
   scroll into view (IntersectionObserver), so the graph data stays light (only
   the original path) and off-screen media is never decoded.
-- **PSD Studio integration**: the Inspector reuses the same backend the static
-  PSD Studio tab uses — a generate node can adopt a provider **profile**
+- **Provider profile integration**: a generate node can adopt a provider **profile**
   (`get_profiles`) to fill provider / model / `credentials_ref` in one step, and
   any `path` param can be filled from the configured **output directory**'s
   `.psd` outputs (`get_runtime_info` + `list_psd_outputs`). `credentials_ref`
