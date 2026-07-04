@@ -532,6 +532,14 @@ export const messages = {
     en: "scrub the program monitor playhead",
     zh: "拖动节目监视器播放头",
   },
+  "drawer.monitorPlay": {
+    en: "play",
+    zh: "播放",
+  },
+  "drawer.monitorPause": {
+    en: "pause",
+    zh: "暂停",
+  },
   "drawer.trackVideo": { en: "V", zh: "视" },
   "drawer.trackAudio": { en: "A", zh: "音" },
   "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
