@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { formatTime } from "./runlog";
 import { runDurationMs, summarizeRun, type RunRecord } from "./runhistory";
+import { useT } from "../i18n";
 
 function formatStarted(ms: number): string {
   try {
@@ -28,23 +29,24 @@ export interface RunHistoryPanelProps {
  */
 export function RunHistoryPanel({ history, onClear, onClose, onSelectNode }: RunHistoryPanelProps) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const t = useT();
 
   return (
     <aside className="project-panel runhistory-panel">
       <div className="project-head">
-        <h2>Run history</h2>
+        <h2>{t("runhistory.heading")}</h2>
         <div className="spacer" />
-        <button onClick={onClear} disabled={history.length === 0} title="clear run history">
-          Clear
+        <button onClick={onClear} disabled={history.length === 0} title={t("runhistory.clearTitle")}>
+          {t("runhistory.clear")}
         </button>
-        <button className="project-new" onClick={onClose} title="hide run history">
-          Hide
+        <button className="project-new" onClick={onClose} title={t("runhistory.hideTitle")}>
+          {t("runhistory.hide")}
         </button>
       </div>
 
       <div className="project-list">
         {history.length === 0 ? (
-          <p className="project-empty">No runs yet — past runs are recorded here.</p>
+          <p className="project-empty">{t("runhistory.empty")}</p>
         ) : (
           history.map((r) => {
             const open = openId === r.id;
@@ -66,7 +68,7 @@ export function RunHistoryPanel({ history, onClear, onClose, onSelectNode }: Run
                 {open ? (
                   <div className="runhistory-log">
                     {r.entries.length === 0 ? (
-                      <p className="run-log-empty">No log lines for this run.</p>
+                      <p className="run-log-empty">{t("runhistory.noLog")}</p>
                     ) : (
                       r.entries.map((e) => (
                         <div key={e.id} className={`run-log-line level-${e.level}`}>
