@@ -320,6 +320,41 @@
   cursor: pointer;
 }
 .mask-color-swap:hover { color: var(--text); }
+/* Adjustments panel (PS 调整): one full-width row per adjustment type. */
+.mask-adjustments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mask-adjustment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.mask-adjustment-row:hover { background: var(--ps-dock-hover, rgba(255, 255, 255, 0.06)); }
+.mask-adjustment-row .glyph {
+  width: 18px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.mask-adjustment-row.planned {
+  opacity: 0.45;
+  cursor: default;
+}
+.mask-channel-quick,
+.mask-path-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
 /* Mask ops panel: whole-mask operations as a two-column button grid. */
 .mask-ops-grid {
   display: grid;
