@@ -7,7 +7,16 @@
 
 ## Status Snapshot (2026-07)
 
-Implemented (PRs #329-379):
+**Checkpoint (PRs #329–400): the reference-based host presentation stage is
+complete.** Every heavy surface (image edit, grade preview, video preview,
+program monitor, layer review, mask editor) presents through the viewport
+host by reference; all target kinds resolve Rust-side; frames cross the IPC
+boundary as binary payloads; and the mask editor's selection tint composites
+host-side at the view window's detail. What remains is the presentation-layer
+endgame (a real WGPU surface swap) and overlay surfaces — both isolated
+behind the host command protocol, so no product-layer rework is pending.
+
+Implemented (PRs #329-400):
 
 - Phase 0 (contract and safety): complete. Graph state stores references and
   operation documents; no startup probes or startup viewports; ingest caches
@@ -16,15 +25,17 @@ Implemented (PRs #329-379):
   commands (create / destroy / set_target / resize / set_grade / set_view /
   render_frame), mocked transport in browser preview, lifecycle logging, and
   a hard cap on simultaneously open viewports.
-- Phase 2 (image edit): mostly complete. Underlay presentation flows through
-  `image_edit` viewports by resource reference; zoom/pan is viewport state
-  with shared view math (`viewport/view.ts`) and a shared interaction hook
-  (`viewport/useViewControls.ts`); zoomed views decode the source proxy at
-  higher detail. The mask editor's underlay now presents as the viewport's
-  rendered view window placed at its rect in the document frame, so its
-  detail follows the canvas zoom too (the recorded pixel space is
-  unchanged). Remaining: mask overlay and brush preview still render in a
-  2D canvas (see below).
+- Phase 2 (image edit): complete for the PNG-transport stage. Underlay
+  presentation flows through `image_edit` viewports by resource reference;
+  zoom/pan is viewport state with shared view math (`viewport/view.ts`) and
+  a shared interaction hook (`viewport/useViewControls.ts`); zoomed views
+  decode the source proxy at higher detail. The mask editor's underlay
+  presents as the viewport's rendered view window placed at its rect in the
+  document frame, so its detail follows the canvas zoom too (the recorded
+  pixel space is unchanged), and the selection tint (morphology preview /
+  quick-mask ruby) composites host-side via `viewport_set_mask_overlay`.
+  Only the input-latency-bound interactive overlays (brush/path/marquee)
+  remain on the 2D canvas — they follow the surface swap (see below).
 - Phase 3 (grade preview): complete. Image and video-frame grading share the
   `hgripe-grade` kernel through `grade_preview` viewports; GPU with CPU
   reference fallback; per-viewport proxy cache so slider drags re-run only
@@ -61,32 +72,38 @@ Implemented (PRs #329-379):
   as `node_output` targets (the connected image path registers as the
   node's output artifact, not as a plain image resource). All viewport
   target kinds now resolve host-side.
+- Binary frame transport: frames cross the host boundary as binary payloads
+  (`viewport_render_frame_bin`: length-prefixed meta JSON + PNG bytes
+  presented via short-lived object URLs) instead of base64 data URLs inside
+  JSON.
+- Product-layer target wiring: the node-card grade modal, the mask/crop
+  editors and the media source's unified editor all preview through
+  `node_output` targets (like the drawer Grade tab), so the selection-target
+  model is uniform in the product layer.
+- Mask editor presentation: the underlay detail follows canvas zoom (the
+  modal requests the visible window from the host and places the rendered
+  frame at the window's rect under the edit canvas), and the selection tint
+  composites host-side via `viewport_set_mask_overlay` — a working-scale
+  coverage buffer the host bilinearly samples over the rendered frame at the
+  view window's detail (quick-mask ruby uses the inverted style).
 
-Remaining work, roughly in priority order:
+Remaining work (next stage), roughly in priority order:
 
-1. Native texture presentation: frames now cross the host boundary as binary
-   payloads (`viewport_render_frame_bin`: length-prefixed meta JSON + PNG
-   bytes presented via short-lived object URLs) instead of base64 data URLs
-   inside JSON. Remaining: replace the PNG hop with a real WGPU
-   surface/texture swap on desktop (readback only when needed); the host
-   command protocol already isolates callers from this change.
-2. Mask editor presentation: underlay detail now follows canvas zoom — the
-   modal requests the visible window (`viewWindow`) from the viewport host
-   and places the rendered frame at the window's rect under the edit canvas
-   (rotated views keep the full frame; the recorded pixel space is
-   unchanged). The selection tint (morphology preview / quick-mask ruby) now
-   composites host-side: the modal sends the working-scale mask to the host
-   (`viewport_set_mask_overlay`) and the host tints the rendered frame at the
-   view window's detail. Remaining: the interactive brush/path/marquee
-   overlays still paint in the 2D canvas at document resolution; move them
-   to the viewport once it presents live surfaces (they are input-latency
-   bound, so they follow the WGPU surface swap, not the PNG transport).
-3. Remaining target wiring: the node-card grade modal, the mask/crop editors
-   and the media source's unified editor now all preview through `node_output`
-   targets (like the drawer Grade tab), so the selection-target model is
-   uniform in the product layer.
-4. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
+1. WGPU surface swap (native texture presentation endgame): replace the PNG
+   hop with a real WGPU surface/texture swap on desktop — the host renders
+   into a native surface positioned at the viewport's rect, and readback
+   happens only when needed (export, scopes, colour picking). The host
+   command protocol already isolates callers from this change; the PNG/blob
+   transport stays as the browser-preview and fallback path.
+2. Interactive overlays on the live surface: the brush/path/marquee overlays
+   still paint in the 2D canvas at document resolution; move them to the
+   viewport once it presents live surfaces (they are input-latency bound, so
+   they depend on item 1, not on the PNG transport).
+3. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
+4. Shared `DeviceReport` wiring: formalise the already-reported
+   requested/actual backend fields into the shared device vocabulary from
+   `GPU_DEVICE_STRATEGY_PLAN.md`.
 
 ## Purpose
 
