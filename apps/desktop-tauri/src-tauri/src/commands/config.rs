@@ -10,3 +10,12 @@ use hgripe_api::{list_provider_profile_summaries, ProviderProfileSummary};
 pub(crate) fn get_profiles() -> Result<Vec<ProviderProfileSummary>, String> {
     list_provider_profile_summaries(None).map_err(|err| err.to_string())
 }
+
+/// Manual weights probe for the system model manager: whether the bound
+/// weights path (file or HF-snapshot directory) exists on this box. Only ever
+/// invoked from the manager's `Test` action, never automatically.
+#[tauri::command]
+pub(crate) fn probe_model_weights(path: String) -> bool {
+    let p = std::path::Path::new(path.trim());
+    p.is_file() || p.is_dir()
+}
