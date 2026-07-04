@@ -1207,7 +1207,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       <EditorHost request={editorRequest} onClose={closeEditor} />
 
       {exportOpen && (
-        <ExportDialog timeline={timeline} assets={binAssets} onClose={() => setExportOpen(false)} />
+        <ExportDialog
+          timeline={timeline}
+          assets={binAssets}
+          clipGradeDoc={clipGradeDoc}
+          onClose={() => setExportOpen(false)}
+        />
       )}
 
       {audioEditClip && audioEditClipId && (

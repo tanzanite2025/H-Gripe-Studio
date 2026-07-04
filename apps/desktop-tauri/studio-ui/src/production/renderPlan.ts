@@ -19,6 +19,8 @@ export interface RenderSegment {
   start: number;
   /** Playback length, seconds. */
   duration: number;
+  /** The clip's stored grade doc (JSON string), applied at encode time. */
+  gradeDoc: string | null;
 }
 
 export type RenderWarning =
@@ -50,7 +52,7 @@ export const MAX_EXPORT_FRAMES = 20000;
 export function buildRenderPlan(
   timeline: TimelineModel,
   assets: MediaAsset[],
-  opts: { fps?: number } = {},
+  opts: { fps?: number; clipGradeDoc?: (clipId: string) => string | null } = {},
 ): RenderPlan {
   const fps = opts.fps && opts.fps > 0 ? opts.fps : DEFAULT_EXPORT_FPS;
   const byId = new Map(assets.map((a) => [a.id, a]));
@@ -83,6 +85,7 @@ export function buildRenderPlan(
       path: asset.path,
       start: clip.start,
       duration: clip.duration,
+      gradeDoc: opts.clipGradeDoc?.(clip.id) ?? null,
     });
   }
 
@@ -102,6 +105,7 @@ export function buildRenderPlan(
         path: asset.path,
         start: clip.start,
         duration: clip.duration,
+        gradeDoc: null,
       });
     }
   }
@@ -111,17 +115,29 @@ export function buildRenderPlan(
   return { timelineId: timeline.id, fps, video, audio, durationSec, warnings };
 }
 
+export interface ExpandedFrames {
+  /** One image path per output frame, in order. */
+  paths: string[];
+  /** Per-frame grade doc (JSON string), aligned with `paths`. */
+  gradeDocs: (string | null)[];
+}
+
 /**
- * Expand the plan's still segments into one image path per output frame,
- * gaps dropped (segments encode back-to-back). Returns `null` when the frame
- * count would exceed {@link MAX_EXPORT_FRAMES}.
+ * Expand the plan's still segments into one image path per output frame
+ * (each carrying its clip's grade doc), gaps dropped (segments encode
+ * back-to-back). Returns `null` when the frame count would exceed
+ * {@link MAX_EXPORT_FRAMES}.
  */
-export function expandStillFrames(plan: RenderPlan): string[] | null {
-  const frames: string[] = [];
+export function expandStillFrames(plan: RenderPlan): ExpandedFrames | null {
+  const paths: string[] = [];
+  const gradeDocs: (string | null)[] = [];
   for (const segment of plan.video) {
     const count = Math.max(1, Math.round(segment.duration * plan.fps));
-    if (frames.length + count > MAX_EXPORT_FRAMES) return null;
-    for (let i = 0; i < count; i += 1) frames.push(segment.path);
+    if (paths.length + count > MAX_EXPORT_FRAMES) return null;
+    for (let i = 0; i < count; i += 1) {
+      paths.push(segment.path);
+      gradeDocs.push(segment.gradeDoc);
+    }
   }
-  return frames;
+  return { paths, gradeDocs };
 }

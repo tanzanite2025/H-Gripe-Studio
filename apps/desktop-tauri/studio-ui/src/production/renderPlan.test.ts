@@ -69,13 +69,19 @@ describe("buildRenderPlan", () => {
 });
 
 describe("expandStillFrames", () => {
-  it("emits one frame path per output frame", () => {
+  it("emits one frame path per output frame, carrying the clip's grade doc", () => {
     const assets = [asset("a1", "image", "C:/one.png")];
-    const { timeline } = withClips(assets);
-    const plan = buildRenderPlan(timeline, assets, { fps: 10 });
+    const { timeline, clipIds } = withClips(assets);
+    const doc = '{"layers":[]}';
+    const plan = buildRenderPlan(timeline, assets, {
+      fps: 10,
+      clipGradeDoc: (clipId) => (clipId === clipIds[0] ? doc : null),
+    });
     const frames = expandStillFrames(plan);
-    expect(frames).toHaveLength(20);
-    expect(frames?.every((f) => f === "C:/one.png")).toBe(true);
+    expect(frames?.paths).toHaveLength(20);
+    expect(frames?.paths.every((f) => f === "C:/one.png")).toBe(true);
+    expect(frames?.gradeDocs).toHaveLength(20);
+    expect(frames?.gradeDocs.every((d) => d === doc)).toBe(true);
   });
 
   it("refuses plans that exceed the frame budget", () => {
