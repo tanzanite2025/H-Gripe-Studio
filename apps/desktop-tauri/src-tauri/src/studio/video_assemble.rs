@@ -108,8 +108,8 @@ pub(super) fn execute_studio_video_assemble(
                     // path is the encode baseline; hardware encoders join
                     // behind their own probe/report/fallback.
                     "engine": "ffmpeg",
-                    "device": "ffmpeg_sw",
-                    "device_requested": "auto",
+                    "device": super::device_report::DeviceUsed::FfmpegSw.as_str(),
+                    "device_requested": super::device_report::DeviceRequest::Auto.as_str(),
                     "engine_fallback_reason":
                         "hardware encode not enabled (vendored libav software baseline)",
                 }),

@@ -23,6 +23,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use ort::session::Session;
 
+use super::device_report::DeviceUsed;
+
 /// Requested execution device for ONNX inference — the `requested` half of
 /// the shared DeviceReport vocabulary (GPU_DEVICE_STRATEGY_PLAN). Parsed from
 /// the node's `device` param; anything unrecognised reads as `Auto`.
@@ -73,18 +75,18 @@ pub(crate) struct OnnxProviderResolution {
 pub(crate) fn resolve_provider(request: OnnxDeviceRequest) -> OnnxProviderResolution {
     match request {
         OnnxDeviceRequest::Cpu => OnnxProviderResolution {
-            device: "cpu",
+            device: DeviceUsed::Cpu.as_str(),
             fallback_reason: None,
         },
         OnnxDeviceRequest::Cuda => OnnxProviderResolution {
-            device: "cpu",
+            device: DeviceUsed::Cpu.as_str(),
             fallback_reason: Some(
                 "CUDA execution provider not built in (onnxruntime compiled with CPU provider only)"
                     .to_string(),
             ),
         },
         OnnxDeviceRequest::Auto => OnnxProviderResolution {
-            device: "cpu",
+            device: DeviceUsed::Cpu.as_str(),
             fallback_reason: Some(
                 "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)"
                     .to_string(),

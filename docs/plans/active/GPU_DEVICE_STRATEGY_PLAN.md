@@ -7,8 +7,9 @@
 > `studio-ui/src/runtime/deviceReport.ts`, and every run now logs a per-node
 > `device requested -> used (backend; fallback)` line, and the grade panel /
 > program monitor backend badges render from the same vocabulary with
-> fallbacks kept visible. Remaining: Rust-side vocabulary, capability-summary
-> refinement, and the medium/long-term hardening below.
+> fallbacks kept visible, and the Rust-side vocabulary mirror lives in
+> `src-tauri/src/studio/device_report.rs`. Remaining: capability-summary
+> refinement and the medium/long-term hardening below.
 
 ## Purpose
 
@@ -387,10 +388,13 @@ This should be a settings surface, not a required setup wizard.
 1. Keep WGPU viewport migration as the heavy-pixel mainline.
 2. ✅ Document current device fields and reports (inventory table in
    `studio-ui/src/runtime/deviceReport.ts`).
-3. ✅ (TypeScript side) Add shared report vocabulary: `DeviceRequest`,
-   `DeviceUsed`, `DeviceReport` + `deviceReportFromEngineReport` /
-   `deviceReportFromViewportBackend` normalizers. Rust-side vocabulary still
-   pending.
+3. ✅ Add shared report vocabulary: `DeviceRequest`, `DeviceUsed`,
+   `DeviceReport` + `deviceReportFromEngineReport` /
+   `deviceReportFromViewportBackend` normalizers on the TypeScript side, and
+   the mirrored Rust-side vocabulary in `src-tauri/src/studio/device_report.rs`
+   (`DeviceRequest` / `DeviceUsed` enums + the ACCELERATED classification,
+   contract-tested against the TS wire strings) that report producers spell
+   their `device` / `device_requested` values from.
 4. ✅ (node reports) Formalize existing backend reports as shared
    `DeviceReport`: after every run the run log shows one
    `device requested -> used (backend; fallback)` line per node whose
