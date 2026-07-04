@@ -43,8 +43,10 @@ body {
   user-select: none;
 }
 .toolbar-title-row {
+  /* 4:2:4 zones — left reserved for the future command system, search
+   * centered, buttons confined to the right zone (no overlap). */
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 360px) minmax(220px, 1fr);
+  grid-template-columns: 4fr 2fr 4fr;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -66,6 +68,7 @@ body {
 }
 .toolbar-title-status {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
