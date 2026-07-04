@@ -260,6 +260,33 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .canvas-tabs-run-project:hover:not(:disabled) { background: rgba(122, 162, 247, 0.12); }
 
+/* status chip floating over the canvas viewport (bottom-left): transient
+ * file/restore messages plus the autosave state. DOM overlay, not a node. */
+.canvas-status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(440px, calc(100% - 24px));
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(24, 26, 33, 0.9);
+  backdrop-filter: blur(6px);
+  font-size: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.canvas-status-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-status-autosave { flex: none; }
+
 .workspace { flex: 1; display: flex; min-height: 0; position: relative; }
 .canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .canvas-flow { flex: 1; min-height: 0; position: relative; }
@@ -1260,10 +1287,17 @@ button:disabled { opacity: 0.6; cursor: default; }
 .autosave { font-size: 11px; cursor: help; }
 .current-file { font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* project folder browser (left rail) */
+/* project folder browser (modal over the workspace, never in the canvas) */
+.project-modal .project-panel {
+  width: min(420px, calc(100vw - 48px));
+  max-height: 72vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
 .project-panel {
   width: 220px;
-  border-right: 1px solid var(--border);
   background: var(--panel);
   padding: 12px;
   overflow: auto;
