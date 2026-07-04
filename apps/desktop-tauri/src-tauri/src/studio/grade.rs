@@ -36,7 +36,7 @@ use super::working_image::{WorkingImage, WorkingSpace};
 
 /// Map the app's working-space tag onto the kernel's (the kernel never sees
 /// an ICC profile — only the TRC/primaries tag; see `grade-kernel.md`).
-fn grade_space(space: WorkingSpace) -> GradeSpace {
+pub(super) fn grade_space(space: WorkingSpace) -> GradeSpace {
     match space {
         WorkingSpace::Srgb => GradeSpace::Srgb,
         WorkingSpace::ProPhoto => GradeSpace::ProPhoto,

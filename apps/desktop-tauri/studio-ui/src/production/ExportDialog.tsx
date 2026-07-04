@@ -19,6 +19,8 @@ import {
 interface ExportDialogProps {
   timeline: TimelineModel;
   assets: MediaAsset[];
+  /** A clip's stored grade doc (JSON string), applied at encode time. */
+  clipGradeDoc?: (clipId: string) => string | null;
   onClose: () => void;
 }
 
@@ -28,7 +30,7 @@ type ExportState =
   | { phase: "done"; videoPath: string; durationSec: number }
   | { phase: "error"; message: string };
 
-export function ExportDialog({ timeline, assets, onClose }: ExportDialogProps) {
+export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: ExportDialogProps) {
   const t = useT();
   const [fps, setFps] = useState(DEFAULT_EXPORT_FPS);
   const [outputName, setOutputName] = useState("");
@@ -42,7 +44,10 @@ export function ExportDialog({ timeline, assets, onClose }: ExportDialogProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const plan = useMemo(() => buildRenderPlan(timeline, assets, { fps }), [timeline, assets, fps]);
+  const plan = useMemo(
+    () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc }),
+    [timeline, assets, fps, clipGradeDoc],
+  );
   const frames = useMemo(() => expandStillFrames(plan), [plan]);
   const canExport = plan.video.length > 0 && frames !== null && state.phase !== "running";
 
@@ -60,11 +65,12 @@ export function ExportDialog({ timeline, assets, onClose }: ExportDialogProps) {
   };
 
   const runExport = async () => {
-    if (!frames || frames.length === 0) return;
+    if (!frames || frames.paths.length === 0) return;
     setState({ phase: "running" });
     try {
-      const result = await timelineExport(frames, plan.fps, {
+      const result = await timelineExport(frames.paths, plan.fps, {
         outputName: outputName.trim() || undefined,
+        gradeDocs: frames.gradeDocs.some((d) => d !== null) ? frames.gradeDocs : undefined,
       });
       if (!result) {
         setState({ phase: "error", message: t("export.noBackend") });

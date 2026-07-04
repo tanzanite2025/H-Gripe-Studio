@@ -19,7 +19,7 @@ export interface TimelineExportResult {
 export async function timelineExport(
   frames: string[],
   fps: number,
-  opts: { codec?: string; outputName?: string } = {},
+  opts: { codec?: string; outputName?: string; gradeDocs?: (string | null)[] } = {},
 ): Promise<TimelineExportResult | null> {
   const invoke = tauriInvoke();
   if (!invoke) return null;
@@ -28,5 +28,6 @@ export async function timelineExport(
     fps,
     codec: opts.codec ?? null,
     outputName: opts.outputName ?? null,
+    gradeDocs: opts.gradeDocs ?? null,
   })) as TimelineExportResult;
 }
