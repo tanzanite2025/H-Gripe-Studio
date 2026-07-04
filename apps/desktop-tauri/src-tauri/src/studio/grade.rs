@@ -489,14 +489,8 @@ pub(crate) fn encode_surface_preview(
     backend: GradeBackend,
     started: Instant,
 ) -> Result<GradePreviewResult, String> {
-    let (pw, ph) = (surface.w, surface.h);
-    let out: Vec<u8> = surface
-        .data
-        .iter()
-        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-        .collect();
-    let graded = RgbaImage::from_raw(pw, ph, out)
-        .ok_or_else(|| "graded preview buffer has the wrong size".to_string())?;
+    let graded = surface_to_rgba(surface)?;
+    let (pw, ph) = graded.dimensions();
     let mut png: Vec<u8> = Vec::new();
     graded
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
@@ -512,6 +506,20 @@ pub(crate) fn encode_surface_preview(
         backend_fallback_reason: backend.fallback_reason,
         elapsed_ms: started.elapsed().as_millis(),
     })
+}
+
+/// Quantise a graded f32 surface back to 8-bit sRGB pixels — the shared
+/// ingress of both frame egress paths: PNG encoding (transport) and native
+/// surface presentation (texture upload).
+pub(crate) fn surface_to_rgba(surface: &GradeSurface) -> Result<RgbaImage, String> {
+    let (pw, ph) = (surface.w, surface.h);
+    let out: Vec<u8> = surface
+        .data
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    RgbaImage::from_raw(pw, ph, out)
+        .ok_or_else(|| "graded preview buffer has the wrong size".to_string())
 }
 
 /// Previous-frame accumulator for video grading: `temporal_denoise` is not a

@@ -42,8 +42,13 @@ function sourceKey(source: ViewportUnderlaySource | undefined): string {
 }
 
 export interface ViewportUnderlay {
-  /** Presented frame as an image source, or null (browser preview / error). */
+  /** Presented frame as an image source, or null (browser preview / error —
+   * or the frame is on the native surface: see `presented`). */
   underlay: string | null;
+  /** The frame is on the viewport's native surface window (WGPU surface swap
+   * Phase S2): `underlay` is null and callers let the surface show through
+   * instead of mounting an `<img>`. */
+  presented: boolean;
   /** Full-frame pixel dimensions (the identity view's frame), or null until
    * the first frame arrives. Stable across zoom/pan re-renders so callers
    * can keep overlay geometry in one image-pixel space. */
@@ -82,6 +87,7 @@ export function useViewportUnderlay(
 ): ViewportUnderlay {
   const [state, setState] = useState<ViewportUnderlay>({
     underlay: null,
+    presented: false,
     dims: null,
     frameView: IDENTITY_VIEW,
     backend: null,
@@ -106,7 +112,14 @@ export function useViewportUnderlay(
   sourceRef.current = source;
 
   useEffect(() => {
-    setState({ underlay: null, dims: null, frameView: IDENTITY_VIEW, backend: null, settled: false });
+    setState({
+      underlay: null,
+      presented: false,
+      dims: null,
+      frameView: IDENTITY_VIEW,
+      backend: null,
+      settled: false,
+    });
     const src = sourceRef.current;
     if (src === undefined) return;
     let cancelled = false;
@@ -153,7 +166,8 @@ export function useViewportUnderlay(
       // full-frame size so `dims` is view-independent.
       const zoom = Math.max(initialView.zoom, 1);
       setState({
-        underlay: frame.data_url,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
         dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
         frameView: initialView,
         backend: frame.backend,
@@ -186,7 +200,8 @@ export function useViewportUnderlay(
       // Keep `dims`: the view window changes size, the frame does not.
       setState((s) => ({
         ...s,
-        underlay: frame.data_url,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
         frameView: view,
         backend: frame.backend,
         settled: true,
@@ -211,7 +226,8 @@ export function useViewportUnderlay(
       if (cancelled || hostRef.current !== host) return;
       setState((s) => ({
         ...s,
-        underlay: frame.data_url,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
         backend: frame.backend,
         settled: true,
       }));

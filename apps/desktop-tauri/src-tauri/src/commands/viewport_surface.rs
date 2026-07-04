@@ -134,11 +134,35 @@ pub(crate) fn destroy_surface(app: &tauri::AppHandle, viewport_id: &str) {
 #[cfg(not(all(windows, feature = "viewport-surface")))]
 pub(crate) fn destroy_surface(_app: &tauri::AppHandle, _viewport_id: &str) {}
 
+/// Present a rendered frame on the viewport's native surface window (surface
+/// swap Phase S2): upload the pixels as a texture and blit aspect-fit over
+/// the app background. Returns `true` when the frame is on the surface — the
+/// caller then skips the PNG transport entirely. Any failure (no window, no
+/// GPU, device loss) returns `false` per the fallback contract: the PNG
+/// transport stays authoritative, never an error.
+#[cfg(all(windows, feature = "viewport-surface"))]
+pub(crate) fn present_frame(
+    _app: &tauri::AppHandle,
+    viewport_id: &str,
+    image: &image::RgbaImage,
+) -> bool {
+    native::present_frame(viewport_id, image)
+}
+
+#[cfg(not(all(windows, feature = "viewport-surface")))]
+pub(crate) fn present_frame(
+    _app: &tauri::AppHandle,
+    _viewport_id: &str,
+    _image: &image::RgbaImage,
+) -> bool {
+    false
+}
+
 #[cfg(all(windows, feature = "viewport-surface"))]
 mod native {
     use std::collections::HashMap;
     use std::sync::mpsc;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Duration;
 
     use tauri::Manager;
@@ -161,6 +185,18 @@ mod native {
         surface: Option<wgpu::Surface<'static>>,
         config: Option<wgpu::SurfaceConfiguration>,
         presented: bool,
+        /// Cached frame texture + bind group, recreated when the frame size
+        /// changes; a same-size frame only re-uploads pixels.
+        frame_tex: Option<FrameTexture>,
+        /// Aspect-fit uniform buffer (`vec2 scale`), written per present.
+        fit_buf: Option<wgpu::Buffer>,
+    }
+
+    struct FrameTexture {
+        texture: wgpu::Texture,
+        bind_group: wgpu::BindGroup,
+        width: u32,
+        height: u32,
     }
 
     static SURFACES: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
@@ -255,9 +291,266 @@ mod native {
         Ok(hwnd as isize)
     }
 
+    /// WGSL blit: a quad scaled to the aspect-fit rect, sampling the frame
+    /// texture; everything outside the quad keeps the clear (app background).
+    const BLIT_SHADER: &str = r#"
+struct Fit { scale: vec2<f32>, pad: vec2<f32> };
+@group(0) @binding(0) var frame_tex: texture_2d<f32>;
+@group(0) @binding(1) var frame_samp: sampler;
+@group(0) @binding(2) var<uniform> fit: Fit;
+
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> VsOut {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+        vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
+    let c = corners[i];
+    var out: VsOut;
+    out.pos = vec4<f32>(c * fit.scale, 0.0, 1.0);
+    out.uv = vec2<f32>(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
+    return out;
+}
+
+@fragment
+fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    return textureSample(frame_tex, frame_samp, in.uv);
+}
+"#;
+
+    /// Compiled blit pipeline for one swapchain format, shared by every
+    /// surface entry (formats in practice collapse to one per adapter).
+    struct BlitPipeline {
+        pipeline: wgpu::RenderPipeline,
+        layout: wgpu::BindGroupLayout,
+        sampler: wgpu::Sampler,
+    }
+
+    static BLIT_PIPELINES: OnceLock<Mutex<HashMap<wgpu::TextureFormat, Arc<BlitPipeline>>>> =
+        OnceLock::new();
+
+    fn blit_pipeline(
+        gpu: &SharedGpu,
+        format: wgpu::TextureFormat,
+    ) -> Result<Arc<BlitPipeline>, String> {
+        let mut map = BLIT_PIPELINES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| "blit pipeline cache poisoned")?;
+        if let Some(blit) = map.get(&format) {
+            return Ok(blit.clone());
+        }
+        let device = &gpu.device;
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport-surface-blit"),
+            source: wgpu::ShaderSource::Wgsl(BLIT_SHADER.into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport-surface-blit"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewport-surface-blit"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport-surface-blit"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(format.into())],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("viewport-surface-blit"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let blit = Arc::new(BlitPipeline {
+            pipeline,
+            layout,
+            sampler,
+        });
+        map.insert(format, blit.clone());
+        Ok(blit)
+    }
+
+    /// Upload the frame's pixels to the entry's cached texture, recreated
+    /// only when the frame size changes — a slider drag re-uploads pixels
+    /// into the same texture.
+    fn upload_frame(
+        gpu: &SharedGpu,
+        entry: &mut Entry,
+        image: &image::RgbaImage,
+        format: wgpu::TextureFormat,
+    ) -> Result<(), String> {
+        let (iw, ih) = image.dimensions();
+        if iw == 0 || ih == 0 {
+            return Err("empty frame".to_string());
+        }
+        if entry.fit_buf.is_none() {
+            entry.fit_buf = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport-surface-fit"),
+                size: 16,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let needs_texture = entry
+            .frame_tex
+            .as_ref()
+            .is_none_or(|t| t.width != iw || t.height != ih);
+        if needs_texture {
+            let blit = blit_pipeline(gpu, format)?;
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewport-surface-frame"),
+                size: wgpu::Extent3d {
+                    width: iw,
+                    height: ih,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                // Non-sRGB: the frame carries display-ready sRGB bytes and the
+                // swapchain is non-sRGB too, so sampling passes them verbatim.
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewport-surface-frame"),
+                layout: &blit.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&blit.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: entry
+                            .fit_buf
+                            .as_ref()
+                            .expect("fit buffer just ensured")
+                            .as_entire_binding(),
+                    },
+                ],
+            });
+            entry.frame_tex = Some(FrameTexture {
+                texture,
+                bind_group,
+                width: iw,
+                height: ih,
+            });
+        }
+        let tex = entry.frame_tex.as_ref().expect("texture just ensured");
+        gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            image.as_raw(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * iw),
+                rows_per_image: Some(ih),
+            },
+            wgpu::Extent3d {
+                width: iw,
+                height: ih,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
+    }
+
+    /// The aspect-fit quad scale in NDC for a `fw`x`fh` frame on a `sw`x`sh`
+    /// surface: letterbox/pillarbox, never crop, never stretch.
+    fn fit_scale(fw: u32, fh: u32, sw: u32, sh: u32) -> [f32; 2] {
+        let (fw, fh) = (fw.max(1) as f32, fh.max(1) as f32);
+        let (sw, sh) = (sw.max(1) as f32, sh.max(1) as f32);
+        let scale = (sw / fw).min(sh / fh);
+        [(fw * scale / sw).min(1.0), (fh * scale / sh).min(1.0)]
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::fit_scale;
+
+        #[test]
+        fn fit_scale_letterboxes_without_crop_or_stretch() {
+            let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+            // Same aspect: fills the surface.
+            let [sx, sy] = fit_scale(1920, 1080, 960, 540);
+            assert!(close(sx, 1.0) && close(sy, 1.0), "{sx} {sy}");
+            // Wider frame on a squarer surface: full width, letterboxed height.
+            let [sx, sy] = fit_scale(1920, 1080, 1000, 1000);
+            assert!(close(sx, 1.0), "{sx}");
+            assert!(close(sy, 1080.0 / 1920.0), "{sy}");
+            // Taller frame: full height, pillarboxed width.
+            let [sx, sy] = fit_scale(1080, 1920, 1000, 1000);
+            assert!(close(sy, 1.0), "{sy}");
+            assert!(close(sx, 1080.0 / 1920.0), "{sx}");
+            // Degenerate inputs never divide by zero or exceed the surface.
+            let [sx, sy] = fit_scale(0, 0, 0, 0);
+            assert!(sx <= 1.0 && sy <= 1.0);
+        }
+    }
+
     /// Create (or reuse) the entry's wgpu surface, reconfigure it to `w`x`h`
-    /// if the size changed, and present one clear frame — the S1 placement
-    /// proof that the swapchain draws under the webview.
+    /// if the size changed, and present one frame: a clear to the app
+    /// background, plus the aspect-fit blit of the last uploaded frame
+    /// texture when one exists (S2) — a bare clear until then (S1).
     fn clear_surface(gpu: &SharedGpu, entry: &mut Entry, w: u32, h: u32) -> Result<(), String> {
         if entry.surface.is_none() {
             let target = wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -288,6 +581,10 @@ mod native {
                 .get_default_config(&gpu.adapter, w, h)
                 .ok_or("surface is not supported by the shared adapter")?;
             config.present_mode = wgpu::PresentMode::AutoNoVsync;
+            // Frames carry display-ready sRGB bytes; a non-sRGB swapchain
+            // presents them verbatim (identical to the PNG transport) instead
+            // of applying a second transfer curve.
+            config.format = config.format.remove_srgb_suffix();
             surface.configure(&gpu.device, &config);
             entry.config = Some(config);
         }
@@ -299,37 +596,99 @@ mod native {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // Draw the last uploaded frame texture aspect-fit over the clear when
+        // one exists; the fit uniform is refreshed here so a placement resize
+        // re-letterboxes the same texture without a re-upload.
+        let blit = match &entry.frame_tex {
+            Some(tex) => {
+                let format = entry.config.as_ref().expect("config just ensured").format;
+                let scale = fit_scale(tex.width, tex.height, w, h);
+                let mut bytes = [0u8; 16];
+                bytes[0..4].copy_from_slice(&scale[0].to_le_bytes());
+                bytes[4..8].copy_from_slice(&scale[1].to_le_bytes());
+                gpu.queue.write_buffer(
+                    entry.fit_buf.as_ref().expect("fit buffer set with texture"),
+                    0,
+                    &bytes,
+                );
+                Some((blit_pipeline(gpu, format)?, &tex.bind_group))
+            }
+            None => None,
+        };
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("viewport-surface-clear"),
+                label: Some("viewport-surface-present"),
             });
-        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("viewport-surface-clear"),
-            multiview_mask: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    // The app's canvas background colour (--bg), so the S1
-                    // clear reads as chrome, not as a glitch.
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.008,
-                        g: 0.009,
-                        b: 0.016,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewport-surface-present"),
+                multiview_mask: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // The app's canvas background colour (--bg), so the
+                        // letterbox reads as chrome, not as a glitch.
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.008,
+                            g: 0.009,
+                            b: 0.016,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            if let Some((blit, bind_group)) = &blit {
+                pass.set_pipeline(&blit.pipeline);
+                pass.set_bind_group(0, *bind_group, &[]);
+                pass.draw(0..6, 0..1);
+            }
+        }
         gpu.queue.submit([encoder.finish()]);
         frame.present();
         Ok(())
+    }
+
+    /// S2 frame presentation: upload the rendered pixels and blit them on the
+    /// viewport's surface. `false` means the caller must fall back to the PNG
+    /// transport (no surface window, hidden, no GPU, or a device error).
+    pub(super) fn present_frame(viewport_id: &str, image: &image::RgbaImage) -> bool {
+        let gpu = match shared_gpu() {
+            Ok(gpu) => gpu,
+            Err(_) => return false,
+        };
+        let mut map = match surfaces().lock() {
+            Ok(map) => map,
+            Err(_) => return false,
+        };
+        let Some(entry) = map.get_mut(viewport_id) else {
+            return false;
+        };
+        if !entry.presented || entry.config.is_none() {
+            return false;
+        }
+        let result = (|| -> Result<(), String> {
+            let format = entry.config.as_ref().expect("config checked").format;
+            upload_frame(&gpu, entry, image, format)?;
+            let (w, h) = {
+                let config = entry.config.as_ref().expect("config checked");
+                (config.width, config.height)
+            };
+            clear_surface(&gpu, entry, w, h)
+        })();
+        match result {
+            Ok(()) => true,
+            Err(reason) => {
+                eprintln!("[viewport] surface present fell back for {viewport_id}: {reason}");
+                false
+            }
+        }
     }
 
     pub(super) fn set_placement(
@@ -358,6 +717,8 @@ mod native {
                         surface: None,
                         config: None,
                         presented: false,
+                        frame_tex: None,
+                        fit_buf: None,
                     })
                 }
             };

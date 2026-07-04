@@ -32,17 +32,22 @@ export interface ViewportDescriptor {
 export interface ViewportFrame {
   /** Presentable image source. On desktop this is a `blob:` object URL over
    * the binary frame payload (the caller owns revocation); in the browser
-   * preview it is a data URL. */
+   * preview it is a data URL. Empty when `presented` is true — the frame is
+   * already on the native surface and no pixels crossed the IPC boundary. */
   data_url: string;
   width: number;
   height: number;
   backend: ViewportBackend;
+  /** The frame presented on the viewport's native surface window (WGPU
+   * surface swap Phase S2): presenters clear their `<img>` and let the
+   * surface show through instead of mounting `data_url`. */
+  presented: boolean;
 }
 
 /** Binary frame payload layout (see `viewport_render_frame_bin`):
- * `[u32 LE meta length][meta JSON {width, height, backend}][PNG bytes]`.
- * Exported for tests; product code receives decoded frames from
- * `renderViewportFrame`. */
+ * `[u32 LE meta length][meta JSON {width, height, backend, presented}][PNG
+ * bytes]`; a presented frame carries no PNG bytes. Exported for tests;
+ * product code receives decoded frames from `renderViewportFrame`. */
 export function decodeFramePayload(payload: ArrayBuffer | Uint8Array): ViewportFrame {
   const bytes =
     payload instanceof Uint8Array
@@ -54,10 +59,13 @@ export function decodeFramePayload(payload: ArrayBuffer | Uint8Array): ViewportF
   if (4 + metaLen > bytes.byteLength) throw new Error("viewport frame meta is truncated");
   const meta = JSON.parse(
     new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)),
-  ) as { width: number; height: number; backend: ViewportBackend };
+  ) as { width: number; height: number; backend: ViewportBackend; presented?: boolean };
+  const presented = meta.presented === true;
   const png = bytes.subarray(4 + metaLen);
-  const data_url = URL.createObjectURL(new Blob([new Uint8Array(png)], { type: "image/png" }));
-  return { data_url, width: meta.width, height: meta.height, backend: meta.backend };
+  const data_url = presented
+    ? ""
+    : URL.createObjectURL(new Blob([new Uint8Array(png)], { type: "image/png" }));
+  return { data_url, width: meta.width, height: meta.height, backend: meta.backend, presented };
 }
 
 // --- browser-preview mock transport -----------------------------------------
@@ -399,6 +407,7 @@ export async function renderViewportFrame(viewportId: string): Promise<ViewportF
     width: Math.max(Math.round(vp.width / zoom), 1),
     height: Math.max(Math.round(vp.height / zoom), 1),
     backend: MOCK_BACKEND,
+    presented: false,
   };
 }
 
