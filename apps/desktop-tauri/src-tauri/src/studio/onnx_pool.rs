@@ -174,8 +174,14 @@ mod tests {
     #[test]
     fn device_request_parses_the_param_vocabulary() {
         assert_eq!(OnnxDeviceRequest::from_param("cpu"), OnnxDeviceRequest::Cpu);
-        assert_eq!(OnnxDeviceRequest::from_param("CUDA"), OnnxDeviceRequest::Cuda);
-        assert_eq!(OnnxDeviceRequest::from_param("gpu"), OnnxDeviceRequest::Cuda);
+        assert_eq!(
+            OnnxDeviceRequest::from_param("CUDA"),
+            OnnxDeviceRequest::Cuda
+        );
+        assert_eq!(
+            OnnxDeviceRequest::from_param("gpu"),
+            OnnxDeviceRequest::Cuda
+        );
         assert_eq!(OnnxDeviceRequest::from_param(""), OnnxDeviceRequest::Auto);
         assert_eq!(
             OnnxDeviceRequest::from_param("anything"),

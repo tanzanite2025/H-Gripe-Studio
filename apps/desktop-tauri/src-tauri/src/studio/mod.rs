@@ -106,6 +106,7 @@ mod timeline_export;
 mod video_assemble;
 pub(crate) mod video_engine;
 mod video_trim;
+pub(crate) mod wgpu_device;
 mod write_skip;
 
 // The colour layers keep their original `crate::studio::<layer>` paths so the

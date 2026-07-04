@@ -238,7 +238,10 @@ mod tests {
         assert_ne!(out[0], src_str);
         assert_eq!(out[2], src_str);
         assert_eq!(result.graded_frame_count, 2);
-        let backend = result.backend.as_ref().expect("graded frames report a backend");
+        let backend = result
+            .backend
+            .as_ref()
+            .expect("graded frames report a backend");
         assert!(matches!(backend.name, "cpu" | "gpu"));
         assert!(
             backend.name == "gpu" || backend.fallback_reason.is_some(),

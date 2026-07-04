@@ -60,7 +60,10 @@ impl DeviceUsed {
     /// the UI uses: cuda, wgpu, directml, ffmpeg_hw. The software FFmpeg
     /// baseline and CPU are honest non-accelerated results, not failures.
     pub(crate) fn accelerated(self) -> bool {
-        matches!(self, Self::Cuda | Self::Wgpu | Self::Directml | Self::FfmpegHw)
+        matches!(
+            self,
+            Self::Cuda | Self::Wgpu | Self::Directml | Self::FfmpegHw
+        )
     }
 }
 

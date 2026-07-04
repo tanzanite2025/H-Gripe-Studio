@@ -1678,6 +1678,7 @@ dependencies = [
  "moxcms",
  "ort",
  "png 0.17.16",
+ "pollster",
  "rayon",
  "rusty_ffmpeg",
  "serde",
@@ -1688,6 +1689,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tiff",
  "tokio",
+ "wgpu",
  "zune-core",
  "zune-jpeg",
 ]
