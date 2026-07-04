@@ -144,9 +144,11 @@ export function Palette({ onAdd }: PaletteProps) {
                 aria-expanded={open}
                 onClick={() => toggleSection(category)}
               >
-                <span className={`palette-chevron${open ? " open" : ""}`} aria-hidden="true" />
-                {t(CATEGORY_LABEL[category])}
+                <span className="palette-group-title">{t(CATEGORY_LABEL[category])}</span>
                 <span className="palette-group-count">{specs.length}</span>
+                <span className="palette-group-toggle" aria-hidden="true">
+                  {open ? "\u2212" : "+"}
+                </span>
               </button>
               {open && (
                 <div className="palette-group-body">
@@ -182,9 +184,11 @@ export function Palette({ onAdd }: PaletteProps) {
             aria-expanded={openSection === "containers"}
             onClick={() => toggleSection("containers")}
           >
-            <span className={`palette-chevron${openSection === "containers" ? " open" : ""}`} aria-hidden="true" />
-            {t("palette.containers")}
+            <span className="palette-group-title">{t("palette.containers")}</span>
             <span className="palette-group-count">1</span>
+            <span className="palette-group-toggle" aria-hidden="true">
+              {openSection === "containers" ? "\u2212" : "+"}
+            </span>
           </button>
           {openSection === "containers" && (
             <div className="palette-group-body">

@@ -143,6 +143,11 @@ export function Toolbar({
         </div>
 
         <div className="toolbar-title-status">
+          {message && (
+            <span className="muted toolbar-message" title={message}>
+              {message}
+            </span>
+          )}
           {issues.length > 0 && (
             <span className="issues" title={issues.map((i) => i.message).join("\n")}>
               ! {issues.length} {issues.length > 1 ? t("issues.many") : t("issues.one")}
@@ -236,10 +241,6 @@ export function Toolbar({
         <div className="toolbar-group">
           <button onClick={onReset}>{t("btn.reset")}</button>
           <button onClick={onClear}>{t("btn.clear")}</button>
-        </div>
-
-        <div className="toolbar-group toolbar-run-group">
-          <span className="muted toolbar-message">{message}</span>
         </div>
       </div>
 
