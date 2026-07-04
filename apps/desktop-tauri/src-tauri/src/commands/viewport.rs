@@ -118,12 +118,18 @@ struct ProxyKey {
 
 /// The viewport's cached display-space source: decode + downscale happen once
 /// per (target, size); parameter-only re-renders such as slider drags re-run
-/// only the grade kernel over this proxy. Bounded by construction — one proxy
-/// per viewport, viewports are capped at [`MAX_VIEWPORTS`].
+/// only the grade kernel over this proxy.
 struct SourceProxy {
     key: ProxyKey,
     srgb: Arc<RgbaImage>,
 }
+
+/// Per-viewport proxy cache depth (Phase 4 bounded frame cache): scrubbing
+/// back and forth across nearby timestamps — or flipping between a layer's
+/// cutout and its mask — reuses recently decoded proxies instead of
+/// re-decoding. Bounded by construction: at most this many proxies per
+/// viewport, viewports capped at [`MAX_VIEWPORTS`].
+const PROXY_CACHE_DEPTH: usize = 8;
 
 /// Presentation view state (WGPU migration Phase 2): `zoom >= 1` selects a
 /// window `1/zoom` the size of the source; `pan_x`/`pan_y` place the window's
@@ -186,7 +192,8 @@ struct ViewportState {
     /// doc is parameters only — pixels are resolved through the target.
     grade_doc: Option<Value>,
     view: ViewportView,
-    proxy: Option<SourceProxy>,
+    /// Most-recently-used first, at most [`PROXY_CACHE_DEPTH`] entries.
+    proxies: Vec<SourceProxy>,
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();
@@ -205,20 +212,24 @@ fn parse_id(viewport_id: &str) -> Result<u64, String> {
 
 /// Fetch the viewport's cached source proxy for `key`, decoding through
 /// `decode` on a miss and storing the result back onto the viewport (if it is
-/// still open) so the next parameter-only render skips the decode. The
-/// registry lock is never held across a decode.
+/// still open) so the next parameter-only render skips the decode. The cache
+/// is a small per-viewport LRU ([`PROXY_CACHE_DEPTH`]); the registry lock is
+/// never held across a decode.
 fn cached_proxy(
     id: u64,
     key: ProxyKey,
     decode: impl FnOnce() -> Result<RgbaImage, String>,
 ) -> Result<Arc<RgbaImage>, String> {
     {
-        let map = viewports()
+        let mut map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
-        if let Some(proxy) = map.get(&id).and_then(|state| state.proxy.as_ref()) {
-            if proxy.key == key {
-                return Ok(proxy.srgb.clone());
+        if let Some(state) = map.get_mut(&id) {
+            if let Some(pos) = state.proxies.iter().position(|proxy| proxy.key == key) {
+                let hit = state.proxies.remove(pos);
+                let srgb = hit.srgb.clone();
+                state.proxies.insert(0, hit);
+                return Ok(srgb);
             }
         }
     }
@@ -227,10 +238,15 @@ fn cached_proxy(
         .lock()
         .map_err(|_| "viewport registry poisoned")?;
     if let Some(state) = map.get_mut(&id) {
-        state.proxy = Some(SourceProxy {
-            key,
-            srgb: srgb.clone(),
-        });
+        state.proxies.retain(|proxy| proxy.key != key);
+        state.proxies.insert(
+            0,
+            SourceProxy {
+                key,
+                srgb: srgb.clone(),
+            },
+        );
+        state.proxies.truncate(PROXY_CACHE_DEPTH);
     }
     Ok(srgb)
 }
@@ -260,7 +276,7 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             height: 0,
             grade_doc: None,
             view: ViewportView::IDENTITY,
-            proxy: None,
+            proxies: Vec::new(),
         },
     );
     eprintln!(
@@ -612,7 +628,7 @@ mod tests {
             let map = viewports().lock().expect("lock");
             let proxy = map
                 .get(&id)
-                .and_then(|s| s.proxy.as_ref())
+                .and_then(|s| s.proxies.first())
                 .expect("proxy cached");
             Arc::as_ptr(&proxy.srgb)
         };
@@ -621,7 +637,7 @@ mod tests {
             let map = viewports().lock().expect("lock");
             let proxy = map
                 .get(&id)
-                .and_then(|s| s.proxy.as_ref())
+                .and_then(|s| s.proxies.first())
                 .expect("proxy kept");
             assert_eq!(
                 Arc::as_ptr(&proxy.srgb),
@@ -637,12 +653,12 @@ mod tests {
             let map = viewports().lock().expect("lock");
             let proxy = map
                 .get(&id)
-                .and_then(|s| s.proxy.as_ref())
+                .and_then(|s| s.proxies.first())
                 .expect("proxy replaced");
             assert_ne!(
                 Arc::as_ptr(&proxy.srgb),
                 first,
-                "resize invalidates the proxy"
+                "resize decodes a new proxy identity"
             );
         }
 
@@ -701,6 +717,47 @@ mod tests {
 
         viewport_destroy(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn proxy_cache_is_a_bounded_per_viewport_lru() {
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        let id = parse_id(&desc.viewport_id).expect("id");
+        let key = |n: u64| ProxyKey {
+            path: format!("img-{n}"),
+            time_bits: None,
+            size: 64,
+        };
+        let decode = || Ok(image::RgbaImage::new(1, 1));
+
+        // Fill the cache, then hit the oldest entry: no decode, moved to front.
+        for n in 0..PROXY_CACHE_DEPTH as u64 {
+            cached_proxy(id, key(n), decode).expect("decode");
+        }
+        cached_proxy(id, key(0), || Err("must not re-decode a cached key".into()))
+            .expect("cache hit");
+
+        // One more distinct key evicts the least recently used (key 1, since
+        // key 0 was just refreshed) and the cache stays bounded.
+        cached_proxy(id, key(PROXY_CACHE_DEPTH as u64), decode).expect("decode");
+        {
+            let map = viewports().lock().expect("lock");
+            let state = map.get(&id).expect("open viewport");
+            assert_eq!(
+                state.proxies.len(),
+                PROXY_CACHE_DEPTH,
+                "cache stays bounded"
+            );
+            assert!(
+                state.proxies.iter().all(|proxy| proxy.key != key(1)),
+                "least recently used entry evicted"
+            );
+            assert!(
+                state.proxies.iter().any(|proxy| proxy.key == key(0)),
+                "refreshed entry retained"
+            );
+        }
+        viewport_destroy(desc.viewport_id).expect("destroy");
     }
 
     #[test]
