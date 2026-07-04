@@ -103,7 +103,10 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
     !p.inline &&
     (!p.visibleWhen || p.visibleWhen.in.includes(String(data.params[p.visibleWhen.param] ?? "")));
 
-  const capability = backendCapability(spec.kind, data.params);
+  // Specs with an inline `model` control carry their own combined selector on
+  // the card, so the inspector must not add a second backend selector surface.
+  const hasModelControl = spec.params.some((p) => p.control === "model");
+  const capability = hasModelControl ? null : backendCapability(spec.kind, data.params);
   const localCapability = localModelCapability(spec.kind, data.params);
   const hasParam = (key: string) => spec.params.some((p) => p.key === key);
   const normalParams = spec.params.filter((p) => isVisible(p) && !p.advanced);
