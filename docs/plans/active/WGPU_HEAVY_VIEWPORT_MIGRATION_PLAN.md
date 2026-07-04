@@ -5,6 +5,56 @@
 > require starting the WGPU viewport boundary now so image edit, grading, and
 > video preview do not become throwaway DOM/canvas implementations.
 
+## Status Snapshot (2026-07)
+
+Implemented (PRs #329–#371):
+
+- Phase 0 (contract and safety): complete. Graph state stores references and
+  operation documents; no startup probes or startup viewports; ingest caches
+  and the resource registry are bounded.
+- Phase 1 (host skeleton): complete. `WgpuViewportHost` + `viewport_*` Tauri
+  commands (create / destroy / set_target / resize / set_grade / set_view /
+  render_frame), mocked transport in browser preview, lifecycle logging, and
+  a hard cap on simultaneously open viewports.
+- Phase 2 (image edit): mostly complete. Underlay presentation flows through
+  `image_edit` viewports by resource reference; zoom/pan is viewport state
+  with shared view math (`viewport/view.ts`) and a shared interaction hook
+  (`viewport/useViewControls.ts`); zoomed views decode the source proxy at
+  higher detail. Remaining: mask overlay and brush preview still render in a
+  2D canvas (see below).
+- Phase 3 (grade preview): complete. Image and video-frame grading share the
+  `hgripe-grade` kernel through `grade_preview` viewports; GPU with CPU
+  reference fallback; per-viewport proxy cache so slider drags re-run only
+  the kernel; actual backend reported in the UI.
+- Phase 4 (video preview): complete. Frames decode through the Rust media
+  engine; the program monitor renders through a `video_preview` viewport with
+  per-clip grade docs, latest-wins seek coalescing, play/pause playback, and
+  a bounded per-viewport LRU proxy cache. Hook contracts are pinned by tests
+  (`useViewportUnderlay`, `useVideoPreview`).
+- Phase 5 (export alignment): mostly complete. Timeline export reuses the
+  render plan and per-clip `GradeDoc`s at encode time and reports graded
+  frame count and grade backend; kernel golden tests keep CPU/GPU parity.
+
+Remaining work, roughly in priority order:
+
+1. Native texture presentation: frames still cross the host boundary as PNG
+   data URLs into an `<img>`. Replace with a real WGPU surface/texture swap
+   on desktop (readback only when needed); the host command protocol already
+   isolates callers from this change.
+2. Mask editor presentation: `MaskEditModal` paints underlay + mask overlay +
+   brush preview in a 2D canvas with CSS-transform zoom; the underlay decodes
+   at fixed detail, so deep zoom is soft. Move overlay/brush presentation to
+   the viewport and tie underlay detail to canvas zoom without changing the
+   recorded pixel space.
+3. Remaining viewport targets: `image_layer`, `video_clip`, and `node_output`
+   targets resolve on the frontend today (layer artifacts are registered by
+   path). Implement them host-side so the selection-target model is uniform.
+4. Preview/export tolerance: add an end-to-end assertion that an exported
+   still/video grade matches the preview within a defined tolerance (kernel
+   parity is tested; the pipeline-level check is not).
+5. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
+   the viewport presentation (listed under "future overlays").
+
 ## Purpose
 
 H-Gripe Studio should not wait until the product is large before moving heavy
