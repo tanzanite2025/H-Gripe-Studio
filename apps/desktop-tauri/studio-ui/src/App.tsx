@@ -656,14 +656,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     );
   }, [canvas, currentFile, fileDirty, t]);
 
-  // Per-tab save / save-as (canvas tab menu): a non-active tab is activated
-  // first, then the file action runs once its state is live in the editor.
+  // Per-tab file/graph actions (canvas tab row): a non-active tab is
+  // activated first, then the action runs once its state is live in the
+  // editor.
+  type TabAction = "save" | "saveAs" | "reset" | "clear";
   const [pendingTabAction, setPendingTabAction] = useState<{
     id: string;
-    action: "save" | "saveAs";
+    action: TabAction;
   } | null>(null);
   const requestTabAction = useCallback(
-    (id: string, action: "save" | "saveAs") => {
+    (id: string, action: TabAction) => {
       if (id !== canvas.documentId) activateCanvas(id);
       setPendingTabAction({ id, action });
     },
@@ -674,8 +676,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     const { action } = pendingTabAction;
     setPendingTabAction(null);
     if (action === "save") void handleSave();
-    else void handleSaveAs();
-  }, [pendingTabAction, canvas.documentId, handleSave, handleSaveAs]);
+    else if (action === "saveAs") void handleSaveAs();
+    else if (action === "reset") resetSample();
+    else clear();
+  }, [pendingTabAction, canvas.documentId, handleSave, handleSaveAs, resetSample, clear]);
 
   // Close a canvas tab, confirming first when it holds unsaved edits.
   const closeCanvasTab = useCallback(
@@ -1302,15 +1306,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onOpen={() => void handleOpen()}
         onSave={() => void handleSave()}
         onSaveAs={() => void handleSaveAs()}
-        onReset={resetSample}
-        onClear={clear}
         fileInputRef={fileInputRef}
         onFilePicked={(f) => void load(f)}
-        snapToGrid={snapToGrid}
-        setSnapToGrid={setSnapToGrid}
-        onTidyLayout={tidyLayout}
-        showMinimap={showMinimap}
-        setShowMinimap={setShowMinimap}
       />
 
       <CanvasTabs
@@ -1324,6 +1321,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onSaveTab={(id) => requestTabAction(id, "save")}
         onSaveAsTab={(id) => requestTabAction(id, "saveAs")}
         onRenameTab={renameCanvas}
+        onResetTab={(id) => requestTabAction(id, "reset")}
+        onClearTab={(id) => requestTabAction(id, "clear")}
         onRunProject={runAllCanvases}
         running={running}
       />
@@ -1370,7 +1369,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               onSelectNode={focusNode}
             />
           )}
-          <Palette onAdd={addNode} edgeType={edgeType} onChangeEdgeType={changeEdgeType} />
+          <Palette
+            onAdd={addNode}
+            edgeType={edgeType}
+            onChangeEdgeType={changeEdgeType}
+            showMinimap={showMinimap}
+            setShowMinimap={setShowMinimap}
+            snapToGrid={snapToGrid}
+            setSnapToGrid={setSnapToGrid}
+            onTidyLayout={tidyLayout}
+          />
           <div className="canvas">
             <div className="canvas-flow">
               <FlowCanvas

@@ -217,6 +217,35 @@ button:disabled { opacity: 0.6; cursor: default; }
   cursor: pointer;
 }
 .canvas-tab-new:hover { color: var(--text); }
+/* Per-tab "⋯" dropdown holding the dangerous reset / clear actions. */
+.canvas-tab-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(24, 26, 33, 0.97);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(6px);
+  cursor: default;
+}
+.canvas-tab-menu button {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.canvas-tab-menu button:hover { background: rgba(91, 140, 255, 0.16); }
+.canvas-tab-menu button.danger { color: #f28b8b; }
+.canvas-tab-menu button.danger:hover { background: rgba(242, 139, 139, 0.14); }
 /* project-level batch action: pinned right so the tab strip stays centered */
 .canvas-tabs-run-project {
   position: absolute;
@@ -1122,6 +1151,34 @@ button:disabled { opacity: 0.6; cursor: default; }
 .palette-control-button.active {
   background: var(--accent, #4c7dff);
   color: #fff;
+}
+/* Labelled canvas options (minimap / snap / tidy): text reads better than
+ * icons here, so they sit on their own row below the icon rows. */
+.palette-controls-labeled {
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  align-items: center;
+}
+.palette-control-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.palette-control-toggle:hover { color: var(--text); }
+.palette-control-text-button {
+  padding: 2px 10px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+  color: var(--muted);
+}
+.palette-control-text-button:hover {
+  color: var(--text);
+  background: rgba(91, 140, 255, 0.12);
+  border-color: rgba(91, 140, 255, 0.4);
 }
 .snap-toggle {
   display: inline-flex;

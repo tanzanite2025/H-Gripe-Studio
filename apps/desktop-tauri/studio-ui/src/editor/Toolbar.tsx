@@ -66,17 +66,8 @@ export interface ToolbarProps {
   onOpen: () => void;
   onSave: () => void;
   onSaveAs: () => void;
-  onReset: () => void;
-  onClear: () => void;
   fileInputRef: MutableRefObject<HTMLInputElement | null>;
   onFilePicked: (file: File) => void;
-
-  // Canvas options
-  snapToGrid: boolean;
-  setSnapToGrid: Dispatch<SetStateAction<boolean>>;
-  onTidyLayout: () => void;
-  showMinimap: boolean;
-  setShowMinimap: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
@@ -114,15 +105,8 @@ export function Toolbar({
   onOpen,
   onSave,
   onSaveAs,
-  onReset,
-  onClear,
   fileInputRef,
   onFilePicked,
-  snapToGrid,
-  setSnapToGrid,
-  onTidyLayout,
-  showMinimap,
-  setShowMinimap,
 }: ToolbarProps) {
   const t = useT();
 
@@ -224,24 +208,6 @@ export function Toolbar({
           </button>
         </div>
 
-        <div className="toolbar-group">
-          <label className="snap-toggle" title={t("label.mapTitle")}>
-            <input type="checkbox" checked={showMinimap} onChange={(e) => setShowMinimap(e.target.checked)} />
-            {t("label.map")}
-          </label>
-          <label className="snap-toggle" title={t("label.snapTitle")}>
-            <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} />
-            {t("label.snap")}
-          </label>
-          <button onClick={onTidyLayout} title={t("btn.tidyTitle")}>
-            {t("btn.tidy")}
-          </button>
-        </div>
-
-        <div className="toolbar-group">
-          <button onClick={onReset}>{t("btn.reset")}</button>
-          <button onClick={onClear}>{t("btn.clear")}</button>
-        </div>
       </div>
 
       <input
