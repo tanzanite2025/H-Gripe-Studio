@@ -416,8 +416,16 @@ They should not be required for:
 
 ## Implementation Order
 
-1. Define the `RunScope` type and scope resolver.
-2. Normalize existing `runUpToNode` under `RunScope.node_upstream`.
+1. ✅ Define the `RunScope` type and scope resolver
+   (`studio-ui/src/runtime/runScope.ts`): `resolveRunScope` turns a scope +
+   authored graph into the subgraph to execute (upstream included by default,
+   downstream only for `node_downstream`, `selection_only` warns about cut
+   inputs; `card_row` resolves to the card's upstream chain until row
+   narrowing lands).
+2. ✅ Normalize existing `runUpToNode` under `RunScope.node_upstream`: the run
+   controller's `run` / `runUpToNode` now build scopes and share one
+   `runScope(scope)` pipeline, which is also exposed on the controller for
+   future selection/card/downstream affordances.
 3. Add row-level run for integrated cards, starting with `Image Processing`.
 4. Reuse existing backend ref validation for row/card scoped runs.
 5. Add card-level run for integrated cards.

@@ -28,7 +28,8 @@ import { useProjectScopedStore } from "./useProjectScopedStore";
 import { lowerWorkflowGraph, originNodeId } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
 import { parseLayeredImageAsset } from "../production/layeredImage";
-import { ancestorSubgraph, runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
+import { runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
+import { describeRunScope, resolveRunScope, type RunScope } from "../runtime/runScope";
 import { batchItems, defaultExecutors } from "../runtime/executors";
 import {
   cancelStudioRun,
@@ -41,6 +42,10 @@ import {
   type StudioGraphRunEvent,
   type StudioGraphRunResult,
 } from "../bridge/tauri";
+
+// The run controller always executes the active canvas's live graph, so its
+// scopes carry this fixed canvas marker instead of a real canvas lookup key.
+const ACTIVE_CANVAS = "active";
 
 const NODE_STATUSES = new Set<NodeStatus>([
   "idle",
@@ -128,6 +133,8 @@ export interface StudioRunController {
   run: () => Promise<void>;
   /** Run only `nodeId` and its transitive inputs, then surface its result. */
   runUpToNode: (nodeId: string) => Promise<void>;
+  /** Run an explicit scope (selection, card, downstream, …) on the active canvas. */
+  runScope: (scope: RunScope) => Promise<void>;
   /** Run the graph once per item of the (first) batch node. */
   runBatch: () => Promise<void>;
   /** Project-level batch: run every open canvas's graph sequentially. */
@@ -465,7 +472,12 @@ export function useStudioRunController({
     [pushLog],
   );
 
-  const run = useCallback(async () => {
+  // Shared scoped-run executor: every manual run entry point produces a
+  // RunScope, resolves it into the subgraph to execute, and goes through this
+  // single pipeline (PSD/backend-ref warnings, lowering, backend dispatch,
+  // previews, history). Row/card/selection affordances plug in here by
+  // constructing new scopes rather than new run loops.
+  const runScope = useCallback(async (scope: RunScope) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setRunning(true);
@@ -474,14 +486,18 @@ export function useStudioRunController({
     autoSnapshotBeforeRun();
     const useRustBackend = isTauri();
     const backend = useRustBackend ? "Rust backend" : "browser preview";
+    const scopeLabel = describeRunScope(scope);
     setMessage(useRustBackend ? "running Rust backend…" : "running browser preview…");
     clearRunInfo();
     const startedAt = Date.now();
     runEntriesRef.current = [];
     let outcome: RunOutcome = "succeeded";
-    pushLog("info", `▶ run started (${backend})`);
+    pushLog("info", `▶ run started: ${scopeLabel} (${backend})`);
     try {
-      const authored = toWorkflowGraph(nodes, edges);
+      const full = toWorkflowGraph(nodes, edges);
+      const resolved = resolveRunScope(full, scope);
+      for (const warning of resolved.warnings) pushLog("warn", `⚠ ${warning}`);
+      const authored = resolved.graph;
       await warnPsdChain(authored);
       const { graph, origin } = lowerWorkflowGraph(authored);
       loweredOrigin.current = origin;
@@ -512,7 +528,7 @@ export function useStudioRunController({
           browserCancel.current = null;
         }
       }
-      pushLog("success", `✔ run finished (${backend})`);
+      pushLog("success", `✔ run finished: ${scopeLabel} (${backend})`);
     } catch (err) {
       const message = String(err);
       const cancelled = message.toLowerCase().includes("cancel");
@@ -544,90 +560,19 @@ export function useStudioRunController({
     setMessage,
   ]);
 
+  // The controller always operates on the active canvas's live graph, so the
+  // scope's canvasId is a fixed marker rather than a lookup key here.
+  const run = useCallback(
+    () => runScope({ kind: "full_canvas", canvasId: ACTIVE_CANVAS }),
+    [runScope],
+  );
+
   // Run only the target node + its transitive inputs (ancestor subgraph), so
   // confirming an edit surfaces that node's result without executing unrelated
-  // downstream branches. Reuses the same executor + preview machinery as run().
+  // downstream branches.
   const runUpToNode = useCallback(
-    async (nodeId: string) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      setRunning(true);
-      setShowLog(true);
-      runFailures.current = [];
-      autoSnapshotBeforeRun();
-      const useRustBackend = isTauri();
-      const backend = useRustBackend ? "Rust backend" : "browser preview";
-      setMessage(useRustBackend ? "running to node (Rust backend)…" : "running to node (browser preview)…");
-      clearRunInfo();
-      const startedAt = Date.now();
-      runEntriesRef.current = [];
-      let outcome: RunOutcome = "succeeded";
-      pushLog("info", `▶ run up to ${nodeId} started (${backend})`);
-      try {
-        const full = toWorkflowGraph(nodes, edges);
-        const authored = ancestorSubgraph(full, nodeId);
-        await warnPsdChain(authored);
-        const { graph, origin } = lowerWorkflowGraph(authored);
-        loweredOrigin.current = origin;
-        if (useRustBackend) {
-          const runId = beginRustRun();
-          try {
-            const result = await runStudioGraph(graph, applyStudioRunEvent, runId);
-            applyStudioRunResult(result);
-            applyPreviews(graph, { outputs: studioOutputsToMap(result) });
-            setMessage("done (Rust backend)");
-          } finally {
-            endRustRun(runId);
-          }
-        } else {
-          const token = { cancelled: false };
-          browserCancel.current = token;
-          try {
-            const result = await runGraph(
-              graph,
-              defaultExecutors,
-              observer,
-              undefined,
-              () => token.cancelled,
-            );
-            applyPreviews(graph, result);
-            setMessage("done (browser preview)");
-          } finally {
-            browserCancel.current = null;
-          }
-        }
-        pushLog("success", `✔ run up to ${nodeId} finished (${backend})`);
-      } catch (err) {
-        const message = String(err);
-        const cancelled = message.toLowerCase().includes("cancel");
-        outcome = cancelled ? "cancelled" : "failed";
-        setMessage(cancelled ? "cancelled" : `error: ${message}`);
-        pushLog(cancelled ? "warn" : "error", cancelled ? "run cancelled" : `run failed: ${message}`);
-      } finally {
-        setRunning(false);
-        inFlight.current = false;
-        browserCancel.current = null;
-        highlightFailures();
-        recordRunHistory("run", startedAt, outcome, backend);
-      }
-    },
-    [
-      nodes,
-      edges,
-      observer,
-      clearRunInfo,
-      applyPreviews,
-      applyStudioRunResult,
-      applyStudioRunEvent,
-      beginRustRun,
-      endRustRun,
-      pushLog,
-      autoSnapshotBeforeRun,
-      highlightFailures,
-      warnPsdChain,
-      recordRunHistory,
-      setMessage,
-    ],
+    (nodeId: string) => runScope({ kind: "node_upstream", canvasId: ACTIVE_CANVAS, nodeId }),
+    [runScope],
   );
 
   // Batch fan-out: run the graph once per item of the (first) batch node,
@@ -893,6 +838,7 @@ export function useStudioRunController({
     clearHistory,
     run,
     runUpToNode,
+    runScope,
     runBatch,
     runProject,
     cancelRun,
