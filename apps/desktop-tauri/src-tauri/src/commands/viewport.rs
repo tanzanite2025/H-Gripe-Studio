@@ -450,6 +450,75 @@ pub(crate) fn viewport_register_timeline(
     Ok(())
 }
 
+/// Cap on registered node outputs, bounded like the other target registries.
+const MAX_NODE_OUTPUTS: usize = 256;
+
+struct NodeOutputRegistry {
+    /// (node id, output port) -> image artifact path.
+    map: HashMap<(String, Option<String>), String>,
+    /// Insertion order of keys, oldest first, for FIFO eviction.
+    order: Vec<(String, Option<String>)>,
+}
+
+static NODE_OUTPUTS: OnceLock<Mutex<NodeOutputRegistry>> = OnceLock::new();
+
+fn node_outputs() -> &'static Mutex<NodeOutputRegistry> {
+    NODE_OUTPUTS.get_or_init(|| {
+        Mutex::new(NodeOutputRegistry {
+            map: HashMap::new(),
+            order: Vec::new(),
+        })
+    })
+}
+
+fn node_output_path(node_id: &str, output_port: Option<&str>) -> Result<String, String> {
+    let reg = node_outputs()
+        .lock()
+        .map_err(|_| "node output registry poisoned")?;
+    let key = (node_id.to_string(), output_port.map(str::to_string));
+    reg.map.get(&key).cloned().ok_or_else(|| match output_port {
+        Some(port) => format!("unknown node output: {node_id}:{port}"),
+        None => format!("unknown node output: {node_id}"),
+    })
+}
+
+/// Register (or refresh) one node output's image artifact so viewports can
+/// resolve `node_output` targets host-side, by reference — the path, never
+/// pixels. A re-registration after a re-run replaces the artifact path.
+#[tauri::command]
+pub(crate) fn viewport_register_node_output(
+    node_id: String,
+    output_port: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    if node_id.is_empty() {
+        return Err("node id must not be empty".to_string());
+    }
+    if output_port.as_deref() == Some("") {
+        return Err(format!("node {node_id} has an empty output port"));
+    }
+    if !std::path::Path::new(&path).is_file() {
+        return Err(format!(
+            "node output {node_id} points at a missing file: {path}"
+        ));
+    }
+    let mut reg = node_outputs()
+        .lock()
+        .map_err(|_| "node output registry poisoned")?;
+    let key = (node_id, output_port);
+    if reg.map.insert(key.clone(), path).is_none() {
+        reg.order.push(key);
+        while reg.map.len() > MAX_NODE_OUTPUTS {
+            if reg.order.is_empty() {
+                break;
+            }
+            let oldest = reg.order.remove(0);
+            reg.map.remove(&oldest);
+        }
+    }
+    Ok(())
+}
+
 const VIEWPORT_KINDS: [&str; 3] = ["image_edit", "grade_preview", "video_preview"];
 
 #[tauri::command]
@@ -531,7 +600,12 @@ pub(crate) fn viewport_set_target(
         } => {
             timeline_clip(timeline_id, clip_id)?;
         }
-        ViewportTarget::NodeOutput { .. } => {}
+        ViewportTarget::NodeOutput {
+            node_id,
+            output_port,
+        } => {
+            node_output_path(node_id, output_port.as_deref())?;
+        }
     }
     let id = parse_id(&viewport_id)?;
     let mut map = viewports()
@@ -674,8 +748,14 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
                 Err("video clip targets require the native media engine".to_string())
             }
         }
-        ViewportTarget::NodeOutput { .. } => {
-            Err("target kind not supported by the phase 1 transport".to_string())
+        ViewportTarget::NodeOutput {
+            node_id,
+            output_port,
+        } => {
+            // Node outputs resolve through the node output registry — the
+            // same reference-not-pixels contract as the other targets.
+            let path = node_output_path(&node_id, output_port.as_deref())?;
+            render_image_path(id, &path, width, height, grade_doc, view)
         }
     }
 }
@@ -1220,6 +1300,84 @@ mod tests {
         assert!(err.contains("invalid placement"), "{err}");
         let err = viewport_register_timeline("tl-bad".to_string(), vec![clip("video", 0.0, 1.0)])
             .expect_err("missing media file must be rejected");
+        assert!(err.contains("missing file"), "{err}");
+    }
+
+    #[test]
+    fn node_output_targets_resolve_through_the_node_output_registry() {
+        let path = std::env::temp_dir().join("hgripe_viewport_node_output.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([40, 90, 220, 255]))
+            .save(&path)
+            .expect("write node output artifact");
+        viewport_register_node_output(
+            "node-1".to_string(),
+            None,
+            path.to_string_lossy().to_string(),
+        )
+        .expect("register node output");
+        viewport_register_node_output(
+            "node-1".to_string(),
+            Some("alt".to_string()),
+            path.to_string_lossy().to_string(),
+        )
+        .expect("register ported node output");
+
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::NodeOutput {
+                node_id: "node-1".to_string(),
+                output_port: None,
+            },
+        )
+        .expect("set node_output target");
+        let frame = viewport_render_frame(desc.viewport_id.clone()).expect("render node output");
+        assert!(frame.data_url.starts_with("data:image/png;base64,"));
+        assert_eq!((frame.width, frame.height), (64, 64));
+
+        // The port is part of the key: an unregistered port fails at set time.
+        let err = viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::NodeOutput {
+                node_id: "node-1".to_string(),
+                output_port: Some("missing".to_string()),
+            },
+        )
+        .expect_err("unregistered port must be rejected");
+        assert!(err.contains("unknown node output"), "{err}");
+        let err = viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::NodeOutput {
+                node_id: "node-missing".to_string(),
+                output_port: None,
+            },
+        )
+        .expect_err("unregistered node must be rejected");
+        assert!(err.contains("unknown node output"), "{err}");
+
+        viewport_destroy(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn register_node_output_validates_ids_and_paths() {
+        assert!(
+            viewport_register_node_output("".to_string(), None, "/tmp/x.png".to_string()).is_err()
+        );
+        let err = viewport_register_node_output(
+            "node-1".to_string(),
+            Some("".to_string()),
+            "/tmp/x.png".to_string(),
+        )
+        .expect_err("empty output port must be rejected");
+        assert!(err.contains("empty output port"), "{err}");
+        let err = viewport_register_node_output(
+            "node-1".to_string(),
+            None,
+            "/does/not/exist.png".to_string(),
+        )
+        .expect_err("missing artifact file must be rejected");
         assert!(err.contains("missing file"), "{err}");
     }
 

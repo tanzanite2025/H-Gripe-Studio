@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   openMockViewportCount,
   registerLayeredAsset,
+  registerNodeOutput,
   registerTimeline,
 } from "../bridge/viewport";
 import { WgpuViewportHost } from "./WgpuViewportHost";
@@ -35,6 +36,41 @@ describe("WgpuViewportHost", () => {
   it("refuses to render before a target is set", async () => {
     const host = await WgpuViewportHost.open("grade_preview");
     await expect(host.renderFrame()).rejects.toThrow(/no target/);
+    await host.close();
+  });
+
+  it("resolves node_output targets through the node output registry", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    // Unregistered node outputs fail at set time, not at first render.
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "node_output", nodeId: "node-1" },
+      }),
+    ).rejects.toThrow(/unknown node output/);
+
+    await registerNodeOutput("node-1", "/tmp/out.png");
+    // The port is part of the key: an unregistered port is still rejected.
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "node_output", nodeId: "node-1", outputPort: "alt" },
+      }),
+    ).rejects.toThrow(/unknown node output/);
+
+    await host.command({
+      kind: "set_target",
+      target: { kind: "node_output", nodeId: "node-1" },
+    });
+    await host.command({ kind: "resize", width: 320, height: 240 });
+    const frame = await host.renderFrame();
+    expect(frame.data_url.startsWith("data:image/")).toBe(true);
+
+    // Registration validates its inputs like the desktop host.
+    await expect(registerNodeOutput("", "/tmp/out.png")).rejects.toThrow(/must not be empty/);
+    await expect(registerNodeOutput("node-1", "/tmp/out.png", "")).rejects.toThrow(
+      /empty output port/,
+    );
     await host.close();
   });
 
