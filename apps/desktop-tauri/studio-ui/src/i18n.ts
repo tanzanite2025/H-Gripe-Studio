@@ -725,6 +725,16 @@ export const messages = {
     en: "saved ref no longer exists in the manager",
     zh: "保存的引用在管理器中已不存在",
   },
+  "models.selector.localLabel": { en: "Backend (local model)", zh: "后端（本地模型）" },
+  "models.selector.pickLocal": { en: "— pick a local model —", zh: "— 选择本地模型 —" },
+  "models.selector.localHint": {
+    en: "capability-filtered from the Models / APIs manager; fills device / precision",
+    zh: "来自「模型 / API」管理器的能力过滤列表；自动填充设备 / 精度",
+  },
+  "models.selector.localEmpty": {
+    en: "no local model declares this capability — open Manage… and add one",
+    zh: "没有本地模型声明此能力——点「管理…」新增并勾选能力",
+  },
   "inspector.advanced": { en: "Advanced / legacy fields", zh: "高级 / 旧字段" },
   "models.tabApi": { en: "API Profiles", zh: "API 配置" },
   "models.tabLocal": { en: "Local Models", zh: "本地模型" },
