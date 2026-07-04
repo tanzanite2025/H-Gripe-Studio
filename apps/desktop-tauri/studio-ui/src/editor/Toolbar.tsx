@@ -7,6 +7,24 @@ import type { EdgeStyle } from "./FlowCanvas";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
 
+function UndoIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </svg>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+    </svg>
+  );
+}
+
 export interface ToolbarProps {
   // Status
   issues: ValidationIssue[];
@@ -160,11 +178,23 @@ export function Toolbar({
 
       <div className="toolbar-action-row">
         <div className="toolbar-group">
-          <button onClick={onUndo} disabled={!canUndo} title={t("btn.undoTitle")}>
-            {t("btn.undo")}
+          <button
+            className="icon-button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title={t("btn.undoTitle")}
+            aria-label={t("btn.undoTitle")}
+          >
+            <UndoIcon />
           </button>
-          <button onClick={onRedo} disabled={!canRedo} title={t("btn.redoTitle")}>
-            {t("btn.redo")}
+          <button
+            className="icon-button"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title={t("btn.redoTitle")}
+            aria-label={t("btn.redoTitle")}
+          >
+            <RedoIcon />
           </button>
         </div>
 

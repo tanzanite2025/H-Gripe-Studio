@@ -45,6 +45,7 @@ body {
   align-items: center;
   gap: 12px;
   width: 100%;
+  min-height: 42px;
 }
 .toolbar-document {
   display: inline-flex;
@@ -108,6 +109,23 @@ button {
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.6; cursor: default; }
+.icon-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+}
+.toolbar-icon {
+  display: block;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* canvas tab row (multi-canvas workspace): one tab per open canvas document */
 .canvas-tabs {
@@ -242,7 +260,8 @@ button:disabled { opacity: 0.6; cursor: default; }
 .node-search { position: relative; display: inline-block; }
 .node-search > input {
   width: 140px;
-  padding: 4px 8px;
+  height: 34px;
+  padding: 0 12px;
   font-size: 12px;
 }
 .node-search-results {
