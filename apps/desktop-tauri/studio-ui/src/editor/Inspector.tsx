@@ -58,6 +58,56 @@ function localModelCapability(
   return null;
 }
 
+// Row-level backend bindings for integrated cards (backend selection contract
+// plan, steps 3–6): each entry renders one capability-filtered selector whose
+// selection is stored under the card's `<row>.`-namespaced params, so lowering
+// forwards it to the leaf executor unchanged.
+interface RowBackendBinding {
+  /** Card param the selected ref is stored under. */
+  paramKey: string;
+  kind: "api" | "local";
+  capability: ModelCapability;
+  /** i18n key for the row's field label. */
+  labelKey: Parameters<ReturnType<typeof useT>>[0];
+  /** Only render when this param has one of the listed values. */
+  visibleWhen?: { param: string; in: string[] };
+}
+
+function paramDefault(spec: ReturnType<typeof nodeSpec>, key: string): unknown {
+  return spec.params.find((p) => p.key === key)?.defaultValue;
+}
+
+const ROW_BACKEND_BINDINGS: Record<string, RowBackendBinding[]> = {
+  imageProcessing: [
+    {
+      paramKey: "enhance.local_model_ref",
+      kind: "local",
+      capability: "image.upscale",
+      labelKey: "models.selector.rowEnhance",
+    },
+    {
+      paramKey: "mask.local_model_ref",
+      kind: "local",
+      capability: "mask.subject",
+      labelKey: "models.selector.rowMask",
+    },
+    {
+      paramKey: "repair.api_profile_ref",
+      kind: "api",
+      capability: "image.edit",
+      labelKey: "models.selector.rowRepairApi",
+      visibleWhen: { param: "repair.engine", in: ["provider"] },
+    },
+    {
+      paramKey: "repair.local_model_ref",
+      kind: "local",
+      capability: "image.inpaint",
+      labelKey: "models.selector.rowRepairLocal",
+      visibleWhen: { param: "repair.engine", in: ["sd_inpaint", "sdxl_inpaint", "flux_fill"] },
+    },
+  ],
+};
+
 interface InspectorProps {
   node: Node;
   onParamChange: (nodeId: string, key: string, value: unknown) => void;
@@ -172,6 +222,42 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
           }}
         />
       )}
+
+      {(ROW_BACKEND_BINDINGS[spec.kind] ?? [])
+        .filter(
+          (b) =>
+            !b.visibleWhen ||
+            b.visibleWhen.in.includes(
+              String(data.params[b.visibleWhen.param] ?? paramDefault(spec, b.visibleWhen.param)),
+            ),
+        )
+        .map((b) =>
+          b.kind === "api" ? (
+            <BackendSelector
+              key={b.paramKey}
+              capability={b.capability}
+              label={t(b.labelKey)}
+              value={String(data.params[b.paramKey] ?? "")}
+              onApply={(profile) => {
+                onParamChange(node.id, b.paramKey, profile.ref);
+                const row = b.paramKey.slice(0, b.paramKey.indexOf("."));
+                if (profile.provider_kind)
+                  onParamChange(node.id, `${row}.provider`, profile.provider_kind);
+                if (profile.default_model)
+                  onParamChange(node.id, `${row}.model`, profile.default_model);
+                onParamChange(node.id, `${row}.credentials_ref`, profile.credentials_ref);
+              }}
+            />
+          ) : (
+            <LocalModelSelector
+              key={b.paramKey}
+              capability={b.capability}
+              label={t(b.labelKey)}
+              value={String(data.params[b.paramKey] ?? "")}
+              onApply={(model) => onParamChange(node.id, b.paramKey, model.ref)}
+            />
+          ),
+        )}
 
       {hasEngineParam && (
         <div className="field engine-check">

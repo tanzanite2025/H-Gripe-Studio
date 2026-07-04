@@ -15,12 +15,14 @@ interface BackendSelectorProps {
   value: string;
   /** Applies the chosen managed profile to the node. */
   onApply: (profile: ApiProfileEntry) => void;
+  /** Overrides the default field label (e.g. a card row prefix). */
+  label?: string;
 }
 
 // Capability-filtered API profile dropdown backed by the system model manager
 // (backend selection contract plan: every card dropdown goes through the same
 // manager selector API, storing a managed ref instead of raw provider fields).
-export function BackendSelector({ capability, value, onApply }: BackendSelectorProps) {
+export function BackendSelector({ capability, value, onApply, label }: BackendSelectorProps) {
   const t = useT();
   const [managerOpen, setManagerOpen] = useState(false);
   // Registry state is reloaded when the manager modal closes, so edits made
@@ -32,7 +34,7 @@ export function BackendSelector({ capability, value, onApply }: BackendSelectorP
 
   return (
     <label className="field">
-      <span>{t("models.selector.label")}</span>
+      <span>{label ?? t("models.selector.label")}</span>
       <div className="path-row">
         <select
           value={dangling ? "" : value}
