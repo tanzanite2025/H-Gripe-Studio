@@ -16,17 +16,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 
 use image::RgbaImage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::commands::thumbnails::generate_thumbnail_inner;
 use crate::resource;
-use crate::studio::{
-    grade_srgb_proxy, load_image_srgb_proxy, parse_grade_doc, TemporalAccumulator,
-};
+use crate::studio::{load_image_srgb_proxy, parse_grade_doc, TemporalAccumulator};
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -964,7 +960,52 @@ pub(crate) fn viewport_set_view(
 
 #[tauri::command]
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
-    let id = parse_id(&viewport_id)?;
+    rgba_to_frame(viewport_render_rgba(&viewport_id)?)
+}
+
+/// A rendered frame before transport encoding: 8-bit sRGB pixels plus the
+/// backend report. The PNG encode happens at the transport boundary so the
+/// native surface path can present the same pixels without an encode.
+struct RenderedRgba {
+    image: Arc<RgbaImage>,
+    backend: ViewportBackend,
+}
+
+fn grade_backend_report(backend: crate::studio::GradeBackend) -> ViewportBackend {
+    ViewportBackend {
+        requested: "auto".to_string(),
+        actual: backend.name.to_string(),
+        fallback_reason: backend.fallback_reason,
+    }
+}
+
+fn encode_frame_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
+    let mut png: Vec<u8> = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|err| format!("failed to encode frame png: {err}"))?;
+    Ok(png)
+}
+
+fn rgba_to_frame(rendered: RenderedRgba) -> Result<ViewportFrame, String> {
+    let (w, h) = rendered.image.dimensions();
+    let png = encode_frame_png(&rendered.image)?;
+    Ok(ViewportFrame {
+        data_url: format!(
+            "data:image/png;base64,{}",
+            crate::commands::thumbnails::base64_encode(&png)
+        ),
+        width: w,
+        height: h,
+        backend: rendered.backend,
+    })
+}
+
+/// Render the viewport's frame to 8-bit sRGB pixels (no transport encode) —
+/// the shared ingress of both egress paths: PNG transport and native surface
+/// presentation.
+fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
+    let id = parse_id(viewport_id)?;
     let (target, width, height, grade_doc, view, temporal_denoise, mask_overlay) = {
         let map = viewports()
             .lock()
@@ -1087,25 +1128,46 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
 /// Binary frame transport: the same render as [`viewport_render_frame`], but
 /// the frame crosses the IPC boundary as raw bytes instead of a base64 data
 /// URL inside a JSON string. Payload layout:
-/// `[u32 LE meta length][meta JSON {width, height, backend}][PNG bytes]`.
+/// `[u32 LE meta length][meta JSON {width, height, backend, presented}][PNG bytes]`.
+///
+/// When the viewport has a native surface window (surface swap Phase S2) the
+/// pixels present directly on it — the payload then carries `presented: true`
+/// and no PNG bytes, so a slider drag does no encode and no pixel IPC.
 #[tauri::command]
 pub(crate) fn viewport_render_frame_bin(
+    app: tauri::AppHandle,
     viewport_id: String,
 ) -> Result<tauri::ipc::Response, String> {
-    let frame = viewport_render_frame(viewport_id)?;
-    Ok(tauri::ipc::Response::new(frame_bin_payload(&frame)?))
+    let rendered = viewport_render_rgba(&viewport_id)?;
+    let presented =
+        crate::commands::viewport_surface::present_frame(&app, &viewport_id, &rendered.image);
+    let png = if presented {
+        Vec::new()
+    } else {
+        encode_frame_png(&rendered.image)?
+    };
+    let (w, h) = rendered.image.dimensions();
+    Ok(tauri::ipc::Response::new(frame_bin_payload(
+        w,
+        h,
+        &rendered.backend,
+        presented,
+        &png,
+    )?))
 }
 
-fn frame_bin_payload(frame: &ViewportFrame) -> Result<Vec<u8>, String> {
-    let png = frame
-        .data_url
-        .strip_prefix("data:image/png;base64,")
-        .ok_or_else(|| "frame is not a PNG data URL".to_string())
-        .and_then(crate::commands::thumbnails::base64_decode)?;
+fn frame_bin_payload(
+    width: u32,
+    height: u32,
+    backend: &ViewportBackend,
+    presented: bool,
+    png: &[u8],
+) -> Result<Vec<u8>, String> {
     let meta = serde_json::json!({
-        "width": frame.width,
-        "height": frame.height,
-        "backend": frame.backend,
+        "width": width,
+        "height": height,
+        "backend": backend,
+        "presented": presented,
     })
     .to_string();
     let mut payload = Vec::with_capacity(4 + meta.len() + png.len());
@@ -1115,7 +1177,7 @@ fn frame_bin_payload(frame: &ViewportFrame) -> Result<Vec<u8>, String> {
             .to_le_bytes(),
     );
     payload.extend_from_slice(meta.as_bytes());
-    payload.extend_from_slice(&png);
+    payload.extend_from_slice(png);
     Ok(payload)
 }
 
@@ -1124,8 +1186,8 @@ fn frame_bin_payload(frame: &ViewportFrame) -> Result<Vec<u8>, String> {
 /// with the proxy cached per viewport keyed by path + timestamp + size, so
 /// grading or panning a paused frame re-runs only crop + kernel; ungraded
 /// frames resolve through the playback engine — dedicated decode thread,
-/// bounded warm frame cache, latest-wins coalescing — then present via the
-/// thumbnail pipeline.
+/// bounded warm frame cache, latest-wins coalescing — then present through
+/// the cached proxy pipeline.
 #[cfg(feature = "native-ffmpeg")]
 #[allow(clippy::too_many_arguments)]
 fn render_video_path(
@@ -1137,7 +1199,7 @@ fn render_video_path(
     grade_doc: Option<Value>,
     view: ViewportView,
     temporal_denoise: f32,
-) -> Result<ViewportFrame, String> {
+) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
     if grade_doc.is_some() || !view.is_identity() || temporal_denoise > 0.0 {
         let doc = parse_grade_doc(grade_doc.as_ref())?;
@@ -1155,20 +1217,13 @@ fn render_video_path(
         } else {
             Some(crop_view(&proxy, view))
         };
-        let started = Instant::now();
         let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
         let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
         apply_temporal(id, path, time_sec, &mut surface, temporal_denoise)?;
-        let graded = crate::studio::encode_surface_preview(&surface, backend, started)?;
-        return Ok(ViewportFrame {
-            data_url: graded.data_url,
-            width: graded.width,
-            height: graded.height,
-            backend: ViewportBackend {
-                requested: "auto".to_string(),
-                actual: graded.backend.to_string(),
-                fallback_reason: graded.backend_fallback_reason,
-            },
+        let image = crate::studio::surface_to_rgba(&surface)?;
+        return Ok(RenderedRgba {
+            image: Arc::new(image),
+            backend: grade_backend_report(backend),
         });
     }
     let poster_dir = crate::cache_subdir(".posters")?;
@@ -1177,11 +1232,14 @@ fn render_video_path(
         std::path::Path::new(path),
         time_sec,
     )?;
-    let thumb = generate_thumbnail_inner(&frame.to_string_lossy(), size, None)?;
-    Ok(ViewportFrame {
-        data_url: thumb.data_url,
-        width: thumb.width,
-        height: thumb.height,
+    let key = ProxyKey {
+        path: path.to_string(),
+        time_bits: Some(time_sec.to_bits()),
+        size,
+    };
+    let proxy = cached_proxy(id, key, || load_image_srgb_proxy(&frame, size))?;
+    Ok(RenderedRgba {
+        image: proxy,
         backend: cpu_backend(),
     })
 }
@@ -1198,7 +1256,7 @@ fn render_image_path(
     grade_doc: Option<Value>,
     view: ViewportView,
     mask_overlay: Option<&MaskOverlay>,
-) -> Result<ViewportFrame, String> {
+) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
     if grade_doc.is_some() || !view.is_identity() || mask_overlay.is_some() {
         // Graded and/or viewed frame: run the grading kernel (identity when
@@ -1218,45 +1276,31 @@ fn render_image_path(
         } else {
             Some(crop_view(&proxy, view))
         };
+        let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
+        let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
         if let Some(overlay) = mask_overlay {
             // The overlay tints the *presented* frame: grade first, then
             // composite, so the tint colour is not pushed through the kernel.
-            let started = Instant::now();
-            let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
-            let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
             composite_mask_overlay(&mut surface, overlay, proxy.dimensions(), view);
-            let graded = crate::studio::encode_surface_preview(&surface, backend, started)?;
-            return Ok(ViewportFrame {
-                data_url: graded.data_url,
-                width: graded.width,
-                height: graded.height,
-                backend: ViewportBackend {
-                    requested: "auto".to_string(),
-                    actual: graded.backend.to_string(),
-                    fallback_reason: graded.backend_fallback_reason,
-                },
-            });
         }
-        let graded = grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
-        return Ok(ViewportFrame {
-            data_url: graded.data_url,
-            width: graded.width,
-            height: graded.height,
-            backend: ViewportBackend {
-                requested: "auto".to_string(),
-                actual: graded.backend.to_string(),
-                fallback_reason: graded.backend_fallback_reason,
-            },
+        let image = crate::studio::surface_to_rgba(&surface)?;
+        return Ok(RenderedRgba {
+            image: Arc::new(image),
+            backend: grade_backend_report(backend),
         });
     }
-    // CPU placeholder transport: reuse the cached thumbnail pipeline at the
-    // viewport's size (bounded so a huge surface cannot request a full decode
-    // through this path).
-    let thumb = generate_thumbnail_inner(path, size, None)?;
-    Ok(ViewportFrame {
-        data_url: thumb.data_url,
-        width: thumb.width,
-        height: thumb.height,
+    // Plain path: the viewport's cached source proxy at the bounded size (so
+    // a huge surface cannot request a full decode through this path).
+    let key = ProxyKey {
+        path: path.to_string(),
+        time_bits: None,
+        size,
+    };
+    let proxy = cached_proxy(id, key, || {
+        load_image_srgb_proxy(std::path::Path::new(path), size)
+    })?;
+    Ok(RenderedRgba {
+        image: proxy,
         backend: cpu_backend(),
     })
 }
@@ -1363,40 +1407,27 @@ mod tests {
 
     #[test]
     fn frame_bin_payload_carries_meta_header_and_png_bytes() {
-        let png = {
-            let img = image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]));
-            let mut out = Vec::new();
-            img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
-                .expect("encode png");
-            out
-        };
-        let frame = ViewportFrame {
-            data_url: format!(
-                "data:image/png;base64,{}",
-                crate::commands::thumbnails::base64_encode(&png)
-            ),
-            width: 3,
-            height: 2,
-            backend: cpu_backend(),
-        };
+        let img = image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]));
+        let png = encode_frame_png(&img).expect("encode png");
 
-        let payload = frame_bin_payload(&frame).expect("payload");
+        let payload = frame_bin_payload(3, 2, &cpu_backend(), false, &png).expect("payload");
         let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
         let meta: serde_json::Value =
             serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
         assert_eq!(meta["width"], 3);
         assert_eq!(meta["height"], 2);
         assert_eq!(meta["backend"]["actual"], "cpu");
-        // The trailing bytes are the PNG, byte for byte (base64 round-trips).
+        assert_eq!(meta["presented"], false);
+        // The trailing bytes are the PNG, byte for byte.
         assert_eq!(&payload[4 + meta_len..], &png[..]);
 
-        let bad = ViewportFrame {
-            data_url: "data:image/jpeg;base64,xxxx".to_string(),
-            width: 1,
-            height: 1,
-            backend: cpu_backend(),
-        };
-        assert!(frame_bin_payload(&bad).is_err());
+        // A natively presented frame carries the flag and no PNG bytes.
+        let payload = frame_bin_payload(3, 2, &cpu_backend(), true, &[]).expect("payload");
+        let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
+        let meta: serde_json::Value =
+            serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
+        assert_eq!(meta["presented"], true);
+        assert!(payload[4 + meta_len..].is_empty());
     }
 
     #[test]

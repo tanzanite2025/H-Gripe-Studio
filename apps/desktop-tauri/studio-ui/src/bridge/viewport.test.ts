@@ -25,8 +25,21 @@ describe("decodeFramePayload", () => {
     expect(frame.width).toBe(640);
     expect(frame.height).toBe(360);
     expect(frame.backend.actual).toBe("cpu");
+    expect(frame.presented).toBe(false);
     expect(frame.data_url.startsWith("blob:")).toBe(true);
     URL.revokeObjectURL(frame.data_url);
+  });
+
+  it("decodes a natively presented frame: flag set, no PNG, no object URL", () => {
+    const frame = decodeFramePayload(
+      payload(
+        { width: 640, height: 360, backend: BACKEND, presented: true },
+        new Uint8Array(0),
+      ),
+    );
+    expect(frame.presented).toBe(true);
+    expect(frame.data_url).toBe("");
+    expect(frame.width).toBe(640);
   });
 
   it("accepts an ArrayBuffer payload", () => {
