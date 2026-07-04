@@ -34,17 +34,30 @@ repaint, masking, and future video/audio tools.
 
 ## Current State
 
-The code already has partial seams:
+The manager and card-selector foundation has landed:
 
-- Node specs use `executor: "api" | "local" | "compute" | "hybrid"`.
-- API cards already carry `provider`, `model`, and `credentials_ref` params.
-- `ProfilePicker` can apply provider/model/credentials to a node.
-- Local image/model cards expose per-node `engine`, `device`, and `precision`
-  style fields.
-- Docs state local model management is partial and API config UI is not yet a
-  deliberate in-app surface.
+- global `Models / APIs` manager surface exists
+- persistent API profile and local model registries exist
+- API profile selectors are capability-filtered
+- local model selectors are capability-filtered
+- `Image Processing` row backend refs are stored in row namespaced params
+- legacy provider/model/credentials and engine fields remain loadable behind
+  compatibility/advanced paths
+- pre-run backend ref validation checks selected refs against the manager
 
-The missing piece is a unified management surface and a stable reference model.
+Completed detail plans:
+
+- [`../completed/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md`](../completed/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md)
+- [`../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md)
+
+Remaining active work:
+
+- Prompt Assistant should consume the same `ModelBackendRef` contract.
+- Prompt card optimization should use manager-backed refs instead of local raw
+  fields.
+- Future audio/video/model-assisted cards should use the same manager selectors.
+- Backend/device reports should continue aligning with
+  [`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md).
 
 ## API Manager
 
