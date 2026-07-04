@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EXEC_LANES } from "./execLanes";
 import {
   DEFAULT_TOOL_ID,
+  MASK_OPS,
   MASK_TOOLS,
   MASK_TOOL_GROUPS,
   MASK_TOOL_SLOTS,
@@ -64,16 +65,25 @@ describe("mask tool registry", () => {
     }
   });
 
-  it("toolbar groups cover every tool exactly once (PS layout)", () => {
+  it("toolbar groups cover every canvas tool exactly once (PS layout)", () => {
     const grouped = MASK_TOOL_GROUPS.flat();
     expect(new Set(grouped).size).toBe(grouped.length);
-    expect([...grouped].sort()).toEqual(MASK_TOOLS.map((t) => t.id).sort());
+    const canvasTools = MASK_TOOLS.filter((t) => t.kind !== "global").map((t) => t.id);
+    expect([...grouped].sort()).toEqual(canvasTools.sort());
   });
 
-  it("toolbar slots cover every tool exactly once (PS flyout layout)", () => {
+  it("toolbar slots cover every canvas tool exactly once (PS flyout layout)", () => {
     const slotted = MASK_TOOL_SLOTS.flat(2);
     expect(new Set(slotted).size).toBe(slotted.length);
-    expect([...slotted].sort()).toEqual(MASK_TOOLS.map((t) => t.id).sort());
+    const canvasTools = MASK_TOOLS.filter((t) => t.kind !== "global").map((t) => t.id);
+    expect([...slotted].sort()).toEqual(canvasTools.sort());
+  });
+
+  it("mask ops cover every whole-mask operation, and none sits in the toolbar", () => {
+    const globals = MASK_TOOLS.filter((t) => t.kind === "global").map((t) => t.id);
+    expect([...MASK_OPS].sort()).toEqual(globals.sort());
+    const slotted = new Set(MASK_TOOL_SLOTS.flat(2));
+    for (const id of MASK_OPS) expect(slotted.has(id), id).toBe(false);
   });
 
   it("the default tool is ready and selectable", () => {

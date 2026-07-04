@@ -174,9 +174,9 @@ export interface PsToolSlot {
  * The left toolbar as Photoshop slot sections (rendered with separators).
  * Slot order follows Photoshop's tool-slot order (V / M / L / W / C / I,
  * then J / B / S / Y / E / G / O, then P / T / A / U, then navigation);
- * every `MASK_TOOLS` id appears in exactly one slot (pinned by a registry
- * test). The whole-mask operations slot is a temporary home until they move
- * to a right-panel Mask Ops group (plan step 4).
+ * every canvas tool id appears in exactly one slot (pinned by a registry
+ * test). Whole-mask operations are not tools in the user's hand, so they
+ * live in the right-panel Mask Ops group (`MASK_OPS`), not here (plan step 4).
  */
 export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
   [
@@ -203,9 +203,6 @@ export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
     { id: "shape", shortcut: "U", label: "Shape", variants: ["shape"] },
   ],
   [
-    { id: "mask_ops", label: "Mask Ops", variants: ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"] },
-  ],
-  [
     { id: "hand", shortcut: "H", label: "Hand", variants: ["hand"] },
     { id: "rotate_view", shortcut: "R", label: "Rotate View", variants: ["rotate_view"] },
     { id: "zoom", shortcut: "Z", label: "Zoom", variants: ["zoom"] },
@@ -226,6 +223,14 @@ export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = PS_TOOL_SECTIONS
  */
 export const MASK_TOOL_SLOTS: readonly (readonly (readonly string[])[])[] =
   PS_TOOL_SECTIONS.map((section) => section.map((slot) => slot.variants));
+
+/**
+ * Whole-mask operations (`kind: "global"`), in the order the right-panel
+ * Mask Ops group lists them. Left toolbar = the tool in the user's hand;
+ * these apply to the whole mask, so they live in the right rail instead
+ * (PS_TOOLBAR_PARITY_PLAN § "Move Out Of The Left Toolbar").
+ */
+export const MASK_OPS: readonly string[] = ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"];
 
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
 export const PLANNED_TOOLS = MASK_TOOLS.filter((t) => t.status === "planned");

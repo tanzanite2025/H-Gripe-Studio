@@ -507,6 +507,7 @@ export const messages = {
   "mask.panelOptions": { en: "Tool options", zh: "工具选项" },
   "mask.panelInfo": { en: "Mask info", zh: "蒙版信息" },
   "mask.panelProperties": { en: "Properties", zh: "属性" },
+  "mask.panelMaskOps": { en: "Mask ops", zh: "蒙版操作" },
   "mask.propsEmpty": {
     en: "Select an adjustment layer to edit its parameters.",
     zh: "选择一个调整图层以编辑其参数。",

@@ -53,6 +53,7 @@ import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
 import "./maskEditModal/maskEditModal.css";
 import { MaskToolbar } from "./maskEditModal/MaskToolbar";
+import { MaskOpsPanel } from "./maskEditModal/MaskOpsPanel";
 import { MaskStage } from "./maskEditModal/MaskStage";
 import { ToolOptionsPanel } from "./maskEditModal/ToolOptionsPanel";
 import { LayersPanel } from "./maskEditModal/LayersPanel";
@@ -88,12 +89,12 @@ let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
 
 // Default right-rail dock layout, mirroring PS: a 属性-style top group
-// (tool options / properties / info) over a growing 图层 group (layers /
-// history). Users re-dock tabs by dragging; the result persists.
+// (tool options / properties / mask ops / info) over a growing 图层 group
+// (layers / history). Users re-dock tabs by dragging; the result persists.
 const DOCK_STORAGE_KEY = "hgripe.studio.maskDock.v1";
 const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
   groups: [
-    { tabs: ["options", "properties", "info"], active: "options" },
+    { tabs: ["options", "properties", "mask_ops", "info"], active: "options" },
     { tabs: ["layers", "history"], active: "layers" },
   ],
   railWidth: 240,
@@ -1059,6 +1060,11 @@ export function MaskEditModal({
                   id: "properties",
                   label: t("mask.panelProperties"),
                   content: <PropertiesPanel adjustment={activeAdjustment} patchAdjustment={patchAdjustment} />,
+                },
+                mask_ops: {
+                  id: "mask_ops",
+                  label: t("mask.panelMaskOps"),
+                  content: <MaskOpsPanel toolId={toolId} onToolClick={onToolClick} />,
                 },
                 info: {
                   id: "info",
