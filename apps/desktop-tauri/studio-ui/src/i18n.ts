@@ -602,6 +602,10 @@ export const messages = {
     zh: "浏览器预览没有编码器——请在桌面版中导出",
   },
   "export.done": { en: "exported {len}s → {path}", zh: "已导出 {len} 秒 → {path}" },
+  "export.gradedNote": {
+    en: "{n} frames graded ({backend})",
+    zh: "已调色 {n} 帧（{backend}）",
+  },
   "drawer.targetLayeredImage": { en: "layered image", zh: "分层图像" },
   "drawer.targetImageLayer": { en: "image layer", zh: "图像图层" },
 

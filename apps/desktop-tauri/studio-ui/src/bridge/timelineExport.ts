@@ -10,6 +10,10 @@ export interface TimelineExportResult {
   video_path: string;
   frame_count: number;
   duration_sec: number;
+  /** Frames graded before the encode (0 when no clip carried a doc). */
+  graded_frame_count: number;
+  /** Backend that ran the grade kernel (`cpu` / `gpu`), when frames were graded. */
+  grade_backend?: "cpu" | "gpu";
 }
 
 /**
