@@ -161,6 +161,22 @@ fn crop_view(srgb: &RgbaImage, view: ViewportView) -> RgbaImage {
     image::imageops::crop_imm(srgb, x, y, vw, vh).to_image()
 }
 
+/// Proxy decode size for a view: zoomed views decode at a higher detail so
+/// the `1/zoom` window still fills the viewport instead of upscaling a
+/// viewport-sized proxy. Zoom is quantized to powers of two so consecutive
+/// wheel ticks reuse the cached proxy, and the result is capped so a deep
+/// zoom cannot request an unbounded decode. Decoders only ever downscale, so
+/// small sources are unaffected.
+fn proxy_detail_size(size: u32, view: ViewportView) -> u32 {
+    const MAX_PROXY_DIM: u32 = 4096;
+    let zoom = view.zoom.clamp(1.0, 8.0);
+    let mut detail = size;
+    while (detail as f32) < (size as f32) * zoom && detail < MAX_PROXY_DIM {
+        detail = (detail * 2).min(MAX_PROXY_DIM);
+    }
+    detail
+}
+
 struct ViewportState {
     kind: String,
     target: Option<ViewportTarget>,
@@ -396,13 +412,14 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
                 // sRGB proxy. The proxy is cached on the viewport, so a slider
                 // drag or a pan/zoom tick re-runs only crop + kernel.
                 let doc = parse_grade_doc(grade_doc.as_ref())?;
+                let detail = proxy_detail_size(size, view);
                 let key = ProxyKey {
                     path: entry.path.clone(),
                     time_bits: None,
-                    size,
+                    size: detail,
                 };
                 let proxy = cached_proxy(id, key, || {
-                    load_image_srgb_proxy(std::path::Path::new(&entry.path), size)
+                    load_image_srgb_proxy(std::path::Path::new(&entry.path), detail)
                 })?;
                 let source = if view.is_identity() {
                     None
@@ -449,16 +466,17 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
                 // size, so grading or panning a paused frame re-runs only
                 // crop + kernel.
                 let doc = parse_grade_doc(grade_doc.as_ref())?;
+                let detail = proxy_detail_size(size, view);
                 let key = ProxyKey {
                     path: entry.path.clone(),
                     time_bits: Some(time_sec.to_bits()),
-                    size,
+                    size: detail,
                 };
                 let proxy = cached_proxy(id, key, || {
                     crate::studio::decode_video_srgb_proxy(
                         std::path::Path::new(&entry.path),
                         time_sec,
-                        size,
+                        detail,
                     )
                 })?;
                 let source = if view.is_identity() {
@@ -680,6 +698,57 @@ mod tests {
         let reset = viewport_render_frame(desc.viewport_id.clone()).expect("reset render");
         assert_eq!(reset.width, full.width);
         assert_eq!(reset.height, full.height);
+
+        viewport_destroy(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn zoomed_render_decodes_at_higher_detail() {
+        // Detail sizing: power-of-two steps toward size*zoom, capped.
+        let view = |zoom: f32| ViewportView {
+            zoom,
+            pan_x: 0.0,
+            pan_y: 0.0,
+        };
+        assert_eq!(proxy_detail_size(1280, view(1.0)), 1280);
+        assert_eq!(proxy_detail_size(1280, view(1.5)), 2560);
+        assert_eq!(proxy_detail_size(1280, view(2.0)), 2560);
+        assert_eq!(proxy_detail_size(1280, view(8.0)), 4096);
+        assert_eq!(proxy_detail_size(64, view(4.0)), 256);
+
+        // End to end: a zoomed window over a large source renders at the
+        // viewport size instead of upscaling a viewport-sized proxy.
+        let path = std::env::temp_dir().join("hgripe_viewport_zoom_detail.png");
+        image::RgbaImage::from_pixel(256, 256, image::Rgba([10, 20, 30, 255]))
+            .save(&path)
+            .expect("write test image");
+        let canonical = path.to_string_lossy().to_string();
+        let res_id = resource::id_for(&canonical);
+        resource::put(
+            &res_id,
+            resource::ResourceEntry {
+                path: canonical,
+                width: Some(256),
+                height: Some(256),
+            },
+        );
+
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::Image {
+                resource_id: res_id,
+            },
+        )
+        .expect("set target");
+
+        viewport_set_view(desc.viewport_id.clone(), 4.0, 0.0, 0.0).expect("set view");
+        let zoomed = viewport_render_frame(desc.viewport_id.clone()).expect("zoomed render");
+        // detail = 256 at 4x, so the 1/4 window is 64px — the viewport size.
+        assert_eq!(zoomed.width, 64, "zoomed window fills the viewport");
+        assert_eq!(zoomed.height, 64);
 
         viewport_destroy(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
