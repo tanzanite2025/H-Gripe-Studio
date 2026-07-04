@@ -93,8 +93,13 @@ body {
   margin-right: 0;
   padding-right: 0;
 }
-.toolbar-run-group { flex: 1 1 260px; }
-.toolbar-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-message {
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .lang-toggle { min-width: 38px; font-weight: 600; }
 .muted { color: var(--muted); }
 
@@ -934,52 +939,76 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .palette-resize:hover::after,
 .palette-resize:active::after { background: var(--accent); }
+/* Accordion cards: each category is a rounded card that expands in place;
+ * closed cards stay compact so the rail never reads as one solid column. */
 .palette-group {
   display: flex;
   flex-direction: column;
   flex: none;
   min-height: 0;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
-.palette-group.open { flex: 0 1 auto; }
+.palette-group:hover { border-color: #3a3f4e; }
+.palette-group.open {
+  flex: 0 1 auto;
+  background: rgba(91, 140, 255, 0.04);
+  border-color: rgba(91, 140, 255, 0.35);
+}
 .palette-group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   flex: none;
-  padding: 6px 8px;
+  padding: 10px 12px;
   border: 0;
-  border-radius: 6px;
   background: transparent;
   text-align: left;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
   cursor: pointer;
 }
-.palette-group-header:hover { background: var(--panel-2); color: var(--text); }
-.palette-chevron {
-  flex: none;
-  width: 0;
-  height: 0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 5px solid currentColor;
-  transition: transform 0.12s ease;
+.palette-group-header:hover { background: rgba(255, 255, 255, 0.03); }
+.palette-group-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.palette-chevron.open { transform: rotate(90deg); }
 .palette-group-count {
   margin-left: auto;
+  flex: none;
+  min-width: 18px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
   font-size: 10px;
+  font-weight: 400;
+  text-align: center;
   color: var(--muted);
 }
+.palette-group-toggle {
+  flex: none;
+  width: 18px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1;
+  text-align: center;
+  color: var(--muted);
+}
+.palette-group-header:hover .palette-group-toggle { color: var(--text); }
 .palette-group-body {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 0 4px 12px;
+  padding: 2px 8px 8px;
+  border-top: 1px solid var(--border);
 }
 .palette-item {
   display: flex;
@@ -987,11 +1016,17 @@ button:disabled { opacity: 0.6; cursor: default; }
   justify-content: space-between;
   gap: 6px;
   width: 100%;
-  min-height: 36px;
+  min-height: 34px;
   text-align: left;
-  margin-bottom: 4px;
+  margin-top: 6px;
   line-height: 1;
   cursor: grab;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+}
+.palette-item:hover {
+  background: rgba(91, 140, 255, 0.12);
+  border-color: rgba(91, 140, 255, 0.4);
 }
 .palette-item-title {
   min-width: 0;
@@ -1958,8 +1993,10 @@ select {
 textarea {
   border-radius: 18px !important;
 }
-button:not(.react-flow__controls-button),
+button:not(.react-flow__controls-button):not(.palette-group-header),
 .palette-item,
 .project-item {
   border-radius: 999px !important;
 }
+/* Accordion card headers keep the card's own rounding. */
+.palette-group-header { border-radius: 0 !important; }
