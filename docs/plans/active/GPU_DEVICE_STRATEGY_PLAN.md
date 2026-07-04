@@ -203,6 +203,13 @@ Rules:
 
 ### Step 5: Capability Probe Summary
 
+✅ (existing probes) `summarizeCapabilities` in
+`studio-ui/src/runtime/capabilitySummary.ts` flattens the engine probe report
+(CUDA devices, torch, onnxruntime providers, model cache, per-card engine
+availability) into diagnostic lines, surfaced in the Model Manager's local
+tab behind a manual "Check engines" button. wgpu adapter status and FFmpeg
+vendored/hardware status join the same summary once their probes exist.
+
 Add or refine a single capability summary that aggregates existing probes:
 
 - detected display adapters
@@ -390,7 +397,9 @@ This should be a settings surface, not a required setup wizard.
    render from the shared `DeviceReport` (label from `used`, tooltip with
    `requested -> used` + fallback reason, and a visible ⚠ marker on fallback
    instead of silently hiding it). Node-report/capability panels still pending.
-6. Add or refine capability summary as diagnostics only.
+6. ✅ (existing probes) Add or refine capability summary as diagnostics only:
+   `summarizeCapabilities` + Model Manager "Machine capability" section;
+   wgpu/FFmpeg probes still to join.
 7. ✅ Add contract tests for report behavior
    (`studio-ui/src/runtime/deviceReport.test.ts`: `auto` always yields a
    `used`, explicit `cpu` never reports `cuda`, fallback stays visible).

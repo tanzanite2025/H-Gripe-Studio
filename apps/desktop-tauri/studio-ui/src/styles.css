@@ -1771,6 +1771,9 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 4px 12px 12px;
   background: var(--panel-2);
 }
+.model-manager-capability { margin: 12px 0; }
+.model-manager-capability-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.model-manager-capability-lines li.warn code { color: var(--warn, #d9a441); }
 .model-manager-caps { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
 .model-manager-caps .snap-toggle { font-size: 11px; }
 .model-manager-form-actions { display: flex; gap: 8px; margin-top: 12px; }
