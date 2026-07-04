@@ -43,6 +43,10 @@ export interface ViewportUnderlay {
    * the first frame arrives. Stable across zoom/pan re-renders so callers
    * can keep overlay geometry in one image-pixel space. */
   dims: { w: number; h: number } | null;
+  /** The view window the presented frame was rendered for. Callers that
+   * place the frame themselves (rather than filling their stage with it)
+   * position it at this window's rect in the full frame. */
+  frameView: ViewportViewState;
   /** Backend report of the last rendered frame (fallback contract). */
   backend: ViewportBackend | null;
   /** True once the attempt finished — with a frame, or without one (browser
@@ -70,6 +74,7 @@ export function useViewportUnderlay(
   const [state, setState] = useState<ViewportUnderlay>({
     underlay: null,
     dims: null,
+    frameView: IDENTITY_VIEW,
     backend: null,
     settled: false,
   });
@@ -88,7 +93,7 @@ export function useViewportUnderlay(
   sourceRef.current = source;
 
   useEffect(() => {
-    setState({ underlay: null, dims: null, backend: null, settled: false });
+    setState({ underlay: null, dims: null, frameView: IDENTITY_VIEW, backend: null, settled: false });
     const src = sourceRef.current;
     if (src === undefined) return;
     let cancelled = false;
@@ -132,6 +137,7 @@ export function useViewportUnderlay(
       setState({
         underlay: frame.data_url,
         dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
+        frameView: initialView,
         backend: frame.backend,
         settled: true,
       });
@@ -163,6 +169,7 @@ export function useViewportUnderlay(
       setState((s) => ({
         ...s,
         underlay: frame.data_url,
+        frameView: view,
         backend: frame.backend,
         settled: true,
       }));
