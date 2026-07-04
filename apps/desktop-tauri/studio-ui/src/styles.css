@@ -1747,6 +1747,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   font-size: 12px;
 }
 .model-manager-form-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
+.inspector-advanced > summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+.inspector-advanced .field { margin-top: 8px; }
 
 /* Global form shape: text-like inputs and dropdowns use the maximum pill
    radius everywhere. Checkboxes and sliders keep their native/control-specific

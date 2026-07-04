@@ -274,8 +274,15 @@ This keeps first launch fast and prevents UI panels from causing runtime stalls.
    the `probe_model_weights` command — desktop only).
 6. ✅ Add capability-filtered selector API for cards (`apiProfilesFor` /
    `localModelsFor` / `backendsFor` / `resolveBackendRef`).
-7. Update cards to use refs from selectors instead of raw provider/model fields.
-8. Keep legacy raw fields loadable behind advanced/debug compatibility.
+7. ✅ Update cards to use refs from selectors instead of raw provider/model
+   fields (`studio-ui/src/models/BackendSelector.tsx`: capability-filtered
+   dropdown in the inspector for `generate` / `promptOptimize` (api mode) /
+   `detailRepaint`; selection stores `api_profile_ref` and mirrors legacy
+   provider/model/credentials fields so existing executors keep working).
+8. ✅ Keep legacy raw fields loadable behind advanced/debug compatibility
+   (raw provider/model/credentials params carry `advanced: true` and render
+   under an "Advanced / legacy fields" disclosure; saved workflows load
+   unchanged).
 
 ## Success Criteria
 

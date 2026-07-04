@@ -10,7 +10,8 @@ import {
   type EngineProbeReport,
 } from "../bridge/engineProbe";
 import { ParamField } from "./ParamField";
-import { ProfilePicker } from "./ProfilePicker";
+import { BackendSelector } from "../models/BackendSelector";
+import type { ModelCapability } from "../models/backendRegistry";
 import { OutputPicker } from "./OutputPicker";
 import { MediaViewer } from "./MediaViewer";
 import type { HgripeNodeData } from "./HgripeNode";
@@ -23,6 +24,18 @@ function engineProbeKind(kind: string, paramKey: string): string | null {
   if (!paramKey.endsWith(".engine")) return null;
   const row = paramKey.slice(0, -".engine".length);
   return LOWERED_CARD_ROWS[kind]?.find((def) => def.row === row)?.kind ?? null;
+}
+
+// Which manager capability a node's backend selector filters by. Selection is
+// stored as `api_profile_ref`; legacy provider/model/credentials_ref params are
+// still written alongside so the existing executors keep working (backend
+// selection contract plan, migration notes).
+function backendCapability(kind: string, params: Record<string, unknown>): ModelCapability | null {
+  if (kind === "generate")
+    return String(params.operation ?? "") === "image.edit" ? "image.edit" : "image.generate";
+  if (kind === "promptOptimize" && String(params.mode ?? "") === "api") return "prompt.rewrite";
+  if (kind === "detailRepaint") return "image.edit";
+  return null;
 }
 
 interface InspectorProps {
@@ -96,11 +109,9 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
     !p.inline &&
     (!p.visibleWhen || p.visibleWhen.in.includes(String(data.params[p.visibleWhen.param] ?? "")));
 
-  // The profile picker only makes sense where API credentials are used: always
-  // for `generate`, and for `promptOptimize` only in its `api` mode.
-  const showProfilePicker =
-    spec.kind === "generate" ||
-    (spec.kind === "promptOptimize" && String(data.params.mode ?? "") === "api");
+  const capability = backendCapability(spec.kind, data.params);
+  const normalParams = spec.params.filter((p) => isVisible(p) && !p.advanced);
+  const advancedParams = spec.params.filter((p) => isVisible(p) && p.advanced);
 
   return (
     <aside className="inspector">
@@ -114,12 +125,15 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
       </div>
       <p className="muted">{spec.description}</p>
 
-      {showProfilePicker && (
-        <ProfilePicker
+      {capability && (
+        <BackendSelector
+          capability={capability}
+          value={String(data.params.api_profile_ref ?? "")}
           onApply={(profile) => {
-            if (profile.provider) onParamChange(node.id, "provider", profile.provider);
-            if (profile.model) onParamChange(node.id, "model", profile.model);
-            onParamChange(node.id, "credentials_ref", profile.credentials_ref ?? "");
+            onParamChange(node.id, "api_profile_ref", profile.ref);
+            if (profile.provider_kind) onParamChange(node.id, "provider", profile.provider_kind);
+            if (profile.default_model) onParamChange(node.id, "model", profile.default_model);
+            onParamChange(node.id, "credentials_ref", profile.credentials_ref);
           }}
         />
       )}
@@ -135,7 +149,7 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
         </div>
       )}
 
-      {spec.params.filter(isVisible).map((p) => {
+      {normalParams.map((p) => {
         const raw = data.params[p.key];
         const onChange = (v: unknown) => onParamChange(node.id, p.key, v);
         // For the opt-in `engine` select, grey out engines the probe reports as
@@ -176,6 +190,23 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
           </label>
         );
       })}
+
+      {advancedParams.length > 0 && (
+        <details className="field inspector-advanced">
+          <summary>{t("inspector.advanced")}</summary>
+          {advancedParams.map((p) => (
+            <label key={p.key} className="field">
+              <span>{p.label}</span>
+              <ParamField
+                spec={p}
+                value={data.params[p.key]}
+                onChange={(v) => onParamChange(node.id, p.key, v)}
+              />
+              {p.hint && <small className="hint">{p.hint}</small>}
+            </label>
+          ))}
+        </details>
+      )}
 
       {data.imagePath && (
         <div className="field">
