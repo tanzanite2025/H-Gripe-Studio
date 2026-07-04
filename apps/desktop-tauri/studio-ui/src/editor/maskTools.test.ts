@@ -10,6 +10,7 @@ import {
   PS_TOOL_SECTIONS,
   READY_TOOLS,
   maskTool,
+  psSlotOf,
   shapeVertices,
   toolTargets,
 } from "./maskTools";
@@ -84,6 +85,14 @@ describe("mask tool registry", () => {
     expect([...MASK_OPS].sort()).toEqual(globals.sort());
     const slotted = new Set(MASK_TOOL_SLOTS.flat(2));
     for (const id of MASK_OPS) expect(slotted.has(id), id).toBe(false);
+  });
+
+  it("resolves each canvas tool to its owning PS slot", () => {
+    expect(psSlotOf("brush")?.id).toBe("brush");
+    expect(psSlotOf("pencil")?.id).toBe("brush");
+    expect(psSlotOf("wand")?.id).toBe("selection");
+    expect(psSlotOf("ellipse")?.id).toBe("marquee");
+    expect(psSlotOf("invert")).toBeUndefined(); // mask op, not a toolbar tool
   });
 
   it("the default tool is ready and selectable", () => {
