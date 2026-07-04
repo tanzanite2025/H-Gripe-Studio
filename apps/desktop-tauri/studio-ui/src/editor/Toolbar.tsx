@@ -72,9 +72,11 @@ export interface ToolbarProps {
 }
 
 /**
- * The editor's top toolbar: a calm title/search/status row, followed by grouped
- * command clusters. The OS keeps the native window chrome; this toolbar is app
- * navigation and workflow control only.
+ * The editor's top toolbar (multi-canvas workspace plan, Phase 1): a global
+ * row (document name, search, status, language) over grouped command
+ * clusters. The OS window chrome already carries the app brand, so the
+ * toolbar does not repeat it, and the language switch lives in the global
+ * row — it is not a canvas editing operation.
  */
 export function Toolbar({
   issues,
@@ -129,9 +131,13 @@ export function Toolbar({
   return (
     <header className="toolbar">
       <div className="toolbar-title-row">
-        <div className="toolbar-brand">
-          <strong>H-Gripe Studio</strong>
-          <span className="muted">{t("brand.subtitle")}</span>
+        <div className="toolbar-document">
+          {isDesktop && (
+            <span className="muted current-file" title={currentFile ?? t("status.untitledTitle")}>
+              {currentFile ? baseName(currentFile) : t("status.untitled")}
+              {fileDirty ? " *" : ""}
+            </span>
+          )}
         </div>
 
         <div className="toolbar-search">
@@ -144,23 +150,17 @@ export function Toolbar({
               ! {issues.length} {issues.length > 1 ? t("issues.many") : t("issues.one")}
             </span>
           )}
-          {isDesktop && (
-            <span className="muted current-file" title={currentFile ?? t("status.untitledTitle")}>
-              {currentFile ? baseName(currentFile) : t("status.untitled")}
-              {fileDirty ? " *" : ""}
-            </span>
-          )}
           <span className="muted autosave" title={t("status.autosaveTitle")}>
             {saved ? t("status.autosaved") : t("status.saving")}
           </span>
+          <button onClick={onToggleLang} title={t("label.langTitle")} className="lang-toggle">
+            {t("label.lang")}
+          </button>
         </div>
       </div>
 
       <div className="toolbar-action-row">
         <div className="toolbar-group">
-          <button onClick={onToggleLang} title={t("label.langTitle")} className="lang-toggle">
-            {t("label.lang")}
-          </button>
           <button onClick={onUndo} disabled={!canUndo} title={t("btn.undoTitle")}>
             {t("btn.undo")}
           </button>

@@ -61,8 +61,8 @@ export function ProjectPanel({
     <aside className="project-panel">
       <div className="project-head">
         <h2>Project</h2>
-        <button className="project-new" onClick={onNew} title="start a new, empty workflow">
-          New
+        <button className="project-new" onClick={onNew} title="start a new, empty canvas — the saved file is untouched">
+          New Canvas
         </button>
       </div>
 
