@@ -1,7 +1,13 @@
 # Photoshop Toolbar Parity Plan
 
-> Status: planning only. The goal is to preserve Photoshop muscle memory while
-> allowing H-Gripe Studio to use its own visual style and AI/workflow extensions.
+> Status: implemented. All steps of the implementation order below are done:
+> the registry is PS slot objects with planned variants, whole-mask operations
+> live in the right-panel Mask Ops group, shortcuts are slot-owned (the letter
+> selects the slot's last-used face; Shift+M cycles the marquee variants),
+> flyout rows show the slot letter, tool options are contextual per tool kind,
+> and registry tests pin slot coverage plus the PS shortcut map. The goal is to
+> preserve Photoshop muscle memory while allowing H-Gripe Studio to use its own
+> visual style and AI/workflow extensions.
 
 ## Principle
 
