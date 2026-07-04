@@ -143,6 +143,8 @@ export interface StudioRunController {
   runCard: (nodeId: string) => Promise<void>;
   /** Run the selected nodes plus their upstream dependencies. */
   runSelection: (nodeIds: string[]) => Promise<void>;
+  /** Run exactly the selected nodes, warning about cut-away inputs. */
+  runSelectionOnly: (nodeIds: string[]) => Promise<void>;
   /** Run `nodeId` and everything downstream of it (explicit downstream run). */
   runNodeDownstream: (nodeId: string) => Promise<void>;
   /** Run the graph once per item of the (first) batch node. */
@@ -624,6 +626,12 @@ export function useStudioRunController({
     [runScope],
   );
 
+  const runSelectionOnly = useCallback(
+    (nodeIds: string[]) =>
+      runScope({ kind: "selection_only", canvasId: ACTIVE_CANVAS, nodeIds }),
+    [runScope],
+  );
+
   // Downstream never runs implicitly (it may hold API generation / export /
   // expensive inference) — this is the explicit "Run downstream" entry point.
   const runNodeDownstream = useCallback(
@@ -898,6 +906,7 @@ export function useStudioRunController({
     runCardRow,
     runCard,
     runSelection,
+    runSelectionOnly,
     runNodeDownstream,
     runBatch,
     runProject,

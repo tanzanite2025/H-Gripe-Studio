@@ -193,7 +193,85 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 .workspace { flex: 1; display: flex; min-height: 0; }
 .canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.canvas-flow { flex: 1; min-height: 0; }
+.canvas-flow { flex: 1; min-height: 0; position: relative; }
+
+/* Canvas run HUD: application-level execution capsule floating over the canvas
+ * viewport. It never pans/zooms with the graph — it is chrome, not a node. */
+.run-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  max-width: min(560px, calc(100% - 24px));
+}
+.run-hud-bar,
+.run-hud-confirm {
+  pointer-events: auto;
+  background: rgba(24, 26, 33, 0.94);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+}
+.run-hud-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.run-hud-run { border-radius: 999px; padding: 6px 14px; gap: 6px; font-weight: 600; }
+.run-hud-play-icon {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+.run-hud-scope { display: inline-flex; align-items: center; gap: 6px; }
+.run-hud-scope select {
+  background: #232633;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.run-hud-count { white-space: nowrap; }
+.run-hud-confirm {
+  width: 100%;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.run-hud-confirm-title { font-weight: 600; }
+.run-hud-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.run-hud-confirm-group { display: flex; gap: 8px; align-items: baseline; }
+.run-hud-confirm-cat { color: var(--muted); flex: none; min-width: 72px; }
+.run-hud-confirm-nodes { min-width: 0; overflow-wrap: anywhere; }
+.run-hud-confirm-warning { color: var(--running); }
+.run-hud-confirm-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.run-hud-confirm-actions { display: inline-flex; gap: 8px; }
 
 /* run log (beneath the canvas) */
 .run-log {

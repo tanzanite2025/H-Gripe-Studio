@@ -93,6 +93,22 @@ export const messages = {
     zh: "运行所选节点及其上游依赖",
   },
 
+  // Canvas run HUD (floating execution capsule over the canvas viewport)
+  "hud.scope": { en: "Scope", zh: "范围" },
+  "hud.scopeFullCanvas": { en: "Full canvas", zh: "全画布" },
+  "hud.scopeSelection": { en: "Selection + upstream", zh: "所选及上游" },
+  "hud.scopeSelectionOnly": { en: "Selection only", zh: "仅所选" },
+  "hud.willRun": { en: "will run {count} node(s)", zh: "将运行 {count} 个节点" },
+  "hud.confirmTitle": { en: "This run will execute:", zh: "本次将运行：" },
+  "hud.totalNodes": { en: "{count} node(s) total", zh: "共 {count} 个节点" },
+  "hud.runSelectedOnly": { en: "Run selected ({count})", zh: "只运行所选（{count}）" },
+  "hud.nothingToRun": { en: "nothing to run in this scope", zh: "该范围内没有可运行的节点" },
+  "hud.blockedByIssues": {
+    en: "fix {count} validation issue(s) before running",
+    zh: "运行前请先修复 {count} 个校验问题",
+  },
+  "hud.catInternal": { en: "Internal", zh: "内部" },
+
   "label.snap": { en: "Snap", zh: "吸附" },
   "label.snapTitle": {
     en: "snap node positions to a 16px grid while dragging",

@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 
 import { FlowCanvas, type EdgeStyle } from "./editor/FlowCanvas";
+import { RunHud, type RunHudScope } from "./editor/RunHud";
 import { Inspector } from "./editor/Inspector";
 import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
@@ -990,6 +991,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     runCardRow,
     runCard,
     runSelection,
+    runSelectionOnly,
     runNodeDownstream,
     runBatch,
     runProject,
@@ -1034,9 +1036,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     () => nodes.filter((n) => n.selected).map((n) => n.id),
     [nodes],
   );
-  const runSelected = useCallback(
-    () => void runSelection(selectedNodeIds),
-    [runSelection, selectedNodeIds],
+  // Canvas run HUD: map the HUD's scope choice onto the run controller's
+  // scoped entry points (full canvas / selection + upstream / selection only).
+  const runHudScope = useCallback(
+    (scope: RunHudScope) => {
+      if (scope === "selection_with_upstream") void runSelection(selectedNodeIds);
+      else if (scope === "selection_only") void runSelectionOnly(selectedNodeIds);
+      else void run();
+    },
+    [run, runSelection, runSelectionOnly, selectedNodeIds],
   );
 
   // Right-click context menu: open state + item list built from the editing
@@ -1280,15 +1288,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onTidyLayout={tidyLayout}
         showMinimap={showMinimap}
         setShowMinimap={setShowMinimap}
-        running={running}
-        canCancel={canCancel}
-        onRun={run}
-        onCancelRun={cancelRun}
-        hasBatch={hasBatch}
-        batchCount={batchCount}
-        onRunBatch={runBatch}
-        selectedCount={selectedNodeIds.length}
-        onRunSelected={runSelected}
       />
 
       <CanvasTabs
@@ -1368,6 +1367,19 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 showMinimap={showMinimap}
                 onNodeContextMenu={openNodeMenu}
                 onPaneContextMenu={openPaneMenu}
+              />
+              <RunHud
+                nodes={nodes}
+                edges={edges}
+                running={running}
+                canCancel={canCancel}
+                issueCount={issues.length}
+                selectedNodeIds={selectedNodeIds}
+                onRunScope={runHudScope}
+                onCancelRun={cancelRun}
+                hasBatch={hasBatch}
+                batchCount={batchCount}
+                onRunBatch={() => void runBatch()}
               />
             </div>
             {showLog && (

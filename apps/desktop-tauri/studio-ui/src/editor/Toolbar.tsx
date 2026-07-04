@@ -77,19 +77,6 @@ export interface ToolbarProps {
   onTidyLayout: () => void;
   showMinimap: boolean;
   setShowMinimap: Dispatch<SetStateAction<boolean>>;
-
-  // Run
-  running: boolean;
-  canCancel: boolean;
-  onRun: () => void;
-  onCancelRun: () => void;
-  hasBatch: boolean;
-  batchCount: number;
-  onRunBatch: () => void;
-  /** Number of currently selected nodes (enables the selection run command). */
-  selectedCount: number;
-  /** Run the selected nodes plus their upstream dependencies. */
-  onRunSelected: () => void;
 }
 
 /**
@@ -136,15 +123,6 @@ export function Toolbar({
   onTidyLayout,
   showMinimap,
   setShowMinimap,
-  running,
-  canCancel,
-  onRun,
-  onCancelRun,
-  hasBatch,
-  batchCount,
-  onRunBatch,
-  selectedCount,
-  onRunSelected,
 }: ToolbarProps) {
   const t = useT();
 
@@ -261,32 +239,6 @@ export function Toolbar({
         </div>
 
         <div className="toolbar-group toolbar-run-group">
-          <button className="primary" onClick={onRun} disabled={running || issues.length > 0} title={t("btn.runTitle")}>
-            {running ? t("btn.running") : t("btn.run")}
-          </button>
-          {selectedCount > 0 && (
-            <button
-              onClick={onRunSelected}
-              disabled={running || issues.length > 0}
-              title={t("btn.runSelectedTitle")}
-            >
-              {t("btn.runSelected")} ({selectedCount})
-            </button>
-          )}
-          {canCancel && (
-            <button onClick={onCancelRun} title={t("btn.cancelTitle")}>
-              {t("btn.cancel")}
-            </button>
-          )}
-          {hasBatch && (
-            <button
-              onClick={onRunBatch}
-              disabled={running || issues.length > 0 || batchCount === 0}
-              title={t("btn.runBatchTitle")}
-            >
-              {t("btn.run")} x{batchCount}
-            </button>
-          )}
           <span className="muted toolbar-message">{message}</span>
         </div>
       </div>
