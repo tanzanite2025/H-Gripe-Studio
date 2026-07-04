@@ -40,6 +40,9 @@ export interface GradePanelProps {
    */
   videoPath?: string | null;
   videoTimestampSec?: number;
+  /** When grading a node's output: present it as a `node_output` reference
+   * target of this node instead of a plain image resource. */
+  nodeId?: string | null;
   /** The target's current grade doc (JSON string), if any. */
   initialDoc?: string | null;
   onCommit: (commit: GradeCommit) => void;
@@ -168,6 +171,7 @@ export function GradePanel({
   imagePath,
   videoPath,
   videoTimestampSec = 0,
+  nodeId,
   initialDoc,
   onCommit,
   applyLabelKey,
@@ -190,7 +194,7 @@ export function GradePanel({
   // Phase 3): the target (still image, or one decoded video frame) is a
   // reference; doc changes flow as viewport state. Null outside Tauri — the
   // mirror fallback stays.
-  const renderGraded = useGradeViewport({ imagePath, videoPath, videoTimestampSec });
+  const renderGraded = useGradeViewport({ imagePath, videoPath, videoTimestampSec, nodeId });
 
   useEffect(() => {
     let cancelled = false;
