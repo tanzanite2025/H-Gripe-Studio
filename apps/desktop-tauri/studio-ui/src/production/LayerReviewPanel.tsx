@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useT } from "../i18n";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
 import type { LayerCandidate, LayeredImageAsset } from "./layeredImage";
 
 export interface LayerReviewPanelProps {
@@ -49,16 +50,59 @@ function LayerPreview({ asset, layer }: { asset: LayeredImageAsset; layer: Layer
       ? layer.mask.path
       : layer.rgba?.path ?? layer.mask.path
     : asset.preview_composite.path;
-  const { underlay, settled } = useViewportUnderlay("image_edit", path, 320);
+  // Zoom/pan is viewport state, shared across layer/mask flips so an
+  // inspected region stays framed while comparing candidates.
+  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const { underlay, settled } = useViewportUnderlay("image_edit", path, 320, view);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!underlay) return;
+    const rect = stageRef.current?.getBoundingClientRect();
+    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
+  };
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (view.zoom <= 1) return;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    const stage = stageRef.current;
+    if (!drag || !stage) return;
+    const rect = stage.getBoundingClientRect();
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    setView((v) => panView(v, dx, dy, rect.width, rect.height));
+  };
+  const handlePointerUp = () => {
+    dragRef.current = null;
+  };
 
   return (
     <div className="layer-review-preview">
-      <div className="layer-review-preview-stage" title={path}>
+      <div
+        className="layer-review-preview-stage"
+        title={path}
+        ref={stageRef}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onDoubleClick={() => setView(IDENTITY_VIEW)}
+        style={view.zoom > 1 ? { cursor: dragRef.current ? "grabbing" : "grab" } : undefined}
+      >
         {underlay ? (
           <img
             className="layer-review-preview-img"
             src={underlay}
             alt={layer?.name ?? "composite"}
+            draggable={false}
           />
         ) : (
           <span className="layer-review-preview-empty">
@@ -74,6 +118,7 @@ function LayerPreview({ asset, layer }: { asset: LayeredImageAsset; layer: Layer
           aria-pressed={showMask}
         >
           {showMask ? t("layers.previewMask") : t("layers.previewLayer")}
+          {view.zoom > 1 ? <span className="muted"> · {Math.round(view.zoom * 100)}%</span> : null}
         </button>
       ) : null}
     </div>
