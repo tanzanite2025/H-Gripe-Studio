@@ -30,6 +30,10 @@ export class WgpuViewportHost {
   private viewportId: string | null;
   readonly kind: ViewportKind;
   readonly backend: ViewportBackend;
+  /** Object URLs of recent frames (desktop binary transport). The last two
+   * stay alive — the newest is presented and the previous may still be the
+   * committed `<img>` src until the caller re-renders — older ones revoke. */
+  private frameUrls: string[] = [];
 
   private constructor(viewportId: string, kind: ViewportKind, backend: ViewportBackend) {
     this.viewportId = viewportId;
@@ -70,7 +74,14 @@ export class WgpuViewportHost {
   }
 
   async renderFrame(): Promise<ViewportFrame> {
-    return renderViewportFrame(this.id());
+    const frame = await renderViewportFrame(this.id());
+    if (frame.data_url.startsWith("blob:")) {
+      this.frameUrls.push(frame.data_url);
+      while (this.frameUrls.length > 2) {
+        URL.revokeObjectURL(this.frameUrls.shift() as string);
+      }
+    }
+    return frame;
   }
 
   /** Destroy the underlying viewport. Safe to call more than once. */
@@ -78,6 +89,7 @@ export class WgpuViewportHost {
     if (this.viewportId === null) return;
     const id = this.viewportId;
     this.viewportId = null;
+    for (const url of this.frameUrls.splice(0)) URL.revokeObjectURL(url);
     await destroyViewport(id);
   }
 }
