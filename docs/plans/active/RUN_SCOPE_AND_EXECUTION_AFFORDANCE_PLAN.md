@@ -433,10 +433,22 @@ They should not be required for:
    warning is logged when the row has no wired input). Every paired semantic
    row on an integrated card shows a hover run button (`NodeCardShell`
    `onRunRow` → `runCardRow` on the run controller / editing context).
-4. Reuse existing backend ref validation for row/card scoped runs.
-5. Add card-level run for integrated cards.
-6. Add toolbar/context menu commands for selection run.
-7. Add explicit downstream run.
+4. ✅ Reuse existing backend ref validation for row/card scoped runs: every
+   scoped run already flows through the shared `runScope` pipeline (and so
+   through `validateBackendRefs`); `card_row` runs additionally pass a
+   `rowFilter` so only the running row's bindings are checked — the other
+   rows of the card do not execute, so their refs are irrelevant.
+5. ✅ Add card-level run for integrated cards: `runCard` on the run
+   controller / editing context (RunScope `card` — the card's wired rows plus
+   upstream), surfaced as a ▶ button in the card header of integrated cards
+   next to the status dot.
+6. ✅ Add toolbar/context menu commands for selection run: the toolbar run
+   group shows "Run selected (n)" whenever nodes are selected
+   (`selection_with_upstream`), and the node context menu gained "Run to
+   here" / "Run card" (integrated cards only).
+7. ✅ Add explicit downstream run: "Run downstream" in the node context menu
+   (`runNodeDownstream` → RunScope `node_downstream`); downstream still never
+   runs implicitly from any other affordance.
 8. Add clear run reports showing scope, executed nodes/rows, skipped rows, and
    backend/device reports.
 9. Only then revisit execution zones or execution nodes.

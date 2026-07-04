@@ -141,7 +141,16 @@ function checkRef(
 export function validateBackendRefs(
   graph: WorkflowGraph,
   registry: BackendRegistry,
+  opts?: {
+    /**
+     * When set, row bindings of this card are checked only for this row
+     * (RunScope `card_row`: other rows do not execute, so their refs are
+     * irrelevant to the run).
+     */
+    rowFilter?: { nodeId: string; rowId: string };
+  },
 ): BackendRefIssue[] {
+  const rowFilter = opts?.rowFilter;
   const issues: BackendRefIssue[] = [];
   for (const node of graph.nodes) {
     const spec = nodeSpec(node.kind);
@@ -157,6 +166,12 @@ export function validateBackendRefs(
       push(checkRef(registry, "local", String(node.params.local_model_ref ?? ""), localCap));
 
     for (const binding of ROW_BACKEND_BINDINGS[node.kind] ?? []) {
+      if (
+        rowFilter &&
+        node.id === rowFilter.nodeId &&
+        !binding.paramKey.startsWith(`${rowFilter.rowId}.`)
+      )
+        continue;
       if (!rowBindingActive(binding, node.kind, node.params)) continue;
       push(
         checkRef(

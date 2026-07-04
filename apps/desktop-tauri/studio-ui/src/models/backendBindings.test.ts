@@ -91,4 +91,22 @@ describe("validateBackendRefs", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toContain('"gone"');
   });
+
+  it("checks only the running row's bindings when a rowFilter is given", () => {
+    // Both the enhance and mask rows carry dangling refs; a card_row-scoped
+    // run of "enhance" must flag only the enhance binding.
+    const g = graph([
+      {
+        id: "card",
+        kind: "imageProcessing",
+        params: { "enhance.local_model_ref": "gone", "mask.local_model_ref": "also-gone" },
+      },
+    ]);
+    expect(validateBackendRefs(g, registry)).toHaveLength(2);
+    const issues = validateBackendRefs(g, registry, {
+      rowFilter: { nodeId: "card", rowId: "enhance" },
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('"gone"');
+  });
 });

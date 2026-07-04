@@ -90,6 +90,10 @@ export interface ToolbarProps {
   hasBatch: boolean;
   batchCount: number;
   onRunBatch: () => void;
+  /** Number of currently selected nodes (enables the selection run command). */
+  selectedCount: number;
+  /** Run the selected nodes plus their upstream dependencies. */
+  onRunSelected: () => void;
 }
 
 /**
@@ -146,6 +150,8 @@ export function Toolbar({
   hasBatch,
   batchCount,
   onRunBatch,
+  selectedCount,
+  onRunSelected,
 }: ToolbarProps) {
   const t = useT();
 
@@ -278,6 +284,15 @@ export function Toolbar({
           <button className="primary" onClick={onRun} disabled={running || issues.length > 0} title={t("btn.runTitle")}>
             {running ? t("btn.running") : t("btn.run")}
           </button>
+          {selectedCount > 0 && (
+            <button
+              onClick={onRunSelected}
+              disabled={running || issues.length > 0}
+              title={t("btn.runSelectedTitle")}
+            >
+              {t("btn.runSelected")} ({selectedCount})
+            </button>
+          )}
           {canCancel && (
             <button onClick={onCancelRun} title={t("btn.cancelTitle")}>
               {t("btn.cancel")}

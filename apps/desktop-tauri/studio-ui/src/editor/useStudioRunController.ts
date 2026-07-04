@@ -137,6 +137,12 @@ export interface StudioRunController {
   runScope: (scope: RunScope) => Promise<void>;
   /** Run one semantic row of an integrated card (its input chain only). */
   runCardRow: (nodeId: string, rowId: string) => Promise<void>;
+  /** Run an integrated card (its wired rows) plus its upstream chain. */
+  runCard: (nodeId: string) => Promise<void>;
+  /** Run the selected nodes plus their upstream dependencies. */
+  runSelection: (nodeIds: string[]) => Promise<void>;
+  /** Run `nodeId` and everything downstream of it (explicit downstream run). */
+  runNodeDownstream: (nodeId: string) => Promise<void>;
   /** Run the graph once per item of the (first) batch node. */
   runBatch: () => Promise<void>;
   /** Project-level batch: run every open canvas's graph sequentially. */
@@ -429,13 +435,16 @@ export function useStudioRunController({
   // the run log before executing, so users do not have to wait for a mid-run
   // failure to find them.
   const warnPsdChain = useCallback(
-    async (graph: WorkflowGraph) => {
+    async (graph: WorkflowGraph, scope?: RunScope) => {
       for (const w of validatePsdChain(graph)) pushLog("warn", `⚠ ${w.node}: ${w.message}`);
       // Backend selection contract, step 8: a stored api_profile_ref /
       // local_model_ref must exist in the manager and declare the capability
       // its selector filters by. Warnings only — executors keep their own
-      // fallback behavior.
-      for (const w of validateBackendRefs(graph, loadRegistry()))
+      // fallback behavior. Row-scoped runs check only the running row's
+      // bindings — the other rows of the card do not execute.
+      const rowFilter =
+        scope?.kind === "card_row" ? { nodeId: scope.nodeId, rowId: scope.rowId } : undefined;
+      for (const w of validateBackendRefs(graph, loadRegistry(), { rowFilter }))
         pushLog("warn", `⚠ ${w.node}: ${w.message}`);
       // Beyond the syntactic checks above, confirm against the real files on
       // disk. This needs the Python/psd-tools backend, so it is desktop-only;
@@ -500,7 +509,7 @@ export function useStudioRunController({
       const resolved = resolveRunScope(full, scope);
       for (const warning of resolved.warnings) pushLog("warn", `⚠ ${warning}`);
       const authored = resolved.graph;
-      await warnPsdChain(authored);
+      await warnPsdChain(authored, scope);
       const { graph, origin } = lowerWorkflowGraph(authored);
       loweredOrigin.current = origin;
       if (useRustBackend) {
@@ -580,6 +589,24 @@ export function useStudioRunController({
   const runCardRow = useCallback(
     (nodeId: string, rowId: string) =>
       runScope({ kind: "card_row", canvasId: ACTIVE_CANVAS, nodeId, rowId }),
+    [runScope],
+  );
+
+  const runCard = useCallback(
+    (nodeId: string) => runScope({ kind: "card", canvasId: ACTIVE_CANVAS, nodeId }),
+    [runScope],
+  );
+
+  const runSelection = useCallback(
+    (nodeIds: string[]) =>
+      runScope({ kind: "selection_with_upstream", canvasId: ACTIVE_CANVAS, nodeIds }),
+    [runScope],
+  );
+
+  // Downstream never runs implicitly (it may hold API generation / export /
+  // expensive inference) — this is the explicit "Run downstream" entry point.
+  const runNodeDownstream = useCallback(
+    (nodeId: string) => runScope({ kind: "node_downstream", canvasId: ACTIVE_CANVAS, nodeId }),
     [runScope],
   );
 
@@ -848,6 +875,9 @@ export function useStudioRunController({
     runUpToNode,
     runScope,
     runCardRow,
+    runCard,
+    runSelection,
+    runNodeDownstream,
     runBatch,
     runProject,
     cancelRun,

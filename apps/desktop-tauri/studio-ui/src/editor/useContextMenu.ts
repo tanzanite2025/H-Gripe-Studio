@@ -8,6 +8,7 @@ import type { Edge, Node } from "@xyflow/react";
 import type { MenuItem } from "./ContextMenu";
 import type { Clip } from "./clipboard";
 import type { HgripeNodeData } from "./HgripeNode";
+import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import { useT } from "../i18n";
 
 export interface UseContextMenuArgs {
@@ -25,6 +26,12 @@ export interface UseContextMenuArgs {
   deleteNode: (id: string) => void;
   tidyLayout: () => void;
   pasteClipboard: () => void;
+  /** Run the node + its upstream chain (RunScope `node_upstream`). */
+  runUpToNode?: (nodeId: string) => void;
+  /** Run an integrated card + upstream (RunScope `card`). */
+  runCard?: (nodeId: string) => void;
+  /** Run the node and everything downstream of it (RunScope `node_downstream`). */
+  runNodeDownstream?: (nodeId: string) => void;
 }
 
 export function useContextMenu({
@@ -38,6 +45,9 @@ export function useContextMenu({
   deleteNode,
   tidyLayout,
   pasteClipboard,
+  runUpToNode,
+  runCard,
+  runNodeDownstream,
 }: UseContextMenuArgs) {
   const t = useT();
   const [menu, setMenu] = useState<{ x: number; y: number; nodeId: string | null } | null>(null);
@@ -60,6 +70,15 @@ export function useContextMenu({
       const connected = edges.some((e) => e.source === id || e.target === id);
       const kind = (nodes.find((n) => n.id === id)?.data as HgripeNodeData | undefined)?.kind;
       const items: MenuItem[] = [];
+      // Scoped run commands (RUN_SCOPE_AND_EXECUTION_AFFORDANCE_PLAN, "Context
+      // Menu"): run-to-here on every node, run-card on integrated cards, and
+      // the explicit downstream run (downstream never runs implicitly).
+      if (runUpToNode)
+        items.push({ label: t("menu.runToHere"), onClick: () => runUpToNode(id) });
+      if (runCard && kind && kind in LOWERED_CARD_ROWS)
+        items.push({ label: t("menu.runCard"), onClick: () => runCard(id) });
+      if (runNodeDownstream)
+        items.push({ label: t("menu.runDownstream"), onClick: () => runNodeDownstream(id) });
       // Auto (computed) entries: image cards spawn a bound compute node and run
       // it straight away — no editor. Each is purely algorithm-derived from the
       // single input image (the manual / human-spatial lanes live on the card's
@@ -99,6 +118,9 @@ export function useContextMenu({
     fitView,
     pasteClipboard,
     clipboard,
+    runUpToNode,
+    runCard,
+    runNodeDownstream,
   ]);
 
   return { menu, menuItems, openNodeMenu, openPaneMenu, closeMenu };
