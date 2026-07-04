@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { registerResource } from "../bridge/files";
 import type { ViewportFrame } from "../bridge/viewport";
+import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 /** What the grading dialog points its viewport at: a still image, or one
@@ -18,21 +19,11 @@ export interface GradeViewportTarget {
   videoTimestampSec?: number;
 }
 
-/** Normalized viewport view: `zoom >= 1`, pan places the window's top-left. */
-export interface GradeViewportView {
-  zoom: number;
-  panX: number;
-  panY: number;
-}
-
-/** The identity view: full frame, no pan. */
-export const IDENTITY_VIEW: GradeViewportView = { zoom: 1, panX: 0, panY: 0 };
-
 interface OpenGradeViewport {
   host: WgpuViewportHost;
   resourceId: string;
   /** Last view sent to the host, to skip no-op `set_view` commands. */
-  view: GradeViewportView;
+  view: ViewportViewState;
 }
 
 /**
@@ -44,7 +35,7 @@ interface OpenGradeViewport {
 export function useGradeViewport(
   target: GradeViewportTarget,
   size = 1280,
-): (doc: unknown, view?: GradeViewportView) => Promise<ViewportFrame | null> {
+): (doc: unknown, view?: ViewportViewState) => Promise<ViewportFrame | null> {
   const { imagePath, videoPath, videoTimestampSec = 0 } = target;
   const path = videoPath ?? imagePath ?? undefined;
   const isVideo = Boolean(videoPath);
@@ -62,7 +53,7 @@ export function useGradeViewport(
   }, [path, isVideo, size]);
 
   return useCallback(
-    async (doc: unknown, view?: GradeViewportView): Promise<ViewportFrame | null> => {
+    async (doc: unknown, view?: ViewportViewState): Promise<ViewportFrame | null> => {
       if (!path) return null;
       if (!hostRef.current) {
         hostRef.current = (async () => {

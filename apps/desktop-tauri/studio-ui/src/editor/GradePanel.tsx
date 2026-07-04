@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
-import {
-  IDENTITY_VIEW,
-  useGradeViewport,
-  type GradeViewportView,
-} from "../viewport/useGradeViewport";
+import { useGradeViewport } from "../viewport/useGradeViewport";
+import { IDENTITY_VIEW, panView, zoomView, type ViewportViewState } from "../viewport/view";
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
@@ -140,27 +137,6 @@ function docFromOps(ops: GradeOp[]): GradeDoc {
 /** Identity document: grading it renders the ungraded base frame. */
 const EMPTY_DOC: GradeDoc = docFromOps([]);
 
-const MAX_PREVIEW_ZOOM = 8;
-
-/** Clamp pan so the `1/zoom`-sized window stays inside the frame. */
-function clampView(view: GradeViewportView): GradeViewportView {
-  const zoom = Math.min(Math.max(view.zoom, 1), MAX_PREVIEW_ZOOM);
-  const max = 1 - 1 / zoom;
-  return {
-    zoom,
-    panX: Math.min(Math.max(view.panX, 0), max),
-    panY: Math.min(Math.max(view.panY, 0), max),
-  };
-}
-
-/** Zoom by `factor` keeping the window's center fixed. */
-function zoomView(view: GradeViewportView, factor: number): GradeViewportView {
-  const zoom = Math.min(Math.max(view.zoom * factor, 1), MAX_PREVIEW_ZOOM);
-  const centerX = view.panX + 0.5 / view.zoom;
-  const centerY = view.panY + 0.5 / view.zoom;
-  return clampView({ zoom, panX: centerX - 0.5 / zoom, panY: centerY - 0.5 / zoom });
-}
-
 // Run the TS mirror over a data-URL underlay: decode to canvas pixels, grade
 // the f32 sRGB surface in place, re-encode. The browser-preview / error path.
 async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<string | null> {
@@ -206,7 +182,7 @@ export function GradePanel({
   // Preview zoom/pan is viewport state (Phase 3): the host crops its cached
   // source proxy, so wheel/drag ticks re-run only crop + kernel. Identity
   // outside Tauri, where the mirror fallback shows the full frame.
-  const [view, setView] = useState<GradeViewportView>(IDENTITY_VIEW);
+  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const cubeInputRef = useRef<HTMLInputElement | null>(null);
@@ -533,17 +509,10 @@ export function GradePanel({
     const stage = stageRef.current;
     if (!from || !stage) return;
     const rect = stage.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
     const dx = e.clientX - from.x;
     const dy = e.clientY - from.y;
     dragRef.current = { x: e.clientX, y: e.clientY };
-    setView((v) =>
-      clampView({
-        zoom: v.zoom,
-        panX: v.panX - dx / rect.width / v.zoom,
-        panY: v.panY - dy / rect.height / v.zoom,
-      }),
-    );
+    setView((v) => panView(v, dx, dy, rect.width, rect.height));
   };
   const handlePointerUp = () => {
     dragRef.current = null;
