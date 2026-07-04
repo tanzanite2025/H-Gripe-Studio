@@ -20,7 +20,10 @@ Implemented (PRs #329-379):
   `image_edit` viewports by resource reference; zoom/pan is viewport state
   with shared view math (`viewport/view.ts`) and a shared interaction hook
   (`viewport/useViewControls.ts`); zoomed views decode the source proxy at
-  higher detail. Remaining: mask overlay and brush preview still render in a
+  higher detail. The mask editor's underlay now presents as the viewport's
+  rendered view window placed at its rect in the document frame, so its
+  detail follows the canvas zoom too (the recorded pixel space is
+  unchanged). Remaining: mask overlay and brush preview still render in a
   2D canvas (see below).
 - Phase 3 (grade preview): complete. Image and video-frame grading share the
   `hgripe-grade` kernel through `grade_preview` viewports; GPU with CPU
@@ -65,11 +68,12 @@ Remaining work, roughly in priority order:
    data URLs into an `<img>`. Replace with a real WGPU surface/texture swap
    on desktop (readback only when needed); the host command protocol already
    isolates callers from this change.
-2. Mask editor presentation: `MaskEditModal` paints underlay + mask overlay +
-   brush preview in a 2D canvas with CSS-transform zoom; the underlay decodes
-   at fixed detail, so deep zoom is soft. Move overlay/brush presentation to
-   the viewport and tie underlay detail to canvas zoom without changing the
-   recorded pixel space.
+2. Mask editor presentation: underlay detail now follows canvas zoom — the
+   modal requests the visible window (`viewWindow`) from the viewport host
+   and places the rendered frame at the window's rect under the edit canvas
+   (rotated views keep the full frame; the recorded pixel space is
+   unchanged). Remaining: mask overlay + brush preview still paint in the
+   2D canvas at document resolution; move them to the viewport.
 3. Remaining target wiring: the node-card grade modal, the mask/crop editors
    and the media source's unified editor now all preview through `node_output`
    targets (like the drawer Grade tab), so the selection-target model is

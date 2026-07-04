@@ -42,12 +42,17 @@ describe("useViewportUnderlay view state", () => {
     );
     await waitFor(() => expect(result.current.dims).toEqual({ w: 640, h: 640 }));
 
+    expect(result.current.frameView).toEqual(IDENTITY_VIEW);
+
+    const zoomed: ViewportViewState = { zoom: 2, panX: 0.25, panY: 0.25 };
     await act(async () => {
-      rerender({ view: { zoom: 2, panX: 0.25, panY: 0.25 } });
+      rerender({ view: zoomed });
     });
     // The frame is now the half-size view window, but `dims` stays the
-    // full-frame size so overlay geometry keeps one image-pixel space.
-    await waitFor(() => expect(result.current.dims).toEqual({ w: 640, h: 640 }));
+    // full-frame size so overlay geometry keeps one image-pixel space;
+    // `frameView` reports the window the presented frame was rendered for.
+    await waitFor(() => expect(result.current.frameView).toEqual(zoomed));
+    expect(result.current.dims).toEqual({ w: 640, h: 640 });
     expect(openMockViewportCount()).toBe(1);
     unmount();
   });

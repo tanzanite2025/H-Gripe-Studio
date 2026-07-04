@@ -15,7 +15,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEd
 import { useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, ZOOM_STEP, panBy, rotateTo, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, ZOOM_STEP, panBy, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
 import {
   activeOps,
   canRedo,
@@ -138,17 +138,30 @@ export function MaskEditModal({
   // (drag a tab to re-dock it; drag the rail edge to resize).
   const dock = useDockLayout(DOCK_STORAGE_KEY, DEFAULT_DOCK_LAYOUT);
 
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
+  // frame — the render path and pointer→image mapping are untouched by it.
+  const [view, setView] = useState<CanvasView>(FIT_VIEW);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
   // Underlay presentation goes through the viewport host (WGPU migration
   // Phase 2): the image is targeted by reference — a `node_output` target
   // when a node id is given, a registered image resource otherwise — and the
   // host renders the frame; in browser preview it stays null and we draw a
   // checkerboard so the user can still paint in the correct pixel space.
+  // The requested frame is the canvas view's visible window, so underlay
+  // detail follows the zoom (rendered through the viewport's cached proxy).
+  const viewportView = useMemo(
+    () => viewWindow(view, canvasRef.current?.offsetWidth ?? 0, canvasRef.current?.offsetHeight ?? 0),
+    [view],
+  );
   const source = useNodeOutputSource(nodeId, imagePath);
-  const viewport = useViewportUnderlay("image_edit", source, 1280);
+  const viewport = useViewportUnderlay("image_edit", source, 1280, viewportView);
   const underlay = viewport.underlay;
+  const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
@@ -190,11 +203,6 @@ export function MaskEditModal({
   // rebuilds and the composite recomputes dirty tiles only, so a slider drag
   // or brush commit on a large document stays cheap.
   const proxyCache = useRef(new ProxyLayerCache());
-  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the canvas
-  // — the render path and pointer→image mapping are untouched by it.
-  const [view, setView] = useState<CanvasView>(FIT_VIEW);
-  const viewRef = useRef(view);
-  viewRef.current = view;
   // Space-hold pan (PS): any tool pans while Space is down.
   const [spacePan, setSpacePan] = useState(false);
   const panDrag = useRef<{ x: number; y: number } | null>(null);
@@ -423,31 +431,37 @@ export function MaskEditModal({
   );
 
   // Eyedropper: read the underlay pixel at an image-space point by drawing
-  // the thumbnail onto an offscreen canvas at document size. Async (the data
-  // URL decodes first); a no-op when there is no underlay to read from.
+  // the presented frame — a view window of the image — onto an offscreen
+  // canvas at the window's document size. Async (the data URL decodes first);
+  // a no-op when there is no underlay or the point is outside the window.
   const sampleUnderlay = useCallback(
     (pt: [number, number]) => {
       if (!underlay) return;
+      const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
+      const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
+      const x = Math.round(pt[0] - frameView.panX * dims.w);
+      const y = Math.round(pt[1] - frameView.panY * dims.h);
+      if (x < 0 || y < 0 || x >= winW || y >= winH) return;
       const img = new Image();
       img.onload = () => {
         const off = document.createElement("canvas");
-        off.width = dims.w;
-        off.height = dims.h;
+        off.width = winW;
+        off.height = winH;
         const ctx = off.getContext("2d");
         if (!ctx) return;
-        ctx.drawImage(img, 0, 0, dims.w, dims.h);
-        const x = Math.min(dims.w - 1, Math.max(0, Math.round(pt[0])));
-        const y = Math.min(dims.h - 1, Math.max(0, Math.round(pt[1])));
+        ctx.drawImage(img, 0, 0, winW, winH);
         const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
         setSampledColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
       };
       img.src = underlay;
     },
-    [underlay, dims.w, dims.h],
+    [underlay, frameView, dims.w, dims.h],
   );
 
-  // Redraw the overlay: underlay (optional), committed brush strokes, and the
-  // in-progress stroke/marquee.
+  // Redraw the overlay: committed brush strokes and the in-progress
+  // stroke/marquee. The underlay presents separately (an image layer under
+  // this canvas at the rendered window's rect), so the canvas stays
+  // transparent where the image shows through.
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -457,17 +471,7 @@ export function MaskEditModal({
     canvas.height = dims.h;
     ctx.clearRect(0, 0, dims.w, dims.h);
 
-    if (!overlayOnly && underlay) {
-      const img = new Image();
-      img.src = underlay;
-      try {
-        ctx.globalAlpha = 0.85;
-        ctx.drawImage(img, 0, 0, dims.w, dims.h);
-        ctx.globalAlpha = 1;
-      } catch {
-        /* image may not be ready synchronously; the strokes still render */
-      }
-    } else if (overlayOnly) {
+    if (overlayOnly) {
       // Transparency preview: dark backdrop so the mask reads clearly.
       ctx.fillStyle = "#0c0e14";
       ctx.fillRect(0, 0, dims.w, dims.h);
@@ -516,7 +520,7 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-  }, [dims.w, dims.h, underlay, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
+  }, [dims.w, dims.h, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
 
   useEffect(() => {
     redraw();
@@ -923,6 +927,9 @@ export function MaskEditModal({
             canvasRef={canvasRef}
             dims={dims}
             view={view}
+            underlay={underlay}
+            frameView={frameView}
+            overlayOnly={overlayOnly}
             spacePan={spacePan}
             toolId={tool.id}
             onPointerDown={onPointerDown}

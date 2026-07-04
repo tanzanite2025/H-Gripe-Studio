@@ -8,6 +8,13 @@
 // unchanged, and the M7 proxy/tile pipeline is untouched. Pure helpers here;
 // the modal owns the React state.
 
+import {
+  clampView as clampViewportView,
+  IDENTITY_VIEW,
+  MAX_VIEW_ZOOM,
+  type ViewportViewState,
+} from "../viewport/view";
+
 /**
  * The canvas view: `zoom` ≥ 1 (1 = fit), pan offsets in pre-scale CSS px,
  * `rotate` an optional view rotation in degrees (PS rotate-view: purely a
@@ -126,4 +133,27 @@ export function zoom100(view: CanvasView, imageW: number, baseW: number, baseH: 
 /** Pan by an on-screen drag delta (hand tool / Space-drag). */
 export function panBy(view: CanvasView, dx: number, dy: number, baseW: number, baseH: number): CanvasView {
   return clampView({ ...view, panX: view.panX + dx, panY: view.panY + dy }, baseW, baseH);
+}
+
+/**
+ * The viewport-host view window backing this canvas view: the visible region
+ * of the canvas as a normalized `1/zoom` window, so a zoomed canvas presents
+ * an underlay decoded at matching detail (WGPU migration: underlay detail
+ * follows canvas zoom; the recorded pixel space is untouched).
+ *
+ * A canvas point p (pre-scale px from centre) renders at `pan + zoom · p`, so
+ * the visible window's centre in normalized canvas coordinates is
+ * `0.5 − pan / (base · zoom)`. Under a rotated view the visible region is not
+ * an axis-aligned window, so the full frame is kept.
+ */
+export function viewWindow(view: CanvasView, baseW: number, baseH: number): ViewportViewState {
+  if (view.zoom <= 1 || view.rotate || baseW <= 0 || baseH <= 0) return IDENTITY_VIEW;
+  const zoom = Math.min(view.zoom, MAX_VIEW_ZOOM);
+  const cx = 0.5 - view.panX / (baseW * view.zoom);
+  const cy = 0.5 - view.panY / (baseH * view.zoom);
+  return clampViewportView({
+    zoom,
+    panX: cx - 1 / (2 * zoom),
+    panY: cy - 1 / (2 * zoom),
+  });
 }

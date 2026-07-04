@@ -12,6 +12,7 @@ import {
   panBy,
   rotateTo,
   viewTransform,
+  viewWindow,
   zoom100,
   zoomAt,
   zoomIn,
@@ -91,5 +92,26 @@ describe("canvasView (M8)", () => {
     expect(v).toEqual({ zoom: 4, panX: 100, panY: -60 });
     expect(viewTransform(v)).toBe("translate(100px, -60px) scale(4)");
     expect(isFitView(v)).toBe(false);
+  });
+
+  it("viewWindow maps the visible region to a normalized viewport window", () => {
+    // Fit view: the full frame.
+    expect(viewWindow(FIT_VIEW, W, H)).toEqual({ zoom: 1, panX: 0, panY: 0 });
+    // Centred 2× zoom: the middle half-size window.
+    expect(viewWindow({ zoom: 2, panX: 0, panY: 0 }, W, H)).toEqual({ zoom: 2, panX: 0.25, panY: 0.25 });
+    // Panned to the clamp edge: the window sits at the matching frame edge.
+    // panX = +max pulls the canvas right, revealing its left edge.
+    const max = { zoom: 2, panX: (W * (2 - 1)) / 2, panY: -(H * (2 - 1)) / 2 };
+    expect(viewWindow(max, W, H)).toEqual({ zoom: 2, panX: 0, panY: 0.5 });
+    // Canvas zoom past the host's max clamps the window zoom but keeps the
+    // window centred on the same visible point.
+    const deep = viewWindow({ zoom: MAX_ZOOM, panX: 0, panY: 0 }, W, H);
+    expect(deep.zoom).toBe(8);
+    expect(deep.panX + 1 / (2 * deep.zoom)).toBeCloseTo(0.5);
+    expect(deep.panY + 1 / (2 * deep.zoom)).toBeCloseTo(0.5);
+    // A rotated view is not an axis-aligned window: keep the full frame.
+    expect(viewWindow({ zoom: 2, panX: 0, panY: 0, rotate: 30 }, W, H)).toEqual({ zoom: 1, panX: 0, panY: 0 });
+    // No measured base yet: keep the full frame.
+    expect(viewWindow({ zoom: 2, panX: 0, panY: 0 }, 0, 0)).toEqual({ zoom: 1, panX: 0, panY: 0 });
   });
 });
