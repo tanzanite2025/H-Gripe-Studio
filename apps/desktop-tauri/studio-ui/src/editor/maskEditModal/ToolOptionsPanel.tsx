@@ -97,15 +97,21 @@ export function ToolOptionsPanel({
 }: ToolOptionsPanelProps) {
   const t = useT();
   const lang = useContext(LangContext);
+  // Brush-like tools stamp with a sized tip; everything else (move, marquee,
+  // path, view, sample…) has no brush, so no size slider (PS contextual
+  // options: only show what the tool in hand actually uses).
+  const usesBrushSize = ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind);
   return (
     <div className="mask-panel-body">
-      <label className="field">
-        <span>{t("mask.brushSize")}</span>
-        <span className="slider-row">
-          <input type="range" min={1} max={96} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} />
-          <output>{brushSize}</output>
-        </span>
-      </label>
+      {usesBrushSize ? (
+        <label className="field">
+          <span>{t("mask.brushSize")}</span>
+          <span className="slider-row">
+            <input type="range" min={1} max={96} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} />
+            <output>{brushSize}</output>
+          </span>
+        </label>
+      ) : null}
       {tool.kind === "paint" || tool.kind === "matte" ? (
         <>
           <label className="field">

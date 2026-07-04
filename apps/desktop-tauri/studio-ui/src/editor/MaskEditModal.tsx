@@ -8,6 +8,8 @@ import {
   DEFAULT_TOOL_ID,
   shapeVertices,
   type MaskTool,
+  PS_SLOTS,
+  psSlotOf,
   type PaintTarget,
   type ShapeKind,
 } from "./maskTools";
@@ -114,6 +116,9 @@ export function MaskEditModal({
   const t = useT();
   const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
   const [toolId, setToolId] = useState<string>(DEFAULT_TOOL_ID);
+  // Last-used variant per multi-tool PS slot: the slot button's visible face,
+  // and what the slot's shortcut letter re-selects.
+  const [slotFaces, setSlotFaces] = useState<Record<string, string>>({});
   const [brushSize, setBrushSize] = useState(24);
   // Soft-brush parameters (M4): hardness / flow are 0..1 (1 = the legacy hard
   // stamp), spacing is the stamp interval as a fraction of the diameter.
@@ -320,6 +325,34 @@ export function MaskEditModal({
     if (id !== "pen") setPenAnchors([]);
     cancelPathEdit();
     setToolId(id);
+    const slot = psSlotOf(id);
+    if (slot && slot.variants.length > 1) setSlotFaces((f) => ({ ...f, [slot.id]: id }));
+  };
+
+  // A slot's PS letter selects the slot's visible face — the remembered
+  // last-used variant, falling back to the first ready one (PS: the shortcut
+  // picks the slot, not a fixed tool).
+  const selectSlot = (slotId: string) => {
+    const slot = PS_SLOTS.find((s) => s.id === slotId);
+    if (!slot) return;
+    const ready = slot.variants.filter((id) => maskTool(id)?.status === "ready");
+    if (ready.length === 0) return;
+    const remembered = slotFaces[slotId];
+    selectTool(remembered && ready.includes(remembered) ? remembered : ready[0]);
+  };
+
+  // Shift+letter cycles the slot's ready variants (PS "Shift cycles tools").
+  const cycleSlot = (slotId: string) => {
+    const slot = PS_SLOTS.find((s) => s.id === slotId);
+    if (!slot) return;
+    const ready = slot.variants.filter((id) => maskTool(id)?.status === "ready");
+    if (ready.length === 0) return;
+    const at = ready.indexOf(toolId);
+    if (at === -1) {
+      selectSlot(slotId);
+      return;
+    }
+    selectTool(ready[(at + 1) % ready.length]);
   };
 
   const closeTransformPanel = useCallback(() => {
@@ -344,16 +377,16 @@ export function MaskEditModal({
     setTransformDraft({ dx: 0, dy: 0, scale: 1, rotate: 0 });
   };
   const shortcutHandlers: ShortcutHandlers = {
-    tool_brush: () => selectTool("brush"),
-    tool_eraser: () => selectTool("eraser"),
-    tool_wand: () => selectTool("wand"),
-    tool_pen: () => setToolId("pen"),
-    tool_lasso: () => selectTool("lasso"),
-    tool_rect: () => selectTool("rect"),
-    tool_ellipse: () => selectTool("ellipse"),
-    tool_gradient: () => selectTool("gradient"),
-    tool_move: () => selectTool("move"),
-    tool_crop: () => selectTool("crop"),
+    tool_brush: () => selectSlot("brush"),
+    tool_eraser: () => selectSlot("eraser"),
+    tool_wand: () => selectSlot("selection"),
+    tool_pen: () => selectSlot("pen"),
+    tool_lasso: () => selectSlot("lasso"),
+    tool_rect: () => selectSlot("marquee"),
+    tool_ellipse: () => cycleSlot("marquee"),
+    tool_gradient: () => selectSlot("fill"),
+    tool_move: () => selectSlot("move"),
+    tool_crop: () => selectSlot("crop"),
     free_transform: () => openFreeTransform(),
     tool_path_select: () => {
       // PS `A` (direct selection): re-edit the anchors of the last path op.
@@ -391,15 +424,15 @@ export function MaskEditModal({
       setPaintTarget("layer");
     },
     quick_mask: () => setQuickMask((v) => !v),
-    tool_healing: () => selectTool("heal"),
-    tool_clone: () => selectTool("clone"),
-    tool_history_brush: () => selectTool("history_brush"),
-    tool_dodge_burn: () => selectTool("dodge_burn"),
-    tool_eyedropper: () => selectTool("eyedropper"),
-    tool_shape: () => selectTool("shape"),
-    tool_hand: () => selectTool("hand"),
-    tool_rotate_view: () => selectTool("rotate_view"),
-    tool_zoom: () => selectTool("zoom"),
+    tool_healing: () => selectSlot("repair"),
+    tool_clone: () => selectSlot("stamp"),
+    tool_history_brush: () => selectSlot("history"),
+    tool_dodge_burn: () => selectSlot("dodge"),
+    tool_eyedropper: () => selectSlot("sample"),
+    tool_shape: () => selectSlot("shape"),
+    tool_hand: () => selectSlot("hand"),
+    tool_rotate_view: () => selectSlot("rotate_view"),
+    tool_zoom: () => selectSlot("zoom"),
     screen_mode: () => setScreenMode((m) => ((m + 1) % 3) as 0 | 1 | 2),
     pan_space: () => setSpacePan(true),
     zoom_in: () => setView((v) => zoomIn(v, ...viewBase())),
@@ -979,7 +1012,12 @@ export function MaskEditModal({
         </div>
 
         <div className="mask-edit-body" style={{ "--mask-rail-w": `${dock.layout.railWidth}px` } as CSSProperties}>
-          <MaskToolbar toolId={toolId} onToolClick={onToolClick} />
+          <MaskToolbar
+            toolId={toolId}
+            onToolClick={onToolClick}
+            faces={slotFaces}
+            onPickFace={(slotId, id) => setSlotFaces((f) => ({ ...f, [slotId]: id }))}
+          />
 
           <MaskStage
             canvasRef={canvasRef}

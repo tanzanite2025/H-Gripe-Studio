@@ -224,6 +224,14 @@ export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = PS_TOOL_SECTIONS
 export const MASK_TOOL_SLOTS: readonly (readonly (readonly string[])[])[] =
   PS_TOOL_SECTIONS.map((section) => section.map((slot) => slot.variants));
 
+/** Flat slot list (section order preserved), for slot lookups. */
+export const PS_SLOTS: readonly PsToolSlot[] = PS_TOOL_SECTIONS.flat();
+
+/** The PS slot a tool id lives in (undefined for right-panel mask ops). */
+export function psSlotOf(toolId: string): PsToolSlot | undefined {
+  return PS_SLOTS.find((slot) => slot.variants.includes(toolId));
+}
+
 /**
  * Whole-mask operations (`kind: "global"`), in the order the right-panel
  * Mask Ops group lists them. Left toolbar = the tool in the user's hand;

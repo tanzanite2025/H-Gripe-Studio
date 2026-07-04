@@ -19,6 +19,10 @@ import { ToolIcon } from "./toolIcons";
 interface MaskToolbarProps {
   toolId: string;
   onToolClick: (tool: MaskTool) => void;
+  /** Last-used variant per multi-tool slot (the icon shown on the button). */
+  faces: Record<string, string>;
+  /** A flyout variant was picked: remember it as slot `slotId`'s face. */
+  onPickFace: (slotId: string, toolId: string) => void;
 }
 
 const LONG_PRESS_MS = 350;
@@ -33,14 +37,12 @@ function isActive(mt: MaskTool, toolId: string): boolean {
   return toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id));
 }
 
-export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
+export function MaskToolbar({ toolId, onToolClick, faces, onPickFace }: MaskToolbarProps) {
   const lang = useContext(LangContext);
   // Which slot's flyout card is open ("si-gi" key) and where it anchors.
   // The card renders `position: fixed` so the scrollable toolbar column
   // can't clip it.
   const [flyout, setFlyout] = useState<{ key: string; left: number; top: number } | null>(null);
-  // Last-used variant per multi-tool slot (the icon shown on the button).
-  const [faces, setFaces] = useState<Record<string, string>>({});
   const pressTimer = useRef<number | null>(null);
   const suppressClick = useRef(false);
 
@@ -66,7 +68,7 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
 
   const pick = (key: string, mt: MaskTool) => {
     if (mt.status !== "ready") return;
-    setFaces((f) => ({ ...f, [key]: mt.id }));
+    onPickFace(key, mt.id);
     setFlyout(null);
     onToolClick(mt);
   };
@@ -139,7 +141,8 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
                     <div className="mask-flyout" role="menu" style={{ left: flyout.left, top: flyout.top }}>
                       {tools.map((mt) => {
                         const mloc = localizeTool(mt, lang);
-                        const mcombo = toolCombo(mt.id);
+                        // PS flyouts show the slot letter on every variant row.
+                        const mcombo = toolCombo(mt.id) ?? slot.shortcut?.toLowerCase();
                         const planned = mt.status !== "ready";
                         return (
                           <button
