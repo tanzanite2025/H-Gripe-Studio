@@ -3,8 +3,10 @@
 > **状态更新（Phase 7，#314）：** Python runtime、`third_party/psd_tools`、PyAV
 > fallback 与所有 Python torch/onnx 引擎已从仓库彻底删除。本文档中“去除
 > Python 桥 / 移除 PyAV / 删除 psd_tools”类目标均已完成：native FFmpeg 是唯一
-> 视频路径，Rust PSD 子集（analyze / compose / export）是唯一 PSD 路径。尚未
-> 完成的主要是 P3（hgripe-grade 接入）与 ONNX 小模型链的持续扩展。
+> 视频路径，Rust PSD 子集（analyze / compose / export）是唯一 PSD 路径。
+> P3（hgripe-grade 接入）也已落地：图片 / 视频帧 / 时间线导出共用同一内核，
+> temporal denoise 已接入视频预览，.cube LUT 可导入导出。尚未完成的主要是
+> ONNX 小模型链的持续扩展。
 
 ## 目的
 
@@ -33,7 +35,7 @@ H-Gripe Studio 已经开始把关键库 fork / vendor 到仓库内，并切断�
 | ~~`third_party/psd_tools`~~ | Python PSD 过渡库（已删除，Phase 7） | — | 已迁到 Rust PSD 子集（`psd/analyze.rs` / `psd/compose.rs` / `psd/write.rs`） |
 | `third_party/cargo-vendor` | Cargo 依赖快照 | 不适合业务集成 | 只做离线构建和版本锁定 |
 | `crates/hgripe-api` | API 调用 crate | 是，但属于业务协议层 | 保持干净，和本地像素内核分离 |
-| future `crates/hgripe-grade` | 调色 / 合成内核 | 是，极高价值 | 统一图片和视频调色 |
+| `crates/hgripe-grade` | 调色 / 合成内核 | ✅ 已集成 | 统一图片和视频调色 |
 | ONNX / `ort` 模型路径 | 本地小模型辅助 | 是，选择性集成 | 抠像、matting、检测、轻量 harmonize |
 
 ## 1. moxcms: 必须端到端集成
@@ -164,9 +166,9 @@ Rust PSD 不需要完整覆盖 Photoshop 全格式。已覆盖 H-Gripe 生产需
 
 `moxcms` 是这个模式的正确例子。
 
-## 5. hgripe-grade: 应该成为图片和视频的统一调色内核
+## 5. hgripe-grade: 图片和视频的统一调色内核 — ✅ 已落地
 
-未来的 `crates/hgripe-grade` 值得端到端集成，因为它连接图片、PSD、视频、手工编辑和导出。
+`crates/hgripe-grade` 已端到端集成，连接图片、PSD、视频、手工编辑和导出。
 
 目标：
 
@@ -244,7 +246,7 @@ psd engine
 - ✅ native FFmpeg 是 desktop 唯一路径。
 - ✅ PyAV 依赖已删除。
 - ✅ trim / assemble / encode 已补齐。
-- 待做：确保视频帧能进入未来 grade surface。
+- ✅ 视频帧直接进入 grade surface（`video_frame_grade_preview` / viewport `video_frame` target，无 PNG 中转）。
 
 ### P2: moxcms 全链路化
 
@@ -253,11 +255,13 @@ psd engine
 - 所有模型/API 只在边界做 sRGB egress。
 - PSD / video / still export 使用同一色彩策略。
 
-### P3: hgripe-grade 接入
+### P3: hgripe-grade 接入 — ✅ 完成
 
-- 图片调色先接。
-- 视频帧调色再接。
-- LUT、曲线、色轮、levels、blend mode 统一。
+- ✅ 图片调色：`imageGrade` 节点（`studio/grade.rs::execute_studio_grade`）在 16-bit 工作面上全精度走内核；`grade_preview` 提供对话框实时预览（GPU 后端 `grade-gpu` 默认启用，CPU rayon 参考路径兜底）。
+- ✅ 视频帧调色：`video_frame_grade_preview` 经 native FFmpeg 解码直接进内核；viewport host 的 `video_frame` / `video_clip` target 渲染时套用 grade doc；`timeline_export` 导出时逐帧全精度调色。
+- ✅ temporal denoise：`TemporalAccumulator`（`studio/grade.rs`）已接入 viewport 渲染路径——连续播放时用上一帧 graded surface 做时域混合，seek / 换源自动重置。
+- ✅ LUT、曲线、色轮、levels、blend mode 统一在 `GradeOp` op graph；`.cube` 可导入（`parse_cube`）也可导出（`bake_cube` 烘焙 3D LUT，空间 op 与 mask 按定义排除）。
+- 剩余方向见 `docs/design/grade-kernel-roadmap.md`（halation/bloom、关键帧插值、GPU 帧序列导出渲染器等增强项）。
 
 ### P4: Rust PSD 子集 — ✅ 完成（Phase 7 收尾）
 
@@ -297,7 +301,7 @@ psd engine
 
 1. `moxcms` - 色彩和 ProPhoto / CMYK / ICC 地基。
 2. `ffmpeg` - 视频、时间线、帧缓存、导出地基。
-3. future `hgripe-grade` - 图片和视频统一调色地基。
+3. `hgripe-grade` - 图片和视频统一调色地基（✅ 已集成）。
 4. Rust PSD engine - PSD 生产交付地基。
 5. ONNX / `ort` 小模型链 - 低成本本地辅助地基。
 

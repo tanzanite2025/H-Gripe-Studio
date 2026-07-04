@@ -232,15 +232,28 @@ export async function resizeViewport(
   vp.height = height;
 }
 
-export async function setViewportGrade(viewportId: string, doc: unknown | null): Promise<void> {
+/**
+ * Set (or clear) the grade doc the viewport applies at render time.
+ * `temporalDenoise` (`0..=1`, video targets only) blends each graded frame
+ * against the previous graded frame during continuous playback; `0` / absent
+ * disables it.
+ */
+export async function setViewportGrade(
+  viewportId: string,
+  doc: unknown | null,
+  temporalDenoise = 0,
+): Promise<void> {
   const invoke = tauriInvoke();
   if (invoke) {
-    await invoke("viewport_set_grade", { viewportId, doc });
+    await invoke("viewport_set_grade", { viewportId, doc, temporalDenoise });
     return;
   }
   const vp = mockGet(viewportId);
   if (vp.kind !== "grade_preview" && vp.kind !== "video_preview") {
     throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept a grade doc`);
+  }
+  if (!Number.isFinite(temporalDenoise) || temporalDenoise < 0 || temporalDenoise > 1) {
+    throw new Error(`temporal_denoise must be between 0 and 1, got ${temporalDenoise}`);
   }
   vp.gradeDoc = doc;
 }

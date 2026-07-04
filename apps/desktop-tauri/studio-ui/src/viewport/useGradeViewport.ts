@@ -36,15 +36,22 @@ interface OpenGradeViewport {
 }
 
 /**
- * Returns `renderGraded(doc, view?)`: apply `doc` to the target and render one
- * graded frame of the (optionally zoomed/panned) view window through the
- * host. Resolves to `null` outside Tauri (browser preview), where callers
- * keep their in-webview mirror fallback.
+ * Returns `renderGraded(doc, view?, temporalDenoise?)`: apply `doc` to the
+ * target and render one graded frame of the (optionally zoomed/panned) view
+ * window through the host. `temporalDenoise` (`0..=1`, video targets only)
+ * blends graded frames against the previous graded frame during continuous
+ * playback — the host restarts the chain on a seek or source change.
+ * Resolves to `null` outside Tauri (browser preview), where callers keep
+ * their in-webview mirror fallback.
  */
 export function useGradeViewport(
   target: GradeViewportTarget,
   size = 1280,
-): (doc: unknown, view?: ViewportViewState) => Promise<ViewportFrame | null> {
+): (
+  doc: unknown,
+  view?: ViewportViewState,
+  temporalDenoise?: number,
+) => Promise<ViewportFrame | null> {
   const { imagePath, videoPath, videoTimestampSec = 0, nodeId } = target;
   const path = videoPath ?? imagePath ?? undefined;
   const isVideo = Boolean(videoPath);
@@ -63,7 +70,11 @@ export function useGradeViewport(
   }, [path, isVideo, nodeRef, size]);
 
   return useCallback(
-    async (doc: unknown, view?: ViewportViewState): Promise<ViewportFrame | null> => {
+    async (
+      doc: unknown,
+      view?: ViewportViewState,
+      temporalDenoise?: number,
+    ): Promise<ViewportFrame | null> => {
       if (!path) return null;
       if (!hostRef.current) {
         hostRef.current = (async () => {
@@ -97,7 +108,11 @@ export function useGradeViewport(
               ? { kind: "video_frame", resourceId: open.ref.resourceId, timeSec: timeRef.current }
               : { kind: "image", resourceId: open.ref.resourceId },
       });
-      await open.host.command({ kind: "set_grade", doc });
+      await open.host.command({
+        kind: "set_grade",
+        doc,
+        temporalDenoise: isVideo ? temporalDenoise : 0,
+      });
       // Zoom/pan is viewport state (Phase 3): the host crops the cached
       // source proxy, so a view change never re-decodes the target.
       const next = view ?? IDENTITY_VIEW;

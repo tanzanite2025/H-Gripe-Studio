@@ -50,3 +50,32 @@ export async function videoFrameGradePreview(
     maxDim,
   })) as GradePreviewResult;
 }
+
+export interface CubeExportResult {
+  /** Absolute path of the written `.cube` file. */
+  path: string;
+  /** Lattice size per axis. */
+  size: number;
+  /** Spatial ops (blur/sharpen/denoise/grain/vignette) excluded from the bake. */
+  skipped_spatial_ops: number;
+  /** Positional layer masks excluded from the bake. */
+  dropped_masks: number;
+}
+
+// Bake the grade document to a `.cube` 3D LUT under the project output dir
+// (interchange with Resolve, FFmpeg `lut3d`, etc.). Spatial ops and
+// positional masks cannot live in a LUT and are excluded (reported on the
+// result). Returns `null` outside Tauri.
+export async function gradeExportCube(
+  doc: GradeDoc,
+  size = 33,
+  outputName?: string,
+): Promise<CubeExportResult | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  return (await invoke("grade_export_cube", {
+    doc,
+    size,
+    outputName,
+  })) as CubeExportResult;
+}
