@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { gradeExportCube } from "../bridge/grade";
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
+import {
+  describeDeviceReport,
+  deviceReportFromViewportBackend,
+  type DeviceReport,
+} from "../runtime/deviceReport";
 import { useGradeViewport } from "../viewport/useGradeViewport";
 import { useViewControls } from "../viewport/useViewControls";
 import { useT, type MsgKey } from "../i18n";
@@ -86,8 +91,10 @@ const OP_LABEL_KEYS: Partial<Record<GradeOp["type"], MsgKey>> = {
   lut3d: "grade.op_lut3d",
 };
 
+// Backend badge labels keyed by the shared DeviceReport `used` vocabulary;
+// `mirror` is the in-webview TS fallback (no viewport backend involved).
 const BACKEND_LABEL_KEYS: Record<string, MsgKey> = {
-  gpu: "grade.backend_gpu",
+  wgpu: "grade.backend_gpu",
   cpu: "grade.backend_cpu",
   mirror: "grade.backend_mirror",
 };
@@ -182,7 +189,7 @@ export function GradePanel({
   const [addKind, setAddKind] = useState<AddableOp>("exposure");
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [backend, setBackend] = useState<string | null>(null);
+  const [backend, setBackend] = useState<DeviceReport | "mirror" | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   // Preview zoom/pan is viewport state (Phase 3): the host crops its cached
   // source proxy, so wheel/drag ticks re-run only crop + kernel. Identity
@@ -245,7 +252,7 @@ export function GradePanel({
           if (previewSeq.current !== seq) return;
           if (result) {
             setPreview(result.data_url);
-            setBackend(result.backend.actual);
+            setBackend(deviceReportFromViewportBackend(result.backend));
             return;
           }
         } catch (err) {
@@ -531,7 +538,15 @@ export function GradePanel({
         </div>
         <small className="muted">
           {previewError ?? t("grade.previewHint")}
-          {backend ? <> · {((key) => (key ? t(key) : backend))(BACKEND_LABEL_KEYS[backend])}</> : null}
+          {backend ? (
+            <span title={backend === "mirror" ? undefined : describeDeviceReport(backend)}>
+              {" · "}
+              {((key) => (key ? t(key) : backend === "mirror" ? backend : backend.used))(
+                BACKEND_LABEL_KEYS[backend === "mirror" ? "mirror" : backend.used],
+              )}
+              {backend !== "mirror" && backend.fallbackReason ? " ⚠" : null}
+            </span>
+          ) : null}
           {view.zoom > 1 ? <> · {Math.round(view.zoom * 100)}%</> : null}
         </small>
       </div>
