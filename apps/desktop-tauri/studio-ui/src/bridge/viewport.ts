@@ -20,6 +20,8 @@ export type ViewportTarget =
 export interface ViewportBackend {
   requested: "auto" | "gpu" | "cpu";
   actual: "wgpu" | "gpu" | "cpu";
+  /** Human-readable device detail (adapter name + backend) when known. */
+  detail?: string;
   fallback_reason?: string;
 }
 
@@ -66,6 +68,36 @@ export function decodeFramePayload(payload: ArrayBuffer | Uint8Array): ViewportF
     ? ""
     : URL.createObjectURL(new Blob([new Uint8Array(png)], { type: "image/png" }));
   return { data_url, width: meta.width, height: meta.height, backend: meta.backend, presented };
+}
+
+/** Decoded `viewport_read_pixels` payload: raw RGBA8 rows, never encoded. */
+export interface ViewportPixels {
+  width: number;
+  height: number;
+  backend: ViewportBackend;
+  /** Row-major `width * height * 4` RGBA bytes. */
+  pixels: Uint8Array;
+}
+
+/** Binary pixels payload layout (see `viewport_read_pixels`):
+ * `[u32 LE meta length][meta JSON {width, height, backend}][raw RGBA8 rows]`.
+ * Exported for tests; product code calls `readViewportPixels`. */
+export function decodePixelsPayload(payload: ArrayBuffer | Uint8Array): ViewportPixels {
+  const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+  if (bytes.byteLength < 4) throw new Error("viewport pixels payload is truncated");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const metaLen = view.getUint32(0, true);
+  if (4 + metaLen > bytes.byteLength) throw new Error("viewport pixels meta is truncated");
+  const meta = JSON.parse(
+    new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)),
+  ) as { width: number; height: number; backend: ViewportBackend };
+  const pixels = bytes.subarray(4 + metaLen);
+  if (pixels.byteLength !== meta.width * meta.height * 4) {
+    throw new Error(
+      `viewport pixels payload is ${pixels.byteLength} bytes, expected ${meta.width * meta.height * 4}`,
+    );
+  }
+  return { width: meta.width, height: meta.height, backend: meta.backend, pixels };
 }
 
 // --- browser-preview mock transport -----------------------------------------
@@ -408,6 +440,31 @@ export async function renderViewportFrame(viewportId: string): Promise<ViewportF
     height: Math.max(Math.round(vp.height / zoom), 1),
     backend: MOCK_BACKEND,
     presented: false,
+  };
+}
+
+/**
+ * Explicit pixel readback for the cases that genuinely need bytes in the
+ * webview — export preview, scopes, colour picking — never the per-frame
+ * path (WGPU surface swap Phase S4). In the browser preview the mock answers
+ * a transparent buffer at the viewport's size.
+ */
+export async function readViewportPixels(viewportId: string): Promise<ViewportPixels> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    const payload = (await invoke("viewport_read_pixels", { viewportId })) as
+      | ArrayBuffer
+      | Uint8Array;
+    return decodePixelsPayload(payload);
+  }
+  const vp = mockGet(viewportId);
+  const width = Math.max(vp.width, 1);
+  const height = Math.max(vp.height, 1);
+  return {
+    width,
+    height,
+    backend: MOCK_BACKEND,
+    pixels: new Uint8Array(width * height * 4),
   };
 }
 

@@ -158,6 +158,20 @@ pub(crate) fn present_frame(
     false
 }
 
+/// Read the viewport surface's last presented frame texture back to CPU
+/// bytes (surface swap Phase S4: export preview, scopes, colour picking).
+/// `None` means no presented texture exists — the caller answers from the
+/// CPU reference render instead, per the fallback contract.
+#[cfg(all(windows, feature = "viewport-surface"))]
+pub(crate) fn read_surface_pixels(viewport_id: &str) -> Option<(u32, u32, Vec<u8>)> {
+    native::read_pixels(viewport_id)
+}
+
+#[cfg(not(all(windows, feature = "viewport-surface")))]
+pub(crate) fn read_surface_pixels(_viewport_id: &str) -> Option<(u32, u32, Vec<u8>)> {
+    None
+}
+
 #[cfg(all(windows, feature = "viewport-surface"))]
 mod native {
     use std::collections::HashMap;
@@ -458,7 +472,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 // Non-sRGB: the frame carries display-ready sRGB bytes and the
                 // swapchain is non-sRGB too, so sampling passes them verbatim.
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                // COPY_SRC: `viewport_read_pixels` reads the presented frame
+                // back for export preview / scopes / colour picking (S4).
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -689,6 +707,76 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 false
             }
         }
+    }
+
+    /// S4 readback: copy the entry's presented frame texture into a mapped
+    /// buffer and return the unpadded RGBA rows. `None` when the viewport has
+    /// no presented texture (never presented, hidden, no GPU) — the CPU
+    /// reference path answers instead.
+    pub(super) fn read_pixels(viewport_id: &str) -> Option<(u32, u32, Vec<u8>)> {
+        let gpu = shared_gpu().ok()?;
+        let map = surfaces().lock().ok()?;
+        let entry = map.get(viewport_id)?;
+        if !entry.presented {
+            return None;
+        }
+        let tex = entry.frame_tex.as_ref()?;
+        let (w, h) = (tex.width, tex.height);
+        // wgpu requires bytes_per_row aligned to COPY_BYTES_PER_ROW_ALIGNMENT.
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let unpadded = w as usize * 4;
+        let padded = unpadded.div_ceil(align) * align;
+        let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport-surface-readback"),
+            size: (padded * h as usize) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("viewport-surface-readback"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded as u32),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        gpu.queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        if gpu.device.poll(wgpu::PollType::wait_indefinitely()).is_err() {
+            return None;
+        }
+        rx.recv_timeout(Duration::from_secs(10)).ok()?.ok()?;
+        let data = slice.get_mapped_range();
+        let mut pixels = Vec::with_capacity(unpadded * h as usize);
+        for row in 0..h as usize {
+            let start = row * padded;
+            pixels.extend_from_slice(&data[start..start + unpadded]);
+        }
+        drop(data);
+        buffer.unmap();
+        Some((w, h, pixels))
     }
 
     pub(super) fn set_placement(

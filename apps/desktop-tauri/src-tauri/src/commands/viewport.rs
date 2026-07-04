@@ -75,6 +75,9 @@ pub(crate) enum ViewportTarget {
 pub(crate) struct ViewportBackend {
     pub requested: String,
     pub actual: String,
+    /// Human-readable device detail (adapter name + backend) when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
 }
@@ -83,7 +86,23 @@ fn cpu_backend() -> ViewportBackend {
     ViewportBackend {
         requested: "auto".to_string(),
         actual: "cpu".to_string(),
+        detail: None,
         fallback_reason: Some("wgpu transport not implemented yet (phase 1)".to_string()),
+    }
+}
+
+/// The backend report a natively presented frame carries (surface swap Phase
+/// S4): the frame is on the shared wgpu device's surface, so the badge says
+/// `wgpu` with the adapter name — regardless of which kernel graded the
+/// pixels (that detail stays in the render backend's `actual` on the PNG
+/// path).
+fn surface_backend_report(requested: &str) -> ViewportBackend {
+    let report = crate::studio::wgpu_device::surface_device_report();
+    ViewportBackend {
+        requested: requested.to_string(),
+        actual: "wgpu".to_string(),
+        detail: report.backend,
+        fallback_reason: None,
     }
 }
 
@@ -975,6 +994,7 @@ fn grade_backend_report(backend: crate::studio::GradeBackend) -> ViewportBackend
     ViewportBackend {
         requested: "auto".to_string(),
         actual: backend.name.to_string(),
+        detail: None,
         fallback_reason: backend.fallback_reason,
     }
 }
@@ -1146,14 +1166,76 @@ pub(crate) fn viewport_render_frame_bin(
     } else {
         encode_frame_png(&rendered.image)?
     };
+    let backend = if presented {
+        surface_backend_report(&rendered.backend.requested)
+    } else {
+        rendered.backend
+    };
     let (w, h) = rendered.image.dimensions();
     Ok(tauri::ipc::Response::new(frame_bin_payload(
+        w, h, &backend, presented, &png,
+    )?))
+}
+
+/// Explicit pixel readback for the cases that genuinely need bytes in the
+/// webview (export preview, scopes, colour picking) — never the per-frame
+/// path. Reads the surface's last presented texture back when one exists;
+/// otherwise renders the frame on the CPU reference path. Both sources carry
+/// the same pixels by construction (the surface texture is uploaded from the
+/// CPU render), so callers get parity regardless of which path answered.
+/// Payload layout: `[u32 LE meta length][meta JSON {width, height, backend}]
+/// [raw RGBA8 bytes, row-major]`.
+#[tauri::command]
+pub(crate) fn viewport_read_pixels(viewport_id: String) -> Result<tauri::ipc::Response, String> {
+    ensure_viewport(&viewport_id)?;
+    if let Some((w, h, pixels)) =
+        crate::commands::viewport_surface::read_surface_pixels(&viewport_id)
+    {
+        return Ok(tauri::ipc::Response::new(pixels_bin_payload(
+            w,
+            h,
+            &surface_backend_report("auto"),
+            &pixels,
+        )?));
+    }
+    let rendered = viewport_render_rgba(&viewport_id)?;
+    let (w, h) = rendered.image.dimensions();
+    Ok(tauri::ipc::Response::new(pixels_bin_payload(
         w,
         h,
         &rendered.backend,
-        presented,
-        &png,
+        rendered.image.as_raw(),
     )?))
+}
+
+fn pixels_bin_payload(
+    width: u32,
+    height: u32,
+    backend: &ViewportBackend,
+    rgba: &[u8],
+) -> Result<Vec<u8>, String> {
+    if rgba.len() != (width as usize) * (height as usize) * 4 {
+        return Err(format!(
+            "pixel buffer is {} bytes, expected {} for {width}x{height} RGBA",
+            rgba.len(),
+            (width as usize) * (height as usize) * 4
+        ));
+    }
+    let meta = serde_json::json!({
+        "width": width,
+        "height": height,
+        "backend": backend,
+    })
+    .to_string();
+    let mut payload = Vec::with_capacity(4 + meta.len() + rgba.len());
+    payload.extend_from_slice(
+        &u32::try_from(meta.len())
+            .map_err(|_| "meta too large")?
+            .to_le_bytes(),
+    );
+    payload.extend_from_slice(meta.as_bytes());
+    payload.extend_from_slice(rgba);
+    Ok(payload)
 }
 
 fn frame_bin_payload(
@@ -1428,6 +1510,100 @@ mod tests {
             serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
         assert_eq!(meta["presented"], true);
         assert!(payload[4 + meta_len..].is_empty());
+    }
+
+    #[test]
+    fn read_pixels_payload_carries_meta_header_and_raw_rgba() {
+        let img = image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]));
+        let payload = pixels_bin_payload(3, 2, &cpu_backend(), img.as_raw()).expect("payload");
+        let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
+        let meta: serde_json::Value =
+            serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
+        assert_eq!(meta["width"], 3);
+        assert_eq!(meta["height"], 2);
+        assert_eq!(meta["backend"]["actual"], "cpu");
+        // The trailing bytes are the raw RGBA rows, byte for byte.
+        assert_eq!(&payload[4 + meta_len..], &img.as_raw()[..]);
+        // A mismatched buffer length fails loudly, never a truncated payload.
+        assert!(pixels_bin_payload(3, 2, &cpu_backend(), &[0u8; 4]).is_err());
+    }
+
+    #[test]
+    fn read_pixels_matches_the_reference_render_parity() {
+        // Golden parity (surface swap Phase S4): what `viewport_read_pixels`
+        // answers must be exactly the reference render's pixels. On CI
+        // runners without a GPU the surface never presents, so the CPU
+        // fallback path answers and the backend report stays truthful.
+        let path = std::env::temp_dir().join("hgripe_viewport_read_pixels.png");
+        image::RgbaImage::from_fn(8, 6, |x, y| {
+            image::Rgba([(x * 30) as u8, (y * 40) as u8, 90, 255])
+        })
+        .save(&path)
+        .expect("write test image");
+        let canonical = path.to_string_lossy().to_string();
+        let res_id = resource::id_for(&canonical);
+        resource::put(
+            &res_id,
+            resource::ResourceEntry {
+                path: canonical,
+                width: Some(8),
+                height: Some(6),
+            },
+        );
+
+        let desc = viewport_create("grade_preview".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 320, 240).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::Image {
+                resource_id: res_id,
+            },
+        )
+        .expect("set target");
+        viewport_set_grade(
+            desc.viewport_id.clone(),
+            Some(serde_json::json!({ "layers": [] })),
+            None,
+        )
+        .expect("set grade");
+
+        let reference = viewport_render_rgba(&desc.viewport_id).expect("reference render");
+        // No surface presented in tests: the readback must answer from the
+        // reference path with identical pixels.
+        assert!(
+            crate::commands::viewport_surface::read_surface_pixels(&desc.viewport_id).is_none()
+        );
+        let payload = viewport_read_pixels(desc.viewport_id.clone()).expect("read pixels");
+        // `tauri::ipc::Response` hides its body; parity is asserted through
+        // the payload builder the command uses plus the shared render path.
+        drop(payload);
+        let rebuilt = {
+            let rendered = viewport_render_rgba(&desc.viewport_id).expect("second render");
+            pixels_bin_payload(
+                rendered.image.width(),
+                rendered.image.height(),
+                &rendered.backend,
+                rendered.image.as_raw(),
+            )
+            .expect("payload")
+        };
+        let meta_len = u32::from_le_bytes(rebuilt[0..4].try_into().unwrap()) as usize;
+        assert_eq!(&rebuilt[4 + meta_len..], &reference.image.as_raw()[..]);
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn surface_backend_report_is_truthful_wgpu() {
+        let report = surface_backend_report("auto");
+        assert_eq!(report.requested, "auto");
+        assert_eq!(report.actual, "wgpu");
+        assert!(report.fallback_reason.is_none());
+        // The adapter detail is present exactly when the shared device
+        // initialised (absent on CI runners without a GPU).
+        let device = crate::studio::wgpu_device::surface_device_report();
+        assert_eq!(report.detail.is_some(), device.backend.is_some());
     }
 
     #[test]

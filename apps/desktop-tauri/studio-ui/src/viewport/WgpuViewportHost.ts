@@ -6,6 +6,7 @@
 import {
   createViewport,
   destroyViewport,
+  readViewportPixels,
   renderViewportFrame,
   resizeViewport,
   setViewportGrade,
@@ -20,6 +21,7 @@ import {
   type ViewportMaskOverlay,
   type ViewportPlacement,
   type ViewportPlacementReport,
+  type ViewportPixels,
   type ViewportTarget,
 } from "../bridge/viewport";
 
@@ -111,6 +113,12 @@ export class WgpuViewportHost {
       }
     }
     return frame;
+  }
+
+  /** Explicit pixel readback (export preview, scopes, colour picking) —
+   * never the per-frame path (surface swap Phase S4). */
+  async readPixels(): Promise<ViewportPixels> {
+    return readViewportPixels(this.id());
   }
 
   /** Destroy the underlying viewport. Safe to call more than once. */
