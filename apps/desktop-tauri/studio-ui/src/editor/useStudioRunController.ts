@@ -30,6 +30,7 @@ import { lowerWorkflowGraph, originNodeId } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
 import { parseLayeredImageAsset } from "../production/layeredImage";
 import { runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
+import { describeDeviceReport, deviceReportFromNodeOutputs } from "../runtime/deviceReport";
 import { describeRunScope, resolveRunScope, type RunScope } from "../runtime/runScope";
 import { batchItems, defaultExecutors } from "../runtime/executors";
 import {
@@ -391,6 +392,19 @@ export function useStudioRunController({
     }
   }, [pushLog, setMessage]);
 
+  // Per-node device transparency (GPU_DEVICE_STRATEGY_PLAN step 4): after a
+  // run, surface each node's requested/used device and fallback reason in the
+  // run log, normalised into the shared DeviceReport vocabulary.
+  const logDeviceReports = useCallback(
+    (outputs: Map<string, Record<string, unknown>>) => {
+      for (const [nodeId, nodeOutputs] of outputs) {
+        const report = deviceReportFromNodeOutputs(nodeOutputs);
+        if (report) pushLog("info", describeDeviceReport(report), mapRunNodeId(nodeId));
+      }
+    },
+    [pushLog, mapRunNodeId],
+  );
+
   // Surface output paths into preview nodes. The thumbnail itself is fetched
   // lazily by the node when it scrolls into view (see HgripeNode).
   const applyPreviews = useCallback(
@@ -520,7 +534,9 @@ export function useStudioRunController({
         try {
           const result = await runStudioGraph(graph, applyStudioRunEvent, runId);
           applyStudioRunResult(result);
-          applyPreviews(graph, { outputs: studioOutputsToMap(result) });
+          const outputs = studioOutputsToMap(result);
+          logDeviceReports(outputs);
+          applyPreviews(graph, { outputs });
           setMessage("done (Rust backend)");
         } finally {
           endRustRun(runId);
@@ -536,6 +552,7 @@ export function useStudioRunController({
             undefined,
             () => token.cancelled,
           );
+          logDeviceReports(result.outputs);
           applyPreviews(graph, result);
           setMessage("done (browser preview)");
         } finally {
@@ -561,6 +578,7 @@ export function useStudioRunController({
     edges,
     observer,
     clearRunInfo,
+    logDeviceReports,
     applyPreviews,
     applyStudioRunResult,
     applyStudioRunEvent,
