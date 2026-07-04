@@ -44,11 +44,8 @@ export interface ToolbarProps {
   setShowSnapshots: Dispatch<SetStateAction<boolean>>;
   showLog: boolean;
   setShowLog: Dispatch<SetStateAction<boolean>>;
-  showHistory: boolean;
-  setShowHistory: Dispatch<SetStateAction<boolean>>;
   snapshotCount: number;
   logCount: number;
-  historyCount: number;
 
   // Node search
   nodes: Node[];
@@ -78,11 +75,8 @@ export function Toolbar({
   setShowSnapshots,
   showLog,
   setShowLog,
-  showHistory,
-  setShowHistory,
   snapshotCount,
   logCount,
-  historyCount,
   nodes,
   onJumpToNode,
   fileInputRef,
@@ -120,10 +114,6 @@ export function Toolbar({
           <button onClick={() => setShowLog((s) => !s)} title={t("btn.logTitle")}>
             {showLog ? t("btn.hideLog") : t("btn.log")}
             {logCount > 0 ? ` (${logCount})` : ""}
-          </button>
-          <button onClick={() => setShowHistory((s) => !s)} title={t("btn.historyTitle")}>
-            {showHistory ? t("btn.hideHistory") : t("btn.history")}
-            {historyCount > 0 ? ` (${historyCount})` : ""}
           </button>
           <button onClick={onOpenModels} title={t("btn.modelsTitle")}>
             {t("btn.models")}

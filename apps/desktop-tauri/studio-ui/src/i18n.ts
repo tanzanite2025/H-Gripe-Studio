@@ -107,12 +107,13 @@ export const messages = {
   "runhistory.noLog": { en: "No log lines for this run.", zh: "此次运行没有日志。" },
   "btn.imageEdit": { en: "Image Editor", zh: "图片编辑" },
   "btn.imageEditTitle": {
-    en: "open the unified image editor (mask + crop) for the selected image card",
-    zh: "打开图片编辑弹窗（蒙版 + 裁剪），作用于选中的图片卡片",
+    en: "open the image editor — uses the selected image card, or pick a file",
+    zh: "打开图片编辑弹窗 — 选中图片卡片则自动带入，否则自行选择文件",
   },
-  "imageEdit.none": {
-    en: "No image card on this canvas — add or select an image source first.",
-    zh: "当前画布没有图片卡片 — 请先添加或选中一个图片素材卡片。",
+  "imageEdit.pickTitle": { en: "Choose an image to edit", zh: "选择要编辑的图片" },
+  "imageEdit.selectFirst": {
+    en: "Select an image card first (the browser preview has no native file picker).",
+    zh: "请先选中一个图片卡片（浏览器预览无法打开系统文件选择框）。",
   },
   "canvasTabs.newBlank": { en: "New blank canvas", zh: "新建空白画布" },
   "canvasTabs.openFile": { en: "Open file…", zh: "打开文件…" },
