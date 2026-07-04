@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
+  ControlButton,
   Controls,
   MiniMap,
   addEdge,
@@ -28,6 +29,35 @@ import { nodeSpec } from "../graph/nodeSpecs";
 import { arePortsCompatible } from "../graph/model";
 import { toWorkflowGraph } from "./adapter";
 import { wouldCreateCycle } from "../runtime/dag";
+import { useT } from "../i18n";
+
+// Icons for the edge-style switch in the bottom-left canvas controls. Paths
+// set their own fill/stroke so the controls' `svg { fill: currentColor }`
+// styling does not fill the open strokes.
+function CurvedEdgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 19 C 11 19, 13 5, 20 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OrthogonalEdgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 19 H12 V5 H20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SmartEdgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 19 H8 V5 H20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="12" y="12" width="7" height="7" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
 
 interface FlowCanvasProps {
   nodes: Node[];
@@ -54,6 +84,8 @@ interface FlowCanvasProps {
   helperLines?: { horizontal?: number; vertical?: number };
   /** Edge rendering style applied to existing + new edges. */
   edgeType?: EdgeStyle;
+  /** Switch the edge rendering style (edge-style buttons in the controls). */
+  onChangeEdgeType?: (style: EdgeStyle) => void;
   /** Whether to render the minimap. */
   showMinimap?: boolean;
   /** Right-click on a node (screen coords + node id). */
@@ -82,12 +114,14 @@ export function FlowCanvas({
   snapToGrid = false,
   helperLines,
   edgeType = "default",
+  onChangeEdgeType,
   showMinimap = true,
   onNodeContextMenu,
   onPaneContextMenu,
 }: FlowCanvasProps) {
   // Declared once so React does not re-create the map each render.
   const nodeTypes = useMemo(() => ({ hgripe: HgripeNode, group: GroupNode }), []);
+  const t = useT();
   const edgeTypes = useMemo(() => ({ smart: SmartEdge, binding: BindingEdge }), []);
   const { screenToFlowPosition, setViewport } = useReactFlow();
 
@@ -214,7 +248,27 @@ export function FlowCanvas({
           bgColor="#11131a"
         />
       )}
-      <Controls className="flow-controls" />
+      <Controls className="flow-controls">
+        {onChangeEdgeType &&
+          (
+            [
+              { style: "default", title: t("label.edgesCurved"), icon: <CurvedEdgeIcon /> },
+              { style: "smoothstep", title: t("label.edgesOrthogonal"), icon: <OrthogonalEdgeIcon /> },
+              { style: "smart", title: t("label.edgesAvoid"), icon: <SmartEdgeIcon /> },
+            ] as const
+          ).map(({ style, title, icon }) => (
+            <ControlButton
+              key={style}
+              className={`edge-style-button${edgeType === style ? " active" : ""}`}
+              onClick={() => onChangeEdgeType(style)}
+              title={title}
+              aria-label={title}
+              aria-pressed={edgeType === style}
+            >
+              {icon}
+            </ControlButton>
+          ))}
+      </Controls>
       <HelperLineOverlay horizontal={helperLines?.horizontal} vertical={helperLines?.vertical} />
     </ReactFlow>
   );

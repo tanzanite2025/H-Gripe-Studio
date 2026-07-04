@@ -3,7 +3,6 @@ import type { Node } from "@xyflow/react";
 
 import { NodeSearchBox } from "./NodeSearchBox";
 import type { CanvasDocument } from "./canvasDocument";
-import type { EdgeStyle } from "./FlowCanvas";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
 
@@ -77,8 +76,6 @@ export interface ToolbarProps {
   snapToGrid: boolean;
   setSnapToGrid: Dispatch<SetStateAction<boolean>>;
   onTidyLayout: () => void;
-  edgeType: EdgeStyle;
-  onChangeEdgeType: (style: EdgeStyle) => void;
   showMinimap: boolean;
   setShowMinimap: Dispatch<SetStateAction<boolean>>;
 
@@ -139,8 +136,6 @@ export function Toolbar({
   snapToGrid,
   setSnapToGrid,
   onTidyLayout,
-  edgeType,
-  onChangeEdgeType,
   showMinimap,
   setShowMinimap,
   running,
@@ -254,14 +249,6 @@ export function Toolbar({
         </div>
 
         <div className="toolbar-group">
-          <label className="snap-toggle" title={t("label.edgesTitle")}>
-            {t("label.edges")}
-            <select value={edgeType} onChange={(e) => onChangeEdgeType(e.target.value as EdgeStyle)}>
-              <option value="default">{t("label.edgesCurved")}</option>
-              <option value="smoothstep">{t("label.edgesOrthogonal")}</option>
-              <option value="smart">{t("label.edgesAvoid")}</option>
-            </select>
-          </label>
           <label className="snap-toggle" title={t("label.mapTitle")}>
             <input type="checkbox" checked={showMinimap} onChange={(e) => setShowMinimap(e.target.checked)} />
             {t("label.map")}
