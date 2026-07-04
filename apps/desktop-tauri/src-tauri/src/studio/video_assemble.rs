@@ -103,6 +103,15 @@ pub(super) fn execute_studio_video_assemble(
                     "codec": stats.codec,
                     "frame_count": stats.frame_count,
                     "duration_sec": stats.duration_sec,
+                    // Engine telemetry (GPU_DEVICE_STRATEGY_PLAN shared
+                    // DeviceReport vocabulary): the vendored libav software
+                    // path is the encode baseline; hardware encoders join
+                    // behind their own probe/report/fallback.
+                    "engine": "ffmpeg",
+                    "device": "ffmpeg_sw",
+                    "device_requested": "auto",
+                    "engine_fallback_reason":
+                        "hardware encode not enabled (vendored libav software baseline)",
                 }),
             ),
         ]))
