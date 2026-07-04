@@ -15,12 +15,14 @@ interface LocalModelSelectorProps {
   value: string;
   /** Applies the chosen managed local model to the node. */
   onApply: (model: LocalModelEntry) => void;
+  /** Overrides the default field label (e.g. a card row prefix). */
+  label?: string;
 }
 
 // Capability-filtered local model dropdown backed by the system model manager
 // (the local twin of BackendSelector; same manager selector API so all cards
 // show consistent options for one capability).
-export function LocalModelSelector({ capability, value, onApply }: LocalModelSelectorProps) {
+export function LocalModelSelector({ capability, value, onApply, label }: LocalModelSelectorProps) {
   const t = useT();
   const [managerOpen, setManagerOpen] = useState(false);
   const [registry, setRegistry] = useState(() => loadRegistry());
@@ -30,7 +32,7 @@ export function LocalModelSelector({ capability, value, onApply }: LocalModelSel
 
   return (
     <label className="field">
-      <span>{t("models.selector.localLabel")}</span>
+      <span>{label ?? t("models.selector.localLabel")}</span>
       <div className="path-row">
         <select
           value={dangling ? "" : value}

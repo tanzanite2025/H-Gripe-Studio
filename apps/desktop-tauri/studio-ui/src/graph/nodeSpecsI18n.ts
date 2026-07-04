@@ -226,6 +226,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         hint: "layerSplit.out 行的资产将哪一层标记为选中",
       },
       "enhance.mode": { label: "增强：模式" },
+      "enhance.local_model_ref": {
+        label: "增强：本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
+      },
       "enhance.engine": {
         label: "增强：引擎",
         hint: "cpu 始终可用；模型引擎在权重缺失时回退到 cpu",
@@ -235,9 +239,21 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "crop.aspect": { label: "裁剪：宽高比" },
       "mask.mode": { label: "蒙版：模式" },
       "mask.feather_px": { label: "蒙版：羽化像素" },
+      "mask.local_model_ref": {
+        label: "蒙版：本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
+      },
       "repair.engine": {
         label: "修复：引擎",
         hint: "provider = 远程 image.edit；本地引擎在权重缺失时回退到提供方",
+      },
+      "repair.api_profile_ref": {
+        label: "修复：API 配置引用",
+        hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
+      },
+      "repair.local_model_ref": {
+        label: "修复：本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
       },
     },
     ports: {
