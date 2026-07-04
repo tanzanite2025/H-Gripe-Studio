@@ -32,6 +32,8 @@ export interface CanvasTabInfo {
   id: string;
   path: string | null;
   dirty: boolean;
+  /** User-set display name overriding the path-derived title. */
+  name?: string | null;
 }
 
 /** One canvas's full editor state, as exported/restored for persistence. */
@@ -39,6 +41,7 @@ export interface CanvasSnapshotState {
   id: string;
   path: string | null;
   dirty: boolean;
+  name?: string | null;
   selectedNodeId: string | null;
   viewport: CanvasViewport;
   nodes: Node[];
@@ -83,6 +86,8 @@ export interface UseCanvasDocument {
   activateCanvas: (id: string) => void;
   /** Close a canvas; when the last one closes, a fresh one replaces it. */
   closeCanvas: (id: string) => void;
+  /** Set (or clear, with null) a canvas's user-facing display name. */
+  renameCanvas: (id: string, name: string | null) => void;
   /** Export every open canvas (active first-hand, parked verbatim). */
   exportCanvases: (activeFile: { path: string | null; dirty: boolean }) => {
     activeCanvasId: string;
@@ -207,6 +212,10 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
     [parkActive, loadCanvas],
   );
 
+  const renameCanvas = useCallback((id: string, name: string | null) => {
+    setTabs((list) => list.map((t) => (t.id === id ? { ...t, name } : t)));
+  }, []);
+
   const closeCanvas = useCallback(
     (id: string) => {
       const closingActive = id === live.current.documentId;
@@ -239,12 +248,13 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
   const exportCanvases = useCallback(
     (activeFile: { path: string | null; dirty: boolean }) => {
       const canvases = tabsRef.current.flatMap((tab): CanvasSnapshotState[] => {
+        const name = tab.name ?? null;
         if (tab.id === live.current.documentId) {
           const { nodes, edges, selectedId, viewport } = live.current;
-          return [{ id: tab.id, ...activeFile, selectedNodeId: selectedId, viewport, nodes, edges }];
+          return [{ id: tab.id, ...activeFile, name, selectedNodeId: selectedId, viewport, nodes, edges }];
         }
         const parked = store.current.get(tab.id);
-        return parked ? [{ id: tab.id, ...parked }] : [];
+        return parked ? [{ id: tab.id, ...parked, name }] : [];
       });
       return { activeCanvasId: live.current.documentId, canvases };
     },
@@ -268,7 +278,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       const active = canvases.find((c) => c.id === activeCanvasId) ?? canvases[0];
       const parked = store.current.get(active.id);
       store.current.delete(active.id);
-      setTabs(canvases.map((c) => ({ id: c.id, path: c.path, dirty: c.dirty })));
+      setTabs(canvases.map((c) => ({ id: c.id, path: c.path, dirty: c.dirty, name: c.name ?? null })));
       if (parked) loadCanvas(active.id, parked);
     },
     [loadCanvas],
@@ -320,6 +330,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       openCanvasWith,
       activateCanvas,
       closeCanvas,
+      renameCanvas,
       exportCanvases,
       restoreCanvases,
       describe,
@@ -340,6 +351,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       openCanvasWith,
       activateCanvas,
       closeCanvas,
+      renameCanvas,
       exportCanvases,
       restoreCanvases,
       describe,

@@ -170,7 +170,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setSelectedId,
     setViewport,
   } = canvas;
-  const { openNewCanvas, activateCanvas, closeCanvas } = canvas;
+  const { openNewCanvas, activateCanvas, closeCanvas, renameCanvas } = canvas;
   const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
@@ -582,6 +582,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             id: c.id,
             path: c.path,
             dirty: c.dirty,
+            name: c.name,
             selectedNodeId: c.selectedNodeId,
             viewport: c.viewport,
             nodes: graph.nodes,
@@ -619,6 +620,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           id: c.id,
           path: c.path,
           dirty: c.dirty,
+          name: c.name ?? null,
           selectedNodeId: c.selectedNodeId,
           viewport: c.viewport,
           graph: toWorkflowGraph(c.nodes, c.edges),
@@ -653,6 +655,27 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       })),
     );
   }, [canvas, currentFile, fileDirty, t]);
+
+  // Per-tab save / save-as (canvas tab menu): a non-active tab is activated
+  // first, then the file action runs once its state is live in the editor.
+  const [pendingTabAction, setPendingTabAction] = useState<{
+    id: string;
+    action: "save" | "saveAs";
+  } | null>(null);
+  const requestTabAction = useCallback(
+    (id: string, action: "save" | "saveAs") => {
+      if (id !== canvas.documentId) activateCanvas(id);
+      setPendingTabAction({ id, action });
+    },
+    [canvas.documentId, activateCanvas],
+  );
+  useEffect(() => {
+    if (!pendingTabAction || pendingTabAction.id !== canvas.documentId) return;
+    const { action } = pendingTabAction;
+    setPendingTabAction(null);
+    if (action === "save") void handleSave();
+    else void handleSaveAs();
+  }, [pendingTabAction, canvas.documentId, handleSave, handleSaveAs]);
 
   // Close a canvas tab, confirming first when it holds unsaved edits.
   const closeCanvasTab = useCallback(
@@ -1298,6 +1321,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onActivate={activateCanvas}
         onClose={closeCanvasTab}
         onNewCanvas={openNewCanvas}
+        onSaveTab={(id) => requestTabAction(id, "save")}
+        onSaveAsTab={(id) => requestTabAction(id, "saveAs")}
+        onRenameTab={renameCanvas}
         onRunProject={runAllCanvases}
         running={running}
       />
