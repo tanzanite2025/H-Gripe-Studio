@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import {
   MASK_TOOLS,
@@ -69,6 +70,8 @@ interface MaskEditModalProps {
   title: string;
   /** Backing image path (best-effort underlay); may be missing in preview. */
   imagePath?: string | null;
+  /** Node whose output backs the underlay, for a `node_output` target. */
+  nodeId?: string | null;
   initial: MaskDocument | null;
   /** Magic-wand colour tolerance from the node's param. */
   wandTolerance: number;
@@ -96,6 +99,7 @@ const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
 export function MaskEditModal({
   title,
   imagePath,
+  nodeId,
   initial,
   wandTolerance,
   onCommit,
@@ -135,10 +139,12 @@ export function MaskEditModal({
   const dock = useDockLayout(DOCK_STORAGE_KEY, DEFAULT_DOCK_LAYOUT);
 
   // Underlay presentation goes through the viewport host (WGPU migration
-  // Phase 2): the image is targeted by resource reference and the host renders
-  // the frame; in browser preview it stays null and we draw a checkerboard so
-  // the user can still paint in the correct pixel space.
-  const viewport = useViewportUnderlay("image_edit", imagePath || undefined, 1280);
+  // Phase 2): the image is targeted by reference — a `node_output` target
+  // when a node id is given, a registered image resource otherwise — and the
+  // host renders the frame; in browser preview it stays null and we draw a
+  // checkerboard so the user can still paint in the correct pixel space.
+  const source = useNodeOutputSource(nodeId, imagePath);
+  const viewport = useViewportUnderlay("image_edit", source, 1280);
   const underlay = viewport.underlay;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
 

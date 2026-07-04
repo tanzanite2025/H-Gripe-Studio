@@ -70,10 +70,10 @@ Remaining work, roughly in priority order:
    at fixed detail, so deep zoom is soft. Move overlay/brush presentation to
    the viewport and tie underlay detail to canvas zoom without changing the
    recorded pixel space.
-3. Remaining target wiring: the node-card grade modal now previews through a
-   `node_output` target (like the drawer Grade tab); the mask/crop editors
-   still address their sources by path — move them onto reference targets so
-   the selection-target model is uniform in the product layer too.
+3. Remaining target wiring: the node-card grade modal, the mask/crop editors
+   and the media source's unified editor now all preview through `node_output`
+   targets (like the drawer Grade tab), so the selection-target model is
+   uniform in the product layer.
 4. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
 

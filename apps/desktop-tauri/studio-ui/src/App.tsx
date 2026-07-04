@@ -929,6 +929,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         target: {
           title: t((maskEditNode.data as HgripeNodeData).kind === "subjectMask" ? "mask.titleSubject" : "mask.titleDefault"),
           imagePath: connectedImagePath(maskEditNode.id) ?? null,
+          nodeId: maskEditNode.id,
         },
         initial: normalizeEditPaths((maskEditNode.data as HgripeNodeData).params.edit_paths),
         wandTolerance: Number((maskEditNode.data as HgripeNodeData).params.wand_tolerance ?? 24),
@@ -942,7 +943,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     : cropEditNode
       ? {
           editor: "crop",
-          target: { title: t("crop.title"), imagePath: connectedImagePath(cropEditNode.id) ?? null },
+          target: {
+            title: t("crop.title"),
+            imagePath: connectedImagePath(cropEditNode.id) ?? null,
+            nodeId: cropEditNode.id,
+          },
           initialMode:
             (cropEditNode.data as HgripeNodeData).params.mode === "auto_subject"
               ? "auto_subject"
@@ -1016,6 +1021,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                   (typeof (mediaEditSource.data as HgripeNodeData).params?.path === "string"
                     ? ((mediaEditSource.data as HgripeNodeData).params.path as string)
                     : null),
+                nodeId: mediaEditSource.id,
               },
               // Apply spawns exactly one bound edit node of the chosen kind from
               // the source (never mutating it) and runs it — same pipeline as the

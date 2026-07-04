@@ -33,7 +33,7 @@ export interface EditorTarget {
   /** Display title for the editor chrome. */
   title: string;
   /** Node whose output backs the target, when it is a node output: lets the
-   * grade preview present a `node_output` viewport target host-side rather
+   * editor preview present a `node_output` viewport target host-side rather
    * than registering the path as a plain image resource. */
   nodeId?: string | null;
 }
@@ -82,6 +82,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
         <MaskEditModal
           title={request.target.title}
           imagePath={request.target.imagePath}
+          nodeId={request.target.nodeId}
           initial={request.initial}
           wandTolerance={request.wandTolerance}
           onCommit={request.onCommit}
@@ -92,6 +93,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
         <CropEditModal
           title={request.target.title}
           imagePath={request.target.imagePath}
+          nodeId={request.target.nodeId}
           initialMode={request.initialMode}
           initialBox={request.initialBox}
           initialAspect={request.initialAspect}
@@ -114,6 +116,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
         <MediaEditModal
           title={request.target.title}
           imagePath={request.target.imagePath}
+          nodeId={request.target.nodeId}
           onCommitMask={request.onCommitMask}
           onCommitCrop={request.onCommitCrop}
           onClose={onClose}
