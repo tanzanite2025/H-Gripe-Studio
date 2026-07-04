@@ -105,6 +105,15 @@ export const messages = {
     zh: "暂无运行记录 — 历史运行会记录在这里。",
   },
   "runhistory.noLog": { en: "No log lines for this run.", zh: "此次运行没有日志。" },
+  "btn.imageEdit": { en: "Image Editor", zh: "图片编辑" },
+  "btn.imageEditTitle": {
+    en: "open the unified image editor (mask + crop) for the selected image card",
+    zh: "打开图片编辑弹窗（蒙版 + 裁剪），作用于选中的图片卡片",
+  },
+  "imageEdit.none": {
+    en: "No image card on this canvas — add or select an image source first.",
+    zh: "当前画布没有图片卡片 — 请先添加或选中一个图片素材卡片。",
+  },
   "canvasTabs.newBlank": { en: "New blank canvas", zh: "新建空白画布" },
   "canvasTabs.openFile": { en: "Open file…", zh: "打开文件…" },
   "btn.tidyTitle": { en: "arrange nodes on a grid by DAG depth", zh: "按 DAG 深度在网格上排列节点" },

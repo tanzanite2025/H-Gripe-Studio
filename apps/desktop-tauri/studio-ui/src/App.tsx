@@ -1260,6 +1260,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             }
           : null;
 
+  // Toolbar entry for the unified image editor: target the selected image
+  // card, else the canvas's first image card.
+  const openImageEditor = () => {
+    const isImage = (n: Node) => (n.data as HgripeNodeData).kind === "imageSource";
+    const target =
+      nodes.find((n) => selectedNodeIds.includes(n.id) && isImage(n)) ?? nodes.find(isImage);
+    if (target) openMediaEdit(target.id);
+    else window.alert(t("imageEdit.none"));
+  };
+
   const closeEditor = () => {
     setMaskEditNodeId(null);
     setCropEditNodeId(null);
@@ -1274,6 +1284,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         isDesktop={isDesktop}
         onToggleLang={onToggleLang}
         onOpenModels={() => setModelsOpen(true)}
+        onOpenImageEdit={openImageEditor}
         showProject={showProject}
         setShowProject={setShowProject}
         showSnapshots={showSnapshots}
