@@ -6,6 +6,7 @@ import {
   MASK_TOOL_GROUPS,
   MASK_TOOL_SLOTS,
   PLANNED_TOOLS,
+  PS_TOOL_SECTIONS,
   READY_TOOLS,
   maskTool,
   shapeVertices,
@@ -115,6 +116,36 @@ describe("mask tool registry", () => {
     for (const id of ["point", "wand", "matting"]) {
       expect(maskTool(id)?.lane, id).toBe("render");
     }
+  });
+
+  it("assigns each PS slot its Photoshop shortcut letter", () => {
+    const byId = new Map(PS_TOOL_SECTIONS.flat().map((s) => [s.id, s.shortcut]));
+    const expected: Record<string, string> = {
+      move: "V", marquee: "M", lasso: "L", selection: "W", crop: "C", sample: "I",
+      repair: "J", brush: "B", stamp: "S", history: "Y", eraser: "E", fill: "G", dodge: "O",
+      pen: "P", type: "T", path_select: "A", shape: "U",
+      hand: "H", rotate_view: "R", zoom: "Z",
+    };
+    for (const [slot, letter] of Object.entries(expected)) {
+      expect(byId.get(slot), slot).toBe(letter);
+    }
+  });
+
+  it("gives every slot a unique id and shortcut", () => {
+    const slots = PS_TOOL_SECTIONS.flat();
+    const ids = slots.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const shortcuts = slots.map((s) => s.shortcut).filter((s): s is string => s != null);
+    expect(new Set(shortcuts).size).toBe(shortcuts.length);
+  });
+
+  it("every slot with a ready tool stays selectable (some variant is ready)", () => {
+    const readySlots = PS_TOOL_SECTIONS.flat().filter((slot) =>
+      slot.variants.some((id) => maskTool(id)?.status === "ready"),
+    );
+    // The pre-refactor toolbar had 15 usable slots; the PS re-slotting must
+    // not lose any of them.
+    expect(readySlots.length).toBeGreaterThanOrEqual(15);
   });
 
   it("ships the shape tool as a ready interactive tool (M15)", () => {

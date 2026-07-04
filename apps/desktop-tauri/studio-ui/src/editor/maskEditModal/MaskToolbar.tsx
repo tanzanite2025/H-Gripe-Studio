@@ -1,11 +1,14 @@
-// Left toolbar: PS-style single icon column. Tools are grouped into slots
-// (see MASK_TOOL_SLOTS); a multi-tool slot shows its last-used variant and
-// opens a flyout card of the variants on long-press / right-click, like the
-// Photoshop toolbar. Each button carries its PS shortcut letter as a corner
-// badge (from the mask-edit scope's `toolCombo` table) alongside the tooltip.
+// Left toolbar: PS-style single icon column. Tools are grouped into
+// Photoshop slots (see PS_TOOL_SECTIONS); a multi-tool slot shows its
+// last-used variant and opens a flyout card of the variants on long-press /
+// right-click, like the Photoshop toolbar. Planned variants render greyed
+// and disabled, holding the PS slot shape. Each button carries its PS
+// shortcut letter as a corner badge (from the mask-edit scope's `toolCombo`
+// table, falling back to the slot's reserved PS letter) alongside the
+// tooltip.
 
 import { useContext, useEffect, useRef, useState } from "react";
-import { MASK_TOOL_SLOTS, maskTool, type MaskTool } from "../maskTools";
+import { PS_TOOL_SECTIONS, maskTool, type MaskTool } from "../maskTools";
 import { localizeTool } from "../maskToolsI18n";
 import { comboLabel, parseCombo } from "../../shortcuts";
 import { toolCombo } from "../../shortcuts/scopes/maskEdit";
@@ -62,6 +65,7 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
   useEffect(() => clearTimer, []);
 
   const pick = (key: string, mt: MaskTool) => {
+    if (mt.status !== "ready") return;
     setFaces((f) => ({ ...f, [key]: mt.id }));
     setFlyout(null);
     onToolClick(mt);
@@ -69,26 +73,31 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
 
   return (
     <div className="mask-edit-tools">
-      {MASK_TOOL_SLOTS.map((section, si) => (
+      {PS_TOOL_SECTIONS.map((section, si) => (
         <div key={si} className="mask-tool-group">
-          {section.map((slot, gi) => {
-            const key = `${si}-${gi}`;
-            const tools = slot.map((id) => maskTool(id)).filter((mt): mt is MaskTool => mt != null);
+          {section.map((slot) => {
+            const key = slot.id;
+            const tools = slot.variants.map((id) => maskTool(id)).filter((mt): mt is MaskTool => mt != null);
             if (tools.length === 0) return null;
+            const readyTools = tools.filter((mt) => mt.status === "ready");
             // Face: the active tool if it lives here, else the remembered
-            // last-used variant, else the slot's first tool.
+            // last-used variant, else the slot's first ready tool, else its
+            // first (all-planned slots show their leading variant, greyed).
             const face =
               tools.find((mt) => mt.id === toolId) ??
-              tools.find((mt) => mt.id === faces[key]) ??
+              readyTools.find((mt) => mt.id === faces[key]) ??
+              readyTools[0] ??
               tools[0];
+            const facePlanned = face.status !== "ready";
             const loc = localizeTool(face, lang);
             const combo = toolCombo(face.id);
             const hint = combo ? `${loc.hint} (${comboLabel(combo)})` : loc.hint;
+            const badge = combo ? comboBadge(combo) : slot.shortcut ?? "";
             const active = tools.some((mt) => isActive(mt, toolId));
             return (
               <div key={key} className="mask-tool-slot">
                 <button
-                  className={`mask-tool ${active ? "active" : ""}`}
+                  className={`mask-tool ${active ? "active" : ""} ${facePlanned ? "planned" : ""}`}
                   title={hint}
                   aria-label={loc.label}
                   onPointerDown={(e) => {
@@ -119,8 +128,8 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
                   }}
                 >
                   <ToolIcon id={face.id} />
-                  {combo && comboBadge(combo) ? (
-                    <kbd className="mask-tool-key" aria-hidden="true">{comboBadge(combo)}</kbd>
+                  {badge ? (
+                    <kbd className="mask-tool-key" aria-hidden="true">{badge}</kbd>
                   ) : null}
                   {tools.length > 1 ? <span className="flyout-corner" aria-hidden="true" /> : null}
                 </button>
@@ -131,12 +140,14 @@ export function MaskToolbar({ toolId, onToolClick }: MaskToolbarProps) {
                       {tools.map((mt) => {
                         const mloc = localizeTool(mt, lang);
                         const mcombo = toolCombo(mt.id);
+                        const planned = mt.status !== "ready";
                         return (
                           <button
                             key={mt.id}
                             role="menuitem"
-                            className={`mask-flyout-item ${isActive(mt, toolId) ? "active" : ""}`}
+                            className={`mask-flyout-item ${isActive(mt, toolId) ? "active" : ""} ${planned ? "planned" : ""}`}
                             title={mcombo ? `${mloc.hint} (${comboLabel(mcombo)})` : mloc.hint}
+                            aria-disabled={planned || undefined}
                             onClick={() => pick(key, mt)}
                           >
                             <ToolIcon id={mt.id} />
