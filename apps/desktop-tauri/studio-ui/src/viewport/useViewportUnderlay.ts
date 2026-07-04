@@ -118,6 +118,36 @@ export function useViewportUnderlay(
   const sentOverlayRef = useRef<ViewportMaskOverlay | null>(null);
   const overlayRef = useRef(maskOverlay);
   overlayRef.current = maskOverlay;
+  // One re-render in flight per host, with the latest request coalesced
+  // behind it. A zoom/pan drag or a brush stroke changes state per input
+  // event; issuing one overlapping `set_view`/`set_mask_overlay` +
+  // `render_frame` chain per change floods the IPC channel (on Windows every
+  // response is a PostMessage to the main thread — enough backlog fills the
+  // message queue). Instead the newest request replaces the queued one and
+  // sends when the in-flight chain finishes.
+  const renderInFlightRef = useRef(false);
+  const queuedRenderRef = useRef<(() => Promise<void>) | null>(null);
+
+  const runCoalesced = (host: WgpuViewportHost, send: () => Promise<void>) => {
+    if (renderInFlightRef.current) {
+      queuedRenderRef.current = send;
+      return;
+    }
+    renderInFlightRef.current = true;
+    void (async () => {
+      let next: (() => Promise<void>) | null = send;
+      while (next && hostRef.current === host && host.isOpen) {
+        try {
+          await next();
+        } catch {
+          /* keep the previous frame */
+        }
+        next = queuedRenderRef.current;
+        queuedRenderRef.current = null;
+      }
+      renderInFlightRef.current = false;
+    })();
+  };
 
   // The source object identity may change every render; key the open effect
   // on its stable identity and read the latest value through a ref.
@@ -220,7 +250,7 @@ export function useViewportUnderlay(
     if (presentEnabled === sentPresentEnabledRef.current) return;
     let cancelled = false;
     sentPresentEnabledRef.current = presentEnabled;
-    (async () => {
+    runCoalesced(host, async () => {
       if (!presentEnabled) {
         await host.command({ kind: "set_presented", presented: false });
       }
@@ -233,8 +263,6 @@ export function useViewportUnderlay(
         backend: frame.backend,
         settled: true,
       }));
-    })().catch(() => {
-      /* keep the previous frame */
     });
     return () => {
       cancelled = true;
@@ -249,7 +277,7 @@ export function useViewportUnderlay(
     if (isIdentityView(view) && isIdentityView(sent)) return;
     let cancelled = false;
     sentViewRef.current = view;
-    (async () => {
+    runCoalesced(host, async () => {
       await host.command({ kind: "set_view", ...view });
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
@@ -262,8 +290,6 @@ export function useViewportUnderlay(
         backend: frame.backend,
         settled: true,
       }));
-    })().catch(() => {
-      /* keep the previous frame */
     });
     return () => {
       cancelled = true;
@@ -276,7 +302,7 @@ export function useViewportUnderlay(
     if (maskOverlay === sentOverlayRef.current) return;
     let cancelled = false;
     sentOverlayRef.current = maskOverlay;
-    (async () => {
+    runCoalesced(host, async () => {
       await host.command({ kind: "set_mask_overlay", overlay: maskOverlay });
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
@@ -287,8 +313,6 @@ export function useViewportUnderlay(
         backend: frame.backend,
         settled: true,
       }));
-    })().catch(() => {
-      /* keep the previous frame */
     });
     return () => {
       cancelled = true;
