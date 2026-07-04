@@ -81,6 +81,16 @@ export interface DeviceProbe {
   onnxruntime: OnnxRuntimeInfo;
 }
 
+/**
+ * One compiled-in kernel backend's probe (mirrors Rust `BackendProbe`):
+ * whether it is usable on this box, with the adapter/library detail when it
+ * is and the reason when it is not.
+ */
+export interface BackendProbe {
+  available: boolean;
+  detail: string;
+}
+
 /** Cross-card engine capability report (mirrors Rust `EngineProbeReport`). */
 export interface EngineProbeReport {
   cards: CardEngineProbe[];
@@ -88,6 +98,10 @@ export interface EngineProbeReport {
   model_cache_dir?: string | null;
   /** Machine compute capability, probed once; absent when it could not run. */
   runtime?: DeviceProbe | null;
+  /** Grade kernel wgpu adapter status. */
+  wgpu?: BackendProbe | null;
+  /** Vendored FFmpeg decode status (software path). */
+  ffmpeg?: BackendProbe | null;
 }
 
 /**

@@ -398,8 +398,11 @@ This should be a settings surface, not a required setup wizard.
    `requested -> used` + fallback reason, and a visible ⚠ marker on fallback
    instead of silently hiding it). Node-report/capability panels still pending.
 6. ✅ (existing probes) Add or refine capability summary as diagnostics only:
-   `summarizeCapabilities` + Model Manager "Machine capability" section;
-   wgpu/FFmpeg probes still to join.
+   `summarizeCapabilities` + Model Manager "Machine capability" section.
+   `probe_engines` now also carries `wgpu` (grade kernel adapter summary, or
+   the init-failure reason) and `ffmpeg` (vendored libav software decode, or
+   why not) `BackendProbe` lines. FFmpeg hardware encoders join behind their
+   own probe.
 7. ✅ Add contract tests for report behavior
    (`studio-ui/src/runtime/deviceReport.test.ts`: `auto` always yields a
    `used`, explicit `cpu` never reports `cuda`, fallback stays visible).

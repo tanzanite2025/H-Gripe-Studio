@@ -72,7 +72,7 @@ mod exec;
 mod ffmpeg_native;
 mod frame_cache;
 mod generate;
-mod grade;
+pub(crate) mod grade;
 mod graph;
 pub(crate) mod heif_decode;
 mod history;

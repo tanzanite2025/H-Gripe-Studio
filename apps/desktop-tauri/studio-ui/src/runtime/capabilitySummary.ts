@@ -54,6 +54,20 @@ export function summarizeCapabilities(report: EngineProbeReport): CapabilityLine
   } else {
     lines.push({ label: "runtime", value: "probe did not run", tone: "warn" });
   }
+  if (report.wgpu) {
+    lines.push({
+      label: "wgpu",
+      value: report.wgpu.detail,
+      tone: report.wgpu.available ? "ok" : "warn",
+    });
+  }
+  if (report.ffmpeg) {
+    lines.push({
+      label: "ffmpeg",
+      value: report.ffmpeg.detail,
+      tone: report.ffmpeg.available ? "ok" : "warn",
+    });
+  }
   if (report.model_cache_dir) {
     lines.push({ label: "model cache", value: report.model_cache_dir, tone: "ok" });
   }

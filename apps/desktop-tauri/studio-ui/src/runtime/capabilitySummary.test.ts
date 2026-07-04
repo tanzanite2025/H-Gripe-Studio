@@ -67,6 +67,25 @@ describe("summarizeCapabilities", () => {
     expect(byLabel["onnxruntime"].tone).toBe("ok");
   });
 
+  it("summarises the wgpu and ffmpeg backend probes with fallback visible", () => {
+    const lines = summarizeCapabilities({
+      cards: [],
+      wgpu: { available: true, detail: "NVIDIA GeForce RTX 4090 (Vulkan)" },
+      ffmpeg: { available: false, detail: "native-ffmpeg feature disabled (no vendored libav decoder)" },
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["wgpu"]).toEqual({
+      label: "wgpu",
+      value: "NVIDIA GeForce RTX 4090 (Vulkan)",
+      tone: "ok",
+    });
+    expect(byLabel["ffmpeg"]).toEqual({
+      label: "ffmpeg",
+      value: "native-ffmpeg feature disabled (no vendored libav decoder)",
+      tone: "warn",
+    });
+  });
+
   it("reports a probe that never ran and per-card probe errors", () => {
     const lines = summarizeCapabilities({
       cards: [
