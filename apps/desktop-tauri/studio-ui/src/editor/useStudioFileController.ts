@@ -123,6 +123,8 @@ export interface StudioFileController {
   autoSnapshotBeforeRun: () => void;
   /** Suppress the next dirty-mark for a programmatic graph/selection swap. */
   suppressNextDirty: () => void;
+  /** Rebind the file state (path + dirty) when the active canvas changes. */
+  adoptFileState: (path: string | null, dirty: boolean) => void;
 }
 
 // Owns the studio's file/persistence layer: workspace autosave, explicit
@@ -169,6 +171,12 @@ export function useStudioFileController({
 
   const suppressNextDirty = useCallback(() => {
     skipDirty.current = true;
+  }, []);
+
+  // Canvas-tab switches rebind which on-disk file the editor tracks.
+  const adoptFileState = useCallback((path: string | null, dirty: boolean) => {
+    setCurrentFile(path);
+    setFileDirty(dirty);
   }, []);
 
   // Swap the editor graph without flagging it as an unsaved user edit.
@@ -682,6 +690,7 @@ export function useStudioFileController({
       projectStoreDir,
       autoSnapshotBeforeRun,
       suppressNextDirty,
+      adoptFileState,
     }),
     [
       saved,
@@ -719,6 +728,7 @@ export function useStudioFileController({
       projectStoreDir,
       autoSnapshotBeforeRun,
       suppressNextDirty,
+      adoptFileState,
     ],
   );
 }

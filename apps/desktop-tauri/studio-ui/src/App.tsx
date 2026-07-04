@@ -30,6 +30,7 @@ import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
 import { ProjectPanel } from "./editor/ProjectPanel";
 import { Toolbar } from "./editor/Toolbar";
+import { CanvasTabs } from "./editor/CanvasTabs";
 import { RunLog } from "./editor/RunLogPanel";
 import { SnapshotsPanel } from "./editor/SnapshotsPanel";
 import { RunHistoryPanel } from "./editor/RunHistoryPanel";
@@ -156,6 +157,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setSelectedId,
     setViewport,
   } = canvas;
+  const { openNewCanvas, activateCanvas, closeCanvas } = canvas;
   const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
@@ -201,7 +203,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // has landed in `nodes` state (setNodes is async, so we defer to an effect).
   const pendingRunNode = useRef<string | null>(null);
 
-  const history = useHistory({ nodes, edges, setNodes, setEdges });
+  const history = useHistory({ nodes, edges, setNodes, setEdges, scopeId: canvas.documentId });
   const { takeSnapshot, undo, redo } = history;
 
   const selectedNode = useMemo(
@@ -503,7 +505,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     openFromPath,
     refreshProjectFiles,
     load,
-    newWorkflow,
     clear,
     resetSample,
     snapshots,
@@ -521,7 +522,30 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     projectStoreDir,
     autoSnapshotBeforeRun,
     suppressNextDirty,
+    adoptFileState,
   } = file;
+
+  // Tab switches park/rebind the controller-owned file state (path + dirty);
+  // re-registered every render so the bridge always reads the live values.
+  useEffect(() => {
+    canvas.registerFileBridge({
+      get: () => ({ path: currentFile, dirty: fileDirty }),
+      set: (path, dirty) => {
+        suppressNextDirty();
+        adoptFileState(path, dirty);
+      },
+    });
+  });
+
+  // Close a canvas tab, confirming first when it holds unsaved edits.
+  const closeCanvasTab = useCallback(
+    (id: string) => {
+      const dirty = id === canvas.documentId ? fileDirty : canvas.tabs.find((t) => t.id === id)?.dirty;
+      if (dirty && !window.confirm(t("canvasTabs.confirmClose"))) return;
+      closeCanvas(id);
+    },
+    [canvas.documentId, canvas.tabs, fileDirty, closeCanvas, t],
+  );
 
   // Modal-open state (Preview / Mask-Edit / Crop-Edit / media manual editor)
   // and the connected-image lookup the modals underlay with.
@@ -907,7 +931,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     save: () => void handleSave(),
     saveAs: () => void handleSaveAs(),
     open: () => void handleOpen(),
-    newWorkflow,
+    newWorkflow: openNewCanvas,
     run: () => void run(),
     canRun: !running && issues.length === 0,
   });
@@ -1104,7 +1128,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         historyCount={runHistory.length}
         nodes={nodes}
         onJumpToNode={jumpToNode}
-        onNew={newWorkflow}
+        onNew={openNewCanvas}
         onOpen={() => void handleOpen()}
         onSave={() => void handleSave()}
         onSaveAs={() => void handleSaveAs()}
@@ -1128,6 +1152,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onRunBatch={runBatch}
       />
 
+      <CanvasTabs
+        tabs={canvas.tabs}
+        activeId={canvas.documentId}
+        activePath={currentFile}
+        activeDirty={fileDirty}
+        onActivate={activateCanvas}
+        onClose={closeCanvasTab}
+        onNewCanvas={openNewCanvas}
+      />
+
       <NodeEditingContext.Provider value={editing}>
         <div className="workspace">
           {isDesktop && showProject && (
@@ -1140,7 +1174,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               onPickFolder={() => void handlePickFolder()}
               onRefresh={() => projectDir && void refreshProjectFiles(projectDir)}
               onOpenFile={(path) => void openFromPath(path)}
-              onNew={newWorkflow}
+              onNew={openNewCanvas}
               onNewInFolder={() => void handleNewInFolder()}
               onRenameFile={(path) => void handleRenameFile(path)}
               onDuplicateFile={(path) => void handleDuplicateFile(path)}
@@ -1184,6 +1218,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 onBeforeConnect={takeSnapshot}
                 onNodeDragStop={handleNodeDragStop}
                 onViewportChange={setViewport}
+                viewportKey={canvas.documentId}
+                viewport={canvas.viewport}
                 snapToGrid={snapToGrid}
                 helperLines={helperLines}
                 edgeType={edgeType}
