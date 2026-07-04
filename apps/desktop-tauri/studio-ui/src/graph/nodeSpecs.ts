@@ -13,7 +13,9 @@ export type ParamControl =
   | "select"
   | "slider"
   | "checkbox"
-  | "path";
+  | "path"
+  /** Registry-backed model dropdown (local models + API profiles, empty allowed). */
+  | "model";
 
 export interface ParamSpec {
   key: string;
@@ -125,6 +127,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "prompt",
     family: "utility",
     executor: "graph",
+    palette: "internal",
     title: "Prompt",
     description: "A text prompt fed into generation nodes.",
     category: "source",
@@ -144,9 +147,9 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     kind: "promptOptimize",
     family: "utility",
     executor: "hybrid",
-    title: "Prompt Optimize",
+    title: "Prompt",
     description:
-      "Initial text node. Enter a prompt, then optionally optimize it — `local` applies model-free cleanup/booster presets, `api` rewrites it through an LLM provider profile (local server or cloud). Outputs the (optimized) prompt text.",
+      "A text prompt fed into generation nodes. Optionally pick a model to optimize it — the built-in local presets, or a local model / API profile from the Models / APIs manager. Leave the model empty to pass the text through unchanged.",
     category: "source",
     inputs: [port("text", "text", "text")],
     outputs: [port("text", "text", "text")],
@@ -161,13 +164,21 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         port: "text",
       },
       {
+        key: "model_select",
+        label: "Model",
+        control: "model",
+        defaultValue: "",
+        hint: "empty = pass through · pick a local model or API profile from the manager",
+        inline: true,
+      },
+      {
         key: "mode",
         label: "Optimize",
         control: "select",
         options: ["off", "local", "api"],
         defaultValue: "off",
-        hint: "off = pass through · local = rule-based · api = LLM via profile",
-        inline: true,
+        hint: "off = pass through · local = rule-based · api = LLM via profile (set by the model dropdown)",
+        advanced: true,
       },
       {
         key: "preset",

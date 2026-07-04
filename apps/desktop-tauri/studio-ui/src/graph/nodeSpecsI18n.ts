@@ -40,12 +40,16 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
     ports: { text: "文本" },
   },
   promptOptimize: {
-    title: "提示词优化",
+    title: "提示词",
     description:
-      "初始文本节点。输入提示词后可选择优化——`local` 应用无模型的清理/增强预设，`api` 通过 LLM 提供方档案（本地服务器或云端）重写。输出（优化后的）提示词文本。",
+      "送入生成节点的文本提示词。可选择一个模型对其优化——内置本地预设，或来自「模型 / API」管理器的本地模型 / API 配置。模型留空则直接输出原文。",
     params: {
       text: { label: "提示词", hint: "初始提示词（连接的 `text` 输入会覆盖它）" },
-      mode: { label: "优化", hint: "off = 直通 · local = 规则化 · api = 经档案走 LLM" },
+      model_select: {
+        label: "模型",
+        hint: "留空 = 直通 · 可选管理器中的本地模型或 API 配置",
+      },
+      mode: { label: "优化", hint: "off = 直通 · local = 规则化 · api = 经档案走 LLM（由模型下拉框设置）" },
       preset: { label: "本地预设", hint: "`local` 模式使用：去重 + 追加增强标签" },
       api_profile_ref: {
         label: "API 配置引用",
