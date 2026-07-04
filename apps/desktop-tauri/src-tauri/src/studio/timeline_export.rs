@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use hgripe_grade::GradeSurface;
 
-use super::grade::{apply_grade_doc, grade_space, parse_grade_doc};
+use super::grade::{apply_grade_doc, grade_space, parse_grade_doc, GradeBackend};
 use super::graph::StudioGraphNode;
 use super::studio_image;
 use super::video_assemble::execute_studio_video_assemble;
@@ -32,13 +32,16 @@ pub(crate) struct TimelineExportResult {
     /// graded. Mirrors the preview's backend report (fallback contract).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) grade_backend: Option<&'static str>,
+    /// Why the grade fell back to CPU, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) grade_backend_fallback_reason: Option<String>,
 }
 
 /// Frames ready for the encoder, plus the grading backend report.
 pub(super) struct GradedFrames {
     pub(super) frames: Vec<String>,
     pub(super) graded_frame_count: u64,
-    pub(super) backend: Option<&'static str>,
+    pub(super) backend: Option<GradeBackend>,
 }
 
 /// Substitute graded frames into a frame sequence: each frame with a grade
@@ -54,7 +57,7 @@ pub(super) fn resolve_graded_frames(
     let mut rendered: HashMap<(String, String), String> = HashMap::new();
     let mut out = Vec::with_capacity(frames.len());
     let mut graded_frame_count = 0u64;
-    let mut backend: Option<&'static str> = None;
+    let mut backend: Option<GradeBackend> = None;
     for (i, path) in frames.into_iter().enumerate() {
         let doc_str = grade_docs.get(i).and_then(|d| d.as_deref()).unwrap_or("");
         if doc_str.trim().is_empty() {
@@ -176,7 +179,8 @@ pub(crate) fn timeline_export(
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
         graded_frame_count,
-        grade_backend: backend,
+        grade_backend: backend.as_ref().map(|b| b.name),
+        grade_backend_fallback_reason: backend.and_then(|b| b.fallback_reason),
     })
 }
 
@@ -234,7 +238,12 @@ mod tests {
         assert_ne!(out[0], src_str);
         assert_eq!(out[2], src_str);
         assert_eq!(result.graded_frame_count, 2);
-        assert!(matches!(result.backend, Some("cpu") | Some("gpu")));
+        let backend = result.backend.as_ref().expect("graded frames report a backend");
+        assert!(matches!(backend.name, "cpu" | "gpu"));
+        assert!(
+            backend.name == "gpu" || backend.fallback_reason.is_some(),
+            "a CPU fallback must carry its reason"
+        );
         let graded = image::open(&out[0]).unwrap().to_rgba8();
         assert!(graded.get_pixel(0, 0).0[0] > 100, "exposure brightens");
 

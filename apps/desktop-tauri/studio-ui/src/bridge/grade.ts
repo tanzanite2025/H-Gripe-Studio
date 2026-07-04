@@ -13,6 +13,8 @@ export interface GradePreviewResult {
   height: number;
   /** Which kernel backend produced the frame: "gpu" | "cpu". */
   backend: string;
+  /** Why the kernel fell back to CPU, when it did. */
+  backend_fallback_reason?: string;
   elapsed_ms: number;
 }
 
