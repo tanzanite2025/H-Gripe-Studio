@@ -271,7 +271,11 @@ export const defaultExecutors: ExecutorRegistry = {
   // compute lane instead (studio/layer_split.rs); the ports are identical.
   smartLayerSplit: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
-    if (!image) throw new Error("Smart Layer Split needs a connected image input");
+    const video = (ctx.inputs.video as string | undefined) ?? null;
+    if (!image && video) {
+      throw new Error("video frame splitting runs in the desktop runtime only");
+    }
+    if (!image) throw new Error("Smart Layer Split needs a connected image or video input");
     const asset = stubLayeredImageAsset({ imagePath: image, nodeId: ctx.nodeId });
     const selectedKind = String(ctx.params.selected_kind ?? "subject");
     const selected =

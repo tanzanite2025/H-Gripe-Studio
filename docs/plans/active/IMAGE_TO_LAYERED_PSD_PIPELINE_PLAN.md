@@ -605,9 +605,12 @@ Reports/
 
 任务：
 
-- 从 timeline frame 提取 still image。
-- 对当前帧做分层。
-- 结果回到 image asset 或 still clip。
+- ✅ 从视频提取 still image：`smartLayerSplit` 增加 `video` 输入端口 +
+  `frame_sec` 参数，桌面运行时通过媒体引擎解码最接近的静帧后再拆分，
+  静帧写入输出目录并记录在 split report 里。
+- ✅ 对当前帧做分层：提取的静帧走完整的主体/背景/实例/文字/logo/
+  阴影/反光管线，`source_asset_id` 指向源视频。
+- 结果回到 image asset 或 still clip（时间线右键入口待做）。
 - 后续再考虑对象跟踪和跨帧 mask。
 
 成功标准：
