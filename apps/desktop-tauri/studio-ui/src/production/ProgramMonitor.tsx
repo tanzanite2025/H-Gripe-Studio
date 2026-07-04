@@ -1,13 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useT } from "../i18n";
+import { useViewControls } from "../viewport/useViewControls";
 import { useVideoPreview } from "../viewport/useVideoPreview";
-import {
-  IDENTITY_VIEW,
-  panView,
-  zoomViewAt,
-  type ViewportViewState,
-} from "../viewport/view";
 import type { MediaAsset } from "./mediaBin";
 import { resolvePreviewFrame } from "./previewFrame";
 import { timelineDuration, type TimelineModel } from "./timeline";
@@ -31,13 +26,10 @@ export function ProgramMonitor({
 }) {
   const t = useT();
   const [playheadSec, setPlayheadSec] = useState(0);
-  // Monitor zoom/pan is viewport state: wheel zooms (up to 8x), dragging
-  // pans when zoomed, double-click resets. The viewport re-crops its cached
-  // frame proxy, so a view tick never re-decodes the frame.
-  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const frameRef = useRef<HTMLDivElement | null>(null);
   const { state, showFrame } = useVideoPreview();
+  // Monitor zoom/pan is viewport state: the viewport re-crops its cached
+  // frame proxy, so a view tick never re-decodes the frame.
+  const { view, stageProps } = useViewControls(!!state.frame);
 
   const duration = Math.max(timelineDuration(timeline), 0);
   const clampedSec = Math.min(playheadSec, duration);
@@ -51,45 +43,9 @@ export function ProgramMonitor({
     showFrame(target ? { target, gradeDoc, view } : null);
   }, [target, gradeDoc, view, showFrame]);
 
-  const handleWheel = (e: React.WheelEvent) => {
-    if (!state.frame) return;
-    const rect = frameRef.current?.getBoundingClientRect();
-    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
-  };
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (view.zoom <= 1) return;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  };
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const from = dragRef.current;
-    const frame = frameRef.current;
-    if (!from || !frame) return;
-    const rect = frame.getBoundingClientRect();
-    const dx = e.clientX - from.x;
-    const dy = e.clientY - from.y;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    setView((v) => panView(v, dx, dy, rect.width, rect.height));
-  };
-  const handlePointerUp = () => {
-    dragRef.current = null;
-  };
-
   return (
     <div className="production-monitor">
-      <div
-        className="production-monitor-frame"
-        ref={frameRef}
-        onWheel={handleWheel}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onDoubleClick={() => setView(IDENTITY_VIEW)}
-        style={view.zoom > 1 ? { cursor: dragRef.current ? "grabbing" : "grab" } : undefined}
-      >
+      <div className="production-monitor-frame" {...stageProps}>
         {state.frame && target ? (
           <img src={state.frame} alt={t("drawer.monitorTitle")} />
         ) : (

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
-import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
+import type { ViewportViewState } from "../viewport/view";
 
 // Shared "review gate" modal.
 //
@@ -62,13 +63,6 @@ export function PreviewModal({ title, layers, caption, onEdit, onClose }: Previe
   // Default to the first layer that actually has a path, else the first layer.
   const firstReady = Math.max(0, layers.findIndex((l) => !!l.path));
   const [active, setActive] = useState(firstReady === -1 ? 0 : firstReady);
-  // Zoom/pan is viewport state shared across layer flips: wheel zooms (up to
-  // 8x), dragging pans when zoomed, double-click resets. Keeping one view
-  // while flipping image / mask / cutout compares the same region.
-  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -80,32 +74,9 @@ export function PreviewModal({ title, layers, caption, onEdit, onClose }: Previe
   const layer = layers[active];
   const path = layer?.path ?? null;
   const isImage = path ? IMAGE_RE.test(path) : false;
-
-  const handleWheel = (e: React.WheelEvent) => {
-    if (!isImage) return;
-    const rect = stageRef.current?.getBoundingClientRect();
-    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
-  };
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (view.zoom <= 1) return;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  };
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const from = dragRef.current;
-    const stage = stageRef.current;
-    if (!from || !stage) return;
-    const rect = stage.getBoundingClientRect();
-    const dx = e.clientX - from.x;
-    const dy = e.clientY - from.y;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    setView((v) => panView(v, dx, dy, rect.width, rect.height));
-  };
-  const handlePointerUp = () => {
-    dragRef.current = null;
-  };
+  // Zoom/pan is viewport state shared across layer flips, so flipping
+  // image / mask / cutout compares the same region.
+  const { view, stageProps } = useViewControls(isImage);
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
@@ -139,17 +110,7 @@ export function PreviewModal({ title, layers, caption, onEdit, onClose }: Previe
             </button>
           </div>
         </div>
-        <div
-          className="media-viewer-stage fit"
-          ref={stageRef}
-          onWheel={handleWheel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onDoubleClick={() => setView(IDENTITY_VIEW)}
-          style={view.zoom > 1 ? { cursor: dragRef.current ? "grabbing" : "grab" } : undefined}
-        >
+        <div className="media-viewer-stage fit" {...stageProps}>
           {!path ? (
             <p className="muted">No “{layer?.label}” produced yet — run the node to generate it.</p>
           ) : !isImage ? (

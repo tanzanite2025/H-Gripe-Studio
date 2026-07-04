@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
 import { useGradeViewport } from "../viewport/useGradeViewport";
-import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
+import { useViewControls } from "../viewport/useViewControls";
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
@@ -182,9 +182,7 @@ export function GradePanel({
   // Preview zoom/pan is viewport state (Phase 3): the host crops its cached
   // source proxy, so wheel/drag ticks re-run only crop + kernel. Identity
   // outside Tauri, where the mirror fallback shows the full frame.
-  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
+  const { view, stageProps } = useViewControls();
   const cubeInputRef = useRef<HTMLInputElement | null>(null);
   // Monotonic preview sequence: only the latest request may publish a frame.
   const previewSeq = useRef(0);
@@ -496,45 +494,10 @@ export function GradePanel({
     }
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    const rect = stageRef.current?.getBoundingClientRect();
-    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
-  };
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (view.zoom <= 1) return;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  };
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const from = dragRef.current;
-    const stage = stageRef.current;
-    if (!from || !stage) return;
-    const rect = stage.getBoundingClientRect();
-    const dx = e.clientX - from.x;
-    const dy = e.clientY - from.y;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    setView((v) => panView(v, dx, dy, rect.width, rect.height));
-  };
-  const handlePointerUp = () => {
-    dragRef.current = null;
-  };
-
   return (
     <div className="mask-edit-body grade-panel">
       <div className="crop-edit-stage-wrap">
-        <div
-          className="crop-edit-stage"
-          ref={stageRef}
-          onWheel={handleWheel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onDoubleClick={() => setView(IDENTITY_VIEW)}
-          style={view.zoom > 1 ? { cursor: dragRef.current ? "grabbing" : "grab" } : undefined}
-        >
+        <div className="crop-edit-stage" {...stageProps}>
           {preview || underlay ? (
             <img className="crop-edit-img" src={preview ?? underlay ?? undefined} alt="preview" draggable={false} />
           ) : (
