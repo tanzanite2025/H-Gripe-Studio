@@ -106,9 +106,62 @@ export function deviceReportFromEngineReport(report: EngineReportLike): DeviceRe
     backend: backendParts.length > 0 ? backendParts.join(" ") : undefined,
     // Software FFmpeg is the vendored encode/decode baseline, not an
     // accelerated backend (only `ffmpeg_hw` counts as accelerated).
-    accelerated:
-      used !== "cpu" && used !== "provider" && used !== "unknown" && used !== "ffmpeg_sw",
+    accelerated: ACCELERATED.has(used),
     fallbackReason: asText(report.engine_fallback_reason),
+  };
+}
+
+/**
+ * Device report an external model plugin must emit at its boundary (the core
+ * app owns no heavy model runtime; it only accepts reports). Mirrors the
+ * plan's plugin contract: requested vs actual device and precision, plus a
+ * fallback reason when the two differ.
+ */
+export interface PluginDeviceReportLike {
+  device_requested?: string | null;
+  device?: string | null;
+  precision_requested?: string | null;
+  precision?: string | null;
+  fallback_reason?: string | null;
+  /** Plugin-owned backend detail (runtime/build id). */
+  backend?: string | null;
+}
+
+/** The `used` values that count as an accelerated backend. */
+const ACCELERATED: ReadonlySet<DeviceUsed> = new Set(["cuda", "wgpu", "directml", "ffmpeg_hw"]);
+
+/**
+ * Normalise an external plugin's boundary report into a `DeviceReport`,
+ * preserving device/precision truthfulness: a plugin may resolve its own
+ * device, but a downgrade from the requested device or precision must stay
+ * visible — when the plugin omits the reason, one is synthesised rather than
+ * letting the downgrade pass silently.
+ */
+export function deviceReportFromPluginReport(report: PluginDeviceReportLike): DeviceReport {
+  const requested = asRequest(report.device_requested);
+  const used = asUsed(report.device) ?? "unknown";
+  const accelerated = ACCELERATED.has(used);
+  const precision = asText(report.precision);
+  const precisionRequested = asText(report.precision_requested);
+  const notes: string[] = [];
+  if ((requested === "cuda" || requested === "gpu") && !accelerated) {
+    notes.push(`plugin ran on ${used} for a ${requested} request`);
+  }
+  if (precisionRequested && precision && precisionRequested !== precision) {
+    notes.push(`precision ${precisionRequested} -> ${precision}`);
+  }
+  const reported = asText(report.fallback_reason);
+  const fallbackReason =
+    reported ?? (notes.length > 0 ? `${notes.join("; ")} (no reason reported)` : undefined);
+  const backendParts = [asText(report.backend) ?? "plugin", precision].filter(
+    Boolean,
+  ) as string[];
+  return {
+    requested,
+    used,
+    backend: backendParts.join(" "),
+    accelerated,
+    fallbackReason,
   };
 }
 
