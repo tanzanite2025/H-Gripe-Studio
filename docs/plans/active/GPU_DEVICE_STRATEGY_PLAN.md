@@ -247,11 +247,10 @@ Goal: make each accelerated backend robust before unifying scheduling.
 - GPU output remains tolerance-tested against CPU.
 - Add clearer `backend: "gpu" | "cpu"` report for every grade preview/render.
 - Cache GPU pipelines for interactive sliders.
-- Add fallback reasons:
-  - no adapter
-  - shader compilation failed
-  - texture too large
-  - GPU readback failed
+- ✅ Add fallback reasons — `GpuError` distinguishes no adapter, shader
+  compilation failed (validation error scope around plan build), surface too
+  large (device storage-buffer limits), GPU readback failed, and device
+  errors; each surfaces verbatim as the reported CPU-fallback reason.
 
 ### ONNX Helpers
 
