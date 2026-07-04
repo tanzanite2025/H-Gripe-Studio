@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useContext, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { paletteGroups, type NodeSpec, type PaletteCategory } from "../graph/nodeSpecs";
 import { GROUP_ZH, localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT, type MsgKey } from "../i18n";
@@ -40,7 +40,6 @@ const GROUP_ITEM = {
   title: "Group",
   description: "A resizable frame. Drag nodes inside to group them; members move together.",
 };
-const GROUP_ITEM_ZH = { kind: "group", title: GROUP_ZH.title, description: GROUP_ZH.description };
 
 export function matches(spec: { title: string; kind: string; description: string }, q: string): boolean {
   if (!q) return true;
@@ -63,13 +62,10 @@ function loadPaletteWidth() {
   return Number.isFinite(parsed) ? clampPaletteWidth(parsed) : PALETTE_DEFAULT_WIDTH;
 }
 
-// Left rail listing the available node kinds. A search box filters by title /
-// kind / description; each item can be dragged onto the canvas (drop position
-// is honoured) or clicked to add at a default location.
+// Left rail listing the available node kinds. Each item can be dragged onto the
+// canvas (drop position is honoured) or clicked to add at a default location.
 export function Palette({ onAdd }: PaletteProps) {
-  const [query, setQuery] = useState("");
   const [width, setWidth] = useState(loadPaletteWidth);
-  const inputRef = useRef<HTMLInputElement>(null);
   const lang = useContext(LangContext);
   const t = useT();
 
@@ -102,36 +98,14 @@ export function Palette({ onAdd }: PaletteProps) {
     window.addEventListener("pointerup", onPointerUp, { once: true });
   };
 
-  // "/" focuses search (unless already typing in a field), so you can add a
-  // node without reaching for the mouse.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "/") return;
-      const t = e.target as HTMLElement | null;
-      const editable =
-        !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
-      if (editable) return;
-      e.preventDefault();
-      inputRef.current?.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const groups = useMemo(
     () =>
-      paletteGroups()
-        .map(({ category, specs }) => ({
-          category,
-          specs: specs
-            .map((s) => localizeSpec(s, lang))
-            .filter((s) => matches(s, query)),
-        }))
-        .filter((g) => g.specs.length > 0),
-    [query, lang],
+      paletteGroups().map(({ category, specs }) => ({
+        category,
+        specs: specs.map((s) => localizeSpec(s, lang)),
+      })),
+    [lang],
   );
-  const showGroupItem = matches(lang === "zh" ? GROUP_ITEM_ZH : GROUP_ITEM, query);
-  const empty = groups.length === 0 && !showGroupItem;
 
   return (
     <aside className="palette" style={{ width }}>
@@ -144,20 +118,6 @@ export function Palette({ onAdd }: PaletteProps) {
         onPointerDown={startResize}
       />
       <h2>{t("palette.heading")}</h2>
-      <input
-        ref={inputRef}
-        className="palette-search"
-        type="search"
-        placeholder={t("palette.searchPh")}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            setQuery("");
-            inputRef.current?.blur();
-          }
-        }}
-      />
       {groups.map(({ category, specs }) => (
         <div key={category} className="palette-group">
           <h3>{t(CATEGORY_LABEL[category])}</h3>
@@ -183,28 +143,22 @@ export function Palette({ onAdd }: PaletteProps) {
           ))}
         </div>
       ))}
-      {showGroupItem && (
-        <div className="palette-group">
-          <h3>{t("palette.containers")}</h3>
-          <button
-            className="palette-item"
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData(DND_NODE_KIND, "group");
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            onClick={() => onAdd("group")}
-            title={`${t("palette.group")} - ${lang === "zh" ? GROUP_ZH.description : GROUP_ITEM.description}`}
-          >
-            {t("palette.group")}
-          </button>
-        </div>
-      )}
-      {empty ? (
-        <p className="muted palette-hint">{t("palette.noMatch", { query })}</p>
-      ) : (
-        <p className="muted palette-hint">{t("palette.hint")}</p>
-      )}
+      <div className="palette-group">
+        <h3>{t("palette.containers")}</h3>
+        <button
+          className="palette-item"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData(DND_NODE_KIND, "group");
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          onClick={() => onAdd("group")}
+          title={`${t("palette.group")} - ${lang === "zh" ? GROUP_ZH.description : GROUP_ITEM.description}`}
+        >
+          {t("palette.group")}
+        </button>
+      </div>
+      <p className="muted palette-hint">{t("palette.hint")}</p>
     </aside>
   );
 }

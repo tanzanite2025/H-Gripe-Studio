@@ -144,6 +144,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
   const [edgeType, setEdgeType] = useState<EdgeStyle>("default");
@@ -194,6 +195,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedId) ?? null,
     [nodes, selectedId],
+  );
+  const inspectorNode = useMemo(
+    () => nodes.find((n) => n.id === inspectorNodeId) ?? null,
+    [nodes, inspectorNodeId],
   );
 
   // The selected split node's layered image asset. The last run's real
@@ -884,7 +889,20 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   // Stable context value so memoized node cards can edit their own params.
   const editing = useMemo(
-    () => ({ onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode }),
+    () => ({
+      onParamChange,
+      openInspector: (nodeId: string) => {
+        setSelectedId(nodeId);
+        setInspectorNodeId(nodeId);
+      },
+      openPreview,
+      openMaskEdit,
+      openCropEdit,
+      openGradeEdit,
+      openMediaEdit,
+      addBoundEdit,
+      runUpToNode,
+    }),
     [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode],
   );
 
@@ -1140,12 +1158,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               />
             )}
           </div>
-          {selectedNode ? (
-            <Inspector node={selectedNode} onParamChange={onParamChange} />
-          ) : (
-            <aside className="inspector">
-              <p className="muted">{t("inspector.selectNode")}</p>
-            </aside>
+          {inspectorNode && (
+            <Inspector
+              node={inspectorNode}
+              onParamChange={onParamChange}
+              onClose={() => setInspectorNodeId(null)}
+            />
           )}
         </div>
         <ProductionDrawer

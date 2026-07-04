@@ -28,6 +28,7 @@ function engineProbeKind(kind: string, paramKey: string): string | null {
 interface InspectorProps {
   node: Node;
   onParamChange: (nodeId: string, key: string, value: unknown) => void;
+  onClose?: () => void;
 }
 
 // Right-side panel. Mounted only while a node is selected (the shell renders a
@@ -35,7 +36,7 @@ interface InspectorProps {
 // nothing is inspected. Full-resolution media preview belongs here (not inside
 // the node card), so the canvas stays light and previews never blow up node
 // size.
-export function Inspector({ node, onParamChange }: InspectorProps) {
+export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
   const [viewerPath, setViewerPath] = useState<string | null>(null);
   // Engine dropdowns read only the node spec — selecting an engine is picking
   // a ref, not probing it. The capability report exists only after the user
@@ -65,7 +66,14 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
   if (data.kind === "group") {
     return (
       <aside className="inspector">
-        <h2>{t("inspector.group")}</h2>
+        <div className="inspector-head">
+          <h2>{t("inspector.group")}</h2>
+          {onClose && (
+            <button type="button" className="inspector-close" onClick={onClose} title="Close inspector">
+              x
+            </button>
+          )}
+        </div>
         <p className="muted">{t("inspector.groupDesc")}</p>
         <label className="field">
           <span>{t("inspector.label")}</span>
@@ -82,8 +90,11 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
 
   // A param can declare `visibleWhen` to hide itself unless a sibling param has
   // one of the listed values (e.g. show API fields only when mode === "api").
+  // Params marked `inline` already live on the node card; repeating them here
+  // creates two edit surfaces for one value and makes the canvas feel incoherent.
   const isVisible = (p: (typeof spec.params)[number]) =>
-    !p.visibleWhen || p.visibleWhen.in.includes(String(data.params[p.visibleWhen.param] ?? ""));
+    !p.inline &&
+    (!p.visibleWhen || p.visibleWhen.in.includes(String(data.params[p.visibleWhen.param] ?? "")));
 
   // The profile picker only makes sense where API credentials are used: always
   // for `generate`, and for `promptOptimize` only in its `api` mode.
@@ -93,7 +104,14 @@ export function Inspector({ node, onParamChange }: InspectorProps) {
 
   return (
     <aside className="inspector">
-      <h2>{spec.title}</h2>
+      <div className="inspector-head">
+        <h2>{spec.title}</h2>
+        {onClose && (
+          <button type="button" className="inspector-close" onClick={onClose} title="Close inspector">
+            x
+          </button>
+        )}
+      </div>
       <p className="muted">{spec.description}</p>
 
       {showProfilePicker && (

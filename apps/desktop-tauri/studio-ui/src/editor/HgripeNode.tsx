@@ -399,7 +399,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   // block, keeping the field next to the connection dot that overrides it.
   const blockParams = spec.params.filter((p) => p.inline && p.port);
   const renderInlineParam = (p: (typeof spec.params)[number]) => (
-    <label key={p.key} className="inline-field">
+    <label key={p.key} className={`inline-field inline-field-${p.control}`}>
       <span>{p.label}</span>
       <ParamField
         spec={p}
@@ -429,6 +429,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       lod={lod}
       durationMs={d.durationMs}
       titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
+      onOpenInspector={() => editing?.openInspector?.(id)}
       portContent={lod ? undefined : portContent}
     >
       {!lod && (status === "failed" || status === "cancelled") && d.error ? (
@@ -438,7 +439,9 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       ) : null}
 
       {!lod && <div className="node-body">
-        {inlineParams.map(renderInlineParam)}
+        {inlineParams.length > 0 ? (
+          <div className="inline-field-grid">{inlineParams.map(renderInlineParam)}</div>
+        ) : null}
 
         {spec.kind === "preview" &&
           (d.imagePath ? (

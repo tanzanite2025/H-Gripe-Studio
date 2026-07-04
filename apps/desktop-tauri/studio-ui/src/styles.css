@@ -32,23 +32,79 @@ body {
 
 .toolbar {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  padding: 8px 12px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+  user-select: none;
 }
-.toolbar .spacer { flex: 1 1 100%; }
+.toolbar-title-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 360px) minmax(220px, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.toolbar-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.toolbar-brand strong { font-size: 15px; }
+.toolbar-search {
+  justify-self: center;
+  width: 100%;
+}
+.toolbar-search .node-search,
+.toolbar-search .node-search > input {
+  width: 100%;
+}
+.toolbar-title-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.toolbar-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  width: 100%;
+}
+.toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding-right: 12px;
+  margin-right: 12px;
+  border-right: 1px solid var(--border);
+}
+.toolbar-group:last-child {
+  border-right: 0;
+  margin-right: 0;
+  padding-right: 0;
+}
+.toolbar-run-group { flex: 1 1 260px; }
+.toolbar-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lang-toggle { min-width: 38px; font-weight: 600; }
 .muted { color: var(--muted); }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: #232633;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 5px 12px;
+  line-height: 1;
   cursor: pointer;
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -260,7 +316,25 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 14px;
   overflow: auto;
 }
+.inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .inspector h2 { margin: 0 0 4px; font-size: 15px; }
+.inspector-close {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+}
+.inspector-close:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
 .field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
 .field > span { color: var(--muted); font-size: 12px; }
 .field input, .field textarea, .field select {
@@ -359,7 +433,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .node {
   position: relative;
-  width: 180px;
+  width: 240px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -372,12 +446,34 @@ button:disabled { opacity: 0.6; cursor: default; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 6px 8px;
   /* keep the title row clear of the corner badge zone */
   padding-right: calc(var(--node-badge-size) * 0.55);
   background: #20232e;
   border-bottom: 1px solid var(--border);
   border-radius: 8px 8px 0 0;
+}
+.node-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.node-inspector-btn {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: #263323;
+  color: #b9ea75;
+  font-size: 13px;
+  line-height: 1;
+}
+.node-inspector-btn:hover {
+  background: #314327;
+  color: #d7ff9d;
 }
 /* Corner type badge: a circle whose center point is exactly the card's
    top-right corner (1/4 inside the card, 3/4 outside). Identity stamp only:
@@ -464,6 +560,36 @@ button:disabled { opacity: 0.6; cursor: default; }
   border-radius: 10px;
   background: #2a2d37;
   color: var(--muted);
+}
+.node-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 2px rgba(139, 144, 160, 0.16);
+}
+.node-status-idle {
+  background: #4d5362;
+  box-shadow: 0 0 0 2px rgba(139, 144, 160, 0.12);
+}
+.node-status-running {
+  background: var(--running);
+  box-shadow: 0 0 0 2px rgba(245, 196, 81, 0.18);
+}
+.node-status-succeeded,
+.node-status-cached {
+  background: var(--ok);
+  box-shadow: 0 0 0 2px rgba(62, 207, 142, 0.18);
+}
+.node-status-failed {
+  background: var(--err);
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.18);
+}
+.node-status-cancelled,
+.node-status-skipped {
+  background: #8b93a7;
+  box-shadow: 0 0 0 2px rgba(139, 147, 167, 0.14);
 }
 .badge-running { background: var(--running); color: #1a1500; }
 .badge-succeeded, .badge-cached { background: var(--ok); color: #00251a; }
@@ -602,6 +728,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   min-height: 36px;
   text-align: left;
   margin-bottom: 4px;
+  line-height: 1;
   cursor: grab;
 }
 .palette-item-title {
@@ -633,14 +760,6 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: var(--muted);
   cursor: pointer;
 }
-.palette-search {
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 4px 6px;
-  font-size: 12px;
-  box-sizing: border-box;
-}
-
 /* React Flow built-ins need explicit dark styling; the upstream defaults are
    bright and disappear on the dark canvas. */
 .flow-controls.react-flow__controls {
@@ -781,7 +900,20 @@ button:disabled { opacity: 0.6; cursor: default; }
 .output-item { text-align: left; font-size: 11px; }
 
 /* inline param editing on the node card */
-.inline-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.inline-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 8px;
+  margin-bottom: 8px;
+}
+.inline-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; min-width: 0; }
+.inline-field-grid .inline-field { margin-bottom: 0; }
+.inline-field-grid .inline-field-text,
+.inline-field-grid .inline-field-textarea,
+.inline-field-grid .inline-field-path,
+.inline-field-grid .inline-field-slider {
+  grid-column: 1 / -1;
+}
 .inline-field > span { color: var(--muted); font-size: 11px; }
 .inline-field input,
 .inline-field textarea,
@@ -1468,3 +1600,19 @@ button:disabled { opacity: 0.6; cursor: default; }
   white-space: nowrap;
 }
 .export-error { margin: 0; color: #f7768e; font-size: 12px; }
+
+/* Global form shape: text-like inputs and dropdowns use the maximum pill
+   radius everywhere. Checkboxes and sliders keep their native/control-specific
+   geometry so toggles and ranges remain readable. */
+input:not([type="checkbox"]):not([type="range"]),
+select {
+  border-radius: 999px !important;
+}
+textarea {
+  border-radius: 18px !important;
+}
+button:not(.react-flow__controls-button),
+.palette-item,
+.project-item {
+  border-radius: 999px !important;
+}

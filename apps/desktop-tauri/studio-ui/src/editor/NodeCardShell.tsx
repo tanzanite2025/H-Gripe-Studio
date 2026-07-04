@@ -17,6 +17,8 @@ export interface NodeCardShellProps {
   durationMs?: number;
   /** Extra element rendered inside the title row (e.g. the PSD tag). */
   titleExtra?: ReactNode;
+  /** Opens the on-demand right-side Inspector for this node. */
+  onOpenInspector?: () => void;
   /** Content rendered inside an input port's block, keyed by port id (e.g. the params belonging to that block). */
   portContent?: Record<string, ReactNode>;
   children?: ReactNode;
@@ -29,6 +31,7 @@ export function NodeCardShell({
   lod,
   durationMs,
   titleExtra,
+  onOpenInspector,
   portContent,
   children,
 }: NodeCardShellProps) {
@@ -38,11 +41,26 @@ export function NodeCardShell({
       <div className="node-header">
         <span className="node-title">{spec.title}</span>
         {titleExtra}
-        <span className={`badge badge-${status}`} title={fmtDuration(durationMs)}>
-          {status}
-          {durationMs != null && (status === "succeeded" || status === "failed" || status === "cancelled") ? (
-            <em className="badge-time"> {fmtDuration(durationMs)}</em>
-          ) : null}
+        <span className="node-header-actions">
+          <span
+            className={`node-status-dot node-status-${status}`}
+            title={durationMs != null ? `${status} ${fmtDuration(durationMs)}` : status}
+            aria-label={`status ${status}`}
+          />
+          {onOpenInspector && (
+            <button
+              type="button"
+              className="node-inspector-btn nodrag nowheel"
+              title="Edit node settings"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenInspector();
+              }}
+            >
+              ⚙
+            </button>
+          )}
         </span>
       </div>
       {spec.inputs.length + spec.outputs.length > 0 && (
