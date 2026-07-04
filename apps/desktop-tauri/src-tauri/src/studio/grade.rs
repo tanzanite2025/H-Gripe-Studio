@@ -68,7 +68,7 @@ pub(crate) fn apply_grade_doc(doc: &GradeDoc, surface: &mut GradeSurface) -> &'s
 
 /// Parse a `grade_doc` value: either the document object itself or a JSON
 /// string holding one. Missing / empty reads as the identity document.
-fn parse_grade_doc(value: Option<&Value>) -> Result<GradeDoc, String> {
+pub(crate) fn parse_grade_doc(value: Option<&Value>) -> Result<GradeDoc, String> {
     match value {
         None | Some(Value::Null) => Ok(GradeDoc { layers: vec![] }),
         Some(Value::String(s)) if s.trim().is_empty() => Ok(GradeDoc { layers: vec![] }),
@@ -275,6 +275,40 @@ pub(crate) fn video_frame_grade_preview(
     grade_srgb_preview(srgb, doc, max_dim, started)
 }
 
+/// Downscale an sRGB proxy to at most `max_dim` on the long edge.
+fn downscale_srgb(srgb: RgbaImage, max_dim: u32) -> RgbaImage {
+    let (w, h) = srgb.dimensions();
+    if w.max(h) <= max_dim {
+        return srgb;
+    }
+    let scale = f64::from(max_dim) / f64::from(w.max(h));
+    let nw = ((f64::from(w) * scale).round() as u32).max(1);
+    let nh = ((f64::from(h) * scale).round() as u32).max(1);
+    image::imageops::resize(&srgb, nw, nh, image::imageops::FilterType::Triangle)
+}
+
+/// Decode a still image and produce its display-space proxy at most `max_dim`
+/// on the long edge. The decode+downscale half of the preview path, split out
+/// so callers (the viewport host) can cache the proxy across parameter-only
+/// re-renders such as slider drags.
+pub(crate) fn load_image_srgb_proxy(path: &Path, max_dim: u32) -> Result<RgbaImage, String> {
+    let loaded = studio_image::load_working(path, studio_image::DEFAULT_MAX_DECODE_PIXELS)?;
+    Ok(downscale_srgb(loaded.image.to_srgb_rgba8(), max_dim))
+}
+
+/// Decode one video frame through the native media engine and produce its
+/// display-space proxy at most `max_dim` on the long edge. Cacheable like
+/// [`load_image_srgb_proxy`], keyed by path + timestamp.
+#[cfg(feature = "native-ffmpeg")]
+pub(crate) fn decode_video_srgb_proxy(
+    video: &Path,
+    timestamp_sec: f64,
+    max_dim: u32,
+) -> Result<RgbaImage, String> {
+    let working = super::ffmpeg_native::decode_frame_working(video, timestamp_sec)?;
+    Ok(downscale_srgb(working.to_srgb_rgba8(), max_dim))
+}
+
 /// Grade an sRGB 8-bit proxy and encode it as a PNG data URL — the shared tail
 /// of both the still ([`grade_preview`]) and video
 /// ([`video_frame_grade_preview`]) preview paths. Downscales to at most
@@ -285,20 +319,23 @@ fn grade_srgb_preview(
     max_dim: Option<u32>,
     started: Instant,
 ) -> Result<GradePreviewResult, String> {
-    let (w, h) = srgb.dimensions();
-    if w == 0 || h == 0 {
+    let max_dim = max_dim.unwrap_or(1280).clamp(16, 4096);
+    let srgb = downscale_srgb(srgb, max_dim);
+    grade_srgb_proxy(&srgb, &doc, started)
+}
+
+/// Run `doc` over an already-scaled sRGB proxy (no decode, no resize) and
+/// encode the graded result as a PNG data URL. The per-tick cost of a slider
+/// drag when the caller caches the proxy.
+pub(crate) fn grade_srgb_proxy(
+    srgb: &RgbaImage,
+    doc: &GradeDoc,
+    started: Instant,
+) -> Result<GradePreviewResult, String> {
+    let (pw, ph) = srgb.dimensions();
+    if pw == 0 || ph == 0 {
         return Err("Grade preview needs a non-empty image".to_string());
     }
-    let max_dim = max_dim.unwrap_or(1280).clamp(16, 4096);
-    let srgb = if w.max(h) > max_dim {
-        let scale = f64::from(max_dim) / f64::from(w.max(h));
-        let nw = ((f64::from(w) * scale).round() as u32).max(1);
-        let nh = ((f64::from(h) * scale).round() as u32).max(1);
-        image::imageops::resize(&srgb, nw, nh, image::imageops::FilterType::Triangle)
-    } else {
-        srgb
-    };
-    let (pw, ph) = srgb.dimensions();
 
     let data: Vec<f32> = srgb
         .as_raw()
@@ -311,7 +348,7 @@ fn grade_srgb_preview(
         data,
         space: GradeSpace::Srgb,
     };
-    let backend = apply_grade_doc(&doc, &mut surface);
+    let backend = apply_grade_doc(doc, &mut surface);
 
     let out: Vec<u8> = surface
         .data

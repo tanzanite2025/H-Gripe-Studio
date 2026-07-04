@@ -15,14 +15,16 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
+use image::RgbaImage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::commands::thumbnails::generate_thumbnail_inner;
 use crate::resource;
-use crate::studio::grade_preview;
+use crate::studio::{grade_srgb_proxy, load_image_srgb_proxy, parse_grade_doc};
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -104,6 +106,25 @@ pub(crate) struct ViewportFrame {
     pub backend: ViewportBackend,
 }
 
+/// Identity of a decoded source proxy: which pixels it holds and at what
+/// size. Timestamps are compared through their bit pattern so the key can be
+/// `Eq` without float fuzz.
+#[derive(Clone, PartialEq, Eq)]
+struct ProxyKey {
+    path: String,
+    time_bits: Option<u64>,
+    size: u32,
+}
+
+/// The viewport's cached display-space source: decode + downscale happen once
+/// per (target, size); parameter-only re-renders such as slider drags re-run
+/// only the grade kernel over this proxy. Bounded by construction — one proxy
+/// per viewport, viewports are capped at [`MAX_VIEWPORTS`].
+struct SourceProxy {
+    key: ProxyKey,
+    srgb: Arc<RgbaImage>,
+}
+
 struct ViewportState {
     kind: String,
     target: Option<ViewportTarget>,
@@ -112,6 +133,7 @@ struct ViewportState {
     /// Grade document applied at render time (grade_preview viewports); the
     /// doc is parameters only — pixels are resolved through the target.
     grade_doc: Option<Value>,
+    proxy: Option<SourceProxy>,
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();
@@ -128,6 +150,38 @@ fn parse_id(viewport_id: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("invalid viewport id: {viewport_id}"))
 }
 
+/// Fetch the viewport's cached source proxy for `key`, decoding through
+/// `decode` on a miss and storing the result back onto the viewport (if it is
+/// still open) so the next parameter-only render skips the decode. The
+/// registry lock is never held across a decode.
+fn cached_proxy(
+    id: u64,
+    key: ProxyKey,
+    decode: impl FnOnce() -> Result<RgbaImage, String>,
+) -> Result<Arc<RgbaImage>, String> {
+    {
+        let map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        if let Some(proxy) = map.get(&id).and_then(|state| state.proxy.as_ref()) {
+            if proxy.key == key {
+                return Ok(proxy.srgb.clone());
+            }
+        }
+    }
+    let srgb = Arc::new(decode()?);
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    if let Some(state) = map.get_mut(&id) {
+        state.proxy = Some(SourceProxy {
+            key,
+            srgb: srgb.clone(),
+        });
+    }
+    Ok(srgb)
+}
+
 const VIEWPORT_KINDS: [&str; 3] = ["image_edit", "grade_preview", "video_preview"];
 
 #[tauri::command]
@@ -135,7 +189,9 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
     if !VIEWPORT_KINDS.contains(&kind.as_str()) {
         return Err(format!("unknown viewport kind: {kind}"));
     }
-    let mut map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
     if map.len() >= MAX_VIEWPORTS {
         return Err(format!(
             "viewport limit reached ({MAX_VIEWPORTS}); a caller is leaking viewports"
@@ -150,9 +206,13 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             width: 0,
             height: 0,
             grade_doc: None,
+            proxy: None,
         },
     );
-    eprintln!("[viewport] created vp-{id} kind={kind} (open: {})", map.len());
+    eprintln!(
+        "[viewport] created vp-{id} kind={kind} (open: {})",
+        map.len()
+    );
     Ok(ViewportDescriptor {
         viewport_id: format!("vp-{id}"),
         kind,
@@ -163,7 +223,9 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
 #[tauri::command]
 pub(crate) fn viewport_destroy(viewport_id: String) -> Result<(), String> {
     let id = parse_id(&viewport_id)?;
-    let mut map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
     match map.remove(&id) {
         Some(state) => {
             eprintln!(
@@ -192,7 +254,9 @@ pub(crate) fn viewport_set_target(
         }
     }
     let id = parse_id(&viewport_id)?;
-    let mut map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
     let state = map
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
@@ -203,7 +267,9 @@ pub(crate) fn viewport_set_target(
 #[tauri::command]
 pub(crate) fn viewport_resize(viewport_id: String, width: u32, height: u32) -> Result<(), String> {
     let id = parse_id(&viewport_id)?;
-    let mut map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
     let state = map
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
@@ -218,7 +284,9 @@ pub(crate) fn viewport_resize(viewport_id: String, width: u32, height: u32) -> R
 #[tauri::command]
 pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Result<(), String> {
     let id = parse_id(&viewport_id)?;
-    let mut map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
     let state = map
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
@@ -236,7 +304,9 @@ pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Res
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
     let id = parse_id(&viewport_id)?;
     let (target, width, height, grade_doc) = {
-        let map = viewports().lock().map_err(|_| "viewport registry poisoned")?;
+        let map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
         let state = map
             .get(&id)
             .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
@@ -255,8 +325,18 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             let size = width.max(height).clamp(64, 2048);
             if let Some(doc) = grade_doc {
                 // Graded frame: run the grading kernel over the target's sRGB
-                // proxy at the viewport size.
-                let graded = grade_preview(entry.path.clone(), doc, Some(size))?;
+                // proxy at the viewport size. The proxy is cached on the
+                // viewport, so a slider drag re-runs only the kernel.
+                let doc = parse_grade_doc(Some(&doc))?;
+                let key = ProxyKey {
+                    path: entry.path.clone(),
+                    time_bits: None,
+                    size,
+                };
+                let proxy = cached_proxy(id, key, || {
+                    load_image_srgb_proxy(std::path::Path::new(&entry.path), size)
+                })?;
+                let graded = grade_srgb_proxy(&proxy, &doc, Instant::now())?;
                 return Ok(ViewportFrame {
                     data_url: graded.data_url,
                     width: graded.width,
@@ -289,13 +369,23 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             let size = width.max(height).clamp(64, 2048);
             if let Some(doc) = grade_doc {
                 // Graded frame: decode through the native media engine and run
-                // the grading kernel over its sRGB proxy.
-                let graded = crate::studio::video_frame_grade_preview(
-                    entry.path.clone(),
-                    time_sec,
-                    doc,
-                    Some(size),
-                )?;
+                // the grading kernel over its sRGB proxy. The decoded frame is
+                // cached on the viewport keyed by path + timestamp + size, so
+                // grading a paused frame re-runs only the kernel.
+                let doc = parse_grade_doc(Some(&doc))?;
+                let key = ProxyKey {
+                    path: entry.path.clone(),
+                    time_bits: Some(time_sec.to_bits()),
+                    size,
+                };
+                let proxy = cached_proxy(id, key, || {
+                    crate::studio::decode_video_srgb_proxy(
+                        std::path::Path::new(&entry.path),
+                        time_sec,
+                        size,
+                    )
+                })?;
+                let graded = grade_srgb_proxy(&proxy, &doc, Instant::now())?;
                 return Ok(ViewportFrame {
                     data_url: graded.data_url,
                     width: graded.width,
@@ -377,6 +467,85 @@ mod tests {
             .expect("grade_preview accepts a grade doc");
         viewport_set_grade(grade.viewport_id.clone(), None).expect("clearing the doc");
         viewport_destroy(grade.viewport_id).expect("destroy");
+    }
+
+    #[test]
+    fn graded_render_caches_the_source_proxy_per_target_and_size() {
+        // Register a real image so the graded render path runs end to end.
+        let path = std::env::temp_dir().join("hgripe_viewport_proxy_cache.png");
+        image::RgbaImage::from_pixel(64, 32, image::Rgba([40, 80, 120, 255]))
+            .save(&path)
+            .expect("write test image");
+        let canonical = path.to_string_lossy().to_string();
+        let res_id = resource::id_for(&canonical);
+        resource::put(
+            &res_id,
+            resource::ResourceEntry {
+                path: canonical,
+                width: Some(64),
+                height: Some(32),
+            },
+        );
+
+        let desc = viewport_create("grade_preview".to_string()).expect("create");
+        let id = parse_id(&desc.viewport_id).expect("id");
+        viewport_resize(desc.viewport_id.clone(), 640, 480).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::Image {
+                resource_id: res_id,
+            },
+        )
+        .expect("set target");
+        viewport_set_grade(
+            desc.viewport_id.clone(),
+            Some(serde_json::json!({ "layers": [] })),
+        )
+        .expect("set grade");
+
+        let frame = viewport_render_frame(desc.viewport_id.clone()).expect("first render");
+        assert!(frame.data_url.starts_with("data:image/png;base64,"));
+
+        let first = {
+            let map = viewports().lock().expect("lock");
+            let proxy = map
+                .get(&id)
+                .and_then(|s| s.proxy.as_ref())
+                .expect("proxy cached");
+            Arc::as_ptr(&proxy.srgb)
+        };
+        viewport_render_frame(desc.viewport_id.clone()).expect("second render");
+        {
+            let map = viewports().lock().expect("lock");
+            let proxy = map
+                .get(&id)
+                .and_then(|s| s.proxy.as_ref())
+                .expect("proxy kept");
+            assert_eq!(
+                Arc::as_ptr(&proxy.srgb),
+                first,
+                "same proxy reused across renders"
+            );
+        }
+
+        // A different viewport size is a different proxy identity.
+        viewport_resize(desc.viewport_id.clone(), 320, 240).expect("resize");
+        viewport_render_frame(desc.viewport_id.clone()).expect("render after resize");
+        {
+            let map = viewports().lock().expect("lock");
+            let proxy = map
+                .get(&id)
+                .and_then(|s| s.proxy.as_ref())
+                .expect("proxy replaced");
+            assert_ne!(
+                Arc::as_ptr(&proxy.srgb),
+                first,
+                "resize invalidates the proxy"
+            );
+        }
+
+        viewport_destroy(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
