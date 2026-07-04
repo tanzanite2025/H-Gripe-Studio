@@ -966,6 +966,15 @@ button:disabled { opacity: 0.6; cursor: default; }
   height: 16px;
   fill: currentColor;
 }
+/* Edge-style switch in the controls: the active style is highlighted. */
+.flow-controls .edge-style-button.active {
+  background: var(--accent, #4c7dff);
+  color: #fff;
+}
+.flow-controls .edge-style-button.active:hover {
+  background: var(--accent, #4c7dff);
+  color: #fff;
+}
 .flow-minimap.react-flow__minimap {
   overflow: hidden;
   border: 1px solid var(--border);
