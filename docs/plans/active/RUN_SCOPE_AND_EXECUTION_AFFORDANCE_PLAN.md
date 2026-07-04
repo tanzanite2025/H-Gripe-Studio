@@ -449,8 +449,12 @@ They should not be required for:
 7. ✅ Add explicit downstream run: "Run downstream" in the node context menu
    (`runNodeDownstream` → RunScope `node_downstream`); downstream still never
    runs implicitly from any other affordance.
-8. Add clear run reports showing scope, executed nodes/rows, skipped rows, and
-   backend/device reports.
+8. ✅ Add clear run reports showing scope, executed nodes/rows, skipped rows,
+   and backend/device reports: once a scope is resolved and lowered, the run
+   log gets a pre-execution report (`buildRunReport` in `runReport.ts`) with
+   the scope + node/row counts, each integrated card's running vs. skipped
+   rows, and the API-profile / local-model refs (with device/precision
+   policies) carried by the executing nodes.
 9. Only then revisit execution zones or execution nodes.
 
 ## Success Criteria
