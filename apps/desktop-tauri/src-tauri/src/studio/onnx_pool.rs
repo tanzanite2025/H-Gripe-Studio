@@ -23,6 +23,76 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use ort::session::Session;
 
+/// Requested execution device for ONNX inference — the `requested` half of
+/// the shared DeviceReport vocabulary (GPU_DEVICE_STRATEGY_PLAN). Parsed from
+/// the node's `device` param; anything unrecognised reads as `Auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OnnxDeviceRequest {
+    Auto,
+    Cpu,
+    Cuda,
+}
+
+impl OnnxDeviceRequest {
+    pub(crate) fn from_param(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "cpu" => Self::Cpu,
+            "cuda" | "gpu" => Self::Cuda,
+            _ => Self::Auto,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Cpu => "cpu",
+            Self::Cuda => "cuda",
+        }
+    }
+}
+
+/// The execution provider a request resolved to, plus the reason acceleration
+/// did not run when it fell back (never silent, per the fallback contract).
+#[derive(Debug, Clone)]
+pub(crate) struct OnnxProviderResolution {
+    /// The provider inference actually runs on (`used` in DeviceReport terms).
+    pub(crate) device: &'static str,
+    /// Why the request did not accelerate; `None` only for an explicit `cpu`
+    /// request, which is honoured rather than fallen back to.
+    pub(crate) fallback_reason: Option<String>,
+}
+
+/// Resolve a device request against the providers this build carries. The
+/// vendored onnxruntime is compiled with the CPU execution provider only, so
+/// today every request resolves to CPU — but an explicit `cpu` request is a
+/// choice (no reason), while `cuda` and `auto` fall back with distinct,
+/// visible reasons. When accelerated providers are compiled in they slot in
+/// here, preserving the request semantics:
+/// `cpu` -> CPU only; `cuda` -> CUDA else CPU + reason; `auto` -> preferred
+/// accelerator else CPU + reason.
+pub(crate) fn resolve_provider(request: OnnxDeviceRequest) -> OnnxProviderResolution {
+    match request {
+        OnnxDeviceRequest::Cpu => OnnxProviderResolution {
+            device: "cpu",
+            fallback_reason: None,
+        },
+        OnnxDeviceRequest::Cuda => OnnxProviderResolution {
+            device: "cpu",
+            fallback_reason: Some(
+                "CUDA execution provider not built in (onnxruntime compiled with CPU provider only)"
+                    .to_string(),
+            ),
+        },
+        OnnxDeviceRequest::Auto => OnnxProviderResolution {
+            device: "cpu",
+            fallback_reason: Some(
+                "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)"
+                    .to_string(),
+            ),
+        },
+    }
+}
+
 /// A warm ONNX session shared across runs. `Mutex` because `Session::run` needs
 /// `&mut self`; `Arc` so the pool and every in-flight segmenter share one copy.
 pub(super) type SharedSession = Arc<Mutex<Session>>;
@@ -81,6 +151,35 @@ pub(super) fn cached_session(path: &Path) -> Result<SharedSession, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_resolution_honours_the_request_contract() {
+        // cpu -> CPU only, no reason (an honoured choice, not a fallback);
+        // cuda / auto -> CPU with a visible, distinct fallback reason.
+        let cpu = resolve_provider(OnnxDeviceRequest::Cpu);
+        assert_eq!(cpu.device, "cpu");
+        assert!(cpu.fallback_reason.is_none());
+
+        let cuda = resolve_provider(OnnxDeviceRequest::Cuda);
+        assert_eq!(cuda.device, "cpu");
+        assert!(cuda.fallback_reason.as_deref().unwrap().contains("CUDA"));
+
+        let auto = resolve_provider(OnnxDeviceRequest::Auto);
+        assert_eq!(auto.device, "cpu");
+        assert!(auto.fallback_reason.is_some());
+    }
+
+    #[test]
+    fn device_request_parses_the_param_vocabulary() {
+        assert_eq!(OnnxDeviceRequest::from_param("cpu"), OnnxDeviceRequest::Cpu);
+        assert_eq!(OnnxDeviceRequest::from_param("CUDA"), OnnxDeviceRequest::Cuda);
+        assert_eq!(OnnxDeviceRequest::from_param("gpu"), OnnxDeviceRequest::Cuda);
+        assert_eq!(OnnxDeviceRequest::from_param(""), OnnxDeviceRequest::Auto);
+        assert_eq!(
+            OnnxDeviceRequest::from_param("anything"),
+            OnnxDeviceRequest::Auto
+        );
+    }
 
     #[test]
     fn cache_key_of_missing_path_is_unchanged() {

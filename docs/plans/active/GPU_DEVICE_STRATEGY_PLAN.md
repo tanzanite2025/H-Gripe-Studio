@@ -255,10 +255,13 @@ Goal: make each accelerated backend robust before unifying scheduling.
 ### ONNX Helpers
 
 - Keep ONNX session cache in Rust.
-- Support provider order by request:
-  - `cpu` -> CPU provider only
-  - `cuda` -> CUDA provider, CPU fallback with reason
-  - `auto` -> preferred accelerator, CPU fallback
+- ✅ Support provider order by request — `OnnxDeviceRequest` (`onnx_pool`)
+  parses the node's `device` param and `resolve_provider` applies the
+  contract: `cpu` -> CPU only (honoured, no reason); `cuda` -> CUDA else CPU
+  fallback with reason; `auto` -> preferred accelerator else CPU fallback
+  with reason. The current build carries the CPU provider only, so cuda/auto
+  resolve to CPU with distinct visible reasons; accelerated providers slot
+  into the resolver when compiled in.
 - Consider DirectML only after the CUDA/CPU contract is stable.
 - Report model path, provider, and fallback reason.
 
