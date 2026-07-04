@@ -89,6 +89,8 @@ export function Toolbar({
   return (
     <header className="toolbar">
       <div className="toolbar-title-row">
+        {/* Reserved zone for the future app-wide command system. */}
+        <div className="toolbar-command-zone" />
         <div className="toolbar-search">
           <NodeSearchBox nodes={nodes} onJump={onJumpToNode} />
         </div>
