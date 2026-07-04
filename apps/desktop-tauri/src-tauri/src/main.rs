@@ -122,6 +122,7 @@ fn main() {
             commands::viewport::viewport_set_target,
             commands::viewport::viewport_resize,
             commands::viewport::viewport_set_grade,
+            commands::viewport::viewport_set_view,
             commands::viewport::viewport_render_frame,
             commands::media::resource_info,
             commands::media::resource_thumbnail,
