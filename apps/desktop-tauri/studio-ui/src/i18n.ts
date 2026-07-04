@@ -87,6 +87,11 @@ export const messages = {
     zh: "在下一个节点开始前请求取消",
   },
   "btn.runBatchTitle": { en: "run the graph once per batch item", zh: "对每个批处理项各运行一次" },
+  "btn.runSelected": { en: "Run selected", zh: "运行所选" },
+  "btn.runSelectedTitle": {
+    en: "run the selected nodes plus their upstream dependencies",
+    zh: "运行所选节点及其上游依赖",
+  },
 
   "label.snap": { en: "Snap", zh: "吸附" },
   "label.snapTitle": {
@@ -166,6 +171,13 @@ export const messages = {
     en: "Run this row (its input chain only)",
     zh: "运行此行（仅其输入链）",
   },
+  "node.runCardTitle": {
+    en: "Run this card (its wired rows and upstream)",
+    zh: "运行此卡片（已连线的行及上游）",
+  },
+  "menu.runToHere": { en: "Run to here", zh: "运行到此处" },
+  "menu.runCard": { en: "Run card", zh: "运行卡片" },
+  "menu.runDownstream": { en: "Run downstream", zh: "运行下游" },
   "node.editMask": { en: "Edit Mask", zh: "编辑蒙版" },
   "node.editMaskTitle": {
     en: "Open the mask editor (brush / wand / morphology)",

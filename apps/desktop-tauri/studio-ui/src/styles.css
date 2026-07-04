@@ -539,6 +539,22 @@ button:disabled { opacity: 0.6; cursor: default; }
   gap: 4px;
   flex: none;
 }
+/* card-level run button on integrated cards: runs the card + upstream. */
+.node-run-card-btn {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: #263323;
+  color: #b9ea75;
+  font-size: 10px;
+  line-height: 1;
+}
+.node-run-card-btn:hover {
+  background: #314327;
+  color: #d7ff9d;
+}
 .node-inspector-btn {
   width: 24px;
   height: 24px;

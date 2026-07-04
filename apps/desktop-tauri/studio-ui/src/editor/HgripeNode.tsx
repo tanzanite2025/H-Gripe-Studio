@@ -422,12 +422,14 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const templateWarn =
     spec.kind === "psdTemplate" ? psdTemplatePathWarning(String(d.params.path ?? "")) : null;
   // Integrated cards (lowered row-by-row) get a per-row run affordance that
-  // executes just that row's input chain (RunScope `card_row`).
+  // executes just that row's input chain (RunScope `card_row`), plus a header
+  // run button that runs the whole card + upstream (RunScope `card`).
+  const integrated = spec.kind in LOWERED_CARD_ROWS;
   const runCardRow = editing?.runCardRow;
   const onRunRow =
-    runCardRow && spec.kind in LOWERED_CARD_ROWS
-      ? (rowId: string) => runCardRow(id, rowId)
-      : undefined;
+    runCardRow && integrated ? (rowId: string) => runCardRow(id, rowId) : undefined;
+  const runCard = editing?.runCard;
+  const onRunCard = runCard && integrated ? () => runCard(id) : undefined;
 
   return (
     <NodeCardShell
@@ -441,6 +443,8 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       portContent={lod ? undefined : portContent}
       onRunRow={lod ? undefined : onRunRow}
       runRowTitle={t("node.runRowTitle")}
+      onRunCard={lod ? undefined : onRunCard}
+      runCardTitle={t("node.runCardTitle")}
     >
       {!lod && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>

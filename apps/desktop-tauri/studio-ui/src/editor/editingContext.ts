@@ -47,6 +47,16 @@ export interface NodeEditing {
    * executes and only that row's leaf is lowered (RunScope `card_row`).
    */
   runCardRow?: (nodeId: string, rowId: string) => void;
+  /**
+   * Run an integrated card (its wired rows) plus its upstream chain
+   * (RunScope `card`).
+   */
+  runCard?: (nodeId: string) => void;
+  /**
+   * Run a node and everything downstream of it (RunScope `node_downstream`).
+   * Downstream never runs implicitly — this is the explicit entry point.
+   */
+  runNodeDownstream?: (nodeId: string) => void;
 }
 
 // Lets memoized node cards edit their own params without threading callbacks

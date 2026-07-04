@@ -988,6 +988,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     run,
     runUpToNode,
     runCardRow,
+    runCard,
+    runSelection,
+    runNodeDownstream,
     runBatch,
     runProject,
     cancelRun,
@@ -1025,6 +1028,17 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [setEdges],
   );
 
+  // Toolbar selection-run command: run the selected nodes plus upstream
+  // (RunScope `selection_with_upstream`; plan "Toolbar" affordances).
+  const selectedNodeIds = useMemo(
+    () => nodes.filter((n) => n.selected).map((n) => n.id),
+    [nodes],
+  );
+  const runSelected = useCallback(
+    () => void runSelection(selectedNodeIds),
+    [runSelection, selectedNodeIds],
+  );
+
   // Right-click context menu: open state + item list built from the editing
   // actions above.
   const { menu, menuItems, openNodeMenu, openPaneMenu, closeMenu } = useContextMenu({
@@ -1038,6 +1052,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     deleteNode,
     tidyLayout,
     pasteClipboard,
+    runUpToNode,
+    runCard,
+    runNodeDownstream,
   });
 
   // Global keyboard shortcuts (edit + file/run); see the hook for behavior.
@@ -1071,8 +1088,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       addBoundEdit,
       runUpToNode,
       runCardRow,
+      runCard,
+      runNodeDownstream,
     }),
-    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode, runCardRow],
+    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
   );
 
   // Canvas -> EditorHost adapter. The editors are application-level surfaces
@@ -1271,6 +1290,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         hasBatch={hasBatch}
         batchCount={batchCount}
         onRunBatch={runBatch}
+        selectedCount={selectedNodeIds.length}
+        onRunSelected={runSelected}
       />
 
       <CanvasTabs

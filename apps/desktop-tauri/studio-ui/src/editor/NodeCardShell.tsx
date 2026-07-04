@@ -25,6 +25,10 @@ export interface NodeCardShellProps {
   onRunRow?: (rowId: string) => void;
   /** Tooltip for the per-row run button. */
   runRowTitle?: string;
+  /** When set, the header shows a run button that runs this card + upstream. */
+  onRunCard?: () => void;
+  /** Tooltip for the card-level run button. */
+  runCardTitle?: string;
   children?: ReactNode;
 }
 
@@ -39,6 +43,8 @@ export function NodeCardShell({
   portContent,
   onRunRow,
   runRowTitle,
+  onRunCard,
+  runCardTitle,
   children,
 }: NodeCardShellProps) {
   return (
@@ -48,6 +54,21 @@ export function NodeCardShell({
         <span className="node-title">{spec.title}</span>
         {titleExtra}
         <span className="node-header-actions">
+          {onRunCard && (
+            <button
+              type="button"
+              className="node-run-card-btn nodrag nowheel"
+              title={runCardTitle}
+              aria-label={runCardTitle}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRunCard();
+              }}
+            >
+              ▶
+            </button>
+          )}
           <span
             className={`node-status-dot node-status-${status}`}
             title={durationMs != null ? `${status} ${fmtDuration(durationMs)}` : status}
