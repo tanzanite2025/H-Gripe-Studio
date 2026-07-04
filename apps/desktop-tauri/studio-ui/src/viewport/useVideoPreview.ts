@@ -18,8 +18,13 @@ import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 export interface VideoPreviewState {
-  /** Latest rendered frame as a data URL, or null (gap / not yet rendered). */
+  /** Latest rendered frame as a data URL, or null (gap / not yet rendered —
+   * or the frame is on the native surface: see `presented`). */
   frame: string | null;
+  /** The frame is on the viewport's native surface window (WGPU surface swap
+   * Phase S3): `frame` is null and the monitor lets the surface show through
+   * instead of mounting an `<img>`. */
+  presented: boolean;
   backend: ViewportBackend | null;
   /** True while a frame request is in flight or queued. */
   pending: boolean;
@@ -28,6 +33,9 @@ export interface VideoPreviewState {
 
 interface MonitorState {
   host: WgpuViewportHost;
+  /** The surface window is hidden for a gap frame; re-shown before the next
+   * rendered frame. */
+  hidden: boolean;
   /** Registered resource id per media path, so scrubbing re-registers nothing. */
   resources: Map<string, string>;
   /** Grade doc (JSON string) currently set on the viewport, to skip no-op sets. */
@@ -73,13 +81,17 @@ function parseGradeDoc(gradeDoc: string | null): unknown | null {
 export function useVideoPreview(size = 1280): {
   state: VideoPreviewState;
   showFrame: (request: VideoPreviewRequest | null) => void;
+  /** The monitor's viewport host once open (for native surface placement). */
+  host: WgpuViewportHost | null;
 } {
   const [state, setState] = useState<VideoPreviewState>({
     frame: null,
+    presented: false,
     backend: null,
     pending: false,
     error: null,
   });
+  const [host, setHost] = useState<WgpuViewportHost | null>(null);
   const monitorRef = useRef<Promise<MonitorState | null> | null>(null);
   const seqRef = useRef(0);
   const inFlightRef = useRef(false);
@@ -97,7 +109,15 @@ export function useVideoPreview(size = 1280): {
     async (request: VideoPreviewRequest | null): Promise<void> => {
       const seq = ++seqRef.current;
       if (request === null) {
-        setState((s) => ({ ...s, frame: null, pending: false, error: null }));
+        // A gap frame hides the surface window (it would otherwise keep
+        // showing the previous clip's frame under the placeholder).
+        const monitor = await monitorRef.current;
+        if (monitor?.host.isOpen && !monitor.hidden) {
+          monitor.hidden = true;
+          await monitor.host.command({ kind: "set_presented", presented: false }).catch(() => {});
+        }
+        if (seqRef.current !== seq) return;
+        setState((s) => ({ ...s, frame: null, presented: false, pending: false, error: null }));
         return;
       }
       const { target, gradeDoc, view = IDENTITY_VIEW } = request;
@@ -105,8 +125,10 @@ export function useVideoPreview(size = 1280): {
         monitorRef.current = (async () => {
           const host = await WgpuViewportHost.open("video_preview");
           await host.command({ kind: "resize", width: size, height: size });
+          setHost(host);
           return {
             host,
+            hidden: false,
             resources: new Map<string, string>(),
             gradeDoc: null,
             view: IDENTITY_VIEW,
@@ -151,9 +173,20 @@ export function useVideoPreview(size = 1280): {
         await monitor.host.command({ kind: "set_view", ...view });
         monitor.view = view;
       }
+      if (monitor.hidden) {
+        // Re-show the surface hidden by a gap frame before presenting on it.
+        monitor.hidden = false;
+        await monitor.host.command({ kind: "set_presented", presented: true });
+      }
       const frame: ViewportFrame = await monitor.host.renderFrame();
       if (seqRef.current !== seq) return; // stale: a newer seek finished after us
-      setState({ frame: frame.data_url, backend: frame.backend, pending: false, error: null });
+      setState({
+        frame: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
+        backend: frame.backend,
+        pending: false,
+        error: null,
+      });
     },
     [size],
   );
@@ -185,5 +218,5 @@ export function useVideoPreview(size = 1280): {
     [pump],
   );
 
-  return { state, showFrame };
+  return { state, showFrame, host };
 }

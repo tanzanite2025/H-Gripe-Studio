@@ -1663,6 +1663,9 @@ button:disabled { opacity: 0.6; cursor: default; }
   overflow: hidden;
 }
 .production-monitor-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* Frame on the native surface window below the webview: keep the hole
+   see-through so the surface shows. */
+.production-monitor-frame.presented { background: transparent; }
 .production-monitor-empty { font-size: 11px; }
 .production-monitor-backend {
   position: absolute;
