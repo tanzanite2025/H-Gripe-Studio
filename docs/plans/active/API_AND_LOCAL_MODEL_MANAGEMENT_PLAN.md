@@ -29,8 +29,8 @@ The managers own the details:
   device/precision preferences, and fallback state.
 
 This keeps graph cards clean and makes API/local model behavior consistent
-across Prompt Assistant, Generate, Prompt Optimize, Image Processing, repaint,
-masking, and future video/audio tools.
+across Prompt Assistant, Prompt card optimization, Generate, Image Processing,
+repaint, masking, and future video/audio tools.
 
 ## Current State
 
@@ -109,7 +109,7 @@ This matters because not every API model can do every task.
 Examples:
 
 - Prompt Assistant needs `text.generate`.
-- Prompt Optimize API mode needs `text.generate`.
+- Prompt card optimization needs `text.generate`.
 - Generate needs `image.generate`.
 - Detail Repaint provider path needs `image.edit` or `image.inpaint`.
 - Future reference-image prompt drafting may need `vision.describe`.
@@ -200,7 +200,7 @@ Recommended entry points:
 | --- | --- |
 | Prompt Assistant backend selector -> Configure | API Manager or Local Model Manager. |
 | Generate card profile selector -> Manage | API Manager filtered to image generation. |
-| Prompt Optimize API mode -> Manage | API Manager filtered to text generation. |
+| Prompt card Optimize row -> Manage | API Manager or Local Model Manager filtered to text generation / prompt rewrite. |
 | Image Processing row model selector -> Manage | Local Model Manager filtered to the row task. |
 | Settings rail -> Models / APIs | Full management pages. |
 
@@ -337,8 +337,8 @@ The user can:
 
 1. Configure an API profile once.
 2. Configure or verify local model slots once.
-3. Use the same profile/model from Prompt Assistant, Prompt Optimize, Generate,
-   Image Processing, and repaint flows.
+3. Use the same profile/model from Prompt Assistant, Prompt card optimization,
+   Generate, Image Processing, and repaint flows.
 4. See when a selected backend is missing capabilities.
 5. Open old workflows that still use legacy provider/model params.
 

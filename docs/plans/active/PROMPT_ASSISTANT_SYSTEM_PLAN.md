@@ -20,7 +20,7 @@ Prompt Assistant
   -> choose API profile or local model
   -> multi-turn conversation / rewrite / translate / structure / style
   -> produce prompt drafts
-  -> insert selected text into Prompt / Generate / Prompt Optimize nodes
+  -> insert selected text into Prompt / Generate nodes
 ```
 
 The assistant helps the user create usable prompt text. The graph consumes the
@@ -67,14 +67,31 @@ execution unless the user explicitly inserts text into a node.
 | Surface | Role |
 | --- | --- |
 | Prompt Assistant panel | Conversation, drafting, rewriting, model selection, prompt library. |
-| `Prompt` node | Stores final text as a graph input. |
-| `Prompt Optimize` node | Reproducible graph step that transforms prompt text during execution. |
+| `Prompt` node | Stores final text as a graph input and owns optional prompt optimization rows. |
 | `Generate` node | Consumes prompt text and calls image generation. |
 | API Manager | Owns provider profiles and credentials. |
 | Local Model Manager | Owns installed local text / vision helper models. |
 
 This split keeps the canvas clean and keeps assistant state from polluting the
 serializable workflow graph.
+
+There must not be a separate user-facing `Prompt Optimize` card. A single graph
+area should not expose two different prompt concepts. Prompt optimization is an
+operation inside the owning `Prompt` card, not another visible prompt card in
+the palette.
+
+Recommended `Prompt` card shape:
+
+| Row | Role |
+| --- | --- |
+| Prompt Text | The confirmed prompt that flows into Generate or other downstream cards. |
+| Optimize | Optional rewrite/translate/structure operation for the prompt text. |
+| Backend | Compact selector for API profile or local model with prompt/text capability. |
+| Assistant | Button that opens the software-level Prompt Assistant panel for deeper conversation. |
+
+The `Optimize` row can expose a connectable output if the graph needs both raw
+and optimized prompt variants, but the visual owner is still the `Prompt` card.
+The palette should show one prompt entry: `Prompt`.
 
 ## Prompt Assistant Capabilities
 
@@ -150,7 +167,6 @@ Recommended actions:
 | Insert into selected Prompt node | Replaces or appends to selected `Prompt` node text. |
 | Create Prompt node | Creates a new `Prompt` node near current canvas focus. |
 | Send to selected Generate node | Writes prompt text into connected prompt source or creates one. |
-| Send to Prompt Optimize node | Writes draft into selected `Prompt Optimize` text field. |
 | Copy | Copies draft to clipboard without graph mutation. |
 
 If no valid target exists, the primary action should be `Create Prompt node`.
@@ -178,9 +194,10 @@ The graph should only receive the final prompt text the user inserts.
 
 This avoids making graph runs depend on an informal chat transcript.
 
-## Relation To Prompt Optimize Node
+## Relation To Prompt Card Optimization
 
-Prompt Assistant and `Prompt Optimize` solve different problems.
+Prompt Assistant and the `Prompt` card's `Optimize` row solve different
+problems.
 
 Prompt Assistant:
 
@@ -190,15 +207,31 @@ Prompt Assistant:
 - software-level UI
 - not part of DAG execution
 
-`Prompt Optimize` node:
+`Prompt` card `Optimize` row:
 
 - deterministic graph step
 - saved with workflow
 - runs during graph execution
 - can be cached / reproduced
+- can select an API profile or local model through the global managers
+- can open Prompt Assistant for exploratory drafting when the user needs a
+  conversation instead of a one-shot rewrite
 
 Both can use the same API/local model managers, but they are not the same
-surface.
+surface. The assistant is the software-level window/panel; the `Prompt` card is
+the graph-level source of prompt text.
+
+Implementation order:
+
+1. Build or stabilize the global API Manager and Local Model Manager described
+   in [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
+2. Build the software-level Prompt Assistant panel described in this document.
+3. Update the `Prompt` card so it has one prompt text area plus an optional
+   `Optimize` row.
+4. Wire the `Optimize` row to the same backend refs used by the managers and
+   assistant.
+5. Remove or hide any user-facing `Prompt Optimize` card from the normal
+   palette. Keep old workflow loading as a migration/backcompat concern only.
 
 ## UI Contract
 
@@ -227,6 +260,7 @@ Bottom drawer
 ## Non-Goals
 
 - Do not turn the `Prompt` node into a chat UI.
+- Do not expose a separate user-facing `Prompt Optimize` card.
 - Do not store API keys inside assistant sessions.
 - Do not make the assistant transcript part of graph execution.
 - Do not put the assistant inside the bottom production drawer.
@@ -240,7 +274,10 @@ Bottom drawer
 4. Wire API profile selection through the global API Manager.
 5. Wire local text model selection through the Local Model Manager.
 6. Add session persistence separate from workflow graph persistence.
-7. Add target-aware prompt insertion for Generate / Prompt Optimize.
+7. Add target-aware prompt insertion for Prompt and Generate cards.
+8. Add the `Prompt` card `Optimize` row using the same manager-backed backend
+   refs.
+9. Hide/migrate the old `Prompt Optimize` card from the normal palette.
 
 ## Success Criteria
 

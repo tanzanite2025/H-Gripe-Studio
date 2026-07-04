@@ -20,6 +20,40 @@ The correct direction is:
 This document separates the short-term, low-risk work from the long-term
 cross-kernel scheduling work.
 
+## Coordination With WGPU Migration
+
+This document must be read together with
+[`WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md).
+
+The priority order is:
+
+```text
+WGPU viewport boundary first
+  -> thin DeviceReport protocol
+  -> existing WGPU backend reports become shared DeviceReport output
+  -> ONNX/local model reports join the same vocabulary
+  -> FFmpeg hardware acceleration later, behind probe/report/fallback
+  -> cross-kernel registry and scheduler last
+```
+
+Do not build a heavy global GPU manager before the WGPU viewport path is stable.
+That would create a second architecture that image edit, grade preview, and
+video preview would later have to bypass or rewrite.
+
+The short-term role of this plan is to define the common reporting vocabulary.
+The short-term role of the WGPU plan is to move heavy visual surfaces behind a
+stable viewport/resource boundary.
+
+Decision authority:
+
+| Question | Source Of Truth |
+| --- | --- |
+| Which surfaces move to WGPU first? | `WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md` |
+| How should a run report requested vs actual device? | This document |
+| Should there be a global scheduler now? | This document: no, reporting first |
+| Should WGPU wait for a global scheduler? | WGPU plan: no, viewport boundary first |
+| When should ONNX/FFmpeg join the shared device layer? | After WGPU viewport reports use the shared vocabulary |
+
 ## Why A Single Global GPU Switch Is Not Enough
 
 Windows can identify a GPU, but every runtime has its own compatibility layer:
@@ -51,6 +85,10 @@ consistent.
 ## Short-Term Plan: Thin Unified Device Contract
 
 Goal: make device behavior transparent without changing core scheduling.
+
+This phase must not block WGPU viewport migration. It should provide the
+`DeviceReport` shape that WGPU, ONNX, FFmpeg, and external plugins can all emit
+as they mature.
 
 ### Step 1: Inventory Current Device Fields
 
@@ -120,6 +158,18 @@ Each kernel keeps its own resolver:
   `DeviceReport` from the plugin boundary
 
 The short-term work is reporting and consistency, not central scheduling.
+
+For WGPU viewports, the resolver can remain local to the viewport/grade path:
+
+```text
+viewport request: auto | gpu | cpu
+  -> WGPU adapter/path if available
+  -> CPU fallback if not
+  -> emit DeviceReport
+```
+
+That report flows into the same UI/run diagnostics as later ONNX and FFmpeg
+reports.
 
 ### Step 4: UI Transparency
 
@@ -314,18 +364,21 @@ This should be a settings surface, not a required setup wizard.
 
 ## Recommended Implementation Order
 
-1. Document current device fields and reports.
-2. Add shared TypeScript/Rust report vocabulary.
-3. Normalize UI display of requested/used/fallback.
-4. Add or refine capability summary.
-5. Add contract tests for report behavior.
-6. Harden grade GPU fallback and reports.
-7. Harden ONNX provider reporting.
-8. Keep heavy model runtimes outside the core app; accept plugin reports only.
-9. Keep FFmpeg software native as baseline.
-10. Add hardware FFmpeg only behind explicit probe/report/fallback.
-11. Build cross-kernel device registry later.
-12. Build GPU queue/memory policy only after timeline/export workloads demand it.
+1. Keep WGPU viewport migration as the heavy-pixel mainline.
+2. Document current device fields and reports.
+3. Add shared TypeScript/Rust report vocabulary.
+4. Formalize existing WGPU image edit / grade / video preview backend reports
+   as shared `DeviceReport`.
+5. Normalize UI display of requested/used/fallback.
+6. Add or refine capability summary as diagnostics only.
+7. Add contract tests for report behavior.
+8. Harden remaining WGPU fallback reasons and reports.
+9. Harden ONNX provider reporting after WGPU reports are stable.
+10. Keep heavy model runtimes outside the core app; accept plugin reports only.
+11. Keep FFmpeg software native as baseline.
+12. Add hardware FFmpeg only behind explicit probe/report/fallback.
+13. Build cross-kernel device registry later.
+14. Build GPU queue/memory policy only after timeline/export workloads demand it.
 
 ## Success Criteria
 

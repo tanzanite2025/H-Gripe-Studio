@@ -7,7 +7,7 @@
 
 ## Status Snapshot (2026-07)
 
-Implemented (PRs #329–#371):
+Implemented (PRs #329-379):
 
 - Phase 0 (contract and safety): complete. Graph state stores references and
   operation documents; no startup probes or startup viewports; ingest caches
@@ -118,6 +118,57 @@ still belongs in React:
 - inspector-like on-demand settings
 
 WGPU owns the surfaces where pixels move, composite, preview, or scrub.
+
+## Coordination With GPU Device Strategy
+
+This document is the near-term implementation authority for heavy visual
+surfaces. It must be read together with
+[`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md), but it should not
+wait for a full global GPU scheduler.
+
+The relationship is:
+
+```text
+WGPU plan
+  -> owns image edit / grade preview / video preview viewport migration
+
+GPU strategy plan
+  -> owns requested/actual device reporting
+  -> owns later cross-kernel registry and scheduler
+```
+
+The immediate rule is:
+
+```text
+WGPU viewport first, global scheduler later.
+```
+
+WGPU paths should emit the shared `DeviceReport` vocabulary as soon as the
+report type is available:
+
+```text
+requested: auto | gpu | cpu
+used: wgpu | cpu
+backend: adapter / backend name when available
+accelerated: true | false
+fallbackReason: optional text
+```
+
+Do not build a separate WGPU-only reporting format, and do not build a global
+GPU scheduler just to start the viewport migration. The stable boundary is the
+viewport host and resource protocol; the common device layer observes and
+reports what happened.
+
+Priority guardrail:
+
+1. Native texture presentation and remaining product-layer target wiring are
+   higher priority than a cross-kernel GPU registry.
+2. Mask overlay / brush preview migration is higher priority than ONNX device
+   unification.
+3. Formal shared `DeviceReport` wiring for the already-reporting WGPU paths is
+   higher priority than FFmpeg hardware acceleration.
+4. FFmpeg hardware acceleration should stay behind explicit probe/report/
+   fallback after the software path remains stable.
 
 ## Strategic Principle: Build A Real Barrier
 
@@ -301,6 +352,11 @@ fallback reason: optional text
 
 Fallback is not failure. It is a reportable runtime decision.
 
+This fallback report should use the shared device vocabulary from
+[`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md). The WGPU viewport
+does not own cross-kernel scheduling, but it must report enough truth for the
+future scheduler and diagnostics to consume.
+
 ## Implementation Order
 
 ### Phase 0: Contract And Safety
@@ -436,7 +492,9 @@ Exit criteria:
 ## Relationship To Existing Plans
 
 - `GPU_DEVICE_STRATEGY_PLAN.md` defines device reporting. This document defines
-  which visual surfaces should use WGPU first.
+  which visual surfaces should use WGPU first. WGPU migration is the current
+  heavy-pixel mainline; the GPU plan should not be implemented as a heavy
+  scheduler before these viewport boundaries are stable.
 - `UNIFIED_PRODUCTION_DRAWER_PLAN.md` defines the bottom drawer and target
   model. This document requires WGPU viewports to consume that target model.
 - `IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md` defines layered assets. This document

@@ -64,6 +64,38 @@ It should not require a standalone Number card for seed or steps. The port can
 still accept an override for automation, but the normal UI is the Generate
 card's own fields.
 
+### Prompt Card
+
+There should be one visible prompt card, not both `Prompt` and `Prompt
+Optimize`.
+
+Prompt optimization is a row inside the owning `Prompt` card. The card owns:
+
+- prompt text
+- negative prompt text when the downstream target supports it
+- optional `Optimize` row
+- API/local backend selector for prompt rewrite/translation/structuring
+- a button that opens the software-level Prompt Assistant panel
+
+The Prompt Assistant itself is not a graph card. It is planned as a
+software-level panel/window in
+[`PROMPT_ASSISTANT_SYSTEM_PLAN.md`](PROMPT_ASSISTANT_SYSTEM_PLAN.md), and it
+uses shared API/local backend refs from
+[`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
+
+The implementation order should be:
+
+1. Keep one visible `Prompt` palette entry.
+2. Add the `Prompt` card's internal `Optimize` row.
+3. Connect that row to API/local model managers for backend selection.
+4. Add the button that opens Prompt Assistant for deeper conversation.
+5. Hide or migrate any old `Prompt Optimize` card as internal/backcompat only.
+
+If the graph needs both raw prompt and optimized prompt outputs, expose two
+semantic row outputs from the same `Prompt` card, such as `prompt.raw` and
+`prompt.optimized`. Do not create a second prompt card just to represent the
+optimization step.
+
 ### Image Processing Card
 
 Image work should be gathered into one product-facing processing card instead
@@ -185,6 +217,7 @@ It should not show:
 - If
 - Switch
 - Reroute
+- Prompt Optimize
 
 If developer debugging ever needs these primitives, use a dev-only surface or
 debug command. Do not add a normal "Advanced nodes" shelf that makes them look
@@ -219,6 +252,8 @@ The user-facing canvas should stay at the production level.
    action, move their behavior into the owning card or the canvas chrome.
 4. For each production card, make the owning controls explicit:
    - Generate owns seed/steps/mode.
+   - Prompt owns prompt text, optional optimize row, model/API selector, and the
+     Prompt Assistant entry.
    - Image Source owns the bottom free `Edit` entry.
    - Image Processing owns row-level ports for split/enhance/grade/crop/mask/repair.
    - Layer Split owns thresholds/review rules.
@@ -234,7 +269,7 @@ The node palette should read like a studio tool:
 
 ```text
 Image Source -> Image Processing(split/grade/crop/mask rows) -> Export
-Prompt -> Generate -> Image Processing(enhance/repair rows) -> Export
+Prompt(text/optimize rows) -> Generate -> Image Processing(enhance/repair rows) -> Export
 Video Source -> Timeline / Grade / Assemble
 ```
 
@@ -242,6 +277,7 @@ It should not read like:
 
 ```text
 Number -> Compare -> Logic -> If -> Switch -> Reroute
+Prompt -> Prompt Optimize -> Generate
 ```
 
 The first version helps a creator build a production workflow. The second
