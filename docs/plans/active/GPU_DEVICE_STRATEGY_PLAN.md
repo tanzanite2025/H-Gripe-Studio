@@ -1,7 +1,13 @@
 # GPU / Device Strategy Plan
 
-> Status: planning document. Implementation still requires an explicit task and
-> should start with reporting/protocol work, not a full device scheduler.
+> Status: active. Short-term reporting steps 1–4 of the recommended order have
+> started landing: the device-field inventory, the shared TypeScript
+> `DeviceReport` vocabulary, and normalizers for the local-engine `*_report`
+> outputs and viewport `ViewportBackend` frames live in
+> `studio-ui/src/runtime/deviceReport.ts`, and every run now logs a per-node
+> `device requested -> used (backend; fallback)` line. Remaining: Rust-side
+> vocabulary, capability-summary refinement, and the medium/long-term
+> hardening below.
 
 ## Purpose
 
@@ -365,13 +371,24 @@ This should be a settings surface, not a required setup wizard.
 ## Recommended Implementation Order
 
 1. Keep WGPU viewport migration as the heavy-pixel mainline.
-2. Document current device fields and reports.
-3. Add shared TypeScript/Rust report vocabulary.
-4. Formalize existing WGPU image edit / grade / video preview backend reports
-   as shared `DeviceReport`.
+2. ✅ Document current device fields and reports (inventory table in
+   `studio-ui/src/runtime/deviceReport.ts`).
+3. ✅ (TypeScript side) Add shared report vocabulary: `DeviceRequest`,
+   `DeviceUsed`, `DeviceReport` + `deviceReportFromEngineReport` /
+   `deviceReportFromViewportBackend` normalizers. Rust-side vocabulary still
+   pending.
+4. ✅ (node reports) Formalize existing backend reports as shared
+   `DeviceReport`: after every run the run log shows one
+   `device requested -> used (backend; fallback)` line per node whose
+   `*_report` output carries engine telemetry
+   (`logDeviceReports` in `useStudioRunController`). Viewport frames have a
+   normalizer; wiring their frames into the same log is part of the WGPU
+   surface work.
 5. Normalize UI display of requested/used/fallback.
 6. Add or refine capability summary as diagnostics only.
-7. Add contract tests for report behavior.
+7. ✅ Add contract tests for report behavior
+   (`studio-ui/src/runtime/deviceReport.test.ts`: `auto` always yields a
+   `used`, explicit `cpu` never reports `cuda`, fallback stays visible).
 8. Harden remaining WGPU fallback reasons and reports.
 9. Harden ONNX provider reporting after WGPU reports are stable.
 10. Keep heavy model runtimes outside the core app; accept plugin reports only.
