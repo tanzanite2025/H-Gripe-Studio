@@ -251,7 +251,7 @@ impl GpuGrader {
                 return Ok(());
             }
         }
-        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let error_scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let plan = build_plan(doc, surface.w, surface.h, surface.space);
         if std::env::var("HGRIPE_GPU_DUMP_WGSL").is_ok() {
             eprintln!("{}", plan.shader);
@@ -312,7 +312,7 @@ impl GpuGrader {
                 contents: bytemuck_cast(&tables),
                 usage: wgpu::BufferUsages::STORAGE,
             });
-        if let Some(err) = pollster::block_on(self.device.pop_error_scope()) {
+        if let Some(err) = pollster::block_on(error_scope.pop()) {
             self.cached = None;
             return Err(GpuError::ShaderCompilation(err.to_string()));
         }
