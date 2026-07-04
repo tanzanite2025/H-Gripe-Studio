@@ -1,7 +1,9 @@
 //! `smartLayerSplit` compute node: subject/background separation plus optional
 //! multi-object instancing, text/logo region detection and shadow/reflection
 //! candidates (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md,
-//! Phases 1–3).
+//! Phases 1–3), plus video-frame ingress (Phase 5): a connected video input
+//! is resolved to the still nearest `frame_sec` through the media engine
+//! before splitting.
 //!
 //! Splits a flat image into a `LayeredImageAsset` — a locked original layer
 //! plus real background/subject candidates whose masks come from the shared
@@ -20,7 +22,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use image::{GrayImage, Luma};
 use serde_json::{json, Value};
 
-use super::graph::{bool_param, studio_output_map, studio_value_to_string, StudioGraphNode};
+use super::graph::{
+    bool_param, number_param, studio_output_map, studio_value_to_string, StudioGraphNode,
+};
 use super::persist::studio_reject_unsafe_basename;
 use super::pixel_ops;
 use super::studio_image;
@@ -155,13 +159,56 @@ pub(crate) fn execute_studio_smart_layer_split(
     node: &StudioGraphNode,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
-    let image_path = inputs
+    let image_input = inputs
         .get("image")
         .map(|value| studio_value_to_string(Some(value)))
         .unwrap_or_default();
-    if image_path.trim().is_empty() {
-        return Err("Smart Layer Split needs a connected image input".to_string());
+    let video_input = inputs
+        .get("video")
+        .map(|value| studio_value_to_string(Some(value)))
+        .unwrap_or_default();
+    if image_input.trim().is_empty() && video_input.trim().is_empty() {
+        return Err("Smart Layer Split needs a connected image or video input".to_string());
     }
+
+    let output_dir = {
+        let configured = studio_value_to_string(node.params.get("output_dir"));
+        if configured.trim().is_empty() {
+            crate::runtime_paths()?
+                .output_dir
+                .to_string_lossy()
+                .to_string()
+        } else {
+            configured
+        }
+    };
+    let dir = PathBuf::from(&output_dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|err| format!("failed to create output dir {}: {err}", dir.display()))?;
+
+    // Phase 5 video ingress: resolve a connected video to the still nearest
+    // `frame_sec` (decoded through the shared media engine) and split that
+    // frame; the video input wins when both are connected.
+    let mut frame_source_note: Option<String> = None;
+    let image_path = if !video_input.trim().is_empty() {
+        let video = Path::new(video_input.trim());
+        if !video.is_file() {
+            return Err(format!("video does not exist: {}", video.display()));
+        }
+        let frame_sec = number_param(node, "frame_sec", 0.0).max(0.0);
+        let ms = (frame_sec * 1000.0).round() as i64;
+        let frame_path = dir.join(format!("{}_f{ms}", image_stem(&video_input)));
+        let frame_path = frame_path.with_extension("png");
+        let mut source = super::video_engine::make_frame_source();
+        let written = source.decode_frame(video, frame_sec, &frame_path)?;
+        frame_source_note = Some(format!(
+            "still frame extracted from {} at {frame_sec}s — masks apply to this frame only",
+            video.display()
+        ));
+        written.to_string_lossy().to_string()
+    } else {
+        image_input
+    };
 
     let loaded = studio_image::load_working(
         Path::new(image_path.trim()),
@@ -185,17 +232,6 @@ pub(crate) fn execute_studio_smart_layer_split(
     let subject_mask = segmented.mask;
     let background_mask = invert_mask(&subject_mask);
 
-    let output_dir = {
-        let configured = studio_value_to_string(node.params.get("output_dir"));
-        if configured.trim().is_empty() {
-            crate::runtime_paths()?
-                .output_dir
-                .to_string_lossy()
-                .to_string()
-        } else {
-            configured
-        }
-    };
     let base = {
         let configured = studio_value_to_string(node.params.get("output_name"));
         if configured.trim().is_empty() {
@@ -205,9 +241,6 @@ pub(crate) fn execute_studio_smart_layer_split(
         }
     };
     studio_reject_unsafe_basename(&base)?;
-    let dir = PathBuf::from(&output_dir);
-    std::fs::create_dir_all(&dir)
-        .map_err(|err| format!("failed to create output dir {}: {err}", dir.display()))?;
 
     let subject_mask_path = dir.join(format!("{base}_subject_mask.png"));
     let subject_rgba_path = dir.join(format!("{base}_subject.png"));
@@ -340,6 +373,9 @@ pub(crate) fn execute_studio_smart_layer_split(
 
     let mut warnings: Vec<Value> = Vec::new();
     let mut suggested_review: Vec<Value> = Vec::new();
+    if let Some(note) = &frame_source_note {
+        warnings.push(json!(note));
+    }
     let review = |layer_id: &str, message: &str| json!({ "layer_id": layer_id, "severity": "warning", "message": message });
     if is_builtin {
         warnings.push(json!("builtin CPU segmentation (no model weight resolved)"));
@@ -515,7 +551,7 @@ pub(crate) fn execute_studio_smart_layer_split(
     let (warnings, suggested_review) = (json!(warnings), json!(suggested_review));
     let asset = json!({
         "id": format!("layered-{}", node.id),
-        "source_asset_id": image_path,
+        "source_asset_id": if video_input.trim().is_empty() { image_path.clone() } else { video_input.trim().to_string() },
         "source_node_id": node.id,
         "canvas": { "width": width, "height": height, "color_space": "srgb" },
         "base_image": source_image,
@@ -609,7 +645,16 @@ mod tests {
         let root = std::env::temp_dir();
         let err =
             execute_studio_smart_layer_split(&node(&root, &[]), &BTreeMap::new()).unwrap_err();
-        assert!(err.contains("connected image"), "{err}");
+        assert!(err.contains("connected image or video"), "{err}");
+    }
+
+    #[test]
+    fn video_input_must_exist_on_disk() {
+        let root = std::env::temp_dir();
+        let mut inputs = BTreeMap::new();
+        inputs.insert("video".to_string(), json!("/no/such/clip.mp4"));
+        let err = execute_studio_smart_layer_split(&node(&root, &[]), &inputs).unwrap_err();
+        assert!(err.contains("video does not exist"), "{err}");
     }
 
     #[test]

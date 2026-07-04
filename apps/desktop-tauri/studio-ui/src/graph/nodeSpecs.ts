@@ -1013,9 +1013,9 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     palette: "internal",
     title: "Smart Layer Split",
     description:
-      "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. The desktop runtime segments the subject in-process (model backend when a weight resolves, else the deterministic builtin CPU segmenter) and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
+      "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. A connected video is resolved to the still nearest the frame time first (desktop runtime only; the video input wins when both are connected). The desktop runtime segments the subject in-process (model backend when a weight resolves, else the deterministic builtin CPU segmenter) and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
     category: "process",
-    inputs: [port("image", "image", "image")],
+    inputs: [port("image", "image", "image"), port("video", "video", "video")],
     outputs: [
       port("layered_asset", "layered asset", "any"),
       port("composite_preview", "composite preview", "image"),
@@ -1069,6 +1069,13 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         control: "checkbox",
         defaultValue: false,
         hint: "detect a reflection candidate below the subject (a dimmer vertically mirrored copy on the surface) as its own layer — desktop runtime only; flagged for review",
+      },
+      {
+        key: "frame_sec",
+        label: "Frame time (s)",
+        control: "number",
+        defaultValue: 0,
+        hint: "timestamp of the still to split when a video is connected, in seconds — desktop runtime only",
       },
       {
         key: "output_dir",
