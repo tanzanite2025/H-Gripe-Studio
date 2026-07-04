@@ -764,7 +764,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        if gpu.device.poll(wgpu::PollType::wait_indefinitely()).is_err() {
+        if gpu
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .is_err()
+        {
             return None;
         }
         rx.recv_timeout(Duration::from_secs(10)).ok()?.ok()?;
