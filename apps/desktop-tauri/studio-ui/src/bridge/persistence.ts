@@ -24,6 +24,20 @@ export async function clearStudioAutosave(): Promise<void> {
   await invoke("clear_studio_autosave");
 }
 
+/** Restore the desktop-managed project manifest (raw JSON), if one exists. */
+export async function readStudioProjectManifest(): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  return (await invoke("read_studio_project_manifest")) as string | null;
+}
+
+/** Persist the project manifest (open canvas tabs) through the Rust backend. */
+export async function writeStudioProjectManifest(manifestJson: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) return;
+  await invoke("write_studio_project_manifest", { manifestJson });
+}
+
 // Project-scoped JSON stores (snapshots, run history) share the same on-disk
 // contract: a single file in the project folder holding a serialized array.
 // These helpers centralize the desktop guard + (de)serialization so each store

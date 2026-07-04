@@ -41,10 +41,19 @@ import { makeNode, useNodeEditing } from "./editor/useNodeEditing";
 import { useContextMenu } from "./editor/useContextMenu";
 import { useModals } from "./editor/useModals";
 import { loadPersistedGraph } from "./editor/persist";
+import {
+  loadLocalProjectManifest,
+  parseProjectManifest,
+  saveLocalProjectManifest,
+  serializeProjectManifest,
+  type ProjectManifest,
+} from "./editor/projectManifest";
 import { validateGraph } from "./runtime/dag";
 import {
   isTauri,
   listenFileDrop,
+  readStudioProjectManifest,
+  writeStudioProjectManifest,
   mergeLayerMasks,
   primeIngest,
   splitLayerMask,
@@ -523,6 +532,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     autoSnapshotBeforeRun,
     suppressNextDirty,
     adoptFileState,
+    autosaveRestoreDone,
   } = file;
 
   // Tab switches park/rebind the controller-owned file state (path + dirty);
@@ -536,6 +546,80 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       },
     });
   });
+
+  // Restore the persisted project manifest (open canvas tabs) once on mount
+  // (multi-canvas plan Phase 4). When a manifest exists it wins over the
+  // legacy single-graph autosave the file controller restores.
+  const manifestRestored = useRef(false);
+  // Persisting is held until the restore settles, so a fresh session never
+  // overwrites the previous session's manifest with its initial single tab.
+  const [manifestReady, setManifestReady] = useState(false);
+  useEffect(() => {
+    // Wait for the legacy restore to settle so the manifest applies on top.
+    if (!autosaveRestoreDone || manifestRestored.current) return;
+    manifestRestored.current = true;
+    const apply = (manifest: ProjectManifest | null) => {
+      if (!manifest) return;
+      canvas.restoreCanvases(
+        manifest.activeCanvasId,
+        manifest.canvases.map((c) => {
+          const graph = fromWorkflowGraph(c.graph);
+          return {
+            id: c.id,
+            path: c.path,
+            dirty: c.dirty,
+            selectedNodeId: c.selectedNodeId,
+            viewport: c.viewport,
+            nodes: graph.nodes,
+            edges: graph.edges,
+          };
+        }),
+      );
+      setMessage(t("canvasTabs.restored"));
+    };
+    if (isDesktop) {
+      void readStudioProjectManifest()
+        .then((raw) => apply(parseProjectManifest(raw)))
+        .catch((err) => setMessage(`project manifest restore failed: ${String(err)}`))
+        .finally(() => setManifestReady(true));
+    } else {
+      apply(loadLocalProjectManifest());
+      setManifestReady(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosaveRestoreDone]);
+
+  // Persist the project manifest (debounced) so the tab set survives a
+  // restart. Runs alongside the legacy single-graph autosave.
+  useEffect(() => {
+    if (!manifestReady) return;
+    const timer = setTimeout(() => {
+      const { activeCanvasId, canvases } = canvas.exportCanvases({
+        path: currentFile,
+        dirty: fileDirty,
+      });
+      const manifest: ProjectManifest = {
+        version: 1,
+        activeCanvasId,
+        canvases: canvases.map((c) => ({
+          id: c.id,
+          path: c.path,
+          dirty: c.dirty,
+          selectedNodeId: c.selectedNodeId,
+          viewport: c.viewport,
+          graph: toWorkflowGraph(c.nodes, c.edges),
+        })),
+      };
+      if (isDesktop) {
+        void writeStudioProjectManifest(serializeProjectManifest(manifest)).catch((err) =>
+          setMessage(`project manifest save failed: ${String(err)}`),
+        );
+      } else {
+        saveLocalProjectManifest(manifest);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [manifestReady, canvas, nodes, edges, selectedId, currentFile, fileDirty, isDesktop, setMessage]);
 
   // Close a canvas tab, confirming first when it holds unsaved edits.
   const closeCanvasTab = useCallback(

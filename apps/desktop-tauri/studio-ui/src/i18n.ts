@@ -24,6 +24,7 @@ export const messages = {
     en: "Close this canvas and discard its unsaved changes?",
     zh: "关闭此画布并丢弃未保存的更改？",
   },
+  "canvasTabs.restored": { en: "restored open canvases", zh: "已恢复打开的画布" },
   "status.autosaveTitle": {
     en: "this workflow is autosaved to the workspace and restored on next open",
     zh: "该工作流会自动保存到工作区，下次打开时恢复",

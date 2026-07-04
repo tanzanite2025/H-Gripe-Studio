@@ -104,6 +104,64 @@ describe("useCanvasDocument tabs", () => {
     expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
   });
 
+  it("exportCanvases captures the live active tab and parked tabs verbatim", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
+    const file = bridge({ path: "C:/flows/hero.json", dirty: true });
+    act(() => result.current.registerFileBridge(file.bridge));
+    const firstId = result.current.documentId;
+
+    act(() => result.current.openNewCanvas());
+    const secondId = result.current.documentId;
+
+    const exported = result.current.exportCanvases({ path: null, dirty: false });
+    expect(exported.activeCanvasId).toBe(secondId);
+    expect(exported.canvases.map((c) => c.id)).toEqual([firstId, secondId]);
+    expect(exported.canvases[0]).toMatchObject({ path: "C:/flows/hero.json", dirty: true });
+    expect(exported.canvases[0].nodes.map((n) => n.id)).toEqual(["a"]);
+    expect(exported.canvases[1]).toMatchObject({ path: null, dirty: false, nodes: [] });
+  });
+
+  it("restoreCanvases replaces the open set and activates the flagged tab", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("z")], edges: [] }));
+    const file = bridge({ path: null, dirty: false });
+    act(() => result.current.registerFileBridge(file.bridge));
+
+    const viewport = { x: 4, y: 8, zoom: 2 };
+    act(() =>
+      result.current.restoreCanvases("c2", [
+        {
+          id: "c1",
+          path: "C:/flows/a.json",
+          dirty: false,
+          selectedNodeId: null,
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [node("a")],
+          edges: [],
+        },
+        {
+          id: "c2",
+          path: null,
+          dirty: true,
+          selectedNodeId: "b",
+          viewport,
+          nodes: [node("b")],
+          edges: [],
+        },
+      ]),
+    );
+
+    expect(result.current.tabs.map((t) => t.id)).toEqual(["c1", "c2"]);
+    expect(result.current.documentId).toBe("c2");
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["b"]);
+    expect(result.current.selectedId).toBe("b");
+    expect(result.current.viewport).toEqual(viewport);
+    expect(file.set).toHaveBeenLastCalledWith(null, true);
+
+    act(() => result.current.activateCanvas("c1"));
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
+    expect(file.set).toHaveBeenLastCalledWith("C:/flows/a.json", false);
+  });
+
   it("describe reports the wrapper plus controller-owned state", () => {
     const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
     const doc = result.current.describe({

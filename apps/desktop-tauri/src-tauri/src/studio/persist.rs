@@ -75,6 +75,86 @@ pub(crate) fn clear_studio_autosave() -> Result<(), String> {
     }
 }
 
+// --- Project manifest (multi-canvas tabs) ------------------------------------
+// The manifest persists the open canvas-document tabs (per-canvas graph, file
+// binding, selection, viewport) so the tab set survives an app restart. The
+// single-slot autosave above stays as the legacy fallback.
+
+fn studio_project_manifest_path() -> PathBuf {
+    studio_workspace_dir().join("project.manifest.json")
+}
+
+/// One canvas entry inside the persisted project manifest. Extra renderer
+/// fields (selection, viewport, dirty) pass through untouched; only the parts
+/// the backend can validate are typed.
+#[derive(Deserialize)]
+struct StudioProjectCanvas {
+    id: String,
+    graph: StudioWorkflowGraph,
+}
+
+/// The persisted project manifest: version + active tab + canvas list.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StudioProjectManifest {
+    version: u32,
+    #[allow(dead_code)]
+    active_canvas_id: Option<String>,
+    canvases: Vec<StudioProjectCanvas>,
+}
+
+#[tauri::command]
+pub(crate) fn read_studio_project_manifest() -> Result<Option<String>, String> {
+    let path = studio_project_manifest_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path).map(Some).map_err(|err| {
+        format!(
+            "failed to read Studio project manifest {}: {err}",
+            path.display()
+        )
+    })
+}
+
+#[tauri::command]
+pub(crate) fn write_studio_project_manifest(manifest_json: String) -> Result<(), String> {
+    let manifest: StudioProjectManifest = serde_json::from_str(&manifest_json)
+        .map_err(|err| format!("invalid Studio project manifest JSON: {err}"))?;
+    if manifest.version != 1 {
+        return Err(format!(
+            "unsupported Studio project manifest version: {} (expected 1)",
+            manifest.version
+        ));
+    }
+    if manifest.canvases.is_empty() {
+        return Err("Studio project manifest has no canvases".to_string());
+    }
+    for canvas in &manifest.canvases {
+        if canvas.id.trim().is_empty() {
+            return Err("Studio project manifest canvas id is empty".to_string());
+        }
+        if canvas.graph.version != 1 {
+            return Err(format!(
+                "unsupported Studio graph version in manifest: {} (expected 1)",
+                canvas.graph.version
+            ));
+        }
+    }
+
+    let path = studio_project_manifest_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    }
+    fs::write(&path, manifest_json).map_err(|err| {
+        format!(
+            "failed to write Studio project manifest {}: {err}",
+            path.display()
+        )
+    })
+}
+
 // --- Explicit workflow save/open + project folder ---------------------------
 // Beyond the single-slot autosave, the editor can save/open named workflow
 // files anywhere on disk and browse a chosen "project folder" of workflows.

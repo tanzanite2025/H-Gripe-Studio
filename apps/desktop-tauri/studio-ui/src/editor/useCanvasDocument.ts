@@ -34,6 +34,17 @@ export interface CanvasTabInfo {
   dirty: boolean;
 }
 
+/** One canvas's full editor state, as exported/restored for persistence. */
+export interface CanvasSnapshotState {
+  id: string;
+  path: string | null;
+  dirty: boolean;
+  selectedNodeId: string | null;
+  viewport: CanvasViewport;
+  nodes: Node[];
+  edges: Edge[];
+}
+
 /** Lets tab switches read/rebind the controller-owned file state. */
 export interface CanvasFileBridge {
   get: () => { path: string | null; dirty: boolean };
@@ -63,6 +74,13 @@ export interface UseCanvasDocument {
   activateCanvas: (id: string) => void;
   /** Close a canvas; when the last one closes, a fresh one replaces it. */
   closeCanvas: (id: string) => void;
+  /** Export every open canvas (active first-hand, parked verbatim). */
+  exportCanvases: (activeFile: { path: string | null; dirty: boolean }) => {
+    activeCanvasId: string;
+    canvases: CanvasSnapshotState[];
+  };
+  /** Replace all open canvases with a restored set (startup restore). */
+  restoreCanvases: (activeCanvasId: string, canvases: CanvasSnapshotState[]) => void;
   /** Assemble the full document with controller-owned file/run state. */
   describe: (state: {
     path: string | null;
@@ -175,6 +193,44 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
     [loadCanvas],
   );
 
+  const exportCanvases = useCallback(
+    (activeFile: { path: string | null; dirty: boolean }) => {
+      const canvases = tabsRef.current.flatMap((tab): CanvasSnapshotState[] => {
+        if (tab.id === live.current.documentId) {
+          const { nodes, edges, selectedId, viewport } = live.current;
+          return [{ id: tab.id, ...activeFile, selectedNodeId: selectedId, viewport, nodes, edges }];
+        }
+        const parked = store.current.get(tab.id);
+        return parked ? [{ id: tab.id, ...parked }] : [];
+      });
+      return { activeCanvasId: live.current.documentId, canvases };
+    },
+    [],
+  );
+
+  const restoreCanvases = useCallback(
+    (activeCanvasId: string, canvases: CanvasSnapshotState[]) => {
+      if (canvases.length === 0) return;
+      store.current.clear();
+      for (const c of canvases) {
+        store.current.set(c.id, {
+          nodes: c.nodes,
+          edges: c.edges,
+          selectedNodeId: c.selectedNodeId,
+          viewport: c.viewport,
+          path: c.path,
+          dirty: c.dirty,
+        });
+      }
+      const active = canvases.find((c) => c.id === activeCanvasId) ?? canvases[0];
+      const parked = store.current.get(active.id);
+      store.current.delete(active.id);
+      setTabs(canvases.map((c) => ({ id: c.id, path: c.path, dirty: c.dirty })));
+      if (parked) loadCanvas(active.id, parked);
+    },
+    [loadCanvas],
+  );
+
   const describe = useCallback(
     ({
       path,
@@ -220,6 +276,8 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       openNewCanvas,
       activateCanvas,
       closeCanvas,
+      exportCanvases,
+      restoreCanvases,
       describe,
     }),
     [
@@ -237,6 +295,8 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       openNewCanvas,
       activateCanvas,
       closeCanvas,
+      exportCanvases,
+      restoreCanvases,
       describe,
     ],
   );
