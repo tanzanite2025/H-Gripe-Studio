@@ -345,6 +345,111 @@ pub(crate) fn viewport_register_layered_asset(
     Ok(())
 }
 
+/// Cap on registered timelines, bounded like the layered asset registry.
+const MAX_TIMELINES: usize = 64;
+
+/// One registered timeline clip: its media by path plus the placement that
+/// maps timeline time to clip-local source time.
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct TimelineClipRef {
+    #[serde(rename = "clipId")]
+    pub clip_id: String,
+    /// "video" (decode the frame at source time) or "still" (render the image).
+    pub kind: String,
+    pub path: String,
+    #[serde(rename = "startSec")]
+    pub start_sec: f64,
+    #[serde(rename = "durationSec")]
+    pub duration_sec: f64,
+}
+
+struct TimelineRegistry {
+    /// timeline id -> (clip id -> clip)
+    map: HashMap<String, HashMap<String, TimelineClipRef>>,
+    /// Insertion order of timeline ids, oldest first, for FIFO eviction.
+    order: Vec<String>,
+}
+
+static TIMELINES: OnceLock<Mutex<TimelineRegistry>> = OnceLock::new();
+
+fn timelines() -> &'static Mutex<TimelineRegistry> {
+    TIMELINES.get_or_init(|| {
+        Mutex::new(TimelineRegistry {
+            map: HashMap::new(),
+            order: Vec::new(),
+        })
+    })
+}
+
+fn timeline_clip(timeline_id: &str, clip_id: &str) -> Result<TimelineClipRef, String> {
+    let reg = timelines()
+        .lock()
+        .map_err(|_| "timeline registry poisoned")?;
+    let clips = reg
+        .map
+        .get(timeline_id)
+        .ok_or_else(|| format!("unknown timeline id: {timeline_id}"))?;
+    clips
+        .get(clip_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown clip id {clip_id} on timeline {timeline_id}"))
+}
+
+/// Register (or refresh) a timeline's clips so viewports can resolve
+/// `video_clip` targets host-side, by reference. Clips register by media
+/// path — never pixels — and a re-registration after an edit replaces the
+/// timeline's clip set.
+#[tauri::command]
+pub(crate) fn viewport_register_timeline(
+    timeline_id: String,
+    clips: Vec<TimelineClipRef>,
+) -> Result<(), String> {
+    if timeline_id.is_empty() {
+        return Err("timeline id must not be empty".to_string());
+    }
+    let mut set = HashMap::new();
+    for clip in clips {
+        if clip.clip_id.is_empty() {
+            return Err(format!(
+                "timeline {timeline_id} has a clip with an empty id"
+            ));
+        }
+        if clip.kind != "video" && clip.kind != "still" {
+            return Err(format!(
+                "clip {} of timeline {timeline_id} has an unknown kind: {}",
+                clip.clip_id, clip.kind
+            ));
+        }
+        if !(clip.duration_sec > 0.0) || !clip.start_sec.is_finite() {
+            return Err(format!(
+                "clip {} of timeline {timeline_id} has an invalid placement",
+                clip.clip_id
+            ));
+        }
+        if !std::path::Path::new(&clip.path).is_file() {
+            return Err(format!(
+                "clip {} of timeline {timeline_id} points at a missing file: {}",
+                clip.clip_id, clip.path
+            ));
+        }
+        set.insert(clip.clip_id.clone(), clip);
+    }
+    let mut reg = timelines()
+        .lock()
+        .map_err(|_| "timeline registry poisoned")?;
+    if reg.map.insert(timeline_id.clone(), set).is_none() {
+        reg.order.push(timeline_id);
+        while reg.map.len() > MAX_TIMELINES {
+            if reg.order.is_empty() {
+                break;
+            }
+            let oldest = reg.order.remove(0);
+            reg.map.remove(&oldest);
+        }
+    }
+    Ok(())
+}
+
 const VIEWPORT_KINDS: [&str; 3] = ["image_edit", "grade_preview", "video_preview"];
 
 #[tauri::command]
@@ -419,7 +524,14 @@ pub(crate) fn viewport_set_target(
         ViewportTarget::ImageLayer { asset_id, layer_id } => {
             layered_asset_layer_path(asset_id, layer_id)?;
         }
-        ViewportTarget::VideoClip { .. } | ViewportTarget::NodeOutput { .. } => {}
+        ViewportTarget::VideoClip {
+            timeline_id,
+            clip_id,
+            ..
+        } => {
+            timeline_clip(timeline_id, clip_id)?;
+        }
+        ViewportTarget::NodeOutput { .. } => {}
     }
     let id = parse_id(&viewport_id)?;
     let mut map = viewports()
@@ -534,72 +646,99 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
         } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
-            let size = width.max(height).clamp(64, 2048);
-            if grade_doc.is_some() || !view.is_identity() {
-                // Graded and/or viewed frame: decode through the native media
-                // engine and run the grading kernel (identity when no doc is
-                // set) over the view window of its sRGB proxy. The decoded
-                // frame is cached on the viewport keyed by path + timestamp +
-                // size, so grading or panning a paused frame re-runs only
-                // crop + kernel.
-                let doc = parse_grade_doc(grade_doc.as_ref())?;
-                let detail = proxy_detail_size(size, view);
-                let key = ProxyKey {
-                    path: entry.path.clone(),
-                    time_bits: Some(time_sec.to_bits()),
-                    size: detail,
-                };
-                let proxy = cached_proxy(id, key, || {
-                    crate::studio::decode_video_srgb_proxy(
-                        std::path::Path::new(&entry.path),
-                        time_sec,
-                        detail,
-                    )
-                })?;
-                let source = if view.is_identity() {
-                    None
-                } else {
-                    Some(crop_view(&proxy, view))
-                };
-                let graded =
-                    grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
-                return Ok(ViewportFrame {
-                    data_url: graded.data_url,
-                    width: graded.width,
-                    height: graded.height,
-                    backend: ViewportBackend {
-                        requested: "auto".to_string(),
-                        actual: graded.backend.to_string(),
-                        fallback_reason: None,
-                    },
-                });
-            }
-            // Ungraded frame (program monitor / scrubbing): resolve through the
-            // playback engine — dedicated decode thread, bounded warm frame
-            // cache, and latest-wins coalescing so a burst of seeks decodes
-            // only the newest — then present via the thumbnail pipeline.
-            let poster_dir = crate::cache_subdir(".posters")?;
-            let frame = crate::studio::video_engine::scrub_frame(
-                &poster_dir,
-                std::path::Path::new(&entry.path),
-                time_sec,
-            )?;
-            let thumb = generate_thumbnail_inner(&frame.to_string_lossy(), size, None)?;
-            Ok(ViewportFrame {
-                data_url: thumb.data_url,
-                width: thumb.width,
-                height: thumb.height,
-                backend: cpu_backend(),
-            })
+            render_video_path(id, &entry.path, time_sec, width, height, grade_doc, view)
         }
         #[cfg(not(feature = "native-ffmpeg"))]
         ViewportTarget::VideoFrame { .. } => {
             Err("video frame targets require the native media engine".to_string())
         }
-        ViewportTarget::VideoClip { .. } | ViewportTarget::NodeOutput { .. } => {
+        ViewportTarget::VideoClip {
+            timeline_id,
+            clip_id,
+            time_sec,
+        } => {
+            // Clips resolve through the timeline registry; the host maps the
+            // timeline playhead to clip-local source time.
+            let clip = timeline_clip(&timeline_id, &clip_id)?;
+            if clip.kind == "still" {
+                return render_image_path(id, &clip.path, width, height, grade_doc, view);
+            }
+            let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
+            #[cfg(feature = "native-ffmpeg")]
+            {
+                render_video_path(id, &clip.path, source_time, width, height, grade_doc, view)
+            }
+            #[cfg(not(feature = "native-ffmpeg"))]
+            {
+                let _ = source_time;
+                Err("video clip targets require the native media engine".to_string())
+            }
+        }
+        ViewportTarget::NodeOutput { .. } => {
             Err("target kind not supported by the phase 1 transport".to_string())
         }
     }
+}
+
+/// Render one video source frame at the viewport's size, applying its grade
+/// doc and view. Graded/viewed frames decode through the native media engine
+/// with the proxy cached per viewport keyed by path + timestamp + size, so
+/// grading or panning a paused frame re-runs only crop + kernel; ungraded
+/// frames resolve through the playback engine — dedicated decode thread,
+/// bounded warm frame cache, latest-wins coalescing — then present via the
+/// thumbnail pipeline.
+#[cfg(feature = "native-ffmpeg")]
+fn render_video_path(
+    id: u64,
+    path: &str,
+    time_sec: f64,
+    width: u32,
+    height: u32,
+    grade_doc: Option<Value>,
+    view: ViewportView,
+) -> Result<ViewportFrame, String> {
+    let size = width.max(height).clamp(64, 2048);
+    if grade_doc.is_some() || !view.is_identity() {
+        let doc = parse_grade_doc(grade_doc.as_ref())?;
+        let detail = proxy_detail_size(size, view);
+        let key = ProxyKey {
+            path: path.to_string(),
+            time_bits: Some(time_sec.to_bits()),
+            size: detail,
+        };
+        let proxy = cached_proxy(id, key, || {
+            crate::studio::decode_video_srgb_proxy(std::path::Path::new(path), time_sec, detail)
+        })?;
+        let source = if view.is_identity() {
+            None
+        } else {
+            Some(crop_view(&proxy, view))
+        };
+        let graded = grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
+        return Ok(ViewportFrame {
+            data_url: graded.data_url,
+            width: graded.width,
+            height: graded.height,
+            backend: ViewportBackend {
+                requested: "auto".to_string(),
+                actual: graded.backend.to_string(),
+                fallback_reason: None,
+            },
+        });
+    }
+    let poster_dir = crate::cache_subdir(".posters")?;
+    let frame = crate::studio::video_engine::scrub_frame(
+        &poster_dir,
+        std::path::Path::new(path),
+        time_sec,
+    )?;
+    let thumb = generate_thumbnail_inner(&frame.to_string_lossy(), size, None)?;
+    Ok(ViewportFrame {
+        data_url: thumb.data_url,
+        width: thumb.width,
+        height: thumb.height,
+        backend: cpu_backend(),
+    })
 }
 
 /// Render one still-image source (an image resource or a layer artifact) at
@@ -996,6 +1135,92 @@ mod tests {
         viewport_destroy(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&subject_path);
         let _ = std::fs::remove_file(&background_path);
+    }
+
+    #[test]
+    fn video_clip_targets_resolve_through_the_timeline_registry() {
+        // A still clip renders end to end without the media engine; video
+        // clips share the video_frame decode path (exercised elsewhere).
+        let path = std::env::temp_dir().join("hgripe_viewport_timeline_still.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([120, 200, 80, 255]))
+            .save(&path)
+            .expect("write still clip");
+        viewport_register_timeline(
+            "tl-1".to_string(),
+            vec![TimelineClipRef {
+                clip_id: "clip_still".to_string(),
+                kind: "still".to_string(),
+                path: path.to_string_lossy().to_string(),
+                start_sec: 1.0,
+                duration_sec: 2.0,
+            }],
+        )
+        .expect("register timeline");
+
+        let desc = viewport_create("video_preview".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::VideoClip {
+                timeline_id: "tl-1".to_string(),
+                clip_id: "clip_still".to_string(),
+                time_sec: 1.5,
+            },
+        )
+        .expect("set video_clip target");
+        let frame = viewport_render_frame(desc.viewport_id.clone()).expect("render still clip");
+        assert!(frame.data_url.starts_with("data:image/png;base64,"));
+        assert_eq!((frame.width, frame.height), (64, 64));
+
+        // Unknown timeline / clip ids fail at set time, not at the first render.
+        let err = viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::VideoClip {
+                timeline_id: "tl-1".to_string(),
+                clip_id: "clip_missing".to_string(),
+                time_sec: 0.0,
+            },
+        )
+        .expect_err("unknown clip id must be rejected");
+        assert!(err.contains("unknown clip id"), "{err}");
+        let err = viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::VideoClip {
+                timeline_id: "tl-missing".to_string(),
+                clip_id: "clip_still".to_string(),
+                time_sec: 0.0,
+            },
+        )
+        .expect_err("unknown timeline id must be rejected");
+        assert!(err.contains("unknown timeline id"), "{err}");
+
+        // Re-registration replaces the timeline's clip set.
+        viewport_register_timeline("tl-1".to_string(), vec![]).expect("re-register timeline");
+        assert!(timeline_clip("tl-1", "clip_still").is_err());
+
+        viewport_destroy(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn register_timeline_validates_ids_kinds_and_placements() {
+        assert!(viewport_register_timeline("".to_string(), vec![]).is_err());
+        let clip = |kind: &str, start: f64, dur: f64| TimelineClipRef {
+            clip_id: "clip_1".to_string(),
+            kind: kind.to_string(),
+            path: "/does/not/exist.mp4".to_string(),
+            start_sec: start,
+            duration_sec: dur,
+        };
+        let err = viewport_register_timeline("tl-bad".to_string(), vec![clip("audio", 0.0, 1.0)])
+            .expect_err("unknown clip kind must be rejected");
+        assert!(err.contains("unknown kind"), "{err}");
+        let err = viewport_register_timeline("tl-bad".to_string(), vec![clip("video", 0.0, 0.0)])
+            .expect_err("zero duration must be rejected");
+        assert!(err.contains("invalid placement"), "{err}");
+        let err = viewport_register_timeline("tl-bad".to_string(), vec![clip("video", 0.0, 1.0)])
+            .expect_err("missing media file must be rejected");
+        assert!(err.contains("missing file"), "{err}");
     }
 
     #[test]

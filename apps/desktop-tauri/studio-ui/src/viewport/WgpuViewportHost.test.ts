@@ -2,7 +2,11 @@
 // outside Tauri, so the bridge takes the browser-preview path).
 
 import { describe, expect, it } from "vitest";
-import { openMockViewportCount, registerLayeredAsset } from "../bridge/viewport";
+import {
+  openMockViewportCount,
+  registerLayeredAsset,
+  registerTimeline,
+} from "../bridge/viewport";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 describe("WgpuViewportHost", () => {
@@ -31,6 +35,47 @@ describe("WgpuViewportHost", () => {
   it("refuses to render before a target is set", async () => {
     const host = await WgpuViewportHost.open("grade_preview");
     await expect(host.renderFrame()).rejects.toThrow(/no target/);
+    await host.close();
+  });
+
+  it("resolves video_clip targets through the timeline registry", async () => {
+    const host = await WgpuViewportHost.open("video_preview");
+    // Unregistered timelines and clips fail at set time, not at first render.
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "video_clip", timelineId: "tl-1", clipId: "clip_a", timeSec: 0.5 },
+      }),
+    ).rejects.toThrow(/unknown timeline id/);
+
+    await registerTimeline("tl-1", [
+      { clipId: "clip_a", kind: "video", path: "/tmp/a.mp4", startSec: 0, durationSec: 2 },
+    ]);
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "video_clip", timelineId: "tl-1", clipId: "clip_missing", timeSec: 0.5 },
+      }),
+    ).rejects.toThrow(/unknown clip id/);
+
+    await host.command({
+      kind: "set_target",
+      target: { kind: "video_clip", timelineId: "tl-1", clipId: "clip_a", timeSec: 0.5 },
+    });
+    await host.command({ kind: "resize", width: 320, height: 240 });
+    const frame = await host.renderFrame();
+    expect(frame.data_url.startsWith("data:image/")).toBe(true);
+
+    // Registration validates its inputs like the desktop host.
+    await expect(registerTimeline("", [])).rejects.toThrow(/must not be empty/);
+    // A re-registration replaces the timeline's clip set.
+    await registerTimeline("tl-1", []);
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "video_clip", timelineId: "tl-1", clipId: "clip_a", timeSec: 0.5 },
+      }),
+    ).rejects.toThrow(/unknown clip id/);
     await host.close();
   });
 

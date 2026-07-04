@@ -42,8 +42,12 @@ Implemented (PRs #329–#371):
   resolve Rust-side like image resources — same proxy cache, grade, and view
   path. The layer review preview presents the selected layer cutout as an
   `image_layer` target of the registered asset (mask/composite artifacts
-  still register by path). `video_clip` and `node_output` still resolve on
-  the frontend.
+  still register by path). `node_output` still resolves on the frontend.
+- Host-side `video_clip` targets: timelines register their clips by media
+  path plus placement (`viewport_register_timeline`), so `video_clip`
+  viewport targets resolve Rust-side — the host maps the timeline playhead
+  to clip-local source time and renders stills through the image path and
+  video clips through the same decode path as `video_frame`.
 
 Remaining work, roughly in priority order:
 
@@ -56,11 +60,11 @@ Remaining work, roughly in priority order:
    at fixed detail, so deep zoom is soft. Move overlay/brush presentation to
    the viewport and tie underlay detail to canvas zoom without changing the
    recorded pixel space.
-3. Remaining viewport targets: `video_clip` and `node_output` targets still
-   resolve on the frontend. Implement them host-side (as done for
-   `image_layer`) so the selection-target model is uniform, and move layer
-   editors onto `image_layer` targets instead of registering layer paths as
-   plain image resources.
+3. Remaining viewport targets: `node_output` targets still resolve on the
+   frontend — implement them host-side (as done for `image_layer` and
+   `video_clip`) so the selection-target model is uniform, and wire the
+   program monitor onto `video_clip` targets (it still resolves the playhead
+   to `video_frame`/`image` targets webview-side).
 4. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
 
