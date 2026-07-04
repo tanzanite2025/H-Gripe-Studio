@@ -200,7 +200,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 .run-hud {
   position: absolute;
   left: 50%;
-  bottom: 18px;
+  top: 14px;
   transform: translateX(-50%);
   z-index: 6;
   display: flex;

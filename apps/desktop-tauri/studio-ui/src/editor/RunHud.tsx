@@ -105,48 +105,6 @@ export function RunHud({
 
   return (
     <div className="run-hud">
-      {confirmOpen && !running && (
-        <div className="run-hud-confirm" role="dialog" aria-label={t("hud.confirmTitle")}>
-          <div className="run-hud-confirm-title">{t("hud.confirmTitle")}</div>
-          <div className="run-hud-confirm-body">
-            {preview.groups.map((group) => (
-              <div key={group.category} className="run-hud-confirm-group">
-                <span className="run-hud-confirm-cat">{t(CATEGORY_LABEL[group.category])}</span>
-                <span className="run-hud-confirm-nodes">
-                  {group.nodes.map((n) => cardTitle(n.kind)).join(" · ")}
-                </span>
-              </div>
-            ))}
-            {preview.total === 0 && <div className="muted">{t("hud.nothingToRun")}</div>}
-            {preview.warnings.map((w, i) => (
-              <div key={i} className="run-hud-confirm-warning">⚠ {w}</div>
-            ))}
-          </div>
-          <div className="run-hud-confirm-footer">
-            <span className="muted">{t("hud.totalNodes", { count: preview.total })}</span>
-            <div className="run-hud-confirm-actions">
-              <button
-                className="primary"
-                onClick={() => execute(scope)}
-                disabled={disabled || preview.total === 0}
-              >
-                {t("btn.run")}
-              </button>
-              {scope === "full_canvas" && hasSelection && (
-                <button
-                  onClick={() => execute("selection_with_upstream")}
-                  disabled={disabled}
-                  title={t("btn.runSelectedTitle")}
-                >
-                  {t("hud.runSelectedOnly", { count: selectedNodeIds.length })}
-                </button>
-              )}
-              <button onClick={() => setConfirmOpen(false)}>{t("btn.cancel")}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="run-hud-bar">
         <button
           className="primary run-hud-run"
@@ -191,6 +149,48 @@ export function RunHud({
           </button>
         )}
       </div>
+
+      {confirmOpen && !running && (
+        <div className="run-hud-confirm" role="dialog" aria-label={t("hud.confirmTitle")}>
+          <div className="run-hud-confirm-title">{t("hud.confirmTitle")}</div>
+          <div className="run-hud-confirm-body">
+            {preview.groups.map((group) => (
+              <div key={group.category} className="run-hud-confirm-group">
+                <span className="run-hud-confirm-cat">{t(CATEGORY_LABEL[group.category])}</span>
+                <span className="run-hud-confirm-nodes">
+                  {group.nodes.map((n) => cardTitle(n.kind)).join(" · ")}
+                </span>
+              </div>
+            ))}
+            {preview.total === 0 && <div className="muted">{t("hud.nothingToRun")}</div>}
+            {preview.warnings.map((w, i) => (
+              <div key={i} className="run-hud-confirm-warning">⚠ {w}</div>
+            ))}
+          </div>
+          <div className="run-hud-confirm-footer">
+            <span className="muted">{t("hud.totalNodes", { count: preview.total })}</span>
+            <div className="run-hud-confirm-actions">
+              <button
+                className="primary"
+                onClick={() => execute(scope)}
+                disabled={disabled || preview.total === 0}
+              >
+                {t("btn.run")}
+              </button>
+              {scope === "full_canvas" && hasSelection && (
+                <button
+                  onClick={() => execute("selection_with_upstream")}
+                  disabled={disabled}
+                  title={t("btn.runSelectedTitle")}
+                >
+                  {t("hud.runSelectedOnly", { count: selectedNodeIds.length })}
+                </button>
+              )}
+              <button onClick={() => setConfirmOpen(false)}>{t("btn.cancel")}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
