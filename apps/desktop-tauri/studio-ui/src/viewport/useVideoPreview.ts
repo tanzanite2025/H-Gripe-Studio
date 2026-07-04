@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
 import type { ViewportBackend, ViewportFrame } from "../bridge/viewport";
 import type { PreviewFrameTarget } from "../production/previewFrame";
+import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 export interface VideoPreviewState {
@@ -31,6 +32,8 @@ interface MonitorState {
   resources: Map<string, string>;
   /** Grade doc (JSON string) currently set on the viewport, to skip no-op sets. */
   gradeDoc: string | null;
+  /** View last sent to the viewport, to skip no-op `set_view` commands. */
+  view: ViewportViewState;
 }
 
 /** A frame request: the resolved playhead media plus the clip's grade doc. */
@@ -38,6 +41,8 @@ export interface VideoPreviewRequest {
   target: PreviewFrameTarget;
   /** The clip's stored grade doc (JSON string), applied to the frame. */
   gradeDoc: string | null;
+  /** Monitor zoom/pan (viewport state); identity when omitted. */
+  view?: ViewportViewState;
 }
 
 /** Parse a stored grade doc (JSON string) for the viewport; bad JSON clears. */
@@ -86,12 +91,17 @@ export function useVideoPreview(size = 1280): {
         setState((s) => ({ ...s, frame: null, pending: false, error: null }));
         return;
       }
-      const { target, gradeDoc } = request;
+      const { target, gradeDoc, view = IDENTITY_VIEW } = request;
       if (!monitorRef.current) {
         monitorRef.current = (async () => {
           const host = await WgpuViewportHost.open("video_preview");
           await host.command({ kind: "resize", width: size, height: size });
-          return { host, resources: new Map<string, string>(), gradeDoc: null };
+          return {
+            host,
+            resources: new Map<string, string>(),
+            gradeDoc: null,
+            view: IDENTITY_VIEW,
+          };
         })().catch(() => null);
       }
       const monitor = await monitorRef.current;
@@ -118,6 +128,14 @@ export function useVideoPreview(size = 1280): {
       if (gradeDoc !== monitor.gradeDoc) {
         await monitor.host.command({ kind: "set_grade", doc: parseGradeDoc(gradeDoc) });
         monitor.gradeDoc = gradeDoc;
+      }
+      if (
+        view.zoom !== monitor.view.zoom ||
+        view.panX !== monitor.view.panX ||
+        view.panY !== monitor.view.panY
+      ) {
+        await monitor.host.command({ kind: "set_view", ...view });
+        monitor.view = view;
       }
       const frame: ViewportFrame = await monitor.host.renderFrame();
       if (seqRef.current !== seq) return; // stale: a newer seek finished after us
