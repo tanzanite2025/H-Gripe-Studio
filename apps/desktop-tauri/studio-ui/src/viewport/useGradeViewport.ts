@@ -6,8 +6,9 @@
 // when the target path changes.
 
 import { useCallback, useEffect, useRef } from "react";
+import { tauriInvoke } from "../bridge/core";
 import { registerResource } from "../bridge/files";
-import type { ViewportFrame } from "../bridge/viewport";
+import { registerNodeOutput, type ViewportFrame } from "../bridge/viewport";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
@@ -17,11 +18,19 @@ export interface GradeViewportTarget {
   imagePath?: string | null;
   videoPath?: string | null;
   videoTimestampSec?: number;
+  /** When grading a node's output, present it as a `node_output` reference
+   * target (the image path registers as the node's output artifact) instead
+   * of a plain image resource. */
+  nodeId?: string | null;
 }
+
+type GradeViewportRef =
+  | { kind: "node_output"; nodeId: string }
+  | { kind: "resource"; resourceId: string };
 
 interface OpenGradeViewport {
   host: WgpuViewportHost;
-  resourceId: string;
+  ref: GradeViewportRef;
   /** Last view sent to the host, to skip no-op `set_view` commands. */
   view: ViewportViewState;
 }
@@ -36,9 +45,10 @@ export function useGradeViewport(
   target: GradeViewportTarget,
   size = 1280,
 ): (doc: unknown, view?: ViewportViewState) => Promise<ViewportFrame | null> {
-  const { imagePath, videoPath, videoTimestampSec = 0 } = target;
+  const { imagePath, videoPath, videoTimestampSec = 0, nodeId } = target;
   const path = videoPath ?? imagePath ?? undefined;
   const isVideo = Boolean(videoPath);
+  const nodeRef = isVideo ? undefined : (nodeId ?? undefined);
   const hostRef = useRef<Promise<OpenGradeViewport | null> | null>(null);
   const timeRef = useRef(videoTimestampSec);
   timeRef.current = videoTimestampSec;
@@ -50,18 +60,28 @@ export function useGradeViewport(
       hostRef.current = null;
       void pending?.then((open) => open?.host.close());
     };
-  }, [path, isVideo, size]);
+  }, [path, isVideo, nodeRef, size]);
 
   return useCallback(
     async (doc: unknown, view?: ViewportViewState): Promise<ViewportFrame | null> => {
       if (!path) return null;
       if (!hostRef.current) {
         hostRef.current = (async () => {
-          const res = await registerResource(path);
-          if (!res) return null; // browser preview: no resource registry
+          let ref: GradeViewportRef;
+          if (nodeRef) {
+            // Node outputs resolve host-side through the node output
+            // registry; outside Tauri callers keep their mirror fallback.
+            if (!tauriInvoke()) return null;
+            await registerNodeOutput(nodeRef, path);
+            ref = { kind: "node_output", nodeId: nodeRef };
+          } else {
+            const res = await registerResource(path);
+            if (!res) return null; // browser preview: no resource registry
+            ref = { kind: "resource", resourceId: res.id };
+          }
           const host = await WgpuViewportHost.open("grade_preview");
           await host.command({ kind: "resize", width: size, height: size });
-          return { host, resourceId: res.id, view: IDENTITY_VIEW };
+          return { host, ref, view: IDENTITY_VIEW };
         })();
       }
       const open = await hostRef.current;
@@ -70,9 +90,12 @@ export function useGradeViewport(
       // per render; a still image target is identical each time.
       await open.host.command({
         kind: "set_target",
-        target: isVideo
-          ? { kind: "video_frame", resourceId: open.resourceId, timeSec: timeRef.current }
-          : { kind: "image", resourceId: open.resourceId },
+        target:
+          open.ref.kind === "node_output"
+            ? { kind: "node_output", nodeId: open.ref.nodeId }
+            : isVideo
+              ? { kind: "video_frame", resourceId: open.ref.resourceId, timeSec: timeRef.current }
+              : { kind: "image", resourceId: open.ref.resourceId },
       });
       await open.host.command({ kind: "set_grade", doc });
       // Zoom/pan is viewport state (Phase 3): the host crops the cached
@@ -88,6 +111,6 @@ export function useGradeViewport(
       }
       return open.host.renderFrame();
     },
-    [path, isVideo, size],
+    [path, isVideo, nodeRef, size],
   );
 }

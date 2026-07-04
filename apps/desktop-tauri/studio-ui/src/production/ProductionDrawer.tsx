@@ -45,6 +45,8 @@ export interface ProductionDrawerProps {
   gradeImagePath: string | null;
   /** Video whose frame the Grade tab previews for video-clip targets. */
   gradeVideoPath: string | null;
+  /** Node whose output the Grade tab previews, for node-output targets. */
+  gradeNodeId: string | null;
   /** The current target's stored grade doc (JSON string), if any. */
   gradeDoc: string | null;
   onGradeCommit: (gradeDoc: string) => void;
@@ -98,6 +100,7 @@ export function ProductionDrawer({
   onOpenExport,
   gradeImagePath,
   gradeVideoPath,
+  gradeNodeId,
   gradeDoc,
   onGradeCommit,
   clipGradeDoc,
@@ -338,6 +341,7 @@ export function ProductionDrawer({
               key={targetKey(target)}
               imagePath={gradeImagePath}
               videoPath={gradeVideoPath}
+              nodeId={gradeNodeId}
               initialDoc={gradeDoc}
               onCommit={(commit) => onGradeCommit(commit.gradeDoc)}
             />

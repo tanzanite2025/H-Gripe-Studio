@@ -535,27 +535,39 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // What the drawer's Grade tab previews for the current target: image bin
   // assets, still clips (over their source image) and image node outputs
   // grade an image; video clips grade a frame of their source video.
-  const gradeSource = useMemo<{ imagePath: string | null; videoPath: string | null }>(() => {
-    const none = { imagePath: null, videoPath: null };
+  const gradeSource = useMemo<{
+    imagePath: string | null;
+    videoPath: string | null;
+    nodeId: string | null;
+  }>(() => {
+    const none = { imagePath: null, videoPath: null, nodeId: null };
     if (!productionTarget) return none;
     switch (productionTarget.kind) {
       case "asset": {
         const asset = binAssets.find((a) => a.id === productionTarget.assetId);
-        return asset && asset.kind === "image" ? { imagePath: asset.path, videoPath: null } : none;
+        return asset && asset.kind === "image"
+          ? { imagePath: asset.path, videoPath: null, nodeId: null }
+          : none;
       }
       case "video_clip": {
         const found = findClip(timeline, productionTarget.clipId);
         const asset = found ? binAssets.find((a) => a.id === found.clip.assetId) : undefined;
         if (!found || !asset) return none;
         return found.clip.kind === "still"
-          ? { imagePath: asset.path, videoPath: null }
-          : { imagePath: null, videoPath: asset.path };
+          ? { imagePath: asset.path, videoPath: null, nodeId: null }
+          : { imagePath: null, videoPath: asset.path, nodeId: null };
       }
       case "node_output":
-        return { imagePath: connectedImagePath(productionTarget.nodeId), videoPath: null };
+        // The image path registers as the node's output artifact, so the
+        // preview presents a `node_output` viewport target.
+        return {
+          imagePath: connectedImagePath(productionTarget.nodeId),
+          videoPath: null,
+          nodeId: productionTarget.nodeId,
+        };
       case "layered_image":
         return layeredAsset && layeredAsset.id === productionTarget.assetId
-          ? { imagePath: layeredAsset.preview_composite.path, videoPath: null }
+          ? { imagePath: layeredAsset.preview_composite.path, videoPath: null, nodeId: null }
           : none;
       case "image_layer": {
         if (!layeredAsset || layeredAsset.id !== productionTarget.assetId) return none;
@@ -563,6 +575,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         return {
           imagePath: layer?.rgba?.path ?? layeredAsset.base_image.path,
           videoPath: null,
+          nodeId: null,
         };
       }
       default:
@@ -1188,6 +1201,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onOpenExport={() => setExportOpen(true)}
           gradeImagePath={gradeSource.imagePath}
           gradeVideoPath={gradeSource.videoPath}
+          gradeNodeId={gradeSource.nodeId}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
           onGradeCommit={handleGradeCommit}
           clipGradeDoc={clipGradeDoc}
