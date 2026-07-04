@@ -26,6 +26,19 @@ pub(crate) struct TimelineExportResult {
     pub(crate) video_path: String,
     pub(crate) frame_count: u64,
     pub(crate) duration_sec: f64,
+    /// Frames graded before the encode (0 when no clip carried a doc).
+    pub(crate) graded_frame_count: u64,
+    /// Backend that ran the grade kernel (`cpu` / `gpu`), when frames were
+    /// graded. Mirrors the preview's backend report (fallback contract).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) grade_backend: Option<&'static str>,
+}
+
+/// Frames ready for the encoder, plus the grading backend report.
+pub(super) struct GradedFrames {
+    pub(super) frames: Vec<String>,
+    pub(super) graded_frame_count: u64,
+    pub(super) backend: Option<&'static str>,
 }
 
 /// Substitute graded frames into a frame sequence: each frame with a grade
@@ -37,9 +50,11 @@ pub(super) fn resolve_graded_frames(
     frames: Vec<String>,
     grade_docs: &[Option<String>],
     graded_dir: &Path,
-) -> Result<Vec<String>, String> {
+) -> Result<GradedFrames, String> {
     let mut rendered: HashMap<(String, String), String> = HashMap::new();
     let mut out = Vec::with_capacity(frames.len());
+    let mut graded_frame_count = 0u64;
+    let mut backend: Option<&'static str> = None;
     for (i, path) in frames.into_iter().enumerate() {
         let doc_str = grade_docs.get(i).and_then(|d| d.as_deref()).unwrap_or("");
         if doc_str.trim().is_empty() {
@@ -53,6 +68,7 @@ pub(super) fn resolve_graded_frames(
         }
         let key = (path.clone(), doc_str.to_string());
         if let Some(existing) = rendered.get(&key) {
+            graded_frame_count += 1;
             out.push(existing.clone());
             continue;
         }
@@ -67,7 +83,8 @@ pub(super) fn resolve_graded_frames(
             &image.pixels,
             grade_space(image.space),
         );
-        apply_grade_doc(&doc, &mut surface);
+        backend = Some(apply_grade_doc(&doc, &mut surface));
+        graded_frame_count += 1;
         let graded = WorkingImage {
             width: image.width,
             height: image.height,
@@ -83,7 +100,11 @@ pub(super) fn resolve_graded_frames(
         rendered.insert(key, out_str.clone());
         out.push(out_str);
     }
-    Ok(out)
+    Ok(GradedFrames {
+        frames: out,
+        graded_frame_count,
+        backend,
+    })
 }
 
 /// Encode `frames` (one image path per output frame, in order) at `fps` into a
@@ -100,7 +121,7 @@ pub(crate) fn timeline_export(
     output_name: Option<String>,
     grade_docs: Option<Vec<Option<String>>>,
 ) -> Result<TimelineExportResult, String> {
-    let frames = match grade_docs {
+    let graded = match grade_docs {
         Some(docs) if docs.iter().any(|d| d.is_some()) => {
             let graded_dir = crate::runtime_paths()?.output_dir.join(format!(
                 "timeline_graded_{}",
@@ -111,8 +132,17 @@ pub(crate) fn timeline_export(
             ));
             resolve_graded_frames(frames, &docs, &graded_dir)?
         }
-        _ => frames,
+        _ => GradedFrames {
+            frames,
+            graded_frame_count: 0,
+            backend: None,
+        },
     };
+    let GradedFrames {
+        frames,
+        graded_frame_count,
+        backend,
+    } = graded;
     let mut params: BTreeMap<String, Value> = BTreeMap::new();
     params.insert("fps".to_string(), json!(fps));
     if let Some(codec) = codec {
@@ -145,6 +175,8 @@ pub(crate) fn timeline_export(
             .get("duration_sec")
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
+        graded_frame_count,
+        grade_backend: backend,
     })
 }
 
@@ -187,29 +219,35 @@ mod tests {
 
         let doc = r#"{"layers":[{"blend":"normal","opacity":1.0,"visible":true,"mask":null,"qualifier":null,"ops":[{"type":"exposure","ev":1.0}]}]}"#.to_string();
         let graded_dir = dir.join("graded");
-        let out = resolve_graded_frames(
+        let result = resolve_graded_frames(
             vec![src_str.clone(), src_str.clone(), src_str.clone()],
             &[Some(doc.clone()), Some(doc), None],
             &graded_dir,
         )
         .expect("grading succeeds");
+        let out = result.frames;
 
         // Repeated (path, doc) frames reuse one rendered file; the ungraded
-        // frame passes through unchanged.
+        // frame passes through unchanged. Both graded frames are counted and
+        // the backend that ran the kernel is reported.
         assert_eq!(out[0], out[1]);
         assert_ne!(out[0], src_str);
         assert_eq!(out[2], src_str);
+        assert_eq!(result.graded_frame_count, 2);
+        assert!(matches!(result.backend, Some("cpu") | Some("gpu")));
         let graded = image::open(&out[0]).unwrap().to_rgba8();
         assert!(graded.get_pixel(0, 0).0[0] > 100, "exposure brightens");
 
-        // Identity / empty docs never render a graded copy.
-        let out = resolve_graded_frames(
+        // Identity / empty docs never render a graded copy or report a backend.
+        let result = resolve_graded_frames(
             vec![src_str.clone(), src_str.clone()],
             &[Some(String::new()), Some(r#"{"layers":[]}"#.to_string())],
             &graded_dir,
         )
         .expect("identity docs pass through");
-        assert_eq!(out, vec![src_str.clone(), src_str]);
+        assert_eq!(result.frames, vec![src_str.clone(), src_str]);
+        assert_eq!(result.graded_frame_count, 0);
+        assert!(result.backend.is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

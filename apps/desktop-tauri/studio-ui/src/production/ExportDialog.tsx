@@ -27,7 +27,13 @@ interface ExportDialogProps {
 type ExportState =
   | { phase: "idle" }
   | { phase: "running" }
-  | { phase: "done"; videoPath: string; durationSec: number }
+  | {
+      phase: "done";
+      videoPath: string;
+      durationSec: number;
+      gradedFrameCount: number;
+      gradeBackend: "cpu" | "gpu" | null;
+    }
   | { phase: "error"; message: string };
 
 export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: ExportDialogProps) {
@@ -76,7 +82,13 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
         setState({ phase: "error", message: t("export.noBackend") });
         return;
       }
-      setState({ phase: "done", videoPath: result.video_path, durationSec: result.duration_sec });
+      setState({
+        phase: "done",
+        videoPath: result.video_path,
+        durationSec: result.duration_sec,
+        gradedFrameCount: result.graded_frame_count ?? 0,
+        gradeBackend: result.grade_backend ?? null,
+      });
     } catch (err) {
       setState({ phase: "error", message: String(err) });
     }
@@ -143,6 +155,15 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
           {state.phase === "done" ? (
             <p className="export-result" title={state.videoPath}>
               {t("export.done", { path: state.videoPath, len: state.durationSec.toFixed(1) })}
+              {state.gradedFrameCount > 0 && state.gradeBackend ? (
+                <>
+                  {" · "}
+                  {t("export.gradedNote", {
+                    n: state.gradedFrameCount,
+                    backend: state.gradeBackend,
+                  })}
+                </>
+              ) : null}
             </p>
           ) : null}
           {state.phase === "error" ? <p className="export-error">{state.message}</p> : null}
