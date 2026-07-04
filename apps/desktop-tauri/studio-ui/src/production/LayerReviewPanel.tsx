@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { generateThumbnail } from "../bridge/files";
+import { useState } from "react";
 import { useT } from "../i18n";
+import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import type { LayerCandidate, LayeredImageAsset } from "./layeredImage";
 
 export interface LayerReviewPanelProps {
@@ -34,48 +34,36 @@ function layerVisible(layer: LayerCandidate, visibility: Record<string, boolean>
 }
 
 /**
- * Thumbnail preview of the current review target: the selected layer's RGBA
- * cutout (toggleable to its mask) or the asset's composite when the whole
- * asset is targeted. Rendering goes through the backend thumbnail command like
- * every other preview — the raw artifact is never decoded in the webview, and
- * the browser preview (mocked backend) shows a text placeholder instead.
+ * Preview of the current review target: the selected layer's RGBA cutout
+ * (toggleable to its mask) or the asset's composite when the whole asset is
+ * targeted. Presentation flows through the viewport host by resource
+ * reference — the artifact path is registered, an `image_edit` viewport
+ * renders it, and the raw pixels never enter webview state. The browser
+ * preview (no resource registry) shows a text placeholder instead.
  */
 function LayerPreview({ asset, layer }: { asset: LayeredImageAsset; layer: LayerCandidate | null }) {
   const t = useT();
   const [showMask, setShowMask] = useState(false);
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const path = layer
     ? showMask
       ? layer.mask.path
       : layer.rgba?.path ?? layer.mask.path
     : asset.preview_composite.path;
-
-  useEffect(() => {
-    let cancelled = false;
-    setSrc(null);
-    setError(null);
-    generateThumbnail({ path, size: 320 })
-      .then((thumb) => {
-        if (cancelled) return;
-        if (thumb.data_url) setSrc(thumb.data_url);
-        else setError(t("layers.previewUnavailable"));
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, t]);
+  const { underlay, settled } = useViewportUnderlay("image_edit", path, 320);
 
   return (
     <div className="layer-review-preview">
       <div className="layer-review-preview-stage" title={path}>
-        {src ? (
-          <img className="layer-review-preview-img" src={src} alt={layer?.name ?? "composite"} />
+        {underlay ? (
+          <img
+            className="layer-review-preview-img"
+            src={underlay}
+            alt={layer?.name ?? "composite"}
+          />
         ) : (
-          <span className="layer-review-preview-empty">{error ?? "…"}</span>
+          <span className="layer-review-preview-empty">
+            {settled ? t("layers.previewUnavailable") : "…"}
+          </span>
         )}
       </div>
       {layer ? (
