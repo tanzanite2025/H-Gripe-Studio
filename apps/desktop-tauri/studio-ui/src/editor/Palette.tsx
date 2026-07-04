@@ -1,4 +1,11 @@
-import { useContext, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useContext,
+  useMemo,
+  useState,
+  type Dispatch,
+  type PointerEvent as ReactPointerEvent,
+  type SetStateAction,
+} from "react";
 import { useReactFlow, useStore, useStoreApi } from "@xyflow/react";
 import type { EdgeStyle } from "./FlowCanvas";
 import { paletteGroups, type NodeSpec, type PaletteCategory } from "../graph/nodeSpecs";
@@ -11,6 +18,12 @@ interface PaletteProps {
   /** Edge rendering style shown/changed in the canvas-controls section. */
   edgeType: EdgeStyle;
   onChangeEdgeType: (style: EdgeStyle) => void;
+  /** Labelled canvas options (own row in the canvas-controls section). */
+  showMinimap: boolean;
+  setShowMinimap: Dispatch<SetStateAction<boolean>>;
+  snapToGrid: boolean;
+  setSnapToGrid: Dispatch<SetStateAction<boolean>>;
+  onTidyLayout: () => void;
 }
 
 // `internal` primitives never appear in the palette, so they carry no label.
@@ -148,7 +161,16 @@ function loadOpenSection(): string | null {
 
 // Left rail listing the available node kinds. Each item can be dragged onto the
 // canvas (drop position is honoured) or clicked to add at a default location.
-export function Palette({ onAdd, edgeType, onChangeEdgeType }: PaletteProps) {
+export function Palette({
+  onAdd,
+  edgeType,
+  onChangeEdgeType,
+  showMinimap,
+  setShowMinimap,
+  snapToGrid,
+  setSnapToGrid,
+  onTidyLayout,
+}: PaletteProps) {
   const [width, setWidth] = useState(loadPaletteWidth);
   const [openSection, setOpenSection] = useState<string | null>(loadOpenSection);
   const lang = useContext(LangContext);
@@ -364,6 +386,32 @@ export function Palette({ onAdd, edgeType, onChangeEdgeType }: PaletteProps) {
                     {icon}
                   </button>
                 ))}
+              </div>
+              <div className="palette-controls-row palette-controls-labeled">
+                <label className="palette-control-toggle" title={t("label.mapTitle")}>
+                  <input
+                    type="checkbox"
+                    checked={showMinimap}
+                    onChange={(e) => setShowMinimap(e.target.checked)}
+                  />
+                  {t("label.map")}
+                </label>
+                <label className="palette-control-toggle" title={t("label.snapTitle")}>
+                  <input
+                    type="checkbox"
+                    checked={snapToGrid}
+                    onChange={(e) => setSnapToGrid(e.target.checked)}
+                  />
+                  {t("label.snap")}
+                </label>
+                <button
+                  type="button"
+                  className="palette-control-text-button"
+                  onClick={onTidyLayout}
+                  title={t("btn.tidyTitle")}
+                >
+                  {t("btn.tidy")}
+                </button>
               </div>
             </div>
           )}

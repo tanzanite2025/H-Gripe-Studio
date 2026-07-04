@@ -3,6 +3,7 @@
 // editor below shows. Purely presentational — the document store lives in
 // useCanvasDocument.
 
+import { useEffect, useRef, useState } from "react";
 import { canvasDocumentTitle } from "./canvasDocument";
 import type { CanvasTabInfo } from "./useCanvasDocument";
 import { useT } from "../i18n";
@@ -21,6 +22,9 @@ interface CanvasTabsProps {
   onSaveAsTab: (id: string) => void;
   /** Set (or clear, with null) a tab's display name. */
   onRenameTab: (id: string, name: string | null) => void;
+  /** Dangerous per-tab actions, kept behind the "⋯" menu. */
+  onResetTab: (id: string) => void;
+  onClearTab: (id: string) => void;
   /** Project-level batch: run every open canvas (multi-canvas plan Phase 5). */
   onRunProject: () => void;
   /** Disables the project run while any run is in flight. */
@@ -92,11 +96,34 @@ export function CanvasTabs({
   onSaveTab,
   onSaveAsTab,
   onRenameTab,
+  onResetTab,
+  onClearTab,
   onRunProject,
   running,
 }: CanvasTabsProps) {
   const t = useT();
   const untitled = t("status.untitled");
+  // Open "⋯" menu (dropdown is position:fixed so the scrollable strip cannot
+  // clip it; the anchor point comes from the toggle button).
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the menu on any click outside the row or on Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!rowRef.current?.contains(e.target as Node)) setMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menu]);
 
   const rename = (id: string, currentTitle: string) => {
     const input = window.prompt(t("canvasTabs.renamePrompt"), currentTitle);
@@ -106,7 +133,7 @@ export function CanvasTabs({
   };
 
   return (
-    <div className="canvas-tabs" role="tablist">
+    <div className="canvas-tabs" role="tablist" ref={rowRef}>
       <div className="canvas-tabs-strip">
         {tabs.map((tab) => {
           const active = tab.id === activeId;
@@ -160,6 +187,21 @@ export function CanvasTabs({
                 <RenameIcon />
               </button>
               <button
+                className="canvas-tab-action"
+                aria-label={t("canvasTabs.more")}
+                title={t("canvasTabs.more")}
+                aria-expanded={menu?.id === tab.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setMenu((cur) =>
+                    cur?.id === tab.id ? null : { id: tab.id, x: rect.left, y: rect.bottom + 6 },
+                  );
+                }}
+              >
+                ⋯
+              </button>
+              <button
                 className="canvas-tab-close"
                 aria-label={t("canvasTabs.close")}
                 title={t("canvasTabs.close")}
@@ -170,6 +212,35 @@ export function CanvasTabs({
               >
                 ×
               </button>
+              {menu?.id === tab.id && (
+                <div
+                  className="canvas-tab-menu"
+                  role="menu"
+                  style={{ left: menu.x, top: menu.y }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    role="menuitem"
+                    className="danger"
+                    onClick={() => {
+                      setMenu(null);
+                      if (window.confirm(t("canvasTabs.confirmReset"))) onResetTab(tab.id);
+                    }}
+                  >
+                    {t("canvasTabs.reset")}
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="danger"
+                    onClick={() => {
+                      setMenu(null);
+                      if (window.confirm(t("canvasTabs.confirmClear"))) onClearTab(tab.id);
+                    }}
+                  >
+                    {t("canvasTabs.clear")}
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
