@@ -1268,7 +1268,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         historyCount={runHistory.length}
         nodes={nodes}
         onJumpToNode={jumpToNode}
-        onNew={openNewCanvas}
         onOpen={() => void handleOpen()}
         onSave={() => void handleSave()}
         onSaveAs={() => void handleSaveAs()}
