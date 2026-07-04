@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
 import { useGradeViewport } from "../viewport/useGradeViewport";
-import { IDENTITY_VIEW, panView, zoomView, type ViewportViewState } from "../viewport/view";
+import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
@@ -497,7 +497,10 @@ export function GradePanel({
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    setView((v) => zoomView(v, e.deltaY < 0 ? 1.25 : 0.8));
+    const rect = stageRef.current?.getBoundingClientRect();
+    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
   };
   const handlePointerDown = (e: React.PointerEvent) => {
     if (view.zoom <= 1) return;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
-import { IDENTITY_VIEW, panView, zoomView, type ViewportViewState } from "../viewport/view";
+import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
 import { useT } from "../i18n";
 
 // Logical fallback size when the connected image has no decodable thumbnail
@@ -151,7 +151,10 @@ export function CropEditModal({
   );
 
   const handleWheel = (e: React.WheelEvent) => {
-    setView((v) => zoomView(v, e.deltaY < 0 ? 1.25 : 0.8));
+    const rect = stageRef.current?.getBoundingClientRect();
+    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
   };
 
   const panning = spaceHeld || panDrag.current != null;
