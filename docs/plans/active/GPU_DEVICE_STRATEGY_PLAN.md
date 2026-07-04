@@ -403,7 +403,14 @@ This should be a settings surface, not a required setup wizard.
 7. ✅ Add contract tests for report behavior
    (`studio-ui/src/runtime/deviceReport.test.ts`: `auto` always yields a
    `used`, explicit `cpu` never reports `cuda`, fallback stays visible).
-8. Harden remaining WGPU fallback reasons and reports.
+8. ✅ (grade kernel) Harden remaining WGPU fallback reasons and reports:
+   `apply_grade_doc` now returns `GradeBackend { name, fallback_reason }` —
+   a failed adapter/device init is cached with its reason, and a per-run GPU
+   apply failure reports why — so `grade_report`, `GradePreviewResult`,
+   viewport frames and `timeline_export` all carry
+   `backend_fallback_reason` instead of silently reporting `cpu`. Remaining
+   WGPU-surface reasons (texture too large, shader compile) land with the
+   viewport migration.
 9. Harden ONNX provider reporting after WGPU reports are stable.
 10. Keep heavy model runtimes outside the core app; accept plugin reports only.
 11. Keep FFmpeg software native as baseline.

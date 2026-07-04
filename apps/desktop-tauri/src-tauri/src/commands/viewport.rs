@@ -1143,7 +1143,7 @@ fn render_video_path(
             backend: ViewportBackend {
                 requested: "auto".to_string(),
                 actual: graded.backend.to_string(),
-                fallback_reason: None,
+                fallback_reason: graded.backend_fallback_reason,
             },
         });
     }
@@ -1209,7 +1209,7 @@ fn render_image_path(
                 backend: ViewportBackend {
                     requested: "auto".to_string(),
                     actual: graded.backend.to_string(),
-                    fallback_reason: None,
+                    fallback_reason: graded.backend_fallback_reason,
                 },
             });
         }
@@ -1221,7 +1221,7 @@ fn render_image_path(
             backend: ViewportBackend {
                 requested: "auto".to_string(),
                 actual: graded.backend.to_string(),
-                fallback_reason: None,
+                fallback_reason: graded.backend_fallback_reason,
             },
         });
     }

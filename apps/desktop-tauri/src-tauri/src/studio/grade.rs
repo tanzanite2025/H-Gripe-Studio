@@ -43,27 +43,63 @@ pub(super) fn grade_space(space: WorkingSpace) -> GradeSpace {
     }
 }
 
+/// The backend that ran a grade, plus why the GPU path did not run when it
+/// fell back — fallback is a reportable runtime decision, not a failure
+/// (GPU_DEVICE_STRATEGY_PLAN fallback contract).
+#[derive(Debug, Clone)]
+pub(crate) struct GradeBackend {
+    pub(crate) name: &'static str,
+    pub(crate) fallback_reason: Option<String>,
+}
+
+impl GradeBackend {
+    fn gpu() -> Self {
+        Self {
+            name: "gpu",
+            fallback_reason: None,
+        }
+    }
+
+    fn cpu(reason: String) -> Self {
+        Self {
+            name: "cpu",
+            fallback_reason: Some(reason),
+        }
+    }
+}
+
 /// Run a grade document over a surface, preferring the GPU backend when it is
 /// compiled in (`grade-gpu`) and an adapter initialises; the CPU reference
-/// path (rayon row-parallel) is the fallback. Returns the backend used.
-pub(crate) fn apply_grade_doc(doc: &GradeDoc, surface: &mut GradeSurface) -> &'static str {
+/// path (rayon row-parallel) is the fallback. Returns the backend used and,
+/// on CPU fallback, the reason the GPU path did not run.
+pub(crate) fn apply_grade_doc(doc: &GradeDoc, surface: &mut GradeSurface) -> GradeBackend {
     #[cfg(feature = "grade-gpu")]
-    {
+    let reason: String = {
         use std::sync::{Mutex, OnceLock};
         // One process-wide grader: adapter/device setup is expensive and the
         // compiled pipelines are cached inside it, keyed by the op sequence.
-        static GRADER: OnceLock<Option<Mutex<hgripe_grade::GpuGrader>>> = OnceLock::new();
-        let grader = GRADER.get_or_init(|| hgripe_grade::GpuGrader::new().ok().map(Mutex::new));
-        if let Some(grader) = grader {
-            if let Ok(mut grader) = grader.lock() {
-                if grader.apply(doc, surface).is_ok() {
-                    return "gpu";
-                }
-            }
+        // A failed init is cached too, so its reason stays reportable.
+        static GRADER: OnceLock<Result<Mutex<hgripe_grade::GpuGrader>, String>> = OnceLock::new();
+        let grader = GRADER.get_or_init(|| {
+            hgripe_grade::GpuGrader::new()
+                .map(Mutex::new)
+                .map_err(|err| err.to_string())
+        });
+        match grader {
+            Ok(grader) => match grader.lock() {
+                Ok(mut grader) => match grader.apply(doc, surface) {
+                    Ok(()) => return GradeBackend::gpu(),
+                    Err(err) => format!("GPU grade failed: {err}"),
+                },
+                Err(_) => "GPU grader unavailable: lock poisoned".to_string(),
+            },
+            Err(err) => format!("GPU unavailable: {err}"),
         }
-    }
+    };
+    #[cfg(not(feature = "grade-gpu"))]
+    let reason = "GPU backend not compiled in (grade-gpu feature disabled)".to_string();
     hgripe_grade::apply_parallel(doc, surface);
-    "cpu"
+    GradeBackend::cpu(reason)
 }
 
 /// Parse a `grade_doc` value: either the document object itself or a JSON
@@ -97,6 +133,8 @@ fn image_stem(path: &str) -> String {
 #[derive(Debug, Serialize)]
 struct GradeReport {
     backend: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend_fallback_reason: Option<String>,
     layers: usize,
     ops: usize,
     op_types: Vec<String>,
@@ -199,7 +237,8 @@ pub(super) fn execute_studio_grade(
 
     let ops: Vec<&hgripe_grade::GradeOp> = doc.layers.iter().flat_map(|l| l.ops.iter()).collect();
     let report = GradeReport {
-        backend: backend.to_string(),
+        backend: backend.name.to_string(),
+        backend_fallback_reason: backend.fallback_reason.clone(),
         layers: doc.layers.len(),
         ops: ops.len(),
         op_types: ops.iter().map(|op| op_type_tag(op)).collect(),
@@ -229,6 +268,8 @@ pub(crate) struct GradePreviewResult {
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) backend: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) backend_fallback_reason: Option<String>,
     pub(crate) elapsed_ms: u128,
 }
 
@@ -420,7 +461,7 @@ pub(crate) fn srgb_proxy_surface(srgb: &RgbaImage) -> Result<GradeSurface, Strin
 /// egress half of [`grade_srgb_proxy`].
 pub(crate) fn encode_surface_preview(
     surface: &GradeSurface,
-    backend: &'static str,
+    backend: GradeBackend,
     started: Instant,
 ) -> Result<GradePreviewResult, String> {
     let (pw, ph) = (surface.w, surface.h);
@@ -442,7 +483,8 @@ pub(crate) fn encode_surface_preview(
         ),
         width: pw,
         height: ph,
-        backend,
+        backend: backend.name,
+        backend_fallback_reason: backend.fallback_reason,
         elapsed_ms: started.elapsed().as_millis(),
     })
 }
@@ -513,7 +555,11 @@ mod tests {
         .unwrap();
         let mut s = surface(vec![0.25, 0.25, 0.25, 1.0]);
         let backend = apply_grade_doc(&doc, &mut s);
-        assert!(backend == "cpu" || backend == "gpu");
+        assert!(backend.name == "cpu" || backend.name == "gpu");
+        assert!(
+            backend.name == "gpu" || backend.fallback_reason.is_some(),
+            "a CPU fallback must carry its reason"
+        );
         assert!(s.data[0] > 0.25, "exposure should brighten");
     }
 
