@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
-import type { ViewportBackend, ViewportFrame } from "../bridge/viewport";
+import type { ViewportBackend, ViewportFrame, ViewportTarget } from "../bridge/viewport";
 import type { PreviewFrameTarget } from "../production/previewFrame";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
@@ -36,9 +36,18 @@ interface MonitorState {
   view: ViewportViewState;
 }
 
-/** A frame request: the resolved playhead media plus the clip's grade doc. */
+/**
+ * What a frame request presents: a `video_clip` reference target when the
+ * timeline is registered with the host (resolution happens Rust-side), or
+ * the webview-resolved playhead media as a fallback.
+ */
+export type VideoPreviewTarget =
+  | PreviewFrameTarget
+  | Extract<ViewportTarget, { kind: "video_clip" }>;
+
+/** A frame request: the playhead target plus the clip's grade doc. */
 export interface VideoPreviewRequest {
-  target: PreviewFrameTarget;
+  target: VideoPreviewTarget;
   /** The clip's stored grade doc (JSON string), applied to the frame. */
   gradeDoc: string | null;
   /** Monitor zoom/pan (viewport state); identity when omitted. */
@@ -106,25 +115,30 @@ export function useVideoPreview(size = 1280): {
       }
       const monitor = await monitorRef.current;
       if (!monitor || !monitor.host.isOpen || seqRef.current !== seq) return;
-      let resourceId = monitor.resources.get(target.path);
-      if (!resourceId) {
-        const res = await registerResource(target.path);
-        if (!res) {
-          // Browser preview: no resource registry; leave the placeholder.
-          setState((s) => ({ ...s, pending: false }));
-          return;
+      let viewportTarget: ViewportTarget;
+      if (target.kind === "video_clip") {
+        // Reference target: the host resolves the clip through its timeline
+        // registry; nothing to register per frame.
+        viewportTarget = target;
+      } else {
+        let resourceId = monitor.resources.get(target.path);
+        if (!resourceId) {
+          const res = await registerResource(target.path);
+          if (!res) {
+            // Browser preview: no resource registry; leave the placeholder.
+            setState((s) => ({ ...s, pending: false }));
+            return;
+          }
+          resourceId = res.id;
+          monitor.resources.set(target.path, resourceId);
         }
-        resourceId = res.id;
-        monitor.resources.set(target.path, resourceId);
-      }
-      if (seqRef.current !== seq) return;
-      await monitor.host.command({
-        kind: "set_target",
-        target:
+        if (seqRef.current !== seq) return;
+        viewportTarget =
           target.kind === "video"
             ? { kind: "video_frame", resourceId, timeSec: target.sourceTimeSec }
-            : { kind: "image", resourceId },
-      });
+            : { kind: "image", resourceId };
+      }
+      await monitor.host.command({ kind: "set_target", target: viewportTarget });
       if (gradeDoc !== monitor.gradeDoc) {
         await monitor.host.command({ kind: "set_grade", doc: parseGradeDoc(gradeDoc) });
         monitor.gradeDoc = gradeDoc;

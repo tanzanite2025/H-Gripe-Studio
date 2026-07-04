@@ -1,11 +1,60 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { registerTimeline, type TimelineClipRef } from "../bridge/viewport";
 import { useT } from "../i18n";
 import { useViewControls } from "../viewport/useViewControls";
-import { useVideoPreview } from "../viewport/useVideoPreview";
+import { useVideoPreview, type VideoPreviewTarget } from "../viewport/useVideoPreview";
 import type { MediaAsset } from "./mediaBin";
 import { resolvePreviewFrame } from "./previewFrame";
 import { timelineDuration, type TimelineModel } from "./timeline";
+
+/**
+ * Register the first video track's clips with the viewport host so playhead
+ * frames present as `video_clip` reference targets (resolved Rust-side).
+ * Returns the timeline id once registration lands — a re-registration after
+ * an edit replaces the host's clip set — or null while pending / after a
+ * failure (the monitor falls back to webview-resolved media targets).
+ */
+function useRegisteredTimeline(timeline: TimelineModel, assets: MediaAsset[]): string | null {
+  const [registered, setRegistered] = useState<string | null>(null);
+  const clips = useMemo<TimelineClipRef[]>(() => {
+    const track = timeline.tracks.find((t) => t.kind === "video");
+    return (track?.clips ?? []).flatMap((clip) => {
+      if (clip.kind === "audio") return [];
+      const asset = assets.find((a) => a.id === clip.assetId);
+      if (!asset) return [];
+      return [
+        {
+          clipId: clip.id,
+          kind: clip.kind,
+          path: asset.path,
+          startSec: clip.start,
+          durationSec: clip.duration,
+        },
+      ];
+    });
+  }, [timeline, assets]);
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
+  const key = clips
+    .map((c) => `${c.clipId}:${c.kind}:${c.path}:${c.startSec}:${c.durationSec}`)
+    .join("|");
+  useEffect(() => {
+    setRegistered(null);
+    let cancelled = false;
+    registerTimeline(timeline.id, clipsRef.current)
+      .then(() => {
+        if (!cancelled) setRegistered(timeline.id);
+      })
+      .catch(() => {
+        // Playhead frames fall back to webview-resolved media targets.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [timeline.id, key]);
+  return registered;
+}
 
 /**
  * Program monitor for the Timeline tab: shows the frame under the playhead
@@ -45,10 +94,24 @@ export function ProgramMonitor({
     [timeline, assets, clampedSec],
   );
 
+  const registeredTimelineId = useRegisteredTimeline(timeline, assets);
   const gradeDoc = target ? (clipGradeDoc?.(target.clipId) ?? null) : null;
   useEffect(() => {
-    showFrame(target ? { target, gradeDoc, view } : null);
-  }, [target, gradeDoc, view, showFrame]);
+    if (!target) {
+      showFrame(null);
+      return;
+    }
+    const previewTarget: VideoPreviewTarget =
+      registeredTimelineId === timeline.id
+        ? {
+            kind: "video_clip",
+            timelineId: timeline.id,
+            clipId: target.clipId,
+            timeSec: clampedSec,
+          }
+        : target;
+    showFrame({ target: previewTarget, gradeDoc, view });
+  }, [target, registeredTimelineId, timeline.id, clampedSec, gradeDoc, view, showFrame]);
 
   useEffect(() => {
     if (!playing || duration <= 0) return;

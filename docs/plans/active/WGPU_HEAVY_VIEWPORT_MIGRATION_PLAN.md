@@ -47,7 +47,10 @@ Implemented (PRs #329–#371):
   path plus placement (`viewport_register_timeline`), so `video_clip`
   viewport targets resolve Rust-side — the host maps the timeline playhead
   to clip-local source time and renders stills through the image path and
-  video clips through the same decode path as `video_frame`.
+  video clips through the same decode path as `video_frame`. The program
+  monitor registers the first video track's clips and presents playhead
+  frames as `video_clip` targets, falling back to webview-resolved media
+  targets while registration is pending or unavailable.
 
 Remaining work, roughly in priority order:
 
@@ -62,9 +65,7 @@ Remaining work, roughly in priority order:
    recorded pixel space.
 3. Remaining viewport targets: `node_output` targets still resolve on the
    frontend — implement them host-side (as done for `image_layer` and
-   `video_clip`) so the selection-target model is uniform, and wire the
-   program monitor onto `video_clip` targets (it still resolves the playhead
-   to `video_frame`/`image` targets webview-side).
+   `video_clip`) so the selection-target model is uniform.
 4. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
 
