@@ -24,6 +24,7 @@ import {
   type RunOutcome,
   type RunRecord,
 } from "./runhistory";
+import { buildRunReport } from "./runReport";
 import { useProjectScopedStore } from "./useProjectScopedStore";
 import { lowerWorkflowGraph, originNodeId } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
@@ -512,6 +513,8 @@ export function useStudioRunController({
       await warnPsdChain(authored, scope);
       const { graph, origin } = lowerWorkflowGraph(authored);
       loweredOrigin.current = origin;
+      for (const line of buildRunReport({ scopeLabel, authored, lowered: graph, origin }))
+        pushLog("info", line);
       if (useRustBackend) {
         const runId = beginRustRun();
         try {
