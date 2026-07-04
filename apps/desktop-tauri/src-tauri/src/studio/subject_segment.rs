@@ -101,6 +101,13 @@ pub(super) struct SegmentResult {
 pub(super) trait SubjectSegmenter {
     /// The provider / model id recorded in `matte_report.provider`.
     fn provider(&self) -> &str;
+    /// The weight file(s) inference runs on, recorded in
+    /// `matte_report.model_path` (GPU_DEVICE_STRATEGY_PLAN: report model
+    /// path, provider, and fallback reason). `None` for weight-free
+    /// segmenters such as the builtin fallback.
+    fn model_path(&self) -> Option<String> {
+        None
+    }
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String>;
 }
 

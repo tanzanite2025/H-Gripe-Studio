@@ -117,6 +117,8 @@ pub(super) struct Sam2Segmenter {
     encoder: SharedSession,
     decoder: SharedSession,
     variant: Sam2Variant,
+    /// The encoder + decoder weight files, for the report.
+    weight_paths: String,
 }
 
 impl Sam2Segmenter {
@@ -141,10 +143,12 @@ impl Sam2Segmenter {
     fn load_variant(variant: Sam2Variant) -> Option<Self> {
         let encoder = resolve_model_file(ENCODER_ENV, variant.encoder_file())?;
         let decoder = resolve_model_file(DECODER_ENV, variant.decoder_file())?;
+        let weight_paths = format!("{}; {}", encoder.display(), decoder.display());
         Some(Self {
             encoder: cached_session(&encoder).ok()?,
             decoder: cached_session(&decoder).ok()?,
             variant,
+            weight_paths,
         })
     }
 }
@@ -152,6 +156,10 @@ impl Sam2Segmenter {
 impl SubjectSegmenter for Sam2Segmenter {
     fn provider(&self) -> &str {
         PROVIDER
+    }
+
+    fn model_path(&self) -> Option<String> {
+        Some(self.weight_paths.clone())
     }
 
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String> {

@@ -56,6 +56,10 @@ struct MatteReport {
     device_requested: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     engine_fallback_reason: Option<String>,
+    /// The weight file(s) inference ran on; absent for weight-free lanes
+    /// (manual/hybrid and the builtin fallback segmenter).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_path: Option<String>,
     source_mode: String,
     exif_transposed: bool,
     max_decode_pixels: u64,
@@ -122,6 +126,7 @@ pub(super) fn execute_studio_subject_mask(
     let device_request =
         super::onnx_pool::OnnxDeviceRequest::from_param(&param_or(node, "device", "auto"));
     let mut engine_device: Option<&'static str> = None;
+    let mut model_path: Option<String> = None;
 
     let placeholder = match optional(studio_value_to_string(inputs.get("placeholder_mask"))) {
         Some(path) => Some(load_mask_sized(&path, width, height, max_decode_pixels)?),
@@ -147,6 +152,7 @@ pub(super) fn execute_studio_subject_mask(
                     points: &points,
                 })?;
                 provider = segmenter.provider().to_string();
+                model_path = segmenter.model_path();
                 if provider == "builtin-cpu" {
                     engine = Some("cpu");
                     engine_device = Some("cpu");
@@ -345,6 +351,7 @@ pub(super) fn execute_studio_subject_mask(
         device: engine_device,
         device_requested: engine.map(|_| device_request.as_str()),
         engine_fallback_reason,
+        model_path,
         source_mode: loaded.meta.source_mode.clone(),
         exif_transposed: loaded.meta.exif_transposed,
         max_decode_pixels,

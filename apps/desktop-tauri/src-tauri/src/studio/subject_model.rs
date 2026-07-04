@@ -161,18 +161,28 @@ pub(super) struct ModelSegmenter {
     // through the lock (keeping the trait's `&self` signature).
     session: SharedSession,
     spec: ModelSpec,
+    /// The weight file the session was built from, for the report.
+    path: PathBuf,
 }
 
 impl ModelSegmenter {
     fn load(path: &Path, spec: ModelSpec) -> Result<Self, String> {
         let session = cached_session(path)?;
-        Ok(Self { session, spec })
+        Ok(Self {
+            session,
+            spec,
+            path: path.to_path_buf(),
+        })
     }
 }
 
 impl SubjectSegmenter for ModelSegmenter {
     fn provider(&self) -> &str {
         self.spec.provider
+    }
+
+    fn model_path(&self) -> Option<String> {
+        Some(self.path.display().to_string())
     }
 
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String> {
