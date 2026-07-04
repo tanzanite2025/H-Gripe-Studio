@@ -12,7 +12,7 @@ import { PS_TOOL_SECTIONS, maskTool, type MaskTool } from "../maskTools";
 import { localizeTool } from "../maskToolsI18n";
 import { comboLabel, parseCombo } from "../../shortcuts";
 import { toolCombo } from "../../shortcuts/scopes/maskEdit";
-import { LangContext } from "../../i18n";
+import { LangContext, useT } from "../../i18n";
 import { isPreviewableOp } from "../maskMorphology";
 import { ToolIcon } from "./toolIcons";
 
@@ -23,6 +23,12 @@ interface MaskToolbarProps {
   faces: Record<string, string>;
   /** A flyout variant was picked: remember it as slot `slotId`'s face. */
   onPickFace: (slotId: string, toolId: string) => void;
+  /** Paint polarity for the colour wells: add paints mask in (white front). */
+  paintMode: "add" | "subtract";
+  /** Swap paint polarity (PS X). */
+  onSwapColors: () => void;
+  /** Back to default polarity / target (PS D). */
+  onResetColors: () => void;
 }
 
 const LONG_PRESS_MS = 350;
@@ -37,7 +43,8 @@ function isActive(mt: MaskTool, toolId: string): boolean {
   return toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id));
 }
 
-export function MaskToolbar({ toolId, onToolClick, faces, onPickFace }: MaskToolbarProps) {
+export function MaskToolbar({ toolId, onToolClick, faces, onPickFace, paintMode, onSwapColors, onResetColors }: MaskToolbarProps) {
+  const t = useT();
   const lang = useContext(LangContext);
   // Which slot's flyout card is open ("si-gi" key) and where it anchors.
   // The card renders `position: fixed` so the scrollable toolbar column
@@ -167,6 +174,31 @@ export function MaskToolbar({ toolId, onToolClick, faces, onPickFace }: MaskTool
           })}
         </div>
       ))}
+      {/* PS-style colour wells: in a grayscale mask the "foreground" is the
+          paint polarity — white adds, black erases. X swaps, D resets. */}
+      <div className="mask-color-wells">
+        <button
+          className="mask-color-reset"
+          title={`${t("mask.colorReset")} (D)`}
+          aria-label={t("mask.colorReset")}
+          onClick={onResetColors}
+        >
+          <span className="well back dark" />
+          <span className="well front light" />
+        </button>
+        <button
+          className="mask-color-swap"
+          title={`${t("mask.colorSwap")} (X)`}
+          aria-label={t("mask.colorSwap")}
+          onClick={onSwapColors}
+        >
+          ⇄
+        </button>
+        <div className="mask-color-main" title={paintMode === "add" ? t("mask.colorAdd") : t("mask.colorSubtract")}>
+          <span className={`well back ${paintMode === "add" ? "dark" : "light"}`} />
+          <span className={`well front ${paintMode === "add" ? "light" : "dark"}`} />
+        </div>
+      </div>
     </div>
   );
 }

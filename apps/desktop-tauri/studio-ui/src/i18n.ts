@@ -508,6 +508,10 @@ export const messages = {
   "mask.panelInfo": { en: "Mask info", zh: "蒙版信息" },
   "mask.panelProperties": { en: "Properties", zh: "属性" },
   "mask.panelMaskOps": { en: "Mask ops", zh: "蒙版操作" },
+  "mask.colorSwap": { en: "Swap paint polarity", zh: "互换前景/背景" },
+  "mask.colorReset": { en: "Default polarity", zh: "默认前景/背景" },
+  "mask.colorAdd": { en: "Painting adds to the mask", zh: "当前绘制为添加蒙版" },
+  "mask.colorSubtract": { en: "Painting erases the mask", zh: "当前绘制为擦除蒙版" },
   "mask.propsEmpty": {
     en: "Select an adjustment layer to edit its parameters.",
     zh: "选择一个调整图层以编辑其参数。",

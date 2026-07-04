@@ -376,6 +376,21 @@ export function MaskEditModal({
     setEditingTransform(null);
     setTransformDraft({ dx: 0, dy: 0, scale: 1, rotate: 0 });
   };
+  // PS `D` (default colours): back to the default brush / add semantics.
+  const resetColors = () => {
+    selectTool(DEFAULT_TOOL_ID);
+    setPathMode("add");
+    setPaintTarget("layer");
+  };
+
+  // PS `X` (swap colours): flip paint polarity — brush↔eraser, or a path
+  // tool's boolean mode.
+  const swapColors = () => {
+    if (toolId === "brush") setToolId("eraser");
+    else if (toolId === "eraser") setToolId("brush");
+    else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
+  };
+
   const shortcutHandlers: ShortcutHandlers = {
     tool_brush: () => selectSlot("brush"),
     tool_eraser: () => selectSlot("eraser"),
@@ -417,12 +432,7 @@ export function MaskEditModal({
     brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),
     brush_softer: () => setBrushHardness((h) => Math.max(0, Math.round((h - 0.25) * 100) / 100)),
     brush_harder: () => setBrushHardness((h) => Math.min(1, Math.round((h + 0.25) * 100) / 100)),
-    default_colors: () => {
-      // PS `D` (default colours): back to the default brush / add semantics.
-      selectTool(DEFAULT_TOOL_ID);
-      setPathMode("add");
-      setPaintTarget("layer");
-    },
+    default_colors: () => resetColors(),
     quick_mask: () => setQuickMask((v) => !v),
     tool_healing: () => selectSlot("repair"),
     tool_clone: () => selectSlot("stamp"),
@@ -447,11 +457,7 @@ export function MaskEditModal({
       // with the amount slider, then Apply commits a revisable `feather` op.
       selectTool("feather");
     },
-    swap_mode: () => {
-      if (toolId === "brush") setToolId("eraser");
-      else if (toolId === "eraser") setToolId("brush");
-      else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
-    },
+    swap_mode: () => swapColors(),
     close_path: () => {
       if (editingPathRef.current != null) {
         commitPathEdit();
@@ -1017,6 +1023,9 @@ export function MaskEditModal({
             onToolClick={onToolClick}
             faces={slotFaces}
             onPickFace={(slotId, id) => setSlotFaces((f) => ({ ...f, [slotId]: id }))}
+            paintMode={tool.mode === "subtract" || (tool.kind === "path" && pathMode === "subtract") ? "subtract" : "add"}
+            onSwapColors={swapColors}
+            onResetColors={resetColors}
           />
 
           <MaskStage

@@ -262,6 +262,64 @@
    chrome); full-bleed lists inside offset the padding with -8px margins. */
 .mask-panel-body { padding: 0 8px 8px; }
 .mask-op-list { display: flex; flex-wrap: wrap; gap: 4px; }
+/* PS-style colour wells at the toolbar's foot: overlapping front/back
+   swatches show the paint polarity (white = add, black = erase); the tiny
+   reset pair and the swap arrow mirror PS's D / X affordances. */
+.mask-color-wells {
+  position: relative;
+  width: 34px;
+  height: 40px;
+  margin: 6px auto 2px;
+  flex: none;
+}
+.mask-color-wells .well {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 2px;
+}
+.mask-color-wells .well.light { background: #fff; }
+.mask-color-wells .well.dark { background: #1a1a1a; }
+.mask-color-main {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 12px;
+  bottom: 0;
+}
+.mask-color-main .well.back { right: 2px; bottom: 0; }
+.mask-color-main .well.front { left: 2px; top: 0; }
+.mask-color-reset {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.mask-color-reset .well {
+  width: 7px;
+  height: 7px;
+}
+.mask-color-reset .well.back { right: 0; bottom: 0; }
+.mask-color-reset .well.front { left: 0; top: 0; }
+.mask-color-swap {
+  position: absolute;
+  right: 0;
+  top: -2px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mask-color-swap:hover { color: var(--text); }
 /* Mask ops panel: whole-mask operations as a two-column button grid. */
 .mask-ops-grid {
   display: grid;

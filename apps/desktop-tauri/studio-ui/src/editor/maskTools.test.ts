@@ -14,6 +14,7 @@ import {
   shapeVertices,
   toolTargets,
 } from "./maskTools";
+import { hasToolIcon } from "./maskEditModal/toolIcons";
 
 describe("mask tool registry", () => {
   it("has unique ids", () => {
@@ -93,6 +94,10 @@ describe("mask tool registry", () => {
     expect(psSlotOf("wand")?.id).toBe("selection");
     expect(psSlotOf("ellipse")?.id).toBe("marquee");
     expect(psSlotOf("invert")).toBeUndefined(); // mask op, not a toolbar tool
+  });
+
+  it("every registry tool has a dedicated toolbar glyph", () => {
+    for (const t of MASK_TOOLS) expect(hasToolIcon(t.id), t.id).toBe(true);
   });
 
   it("the default tool is ready and selectable", () => {
