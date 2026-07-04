@@ -60,6 +60,9 @@ interface MockViewport {
 const mockViewports = new Map<string, MockViewport>();
 let mockNextId = 1;
 
+/** Mock registry of layered assets: asset id -> (layer id -> rgba path). */
+const mockLayeredAssets = new Map<string, Map<string, string>>();
+
 function mockGet(viewportId: string): MockViewport {
   const vp = mockViewports.get(viewportId);
   if (!vp) throw new Error(`unknown viewport id: ${viewportId}`);
@@ -104,7 +107,41 @@ export async function setViewportTarget(
     await invoke("viewport_set_target", { viewportId, target });
     return;
   }
+  // Like the desktop host, image_layer targets must reference a registered
+  // layered asset so a bad id fails at set time, not at the first render.
+  if (target.kind === "image_layer") {
+    const layers = mockLayeredAssets.get(target.assetId);
+    if (!layers) throw new Error(`unknown layered asset id: ${target.assetId}`);
+    if (!layers.has(target.layerId)) {
+      throw new Error(`unknown layer id ${target.layerId} on layered asset ${target.assetId}`);
+    }
+  }
   mockGet(viewportId).target = target;
+}
+
+/** One layer artifact of a layered asset, registered by path — never pixels. */
+export interface LayeredAssetLayerRef {
+  layerId: string;
+  rgbaPath: string;
+}
+
+/**
+ * Register (or refresh) a layered asset's layer artifacts with the viewport
+ * host so `image_layer` targets resolve host-side, by reference. A
+ * re-registration after an edit replaces the asset's layer set.
+ */
+export async function registerLayeredAsset(
+  assetId: string,
+  layers: LayeredAssetLayerRef[],
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_register_layered_asset", { assetId, layers });
+    return;
+  }
+  if (!assetId) throw new Error("layered asset id must not be empty");
+  if (layers.length === 0) throw new Error(`layered asset ${assetId} has no layers to register`);
+  mockLayeredAssets.set(assetId, new Map(layers.map((l) => [l.layerId, l.rgbaPath])));
 }
 
 export async function resizeViewport(
