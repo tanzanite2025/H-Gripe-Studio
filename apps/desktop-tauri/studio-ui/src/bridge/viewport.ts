@@ -63,6 +63,9 @@ let mockNextId = 1;
 /** Mock registry of layered assets: asset id -> (layer id -> rgba path). */
 const mockLayeredAssets = new Map<string, Map<string, string>>();
 
+/** Mock registry of timelines: timeline id -> (clip id -> clip). */
+const mockTimelines = new Map<string, Map<string, TimelineClipRef>>();
+
 function mockGet(viewportId: string): MockViewport {
   const vp = mockViewports.get(viewportId);
   if (!vp) throw new Error(`unknown viewport id: ${viewportId}`);
@@ -116,6 +119,14 @@ export async function setViewportTarget(
       throw new Error(`unknown layer id ${target.layerId} on layered asset ${target.assetId}`);
     }
   }
+  // video_clip targets must reference a registered timeline's clip.
+  if (target.kind === "video_clip") {
+    const clips = mockTimelines.get(target.timelineId);
+    if (!clips) throw new Error(`unknown timeline id: ${target.timelineId}`);
+    if (!clips.has(target.clipId)) {
+      throw new Error(`unknown clip id ${target.clipId} on timeline ${target.timelineId}`);
+    }
+  }
   mockGet(viewportId).target = target;
 }
 
@@ -142,6 +153,35 @@ export async function registerLayeredAsset(
   if (!assetId) throw new Error("layered asset id must not be empty");
   if (layers.length === 0) throw new Error(`layered asset ${assetId} has no layers to register`);
   mockLayeredAssets.set(assetId, new Map(layers.map((l) => [l.layerId, l.rgbaPath])));
+}
+
+/** One timeline clip, registered by media path plus its placement. */
+export interface TimelineClipRef {
+  clipId: string;
+  /** "video" decodes the frame at source time; "still" renders the image. */
+  kind: "video" | "still";
+  path: string;
+  startSec: number;
+  durationSec: number;
+}
+
+/**
+ * Register (or refresh) a timeline's clips with the viewport host so
+ * `video_clip` targets resolve host-side, by reference — the host maps the
+ * timeline playhead to clip-local source time. A re-registration after an
+ * edit replaces the timeline's clip set.
+ */
+export async function registerTimeline(
+  timelineId: string,
+  clips: TimelineClipRef[],
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_register_timeline", { timelineId, clips });
+    return;
+  }
+  if (!timelineId) throw new Error("timeline id must not be empty");
+  mockTimelines.set(timelineId, new Map(clips.map((c) => [c.clipId, c])));
 }
 
 export async function resizeViewport(
