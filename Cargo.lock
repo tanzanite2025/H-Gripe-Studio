@@ -1690,6 +1690,7 @@ dependencies = [
  "tiff",
  "tokio",
  "wgpu",
+ "windows-sys 0.61.2",
  "zune-core",
  "zune-jpeg",
 ]

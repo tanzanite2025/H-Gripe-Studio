@@ -367,6 +367,21 @@ fn parse_id(viewport_id: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("invalid viewport id: {viewport_id}"))
 }
 
+/// Check that `viewport_id` names an open viewport. The surface presentation
+/// commands (`viewport_surface`) validate against the registry through this
+/// without touching viewport state.
+pub(crate) fn ensure_viewport(viewport_id: &str) -> Result<(), String> {
+    let id = parse_id(viewport_id)?;
+    let map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    if map.contains_key(&id) {
+        Ok(())
+    } else {
+        Err(format!("unknown viewport id: {viewport_id}"))
+    }
+}
+
 /// Fetch the viewport's cached source proxy for `key`, decoding through
 /// `decode` on a miss and storing the result back onto the viewport (if it is
 /// still open) so the next parameter-only render skips the decode. The cache
@@ -719,7 +734,16 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
 }
 
 #[tauri::command]
-pub(crate) fn viewport_destroy(viewport_id: String) -> Result<(), String> {
+pub(crate) fn viewport_destroy(app: tauri::AppHandle, viewport_id: String) -> Result<(), String> {
+    // The surface window (if any) goes first, so the swapchain never outlives
+    // its viewport. A no-op for viewports that never presented.
+    crate::commands::viewport_surface::destroy_surface(&app, &viewport_id);
+    viewport_destroy_inner(viewport_id)
+}
+
+/// Registry half of destroy, callable without an app handle (unit tests run
+/// without a Tauri runtime and never create surface windows).
+pub(crate) fn viewport_destroy_inner(viewport_id: String) -> Result<(), String> {
     let id = parse_id(&viewport_id)?;
     let mut map = viewports()
         .lock()
@@ -1251,10 +1275,10 @@ mod tests {
         // No target yet: rendering must fail, not panic.
         assert!(viewport_render_frame(desc.viewport_id.clone()).is_err());
 
-        viewport_destroy(desc.viewport_id.clone()).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id.clone()).expect("destroy");
         // Destroyed viewports are gone.
         assert!(viewport_resize(desc.viewport_id.clone(), 1, 1).is_err());
-        assert!(viewport_destroy(desc.viewport_id).is_err());
+        assert!(viewport_destroy_inner(desc.viewport_id).is_err());
     }
 
     #[test]
@@ -1273,7 +1297,7 @@ mod tests {
         let err = viewport_set_mask_overlay(grade.viewport_id.clone(), Some(arg(data.clone())))
             .expect_err("grade_preview must reject a mask overlay");
         assert!(err.contains("does not accept a mask overlay"));
-        viewport_destroy(grade.viewport_id).expect("destroy");
+        viewport_destroy_inner(grade.viewport_id).expect("destroy");
 
         let vp = viewport_create("image_edit".to_string()).expect("create");
         viewport_set_mask_overlay(vp.viewport_id.clone(), Some(arg(data.clone())))
@@ -1299,7 +1323,7 @@ mod tests {
             let id = parse_id(&vp.viewport_id).expect("id");
             assert!(map.get(&id).expect("open").mask_overlay.is_none());
         }
-        viewport_destroy(vp.viewport_id).expect("destroy");
+        viewport_destroy_inner(vp.viewport_id).expect("destroy");
     }
 
     #[test]
@@ -1378,7 +1402,7 @@ mod tests {
     #[test]
     fn rejects_unknown_kind_and_bad_ids() {
         assert!(viewport_create("node_canvas".to_string()).is_err());
-        assert!(viewport_destroy("nonsense".to_string()).is_err());
+        assert!(viewport_destroy_inner("nonsense".to_string()).is_err());
         assert!(viewport_resize("vp-999999".to_string(), 1, 1).is_err());
     }
 
@@ -1388,7 +1412,7 @@ mod tests {
         let err = viewport_set_grade(image.viewport_id.clone(), Some(serde_json::json!({})), None)
             .expect_err("image_edit must reject a grade doc");
         assert!(err.contains("does not accept a grade doc"));
-        viewport_destroy(image.viewport_id).expect("destroy");
+        viewport_destroy_inner(image.viewport_id).expect("destroy");
 
         for kind in ["grade_preview", "video_preview"] {
             let vp = viewport_create(kind.to_string()).expect("create");
@@ -1398,7 +1422,7 @@ mod tests {
             let err = viewport_set_grade(vp.viewport_id.clone(), None, Some(1.5))
                 .expect_err("amount above 1 must be rejected");
             assert!(err.contains("temporal_denoise"));
-            viewport_destroy(vp.viewport_id).expect("destroy");
+            viewport_destroy_inner(vp.viewport_id).expect("destroy");
         }
     }
 
@@ -1446,7 +1470,7 @@ mod tests {
             let map = viewports().lock().expect("lock");
             assert!(map.get(&id).expect("open").temporal.is_none());
         }
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
     }
 
     #[test]
@@ -1525,7 +1549,7 @@ mod tests {
             );
         }
 
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1578,7 +1602,7 @@ mod tests {
         assert_eq!(reset.width, full.width);
         assert_eq!(reset.height, full.height);
 
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1620,7 +1644,7 @@ mod tests {
                 "refreshed entry retained"
             );
         }
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
     }
 
     #[test]
@@ -1670,7 +1694,7 @@ mod tests {
         assert_eq!(zoomed.width, 64, "zoomed window fills the viewport");
         assert_eq!(zoomed.height, 64);
 
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1742,7 +1766,7 @@ mod tests {
         assert!(layered_asset_layer_path("layered-n1", "layer_subject").is_err());
         assert!(layered_asset_layer_path("layered-n1", "layer_background").is_ok());
 
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&subject_path);
         let _ = std::fs::remove_file(&background_path);
     }
@@ -1808,7 +1832,7 @@ mod tests {
         viewport_register_timeline("tl-1".to_string(), vec![]).expect("re-register timeline");
         assert!(timeline_clip("tl-1", "clip_still").is_err());
 
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1886,7 +1910,7 @@ mod tests {
         .expect_err("unregistered node must be rejected");
         assert!(err.contains("unknown node output"), "{err}");
 
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1946,6 +1970,6 @@ mod tests {
         )
         .expect_err("unknown resource must be rejected");
         assert!(err.contains("unknown resource id"));
-        viewport_destroy(desc.viewport_id).expect("destroy");
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
     }
 }

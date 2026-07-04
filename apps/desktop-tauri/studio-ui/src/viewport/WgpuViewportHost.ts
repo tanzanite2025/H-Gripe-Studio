@@ -10,12 +10,16 @@ import {
   resizeViewport,
   setViewportGrade,
   setViewportMaskOverlay,
+  setViewportPlacement,
+  setViewportPresented,
   setViewportTarget,
   setViewportView,
   type ViewportBackend,
   type ViewportFrame,
   type ViewportKind,
   type ViewportMaskOverlay,
+  type ViewportPlacement,
+  type ViewportPlacementReport,
   type ViewportTarget,
 } from "../bridge/viewport";
 
@@ -30,7 +34,11 @@ export type ViewportCommand =
   /** Mask overlay composited over rendered frames (image_edit viewports):
    * the mask editor's selection tint, presented by the host at the view
    * window's detail. */
-  | { kind: "set_mask_overlay"; overlay: ViewportMaskOverlay | null };
+  | { kind: "set_mask_overlay"; overlay: ViewportMaskOverlay | null }
+  /** Native surface presentation (surface swap Phase S1): the element rect
+   * the host's surface window sits under, and whether it is shown at all. */
+  | { kind: "set_placement"; placement: ViewportPlacement }
+  | { kind: "set_presented"; presented: boolean };
 
 export class WgpuViewportHost {
   private viewportId: string | null;
@@ -79,7 +87,19 @@ export class WgpuViewportHost {
       case "set_mask_overlay":
         await setViewportMaskOverlay(this.id(), cmd.overlay);
         return;
+      case "set_placement":
+        await setViewportPlacement(this.id(), cmd.placement);
+        return;
+      case "set_presented":
+        await setViewportPresented(this.id(), cmd.presented);
+        return;
     }
+  }
+
+  /** Report the viewport element's rect for native surface placement and
+   * learn whether the surface path took it (fallback contract). */
+  async place(placement: ViewportPlacement): Promise<ViewportPlacementReport> {
+    return setViewportPlacement(this.id(), placement);
   }
 
   async renderFrame(): Promise<ViewportFrame> {
