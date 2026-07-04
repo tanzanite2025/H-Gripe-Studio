@@ -17,6 +17,8 @@ import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
 import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
+import type { MaskDocument } from "./types/production";
+import type { CropCommit } from "./editor/CropEditModal";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
 import { useCanvasDocument } from "./editor/useCanvasDocument";
@@ -204,6 +206,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // System "Models / APIs" manager (system model manager surface plan):
   // opened from the global toolbar entry, never automatically.
   const [modelsOpen, setModelsOpen] = useState(false);
+  // Standalone image editor opened blank (no image card selected yet).
+  const [mediaEditBlank, setMediaEditBlank] = useState(false);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -1222,60 +1226,76 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               onParamChange(gradeEditNode.id, "grade_doc", commit.gradeDoc);
             },
           }
-        : mediaEditSource
-          ? {
-              editor: "media",
-              target: (() => {
-                const data = mediaEditSource.data as HgripeNodeData;
-                const imagePath =
-                  data.imagePath ??
-                  (typeof data.params?.path === "string" ? (data.params.path as string) : null);
-                // Title: the image's filename, so the bar reads
-                // "photo.png · image editor".
-                const base = imagePath?.split(/[\\/]/).pop();
-                return {
+        : mediaEditSource || mediaEditBlank
+          ? (() => {
+              const data = mediaEditSource ? (mediaEditSource.data as HgripeNodeData) : null;
+              const imagePath = data
+                ? (data.imagePath ??
+                  (typeof data.params?.path === "string" ? (data.params.path as string) : null))
+                : null;
+              // Title: the image's filename, so the bar reads
+              // "photo.png · image editor".
+              const base = imagePath?.split(/[\\/]/).pop();
+              return {
+                editor: "media" as const,
+                target: {
                   title: base || t("mediaEdit.title"),
                   imagePath,
-                  nodeId: mediaEditSource.id,
-                };
-              })(),
-              // Apply spawns exactly one bound edit node of the chosen kind from
-              // the source (never mutating it) and runs it — same pipeline as the
-              // right-click auto entries, but seeded with the manual edits.
-              onCommitMask: (edits) => {
-                addBoundEdit(mediaEditSource.id, "subjectMask", {
-                  params: { edit_paths: edits },
-                  openEditor: false,
-                  run: true,
-                });
-                setMediaEditSourceId(null);
-              },
-              onCommitCrop: (commit) => {
-                addBoundEdit(mediaEditSource.id, "crop", {
-                  params: {
-                    mode: commit.mode,
-                    aspect: commit.aspect,
-                    margin_pct: commit.marginPct,
-                    crop_box: commit.cropBox,
-                  },
-                  openEditor: false,
-                  run: true,
-                });
-                setMediaEditSourceId(null);
-              },
-            }
+                  nodeId: mediaEditSource?.id ?? null,
+                },
+                // Blank standalone editor: an in-editor "open image" entry
+                // replaces the up-front system picker.
+                onPickFile: imagePath ? undefined : () => void pickIntoImageEditor(),
+                // Apply spawns exactly one bound edit node of the chosen kind from
+                // the source (never mutating it) and runs it — same pipeline as the
+                // right-click auto entries, but seeded with the manual edits.
+                onCommitMask: (edits: MaskDocument) => {
+                  if (mediaEditSource) {
+                    addBoundEdit(mediaEditSource.id, "subjectMask", {
+                      params: { edit_paths: edits },
+                      openEditor: false,
+                      run: true,
+                    });
+                  }
+                  setMediaEditSourceId(null);
+                  setMediaEditBlank(false);
+                },
+                onCommitCrop: (commit: CropCommit) => {
+                  if (mediaEditSource) {
+                    addBoundEdit(mediaEditSource.id, "crop", {
+                      params: {
+                        mode: commit.mode,
+                        aspect: commit.aspect,
+                        margin_pct: commit.marginPct,
+                        crop_box: commit.cropBox,
+                      },
+                      openEditor: false,
+                      run: true,
+                    });
+                  }
+                  setMediaEditSourceId(null);
+                  setMediaEditBlank(false);
+                },
+              };
+            })()
           : null;
 
   // Toolbar entry for the unified image editor — a standalone surface: with an
-  // image card selected it auto-imports that card's image; otherwise the user
-  // picks a file, which lands on a new image card the editor opens on.
-  const openImageEditor = async () => {
+  // image card selected it auto-imports that card's image; otherwise the editor
+  // opens blank and offers an in-editor "open image" entry.
+  const openImageEditor = () => {
     const isImage = (n: Node) => (n.data as HgripeNodeData).kind === "imageSource";
     const selected = nodes.find((n) => selectedNodeIds.includes(n.id) && isImage(n));
     if (selected) {
       openMediaEdit(selected.id);
       return;
     }
+    setMediaEditBlank(true);
+  };
+
+  // The blank editor's "open image" entry: pick a file, land it on a new image
+  // card, and re-open the editor on that card.
+  const pickIntoImageEditor = async () => {
     const path = await pickFile({
       title: t("imageEdit.pickTitle"),
       filterName: "Images",
@@ -1298,6 +1318,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
     setSelectedId(node.id);
     void primeIngest([path]);
+    setMediaEditBlank(false);
     openMediaEdit(node.id);
   };
 
@@ -1306,6 +1327,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setCropEditNodeId(null);
     setGradeEditNodeId(null);
     setMediaEditSourceId(null);
+    setMediaEditBlank(false);
   };
 
   return (
@@ -1315,7 +1337,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         isDesktop={isDesktop}
         onToggleLang={onToggleLang}
         onOpenModels={() => setModelsOpen(true)}
-        onOpenImageEdit={() => void openImageEditor()}
+        onOpenImageEdit={openImageEditor}
         showProject={showProject}
         setShowProject={setShowProject}
         showSnapshots={showSnapshots}

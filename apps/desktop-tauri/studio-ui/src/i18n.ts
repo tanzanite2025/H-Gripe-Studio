@@ -272,6 +272,11 @@ export const messages = {
   },
   "mediaEdit.editor": { en: "image editor", zh: "图片编辑器" },
   "mediaEdit.title": { en: "Image editor", zh: "图片编辑器" },
+  "mediaEdit.open": { en: "Open image…", zh: "打开图片…" },
+  "mediaEdit.openTitle": {
+    en: "pick an image file to edit (it lands on a new image card)",
+    zh: "选择要编辑的图片文件（会生成一个新的图片卡片）",
+  },
   "mediaEdit.mask": { en: "Mask", zh: "蒙版" },
   "mediaEdit.crop": { en: "Crop", zh: "裁剪" },
   "node.cropAuto": { en: "Crop to subject [Auto]", zh: "裁剪到主体【自动】" },

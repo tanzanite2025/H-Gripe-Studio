@@ -65,6 +65,8 @@ export type EditorRequest =
   | {
       editor: "media";
       target: EditorTarget;
+      /** Blank-editor "open image" entry (shown when there is no image yet). */
+      onPickFile?: () => void;
       onCommitMask: (edits: MaskDocument) => void;
       onCommitCrop: (commit: CropCommit) => void;
     };
@@ -117,6 +119,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
           title={request.target.title}
           imagePath={request.target.imagePath}
           nodeId={request.target.nodeId}
+          onPickFile={request.onPickFile}
           onCommitMask={request.onCommitMask}
           onCommitCrop={request.onCommitCrop}
           onClose={onClose}
