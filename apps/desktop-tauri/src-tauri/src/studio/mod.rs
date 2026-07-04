@@ -65,6 +65,7 @@ mod detail_repaint;
 pub(crate) mod detail_repaint_cpu;
 mod detail_watchdog;
 pub(crate) mod detail_watchdog_cpu;
+mod device_report;
 mod edge_refine;
 pub(crate) mod edge_refine_cpu;
 mod exec;
