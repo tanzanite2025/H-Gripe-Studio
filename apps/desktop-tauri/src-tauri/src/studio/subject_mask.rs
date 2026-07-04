@@ -857,7 +857,8 @@ fn apply_queued_operation(
             let subtract = op.get("mode").and_then(Value::as_str) == Some("subtract");
             let fill = if subtract { MASK_OFF } else { MASK_ON };
             wand_select(image, mask, x as u32, y as u32, tolerance, fill);
-            operations.push(json!({ "type": "wand", "tolerance": tolerance, "subtract": subtract }));
+            operations
+                .push(json!({ "type": "wand", "tolerance": tolerance, "subtract": subtract }));
         }
         Some("quick_select") => {
             // Quick selection (PS W flyout): every stroke point seeds a
@@ -876,7 +877,9 @@ fn apply_queued_operation(
                 }
                 wand_select(image, mask, px as u32, py as u32, tolerance, MASK_ON);
             }
-            operations.push(json!({ "type": "quick_select", "tolerance": tolerance, "seeds": points.len() }));
+            operations.push(
+                json!({ "type": "quick_select", "tolerance": tolerance, "seeds": points.len() }),
+            );
         }
         Some("background_eraser") => {
             // Background eraser (PS E flyout): for each stamp along the
@@ -893,7 +896,9 @@ fn apply_queued_operation(
                 .map(|t| (t as i64).clamp(0, 255) as i32)
                 .unwrap_or(default_tolerance);
             background_erase(image, mask, &points, radius, tolerance);
-            operations.push(json!({ "type": "background_eraser", "radius": radius, "tolerance": tolerance }));
+            operations.push(
+                json!({ "type": "background_eraser", "radius": radius, "tolerance": tolerance }),
+            );
         }
         Some("red_eye") => {
             // Red eye (M15): region carries the `[x, y]` click; the
@@ -1047,7 +1052,8 @@ fn apply_queued_operation(
             let mut coverage = GrayImage::new(w, h);
             stamp_stroke(&mut coverage, &points, radius, MASK_ON);
             healing_brush_region(mask, &coverage, dx, dy, radius);
-            operations.push(json!({ "type": "healing_brush", "radius": radius, "dx": dx, "dy": dy }));
+            operations
+                .push(json!({ "type": "healing_brush", "radius": radius, "dx": dx, "dy": dy }));
         }
         Some("patch") => {
             // Patch (M15): refill the lassoed polygon from the `dx`/`dy`
@@ -1573,7 +1579,8 @@ fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
         }
         for x in 0..w {
             tmp.put_pixel(x, y, Luma([(sum / win).round() as u8]));
-            sum += at(mask, i64::from(x) + r + 1, i64::from(y)) - at(mask, i64::from(x) - r, i64::from(y));
+            sum += at(mask, i64::from(x) + r + 1, i64::from(y))
+                - at(mask, i64::from(x) - r, i64::from(y));
         }
     }
     let mut out = GrayImage::new(w, h);
@@ -1584,7 +1591,8 @@ fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
         }
         for y in 0..h {
             out.put_pixel(x, y, Luma([(sum / win).round() as u8]));
-            sum += at(&tmp, i64::from(x), i64::from(y) + r + 1) - at(&tmp, i64::from(x), i64::from(y) - r);
+            sum += at(&tmp, i64::from(x), i64::from(y) + r + 1)
+                - at(&tmp, i64::from(x), i64::from(y) - r);
         }
     }
     out
@@ -1613,7 +1621,11 @@ fn healing_brush_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy:
                 0.0
             };
             let v = f64::from(base.get_pixel(x, y).0[0]);
-            mask.put_pixel(x, y, Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]));
+            mask.put_pixel(
+                x,
+                y,
+                Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]),
+            );
         }
     }
 }
@@ -2781,6 +2793,7 @@ mod tests {
         let out = perspective_crop_mask(&mask, &[10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0]);
         assert_eq!(out.get_pixel(20, 20).0[0], MASK_ON); // inside preserved
         assert_eq!(out.get_pixel(5, 5).0[0], MASK_OFF); // outside cleared
+
         // A skewed quad samples the quad's corner regions into the rect's.
         let mut m2 = GrayImage::new(40, 40);
         for y in 3..8 {
