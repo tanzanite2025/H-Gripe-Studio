@@ -18,20 +18,33 @@ export interface GradeViewportTarget {
   videoTimestampSec?: number;
 }
 
+/** Normalized viewport view: `zoom >= 1`, pan places the window's top-left. */
+export interface GradeViewportView {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+/** The identity view: full frame, no pan. */
+export const IDENTITY_VIEW: GradeViewportView = { zoom: 1, panX: 0, panY: 0 };
+
 interface OpenGradeViewport {
   host: WgpuViewportHost;
   resourceId: string;
+  /** Last view sent to the host, to skip no-op `set_view` commands. */
+  view: GradeViewportView;
 }
 
 /**
- * Returns `renderGraded(doc)`: apply `doc` to the target and render one graded
- * frame through the host. Resolves to `null` outside Tauri (browser preview),
- * where callers keep their in-webview mirror fallback.
+ * Returns `renderGraded(doc, view?)`: apply `doc` to the target and render one
+ * graded frame of the (optionally zoomed/panned) view window through the
+ * host. Resolves to `null` outside Tauri (browser preview), where callers
+ * keep their in-webview mirror fallback.
  */
 export function useGradeViewport(
   target: GradeViewportTarget,
   size = 1280,
-): (doc: unknown) => Promise<ViewportFrame | null> {
+): (doc: unknown, view?: GradeViewportView) => Promise<ViewportFrame | null> {
   const { imagePath, videoPath, videoTimestampSec = 0 } = target;
   const path = videoPath ?? imagePath ?? undefined;
   const isVideo = Boolean(videoPath);
@@ -49,7 +62,7 @@ export function useGradeViewport(
   }, [path, isVideo, size]);
 
   return useCallback(
-    async (doc: unknown): Promise<ViewportFrame | null> => {
+    async (doc: unknown, view?: GradeViewportView): Promise<ViewportFrame | null> => {
       if (!path) return null;
       if (!hostRef.current) {
         hostRef.current = (async () => {
@@ -57,7 +70,7 @@ export function useGradeViewport(
           if (!res) return null; // browser preview: no resource registry
           const host = await WgpuViewportHost.open("grade_preview");
           await host.command({ kind: "resize", width: size, height: size });
-          return { host, resourceId: res.id };
+          return { host, resourceId: res.id, view: IDENTITY_VIEW };
         })();
       }
       const open = await hostRef.current;
@@ -71,6 +84,17 @@ export function useGradeViewport(
           : { kind: "image", resourceId: open.resourceId },
       });
       await open.host.command({ kind: "set_grade", doc });
+      // Zoom/pan is viewport state (Phase 3): the host crops the cached
+      // source proxy, so a view change never re-decodes the target.
+      const next = view ?? IDENTITY_VIEW;
+      if (
+        next.zoom !== open.view.zoom ||
+        next.panX !== open.view.panX ||
+        next.panY !== open.view.panY
+      ) {
+        await open.host.command({ kind: "set_view", ...next });
+        open.view = next;
+      }
       return open.host.renderFrame();
     },
     [path, isVideo, size],

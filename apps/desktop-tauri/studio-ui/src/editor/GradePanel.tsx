@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
-import { useGradeViewport } from "../viewport/useGradeViewport";
+import {
+  IDENTITY_VIEW,
+  useGradeViewport,
+  type GradeViewportView,
+} from "../viewport/useGradeViewport";
 import { useT, type MsgKey } from "../i18n";
 import {
   applyDoc,
@@ -136,6 +140,27 @@ function docFromOps(ops: GradeOp[]): GradeDoc {
 /** Identity document: grading it renders the ungraded base frame. */
 const EMPTY_DOC: GradeDoc = docFromOps([]);
 
+const MAX_PREVIEW_ZOOM = 8;
+
+/** Clamp pan so the `1/zoom`-sized window stays inside the frame. */
+function clampView(view: GradeViewportView): GradeViewportView {
+  const zoom = Math.min(Math.max(view.zoom, 1), MAX_PREVIEW_ZOOM);
+  const max = 1 - 1 / zoom;
+  return {
+    zoom,
+    panX: Math.min(Math.max(view.panX, 0), max),
+    panY: Math.min(Math.max(view.panY, 0), max),
+  };
+}
+
+/** Zoom by `factor` keeping the window's center fixed. */
+function zoomView(view: GradeViewportView, factor: number): GradeViewportView {
+  const zoom = Math.min(Math.max(view.zoom * factor, 1), MAX_PREVIEW_ZOOM);
+  const centerX = view.panX + 0.5 / view.zoom;
+  const centerY = view.panY + 0.5 / view.zoom;
+  return clampView({ zoom, panX: centerX - 0.5 / zoom, panY: centerY - 0.5 / zoom });
+}
+
 // Run the TS mirror over a data-URL underlay: decode to canvas pixels, grade
 // the f32 sRGB surface in place, re-encode. The browser-preview / error path.
 async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<string | null> {
@@ -178,6 +203,12 @@ export function GradePanel({
   const [preview, setPreview] = useState<string | null>(null);
   const [backend, setBackend] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Preview zoom/pan is viewport state (Phase 3): the host crops its cached
+  // source proxy, so wheel/drag ticks re-run only crop + kernel. Identity
+  // outside Tauri, where the mirror fallback shows the full frame.
+  const [view, setView] = useState<GradeViewportView>(IDENTITY_VIEW);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const cubeInputRef = useRef<HTMLInputElement | null>(null);
   // Monotonic preview sequence: only the latest request may publish a frame.
   const previewSeq = useRef(0);
@@ -226,7 +257,7 @@ export function GradePanel({
       setPreviewError(null);
       if (videoPath || imagePath) {
         try {
-          const result = await renderGraded(doc);
+          const result = await renderGraded(doc, view);
           if (previewSeq.current !== seq) return;
           if (result) {
             setPreview(result.data_url);
@@ -251,7 +282,7 @@ export function GradePanel({
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [doc, imagePath, videoPath, videoTimestampSec, underlay, renderGraded]);
+  }, [doc, view, imagePath, videoPath, videoTimestampSec, underlay, renderGraded]);
 
   const updateOp = useCallback((index: number, next: GradeOp) => {
     setOps((prev) => prev.map((op, i) => (i === index ? next : op)));
@@ -489,10 +520,49 @@ export function GradePanel({
     }
   };
 
+  const handleWheel = (e: React.WheelEvent) => {
+    setView((v) => zoomView(v, e.deltaY < 0 ? 1.25 : 0.8));
+  };
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (view.zoom <= 1) return;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const from = dragRef.current;
+    const stage = stageRef.current;
+    if (!from || !stage) return;
+    const rect = stage.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const dx = e.clientX - from.x;
+    const dy = e.clientY - from.y;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    setView((v) =>
+      clampView({
+        zoom: v.zoom,
+        panX: v.panX - dx / rect.width / v.zoom,
+        panY: v.panY - dy / rect.height / v.zoom,
+      }),
+    );
+  };
+  const handlePointerUp = () => {
+    dragRef.current = null;
+  };
+
   return (
     <div className="mask-edit-body grade-panel">
       <div className="crop-edit-stage-wrap">
-        <div className="crop-edit-stage">
+        <div
+          className="crop-edit-stage"
+          ref={stageRef}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onDoubleClick={() => setView(IDENTITY_VIEW)}
+          style={view.zoom > 1 ? { cursor: dragRef.current ? "grabbing" : "grab" } : undefined}
+        >
           {preview || underlay ? (
             <img className="crop-edit-img" src={preview ?? underlay ?? undefined} alt="preview" draggable={false} />
           ) : (
@@ -502,6 +572,7 @@ export function GradePanel({
         <small className="muted">
           {previewError ?? t("grade.previewHint")}
           {backend ? <> · {((key) => (key ? t(key) : backend))(BACKEND_LABEL_KEYS[backend])}</> : null}
+          {view.zoom > 1 ? <> · {Math.round(view.zoom * 100)}%</> : null}
         </small>
       </div>
 
