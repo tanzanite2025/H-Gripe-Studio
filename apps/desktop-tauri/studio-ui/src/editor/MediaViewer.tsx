@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
-import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
 
 // Large image extensions we know how to display. Anything else falls back to a
 // "open externally" hint rather than trying to decode it in the webview.
@@ -23,15 +23,10 @@ interface MediaViewerProps {
 // shown for copy / external open.
 export function MediaViewer({ path, onClose }: MediaViewerProps) {
   const [actualSize, setActualSize] = useState(false);
-  // Zoom/pan is viewport state: wheel zooms (up to 8x), dragging pans when
-  // zoomed, double-click resets. The viewport crops its cached source proxy,
-  // so a view tick never re-decodes the image.
-  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
   const isImage = IMAGE_RE.test(path);
   // Presented through the viewport host (image_edit viewport, CPU transport):
   // stays null in browser preview, where we degrade to a path-only card.
+  const { view, stageProps } = useViewControls(isImage);
   const viewport = useViewportUnderlay("image_edit", isImage ? path : undefined, 1280, view);
   const src = viewport.underlay;
   const dims = viewport.dims;
@@ -44,32 +39,6 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-
-  const handleWheel = (e: React.WheelEvent) => {
-    if (!src) return;
-    const rect = stageRef.current?.getBoundingClientRect();
-    const fx = rect && rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-    const fy = rect && rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-    setView((v) => zoomViewAt(v, e.deltaY < 0 ? 1.25 : 0.8, fx, fy));
-  };
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (view.zoom <= 1) return;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  };
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const from = dragRef.current;
-    const stage = stageRef.current;
-    if (!from || !stage) return;
-    const rect = stage.getBoundingClientRect();
-    const dx = e.clientX - from.x;
-    const dy = e.clientY - from.y;
-    dragRef.current = { x: e.clientX, y: e.clientY };
-    setView((v) => panView(v, dx, dy, rect.width, rect.height));
-  };
-  const handlePointerUp = () => {
-    dragRef.current = null;
-  };
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
@@ -93,14 +62,7 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
         </div>
         <div
           className={`media-viewer-stage ${actualSize ? "actual" : "fit"}`}
-          ref={stageRef}
-          onWheel={handleWheel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onDoubleClick={() => setView(IDENTITY_VIEW)}
-          style={view.zoom > 1 ? { cursor: dragRef.current ? "grabbing" : "grab" } : undefined}
+          {...stageProps}
         >
           {!isImage ? (
             <p className="muted">No inline preview for this file type. Original path:</p>
