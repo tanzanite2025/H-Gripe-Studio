@@ -4,6 +4,8 @@ import type { Edge, Node } from "@xyflow/react";
 import type { HgripeNodeData } from "./HgripeNode";
 import { toWorkflowGraph } from "./adapter";
 import { psdExportTargets, psdTemplatePaths, validatePsdChain } from "./psdcheck";
+import { validateBackendRefs } from "../models/backendBindings";
+import { loadRegistry } from "../models/backendRegistry";
 import {
   appendLog,
   describeNodeStatus,
@@ -420,6 +422,12 @@ export function useStudioRunController({
   const warnPsdChain = useCallback(
     async (graph: WorkflowGraph) => {
       for (const w of validatePsdChain(graph)) pushLog("warn", `⚠ ${w.node}: ${w.message}`);
+      // Backend selection contract, step 8: a stored api_profile_ref /
+      // local_model_ref must exist in the manager and declare the capability
+      // its selector filters by. Warnings only — executors keep their own
+      // fallback behavior.
+      for (const w of validateBackendRefs(graph, loadRegistry()))
+        pushLog("warn", `⚠ ${w.node}: ${w.message}`);
       // Beyond the syntactic checks above, confirm against the real files on
       // disk. This needs the Python/psd-tools backend, so it is desktop-only;
       // browser preview keeps just the path-shape check.
