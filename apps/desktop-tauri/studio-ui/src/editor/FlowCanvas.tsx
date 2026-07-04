@@ -13,6 +13,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type IsValidConnection,
+  type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -41,6 +42,8 @@ interface FlowCanvasProps {
   onBeforeConnect?: () => void;
   /** Called after a node finishes dragging, so the host can (re)assign groups. */
   onNodeDragStop?: (node: Node) => void;
+  /** Called when a pane pan/zoom settles, with the resulting viewport. */
+  onViewportChange?: (viewport: Viewport) => void;
   /** Snap node positions to a grid while dragging. */
   snapToGrid?: boolean;
   /** Alignment guide lines (flow-space coords) to draw, if any. */
@@ -69,6 +72,7 @@ export function FlowCanvas({
   onAddNode,
   onBeforeConnect,
   onNodeDragStop,
+  onViewportChange,
   snapToGrid = false,
   helperLines,
   edgeType = "default",
@@ -169,6 +173,7 @@ export function FlowCanvas({
       onConnect={onConnect}
       defaultEdgeOptions={defaultEdgeOptions}
       onNodeDragStop={(_, node) => onNodeDragStop?.(node)}
+      onMoveEnd={(_, viewport) => onViewportChange?.(viewport)}
       snapToGrid={snapToGrid}
       snapGrid={SNAP_GRID}
       isValidConnection={isValidConnection}
