@@ -262,6 +262,37 @@
    chrome); full-bleed lists inside offset the padding with -8px margins. */
 .mask-panel-body { padding: 0 8px 8px; }
 .mask-op-list { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Mask ops panel: whole-mask operations as a two-column button grid. */
+.mask-ops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 8px;
+}
+.mask-op-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  min-width: 0;
+}
+.mask-op-button svg { flex: none; }
+.mask-op-button .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-op-button:hover { background: var(--ps-hover); }
+.mask-op-button.active {
+  background: var(--ps-active-overlay);
+  border-color: var(--accent);
+}
 .mask-op-chip {
   font-size: 11px;
   padding: 2px 7px;
