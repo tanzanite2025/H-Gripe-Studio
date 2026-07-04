@@ -23,6 +23,17 @@ export const messages = {
   "canvasTabs.save": { en: "Save", zh: "保存" },
   "canvasTabs.saveAs": { en: "Save as…", zh: "另存为…" },
   "canvasTabs.rename": { en: "Rename", zh: "重命名" },
+  "canvasTabs.more": { en: "More actions", zh: "更多操作" },
+  "canvasTabs.reset": { en: "Reset", zh: "重置" },
+  "canvasTabs.clear": { en: "Clear", zh: "清空" },
+  "canvasTabs.confirmReset": {
+    en: "Reset this canvas to the sample workflow? Unsaved changes will be lost.",
+    zh: "将此画布重置为示例工作流？未保存的更改将丢失。",
+  },
+  "canvasTabs.confirmClear": {
+    en: "Clear all nodes on this canvas? Unsaved changes will be lost.",
+    zh: "清空此画布上的全部节点？未保存的更改将丢失。",
+  },
   "canvasTabs.renamePrompt": {
     en: "Tab name (leave empty to use the file name):",
     zh: "标签名称（留空则使用文件名）：",
