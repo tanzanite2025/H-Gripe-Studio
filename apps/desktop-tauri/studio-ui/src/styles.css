@@ -1019,6 +1019,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   min-height: 34px;
   text-align: left;
   margin-top: 6px;
+  font-size: 12px;
   line-height: 1;
   cursor: grab;
   background: rgba(255, 255, 255, 0.04);
