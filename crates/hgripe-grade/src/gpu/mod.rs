@@ -30,6 +30,9 @@ use wgsl::{build_plan, Step};
 pub struct GpuGrader {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// Human-readable adapter description (name + backend), for capability
+    /// and device reports.
+    adapter: String,
     cached: Option<Cached>,
 }
 
@@ -80,6 +83,8 @@ impl GpuGrader {
             compatible_surface: None,
         }))
         .map_err(|_| GpuError::NoAdapter)?;
+        let info = adapter.get_info();
+        let adapter_summary = format!("{} ({:?})", info.name, info.backend);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("hgripe-grade"),
             required_features: wgpu::Features::empty(),
@@ -90,8 +95,14 @@ impl GpuGrader {
         Ok(Self {
             device,
             queue,
+            adapter: adapter_summary,
             cached: None,
         })
+    }
+
+    /// The adapter this grader runs on, e.g. `NVIDIA GeForce RTX 4090 (Vulkan)`.
+    pub fn adapter_summary(&self) -> &str {
+        &self.adapter
     }
 
     /// Run `doc` over `surface` in place on the GPU. Recompiles the plan

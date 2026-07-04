@@ -112,6 +112,34 @@ pub(crate) struct DeviceProbe {
     pub(crate) onnxruntime: OnnxRuntimeInfo,
 }
 
+/// One compiled-in kernel backend's probe (wgpu grade kernel, vendored
+/// FFmpeg): whether it is usable on this box, with the adapter/library detail
+/// when it is and the reason when it is not (fallback stays visible,
+/// GPU_DEVICE_STRATEGY_PLAN).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct BackendProbe {
+    #[serde(default)]
+    pub(crate) available: bool,
+    /// Adapter/library summary when available, the reason when not.
+    #[serde(default)]
+    pub(crate) detail: String,
+}
+
+impl BackendProbe {
+    fn from_capability(capability: Result<String, String>) -> Self {
+        match capability {
+            Ok(detail) => Self {
+                available: true,
+                detail,
+            },
+            Err(reason) => Self {
+                available: false,
+                detail: reason,
+            },
+        }
+    }
+}
+
 /// Cross-card engine capability report (the `doctor`-style probe). Aggregates
 /// every local card that exposes an opt-in ML `engine` seam so the UI can grey
 /// out engines whose deps/weights are missing on this box.
@@ -125,6 +153,14 @@ pub(crate) struct EngineProbeReport {
     /// probed once; `None` when the device probe itself could not run.
     #[serde(default)]
     pub(crate) runtime: Option<DeviceProbe>,
+    /// Grade kernel wgpu adapter status (initialises the shared grader once;
+    /// cached either way).
+    #[serde(default)]
+    pub(crate) wgpu: Option<BackendProbe>,
+    /// Vendored FFmpeg decode status (software path; hardware joins later
+    /// behind its own probe).
+    #[serde(default)]
+    pub(crate) ffmpeg: Option<BackendProbe>,
 }
 
 /// Probe the `engine` seams across the local cards (the `doctor` cross-card
@@ -171,5 +207,11 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
         cards,
         model_cache_dir: super::load_model_paths_config().model_cache_dir,
         runtime: None,
+        wgpu: Some(BackendProbe::from_capability(
+            crate::studio::grade::wgpu_capability(),
+        )),
+        ffmpeg: Some(BackendProbe::from_capability(
+            crate::studio::video_engine::ffmpeg_capability(),
+        )),
     })
 }

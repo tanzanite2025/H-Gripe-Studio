@@ -68,6 +68,41 @@ impl GradeBackend {
     }
 }
 
+/// The one process-wide GPU grader: adapter/device setup is expensive and the
+/// compiled pipelines are cached inside it, keyed by the op sequence. A failed
+/// init is cached too, so its reason stays reportable.
+#[cfg(feature = "grade-gpu")]
+fn gpu_grader() -> &'static Result<std::sync::Mutex<hgripe_grade::GpuGrader>, String> {
+    use std::sync::{Mutex, OnceLock};
+    static GRADER: OnceLock<Result<Mutex<hgripe_grade::GpuGrader>, String>> = OnceLock::new();
+    GRADER.get_or_init(|| {
+        hgripe_grade::GpuGrader::new()
+            .map(Mutex::new)
+            .map_err(|err| err.to_string())
+    })
+}
+
+/// Probe the grade kernel's wgpu adapter for the capability summary:
+/// `Ok(adapter summary)` when the shared grader initialised, `Err(reason)`
+/// when it could not (or the `grade-gpu` feature is disabled). Initialises
+/// the process-wide grader on first call; the result is cached either way.
+pub(crate) fn wgpu_capability() -> Result<String, String> {
+    #[cfg(feature = "grade-gpu")]
+    {
+        match gpu_grader() {
+            Ok(grader) => match grader.lock() {
+                Ok(grader) => Ok(grader.adapter_summary().to_string()),
+                Err(_) => Err("GPU grader unavailable: lock poisoned".to_string()),
+            },
+            Err(err) => Err(format!("GPU unavailable: {err}")),
+        }
+    }
+    #[cfg(not(feature = "grade-gpu"))]
+    {
+        Err("GPU backend not compiled in (grade-gpu feature disabled)".to_string())
+    }
+}
+
 /// Run a grade document over a surface, preferring the GPU backend when it is
 /// compiled in (`grade-gpu`) and an adapter initialises; the CPU reference
 /// path (rayon row-parallel) is the fallback. Returns the backend used and,
@@ -75,17 +110,7 @@ impl GradeBackend {
 pub(crate) fn apply_grade_doc(doc: &GradeDoc, surface: &mut GradeSurface) -> GradeBackend {
     #[cfg(feature = "grade-gpu")]
     let reason: String = {
-        use std::sync::{Mutex, OnceLock};
-        // One process-wide grader: adapter/device setup is expensive and the
-        // compiled pipelines are cached inside it, keyed by the op sequence.
-        // A failed init is cached too, so its reason stays reportable.
-        static GRADER: OnceLock<Result<Mutex<hgripe_grade::GpuGrader>, String>> = OnceLock::new();
-        let grader = GRADER.get_or_init(|| {
-            hgripe_grade::GpuGrader::new()
-                .map(Mutex::new)
-                .map_err(|err| err.to_string())
-        });
-        match grader {
+        match gpu_grader() {
             Ok(grader) => match grader.lock() {
                 Ok(mut grader) => match grader.apply(doc, surface) {
                     Ok(()) => return GradeBackend::gpu(),

@@ -93,6 +93,21 @@ impl FrameSource for UnavailableFrameSource {
     }
 }
 
+/// Probe the video decode backend for the capability summary:
+/// `Ok(detail)` when the vendored libav decoder is compiled in
+/// (`native-ffmpeg`), `Err(reason)` otherwise. Software-only today; hardware
+/// decode/encode joins behind its own probe (GPU_DEVICE_STRATEGY_PLAN).
+pub(crate) fn ffmpeg_capability() -> Result<String, String> {
+    #[cfg(feature = "native-ffmpeg")]
+    {
+        Ok("vendored libav (software decode)".to_string())
+    }
+    #[cfg(not(feature = "native-ffmpeg"))]
+    {
+        Err("native-ffmpeg feature disabled (no vendored libav decoder)".to_string())
+    }
+}
+
 /// Build the decoder backend: the in-process libav decoder
 /// ([`super::ffmpeg_native`]) — decode errors surface as `Err` to the caller.
 /// Without `native-ffmpeg`, a stub source whose every call errors.
