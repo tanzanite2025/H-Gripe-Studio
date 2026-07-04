@@ -14,7 +14,6 @@ const LANG_KEY = "hgripe.studio.lang.v1";
 
 /** Translatable UI strings. Keys are stable ids; values hold both languages. */
 export const messages = {
-  "brand.subtitle": { en: "API-first control shell", zh: "API 优先控制台" },
   "status.autosaved": { en: "● autosaved", zh: "● 已自动保存" },
   "status.saving": { en: "○ saving…", zh: "○ 保存中…" },
   "status.untitled": { en: "untitled", zh: "未命名" },
@@ -37,8 +36,11 @@ export const messages = {
     en: "toggle the snapshots panel (named versions of the workflow)",
     zh: "切换快照面板（工作流的命名版本）",
   },
-  "btn.new": { en: "New", zh: "新建" },
-  "btn.newTitle": { en: "start a new, empty workflow (Ctrl/Cmd+N)", zh: "新建空工作流 (Ctrl/Cmd+N)" },
+  "btn.new": { en: "New Canvas", zh: "新建画布" },
+  "btn.newTitle": {
+    en: "start a new, empty canvas — the saved file is untouched (Ctrl/Cmd+N)",
+    zh: "新建空画布——已保存的文件不受影响 (Ctrl/Cmd+N)",
+  },
   "btn.open": { en: "Open…", zh: "打开…" },
   "btn.load": { en: "Load", zh: "载入" },
   "btn.openTitle": { en: "open a workflow file (Ctrl/Cmd+O)", zh: "打开工作流文件 (Ctrl/Cmd+O)" },

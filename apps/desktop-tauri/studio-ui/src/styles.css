@@ -46,13 +46,12 @@ body {
   gap: 12px;
   width: 100%;
 }
-.toolbar-brand {
+.toolbar-document {
   display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
   min-width: 0;
+  white-space: nowrap;
 }
-.toolbar-brand strong { font-size: 15px; }
 .toolbar-search {
   justify-self: center;
   width: 100%;
