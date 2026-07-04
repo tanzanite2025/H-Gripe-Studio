@@ -35,14 +35,25 @@ function samePlacement(a: ViewportPlacement | null, b: ViewportPlacement): boole
  * rAF-throttles bursts so a drag-resize sends one placement per frame. On
  * cleanup the surface is hidden (`set_presented: false`), not destroyed —
  * destroy belongs to the host's `close()`.
+ *
+ * `enabled: false` hides the surface and stops tracking without unmounting
+ * the presenter — for states the surface cannot represent (a rotated view,
+ * transparency preview). Re-enabling resends the placement, which re-shows.
  */
 export function useViewportPlacement(
   host: WgpuViewportHost | null,
   ref: RefObject<HTMLElement | null>,
+  enabled = true,
 ): void {
   useEffect(() => {
     const el = ref.current;
     if (!host || !host.isOpen || !el) return;
+    if (!enabled) {
+      host.command({ kind: "set_presented", presented: false }).catch(() => {
+        /* the viewport may already be destroyed */
+      });
+      return;
+    }
     let cancelled = false;
     let frame: number | null = null;
     let sent: ViewportPlacement | null = null;
@@ -97,5 +108,5 @@ export function useViewportPlacement(
         });
       }
     };
-  }, [host, ref]);
+  }, [host, ref, enabled]);
 }

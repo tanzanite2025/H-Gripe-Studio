@@ -105,4 +105,36 @@ describe("useViewportPlacement", () => {
     );
     await host.close();
   });
+
+  it("hides the surface while disabled and re-places when re-enabled", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    const commands: unknown[] = [];
+    const originalCommand = host.command.bind(host);
+    vi.spyOn(host, "command").mockImplementation(async (cmd) => {
+      commands.push(cmd);
+      return originalCommand(cmd);
+    });
+
+    const ref = elementRef();
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useViewportPlacement(host, ref, enabled),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() =>
+      expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(1),
+    );
+
+    // Disabling hides the surface (a state the surface cannot represent).
+    rerender({ enabled: false });
+    await waitFor(() => {
+      expect(commands).toContainEqual({ kind: "set_presented", presented: false });
+    });
+
+    // Re-enabling resends the placement, which re-shows the surface.
+    rerender({ enabled: true });
+    await waitFor(() =>
+      expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(2),
+    );
+    await host.close();
+  });
 });

@@ -173,8 +173,24 @@ export function MaskEditModal({
       : { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [224, 32, 32], alpha: 0.5, invert: true };
   }, [previewing, preview, quickMask, quickProxy]);
   const source = useNodeOutputSource(nodeId, imagePath);
-  const viewport = useViewportUnderlay("image_edit", source, 1280, viewportView, viewportMaskOverlay);
+  // Native surface presentation (surface swap): the underlay presents on a
+  // surface window placed under the anchor's rect while the view is one the
+  // surface can represent — a rotated view or the transparency preview hides
+  // it and frames fall back to the PNG transport. The brush/path/marquee
+  // canvas is DOM, so it keeps compositing above the hole.
+  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  const presentEnabled = !overlayOnly && !view.rotate;
+  const viewport = useViewportUnderlay(
+    "image_edit",
+    source,
+    1280,
+    viewportView,
+    viewportMaskOverlay,
+    underlayAnchorRef,
+    presentEnabled,
+  );
   const underlay = viewport.underlay;
+  const presented = viewport.presented;
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
 
@@ -448,14 +464,33 @@ export function MaskEditModal({
   // the presented frame — a view window of the image — onto an offscreen
   // canvas at the window's document size. Async (the data URL decodes first);
   // a no-op when there is no underlay or the point is outside the window.
+  // A natively presented frame has no data URL: explicit pixel readback
+  // (`readPixels`, surface swap Phase S4) answers instead.
+  const viewportHost = viewport.host;
   const sampleUnderlay = useCallback(
     (pt: [number, number]) => {
-      if (!underlay) return;
       const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
       const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
       const x = Math.round(pt[0] - frameView.panX * dims.w);
       const y = Math.round(pt[1] - frameView.panY * dims.h);
       if (x < 0 || y < 0 || x >= winW || y >= winH) return;
+      const sample = (r: number, g: number, b: number) =>
+        setSampledColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
+      if (!underlay) {
+        if (!presented || !viewportHost || !viewportHost.isOpen) return;
+        viewportHost
+          .readPixels()
+          .then((px) => {
+            const fx = Math.min(px.width - 1, Math.floor((x / winW) * px.width));
+            const fy = Math.min(px.height - 1, Math.floor((y / winH) * px.height));
+            const i = (fy * px.width + fx) * 4;
+            sample(px.pixels[i], px.pixels[i + 1], px.pixels[i + 2]);
+          })
+          .catch(() => {
+            /* keep the previous sample */
+          });
+        return;
+      }
       const img = new Image();
       img.onload = () => {
         const off = document.createElement("canvas");
@@ -465,11 +500,11 @@ export function MaskEditModal({
         if (!ctx) return;
         ctx.drawImage(img, 0, 0, winW, winH);
         const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-        setSampledColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
+        sample(r, g, b);
       };
       img.src = underlay;
     },
-    [underlay, frameView, dims.w, dims.h],
+    [underlay, presented, viewportHost, frameView, dims.w, dims.h],
   );
 
   // Redraw the overlay: committed brush strokes and the in-progress
@@ -525,9 +560,10 @@ export function MaskEditModal({
     if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
     if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
     paintSamPoints(ctx, state.current.points);
-    // With a host frame the selection tint is composited host-side (the
-    // viewport mask overlay); paint it locally only for the fallback stage.
-    if (!underlay) {
+    // With a host frame — a PNG underlay or a natively presented surface —
+    // the selection tint is composited host-side (the viewport mask
+    // overlay); paint it locally only for the fallback stage.
+    if (!underlay && !presented) {
       if (previewing && preview) paintPreviewOverlay(ctx, preview, dims.w, dims.h);
       if (quickMask && quickProxy) paintQuickMask(ctx, quickProxy, dims.w, dims.h);
     }
@@ -538,7 +574,7 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-  }, [dims.w, dims.h, overlayOnly, underlay, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
+  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
 
   useEffect(() => {
     redraw();
@@ -946,6 +982,8 @@ export function MaskEditModal({
             dims={dims}
             view={view}
             underlay={underlay}
+            presented={presented}
+            underlayRef={underlayAnchorRef}
             frameView={frameView}
             backend={viewport.backend}
             overlayOnly={overlayOnly}

@@ -5,7 +5,7 @@
 // becomes a WGPU texture the editors do not change — only this hook's
 // presentation output does.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { registerResource } from "../bridge/files";
 import type {
   ViewportBackend,
@@ -14,6 +14,7 @@ import type {
   ViewportTarget,
 } from "../bridge/viewport";
 import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
+import { useViewportPlacement } from "./useViewportPlacement";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 /**
@@ -62,6 +63,10 @@ export interface ViewportUnderlay {
   /** True once the attempt finished — with a frame, or without one (browser
    * preview / render error), letting callers stop showing a loading state. */
   settled: boolean;
+  /** The open viewport host, for explicit host calls that the presented
+   * frame cannot answer — pixel readback (`readPixels`, surface swap Phase
+   * S4). Null until open and after close. */
+  host: WgpuViewportHost | null;
 }
 
 /**
@@ -84,8 +89,16 @@ export function useViewportUnderlay(
    * the selection tint presents at the view window's detail instead of an
    * upscaled document-size canvas overlay. */
   maskOverlay: ViewportMaskOverlay | null = null,
+  /** Element the native surface window sits under (surface swap): when given,
+   * placement is tracked for the host's lifetime and presented frames skip
+   * the PNG transport — callers keep their DOM overlays above the hole. */
+  placementRef: RefObject<HTMLElement | null> | null = null,
+  /** Present on the native surface only while true — false for states the
+   * surface cannot represent (rotated view, transparency preview): the
+   * surface hides and frames fall back to the PNG transport. */
+  presentEnabled = true,
 ): ViewportUnderlay {
-  const [state, setState] = useState<ViewportUnderlay>({
+  const [state, setState] = useState<Omit<ViewportUnderlay, "host">>({
     underlay: null,
     presented: false,
     dims: null,
@@ -94,6 +107,7 @@ export function useViewportUnderlay(
     settled: false,
   });
   const hostRef = useRef<WgpuViewportHost | null>(null);
+  const [openHost, setOpenHost] = useState<WgpuViewportHost | null>(null);
   // The view last sent to the open host, to skip no-op `set_view` commands.
   const sentViewRef = useRef<ViewportViewState>(IDENTITY_VIEW);
   // Latest requested view, so a host opened after a view change (e.g. the
@@ -110,6 +124,14 @@ export function useViewportUnderlay(
   const key = sourceKey(source);
   const sourceRef = useRef(source);
   sourceRef.current = source;
+
+  // Placement tracking (surface swap): inert without a placement ref — the
+  // hook then never sends placement and frames stay on the PNG transport.
+  const noPlacementRef = useRef<HTMLElement | null>(null);
+  useViewportPlacement(openHost, placementRef ?? noPlacementRef, presentEnabled);
+  const sentPresentEnabledRef = useRef(true);
+  const presentEnabledRef = useRef(presentEnabled);
+  presentEnabledRef.current = presentEnabled;
 
   useEffect(() => {
     setState({
@@ -160,8 +182,10 @@ export function useViewportUnderlay(
       const frame = await host.renderFrame();
       if (cancelled) return;
       hostRef.current = host;
+      setOpenHost(host);
       sentViewRef.current = initialView;
       sentOverlayRef.current = initialOverlay;
+      sentPresentEnabledRef.current = presentEnabledRef.current;
       // A non-identity first frame is the view window; scale back to the
       // full-frame size so `dims` is view-independent.
       const zoom = Math.max(initialView.zoom, 1);
@@ -181,9 +205,41 @@ export function useViewportUnderlay(
     return () => {
       cancelled = true;
       hostRef.current = null;
+      setOpenHost(null);
       void host?.close();
     };
   }, [kind, key, size]);
+
+  // A presentability flip re-renders through the open host: disabling hides
+  // the surface first (so the frame falls back to the PNG transport rather
+  // than presenting into a hidden window); enabling just re-renders — the
+  // placement resend above re-shows the surface for it.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !host.isOpen) return;
+    if (presentEnabled === sentPresentEnabledRef.current) return;
+    let cancelled = false;
+    sentPresentEnabledRef.current = presentEnabled;
+    (async () => {
+      if (!presentEnabled) {
+        await host.command({ kind: "set_presented", presented: false });
+      }
+      const frame = await host.renderFrame();
+      if (cancelled || hostRef.current !== host) return;
+      setState((s) => ({
+        ...s,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
+        backend: frame.backend,
+        settled: true,
+      }));
+    })().catch(() => {
+      /* keep the previous frame */
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [presentEnabled]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -239,5 +295,5 @@ export function useViewportUnderlay(
     };
   }, [maskOverlay]);
 
-  return state;
+  return { ...state, host: openHost };
 }

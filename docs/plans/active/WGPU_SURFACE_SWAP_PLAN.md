@@ -205,6 +205,25 @@ Exit: program monitor playback/scrub presents natively; no PNG per frame.
 Exit: parity green in CI (CPU fallback asserted on CI runners without GPU);
 badges truthful on both paths.
 
+### Phase S5: Mask editor on the live surface (follow-up, done)
+
+- The mask editor's underlay presents on the native surface: the stage keeps
+  a placement anchor at the underlay window's rect, `useViewportUnderlay`
+  tracks it (`useViewportPlacement` gains an `enabled` flag), and the
+  brush/path/marquee canvas — DOM, above the webview hole — keeps compositing
+  over the surface unchanged. The selection tint stays host-side
+  (`set_mask_overlay`), so it is composited into the presented frame.
+- States the surface cannot represent fall back to the PNG transport without
+  re-opening the host: a rotated view (the CSS transform rotates the DOM, not
+  the surface window) and the transparency preview hide the surface
+  (`set_presented: false`) and re-render.
+- The eyedropper reads a presented frame via `viewport_read_pixels` (S4)
+  instead of decoding a data URL.
+
+Exit: brush/path/marquee/shape overlays draw over the natively presented
+underlay; rotate/transparency-preview fall back to PNG; browser preview
+unchanged.
+
 ## Testing Strategy
 
 - **CI (no GPU):** everything must pass with the fallback path — feature
@@ -230,8 +249,6 @@ badges truthful on both paths.
 
 ## Out Of Scope (Follow-Ups)
 
-- Interactive overlays (brush/path/marquee) on the live surface — item 2,
-  depends on this plan's S2.
 - Safe area / crop box / scopes overlay surfaces — item 3.
 - Node canvas migration, FFmpeg hardware decode, cross-kernel GPU scheduler —
   unchanged per the migration plan's guardrails.
