@@ -1287,7 +1287,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         historyCount={runHistory.length}
         nodes={nodes}
         onJumpToNode={jumpToNode}
-        onOpen={() => void handleOpen()}
         fileInputRef={fileInputRef}
         onFilePicked={(f) => void load(f)}
       />
@@ -1300,6 +1299,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onActivate={activateCanvas}
         onClose={closeCanvasTab}
         onNewCanvas={openNewCanvas}
+        onOpenFile={() => void handleOpen()}
         onSaveTab={(id) => requestTabAction(id, "save")}
         onSaveAsTab={(id) => requestTabAction(id, "saveAs")}
         onRenameTab={renameCanvas}
