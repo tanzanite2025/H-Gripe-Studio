@@ -42,6 +42,8 @@ interface CropEditModalProps {
   onClose: () => void;
   /** Optional bar content (e.g. the unified editor's tool-group switcher). */
   headerExtra?: ReactNode;
+  /** Editor name shown after the title (defaults to "crop"). */
+  editorName?: string;
 }
 
 type DragKind = "draw" | "move" | "nw" | "ne" | "sw" | "se";
@@ -80,6 +82,7 @@ export function CropEditModal({
   onCommit,
   onClose,
   headerExtra,
+  editorName,
 }: CropEditModalProps) {
   const t = useT();
   // Zoom/pan is viewport state (WGPU migration Phase 2): the underlay renders
@@ -274,7 +277,7 @@ export function CropEditModal({
       <div className="media-viewer crop-edit" onClick={(e) => e.stopPropagation()}>
         <div className="media-viewer-bar">
           <span className="media-viewer-name" title={title}>
-            {title} <span className="muted">· {t("crop.title")}</span>
+            {title} <span className="muted">· {editorName ?? t("crop.title")}</span>
             {view.zoom > 1 ? <span className="muted"> · {Math.round(view.zoom * 100)}%</span> : null}
           </span>
           {headerExtra}
