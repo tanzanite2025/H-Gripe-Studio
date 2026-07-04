@@ -44,6 +44,13 @@ export interface ParamSpec {
   /** For `path` controls: native file-picker extension filter. */
   pickerFilterName?: string;
   pickerExtensions?: string[];
+  /**
+   * Legacy/diagnostic field kept loadable for saved workflows but hidden from
+   * the normal inspector surface behind an advanced disclosure. Cards should
+   * carry a managed backend ref (`api_profile_ref`) instead of raw
+   * provider/model/credential fields (backend selection contract plan).
+   */
+  advanced?: boolean;
 }
 
 /**
@@ -172,12 +179,22 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         visibleWhen: { param: "mode", in: ["local"] },
       },
       {
+        key: "api_profile_ref",
+        label: "API profile",
+        control: "text",
+        defaultValue: "",
+        hint: "managed backend ref from the Models / APIs manager (set by the backend selector)",
+        visibleWhen: { param: "mode", in: ["api"] },
+        advanced: true,
+      },
+      {
         key: "provider",
         label: "Provider",
         control: "text",
         defaultValue: "openai_compatible",
         hint: "used by `api` mode (set automatically when you pick a profile)",
         visibleWhen: { param: "mode", in: ["api"] },
+        advanced: true,
       },
       {
         key: "model",
@@ -186,6 +203,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         defaultValue: "",
         hint: "used by `api` mode",
         visibleWhen: { param: "mode", in: ["api"] },
+        advanced: true,
       },
       {
         key: "instruction",
@@ -203,6 +221,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         defaultValue: "",
         hint: "used by `api` mode (set automatically when you pick a profile)",
         visibleWhen: { param: "mode", in: ["api"] },
+        advanced: true,
       },
       {
         key: "temperature",
@@ -359,7 +378,21 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     ],
     outputs: [port("image", "image", "image")],
     params: [
-      { key: "provider", label: "Provider", control: "text", defaultValue: "mock" },
+      {
+        key: "api_profile_ref",
+        label: "API profile",
+        control: "text",
+        defaultValue: "",
+        hint: "managed backend ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
+      },
+      {
+        key: "provider",
+        label: "Provider",
+        control: "text",
+        defaultValue: "mock",
+        advanced: true,
+      },
       {
         key: "operation",
         label: "Operation",
@@ -368,7 +401,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         defaultValue: "image.generate",
         inline: true,
       },
-      { key: "model", label: "Model", control: "text", defaultValue: "" },
+      { key: "model", label: "Model", control: "text", defaultValue: "", advanced: true },
       { key: "size", label: "Size", control: "text", defaultValue: "1024x1024" },
       {
         key: "steps",
@@ -393,6 +426,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         control: "text",
         defaultValue: "",
         hint: "set automatically when you pick a profile",
+        advanced: true,
       },
     ],
   },
@@ -1574,11 +1608,20 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     ],
     params: [
       {
+        key: "api_profile_ref",
+        label: "API profile",
+        control: "text",
+        defaultValue: "",
+        hint: "managed backend ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
+      },
+      {
         key: "provider",
         label: "Provider",
         control: "text",
         defaultValue: "mock",
         hint: "an image.edit-capable provider (set automatically when you pick a profile); empty/mock passes through",
+        advanced: true,
       },
       {
         key: "operation",
@@ -1623,6 +1666,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         control: "text",
         defaultValue: "",
         hint: "set automatically when you pick a profile",
+        advanced: true,
       },
       {
         key: "repaint_prompt_base",

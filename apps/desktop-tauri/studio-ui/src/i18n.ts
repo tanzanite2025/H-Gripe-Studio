@@ -710,6 +710,22 @@ export const messages = {
     zh: "打开系统模型管理器（API 配置与本地模型绑定）",
   },
   "models.title": { en: "Models / APIs", zh: "模型 / API" },
+  "models.selector.label": { en: "Backend (API profile)", zh: "后端（API 配置）" },
+  "models.selector.pick": { en: "— pick a profile —", zh: "— 选择配置 —" },
+  "models.selector.manage": { en: "Manage…", zh: "管理…" },
+  "models.selector.hint": {
+    en: "capability-filtered from the Models / APIs manager; fills provider / model / credentials",
+    zh: "来自「模型 / API」管理器的能力过滤列表；自动填充 provider / model / credentials",
+  },
+  "models.selector.empty": {
+    en: "no profile declares this capability — open Manage… and tag one",
+    zh: "没有配置声明此能力——点「管理…」为配置勾选能力",
+  },
+  "models.selector.dangling": {
+    en: "saved ref no longer exists in the manager",
+    zh: "保存的引用在管理器中已不存在",
+  },
+  "inspector.advanced": { en: "Advanced / legacy fields", zh: "高级 / 旧字段" },
   "models.tabApi": { en: "API Profiles", zh: "API 配置" },
   "models.tabLocal": { en: "Local Models", zh: "本地模型" },
   "models.closeTitle": { en: "Close (Esc)", zh: "关闭 (Esc)" },

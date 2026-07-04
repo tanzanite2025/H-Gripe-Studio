@@ -47,6 +47,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       text: { label: "提示词", hint: "初始提示词（连接的 `text` 输入会覆盖它）" },
       mode: { label: "优化", hint: "off = 直通 · local = 规则化 · api = 经档案走 LLM" },
       preset: { label: "本地预设", hint: "`local` 模式使用：去重 + 追加增强标签" },
+      api_profile_ref: {
+        label: "API 配置引用",
+        hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
+      },
       provider: { label: "提供方", hint: "`api` 模式使用（选择档案时自动设置）" },
       model: { label: "模型", hint: "`api` 模式使用" },
       instruction: { label: "指令", hint: "`api` 模式使用（作为系统提示发送）" },
@@ -95,6 +99,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
     title: "生成",
     description: "通过 H-Gripe broker 运行一次图像生成操作。",
     params: {
+      api_profile_ref: {
+        label: "API 配置引用",
+        hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
+      },
       provider: { label: "提供方" },
       operation: { label: "操作" },
       model: { label: "模型" },
@@ -509,6 +517,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
     description:
       "对 Detail Watchdog 标记的问题区域做局部重绘。为每个可重绘问题（其 suggested_action 在 `Repaint actions` 列表中）带边距裁剪，写出 inpaint 蒙版，将每块裁剪通过 broker 的 image.edit 操作（与 Generate 相同的提供方/凭据路径）发送，再以羽化接缝贴回。输出修复图像与 RepaintReport。若未配置具备编辑能力的提供方（空 / `mock`），则所有区域都不重绘，图像原样通过。",
     params: {
+      api_profile_ref: {
+        label: "API 配置引用",
+        hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
+      },
       provider: {
         label: "提供方",
         hint: "具备 image.edit 能力的提供方（选择档案时自动设置）；空/mock 则直通",
