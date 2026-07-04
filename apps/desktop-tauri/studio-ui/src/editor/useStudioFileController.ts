@@ -66,6 +66,15 @@ export interface StudioFileControllerOptions {
   sampleEdges: Edge[];
   /** Whether a persisted workflow was restored on mount (seeds `saved`). */
   restoredOnMount: boolean;
+  /**
+   * Open a loaded workflow in a new canvas tab instead of replacing the
+   * active graph (multi-canvas workspace plan: "Open Workflow" imports into
+   * a new tab). When the path is already open, its tab is activated.
+   */
+  openInCanvasTab?: (
+    graph: WorkflowGraph,
+    path: string | null,
+  ) => "opened" | "activated" | "already-active";
 }
 
 export interface StudioFileController {
@@ -146,6 +155,7 @@ export function useStudioFileController({
   sampleNodes,
   sampleEdges,
   restoredOnMount,
+  openInCanvasTab,
 }: StudioFileControllerOptions): StudioFileController {
   const isDesktop = isTauri();
 
@@ -337,10 +347,16 @@ export function useStudioFileController({
   // Browser-preview upload (the hidden file input). Desktop uses native dialogs.
   const load = useCallback(
     async (file: File) => {
-      if (!confirmDiscard(`load ${file.name}`)) return;
       try {
-        takeSnapshot();
         const graph = deserializeGraph(await file.text());
+        if (openInCanvasTab) {
+          skipDirty.current = true;
+          openInCanvasTab(graph, null);
+          setMessage(`loaded ${file.name} in a new canvas`);
+          return;
+        }
+        if (!confirmDiscard(`load ${file.name}`)) return;
+        takeSnapshot();
         loadGraphIntoEditor(graph);
         setCurrentFile(null);
         setFileDirty(false);
@@ -349,7 +365,7 @@ export function useStudioFileController({
         setMessage(`load failed: ${String(err)}`);
       }
     },
-    [takeSnapshot, loadGraphIntoEditor, confirmDiscard, setMessage],
+    [takeSnapshot, loadGraphIntoEditor, confirmDiscard, setMessage, openInCanvasTab],
   );
 
   const refreshProjectFiles = useCallback(
@@ -373,8 +389,20 @@ export function useStudioFileController({
 
   const openFromPath = useCallback(
     async (path: string) => {
-      if (!confirmDiscard(`open ${baseName(path)}`)) return;
       try {
+        if (openInCanvasTab) {
+          const graph = deserializeGraph(await readStudioWorkflow(path));
+          skipDirty.current = true;
+          const result = openInCanvasTab(graph, path);
+          rememberFile(path);
+          setMessage(
+            result === "opened"
+              ? `opened ${baseName(path)} in a new canvas`
+              : `${baseName(path)} is already open`,
+          );
+          return;
+        }
+        if (!confirmDiscard(`open ${baseName(path)}`)) return;
         takeSnapshot();
         const graph = deserializeGraph(await readStudioWorkflow(path));
         loadGraphIntoEditor(graph);
@@ -386,7 +414,7 @@ export function useStudioFileController({
         setMessage(`open failed: ${String(err)}`);
       }
     },
-    [takeSnapshot, loadGraphIntoEditor, rememberFile, confirmDiscard, setMessage],
+    [takeSnapshot, loadGraphIntoEditor, rememberFile, confirmDiscard, setMessage, openInCanvasTab],
   );
 
   const saveToPath = useCallback(

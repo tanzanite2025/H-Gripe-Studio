@@ -70,6 +70,15 @@ export interface UseCanvasDocument {
   registerFileBridge: (bridge: CanvasFileBridge) => void;
   /** Park the active canvas and open a fresh, empty, untitled one. */
   openNewCanvas: () => void;
+  /**
+   * Open a loaded workflow in a new tab (parking the active canvas). When
+   * `path` is already open in another tab, that tab is activated instead.
+   * Returns "opened", "activated", or "already-active".
+   */
+  openCanvasWith: (state: { nodes: Node[]; edges: Edge[]; path: string | null }) =>
+    | "opened"
+    | "activated"
+    | "already-active";
   /** Park the active canvas and swap the given one in. */
   activateCanvas: (id: string) => void;
   /** Close a canvas; when the last one closes, a fresh one replaces it. */
@@ -151,6 +160,40 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       dirty: false,
     });
   }, [parkActive, loadCanvas]);
+
+  const openCanvasWith = useCallback(
+    (state: { nodes: Node[]; edges: Edge[]; path: string | null }) => {
+      if (state.path) {
+        const activePath = fileBridge.current?.get().path ?? null;
+        if (state.path === activePath) return "already-active" as const;
+        const existing = tabsRef.current.find(
+          (t) => t.id !== live.current.documentId && store.current.get(t.id)?.path === state.path,
+        );
+        if (existing) {
+          const parked = store.current.get(existing.id);
+          if (parked) {
+            parkActive();
+            store.current.delete(existing.id);
+            loadCanvas(existing.id, parked);
+            return "activated" as const;
+          }
+        }
+      }
+      parkActive();
+      const id = newCanvasDocumentId();
+      setTabs((list) => [...list, { id, path: state.path, dirty: false }]);
+      loadCanvas(id, {
+        nodes: state.nodes,
+        edges: state.edges,
+        selectedNodeId: null,
+        viewport: DEFAULT_CANVAS_VIEWPORT,
+        path: state.path,
+        dirty: false,
+      });
+      return "opened" as const;
+    },
+    [parkActive, loadCanvas],
+  );
 
   const activateCanvas = useCallback(
     (id: string) => {
@@ -274,6 +317,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       tabs,
       registerFileBridge,
       openNewCanvas,
+      openCanvasWith,
       activateCanvas,
       closeCanvas,
       exportCanvases,
@@ -293,6 +337,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       tabs,
       registerFileBridge,
       openNewCanvas,
+      openCanvasWith,
       activateCanvas,
       closeCanvas,
       exportCanvases,

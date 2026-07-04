@@ -99,6 +99,31 @@ describe("useStudioFileController", () => {
     expect(result.current.fileDirty).toBe(false);
   });
 
+  it("openFromPath routes into a new canvas tab when the hook is provided", async () => {
+    const { readStudioWorkflow } = await import("../bridge/tauri");
+    vi.mocked(readStudioWorkflow).mockResolvedValue(
+      JSON.stringify({ version: 1, nodes: [], edges: [] }),
+    );
+    const openInCanvasTab = vi.fn(() => "opened" as const);
+    const { options, setNodes, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { result } = renderHook(() =>
+      useStudioFileController({ ...options, openInCanvasTab }),
+    );
+
+    await act(async () => {
+      await result.current.openFromPath("C:/flows/other.json");
+    });
+
+    expect(openInCanvasTab).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 1 }),
+      "C:/flows/other.json",
+    );
+    // The active graph is untouched — the tab machinery owns the swap.
+    expect(setNodes).not.toHaveBeenCalled();
+    expect(setMessage).toHaveBeenCalledWith("opened other.json in a new canvas");
+    expect(result.current.recentFiles).toContain("C:/flows/other.json");
+  });
+
   it("captures a named snapshot when the prompt is answered", () => {
     vi.spyOn(window, "prompt").mockReturnValue("My snapshot");
     const { options, setMessage } = setup([makeNode("p1", "prompt")]);

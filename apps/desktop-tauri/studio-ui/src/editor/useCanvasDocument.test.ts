@@ -104,6 +104,75 @@ describe("useCanvasDocument tabs", () => {
     expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
   });
 
+  it("openCanvasWith opens a loaded workflow in a new tab without touching the active one", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
+    const file = bridge({ path: "C:/flows/hero.json", dirty: true });
+    act(() => result.current.registerFileBridge(file.bridge));
+    const firstId = result.current.documentId;
+
+    let outcome: string | undefined;
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("b")],
+        edges: [],
+        path: "C:/flows/other.json",
+      });
+    });
+
+    expect(outcome).toBe("opened");
+    expect(result.current.tabs).toHaveLength(2);
+    expect(result.current.documentId).not.toBe(firstId);
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["b"]);
+    expect(file.set).toHaveBeenLastCalledWith("C:/flows/other.json", false);
+    // The parked tab keeps its graph and file state.
+    expect(result.current.tabs[0]).toMatchObject({ path: "C:/flows/hero.json", dirty: true });
+    act(() => result.current.activateCanvas(firstId));
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
+  });
+
+  it("openCanvasWith activates the existing tab when the path is already open", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
+    const file = bridge({ path: "C:/flows/hero.json", dirty: false });
+    act(() => result.current.registerFileBridge(file.bridge));
+    const firstId = result.current.documentId;
+
+    act(() => result.current.openNewCanvas());
+
+    let outcome: string | undefined;
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("stale")],
+        edges: [],
+        path: "C:/flows/hero.json",
+      });
+    });
+
+    expect(outcome).toBe("activated");
+    expect(result.current.tabs).toHaveLength(2);
+    expect(result.current.documentId).toBe(firstId);
+    // The parked tab's own graph wins over the re-read content.
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
+  });
+
+  it("openCanvasWith is a no-op when the path is the active canvas", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
+    const file = bridge({ path: "C:/flows/hero.json", dirty: false });
+    act(() => result.current.registerFileBridge(file.bridge));
+
+    let outcome: string | undefined;
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("stale")],
+        edges: [],
+        path: "C:/flows/hero.json",
+      });
+    });
+
+    expect(outcome).toBe("already-active");
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
+  });
+
   it("exportCanvases captures the live active tab and parked tabs verbatim", () => {
     const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
     const file = bridge({ path: "C:/flows/hero.json", dirty: true });

@@ -28,6 +28,7 @@ import {
 import { getHelperLines } from "./editor/helperLines";
 import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
+import type { WorkflowGraph } from "./graph/model";
 import { canvasDocumentTitle } from "./editor/canvasDocument";
 import { ProjectPanel } from "./editor/ProjectPanel";
 import { Toolbar } from "./editor/Toolbar";
@@ -492,6 +493,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     sampleNodes: initialNodes,
     sampleEdges: initialEdges,
     restoredOnMount: restoredOnMount.current,
+    openInCanvasTab: useCallback(
+      (graph: WorkflowGraph, path: string | null) => {
+        const { nodes, edges } = fromWorkflowGraph(graph);
+        return canvas.openCanvasWith({ nodes, edges, path });
+      },
+      [canvas],
+    ),
   });
   const {
     saved,
