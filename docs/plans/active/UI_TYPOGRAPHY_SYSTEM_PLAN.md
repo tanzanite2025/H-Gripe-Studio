@@ -21,8 +21,8 @@ Recommended stack:
 
 ```css
 :root {
-  --font-ui: "Satoshi", "MiSans", "Noto Sans SC", sans-serif;
-  --font-display: "Satoshi", "MiSans", "Noto Sans SC", sans-serif;
+  --font-ui: "Satoshi", "Noto Sans SC", sans-serif;
+  --font-display: "Satoshi", "Noto Sans SC", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
 }
 ```
@@ -31,8 +31,10 @@ Why:
 
 - `Satoshi` gives English UI labels, product terms, headings, and node names a
   soft modern feel.
-- `MiSans` gives Chinese UI text a similar rounded, modern weight.
-- `Noto Sans SC` is the stable open fallback for missing Chinese glyphs.
+- The Chinese UI font is still being selected; it must have clear desktop-app
+  bundling / redistribution rights before it becomes part of the packaged app.
+- `Noto Sans SC` is the stable open Chinese fallback while the final Chinese
+  font is selected.
 - `JetBrains Mono` / `Cascadia Code` keeps logs, paths, IDs, JSON, and FFmpeg
   commands readable.
 
@@ -56,14 +58,15 @@ Timeline Clip
 This is not a problem if the font stack is ordered correctly:
 
 ```css
-font-family: "Satoshi", "MiSans", "Noto Sans SC", sans-serif;
+font-family: "Satoshi", "<final Chinese UI font>", "Noto Sans SC", sans-serif;
 ```
 
 Browser/WebView shaping will use:
 
 - Satoshi for Latin glyphs.
-- MiSans for Chinese glyphs.
-- Noto Sans SC when MiSans does not cover a glyph.
+- The final Chinese UI font for Chinese glyphs once selected and licensed.
+- Noto Sans SC for Chinese fallback until that font is selected, and for any
+  missing glyphs after it is selected.
 
 The product should not translate every technical term into Chinese just to make
 the UI look uniform. Terms such as `PSD`, `FFmpeg`, `GPU`, `Timeline`, `Grade`,
@@ -71,6 +74,74 @@ the UI look uniform. Terms such as `PSD`, `FFmpeg`, `GPU`, `Timeline`, `Grade`,
 clearer for production users.
 
 ## Font Licensing
+
+### Adobe Fonts Reference: Not Adopted For Packaging
+
+These two Adobe Fonts remain useful visual references, but they should not be
+used as the packaged app font stack because app embedding / redistribution
+requires extra licensing work:
+
+| Role | Font | Source | Use |
+| --- | --- | --- | --- |
+| English / Latin reference | `Sama Latin` | Adobe Fonts, Ek Type | Rounded-terminal Latin feel reference |
+| Chinese reference | `AR YuanGBStd` | Adobe Fonts, Arphic Types | Rounded Chinese UI tone reference |
+
+Adobe Fonts pages:
+
+- `https://fonts.adobe.com/fonts/sama-latin`
+- `https://fonts.adobe.com/fonts/ar-yuangbstd`
+
+Licensing direction:
+
+- Adobe Fonts can be used for personal and commercial design work, website
+  publishing through Adobe web projects, PDFs, and video/broadcast output.
+- Adobe's current font licensing FAQ says Adobe Fonts may **not** be embedded
+  within mobile or desktop applications. App embedding requires an appropriate
+  license from the foundry or an authorized reseller.
+- Therefore, do not bundle `Sama Latin` or `AR YuanGBStd` font files into the
+  Tauri desktop app.
+- Do not make these fonts required for local/dev builds.
+- Use their style as reference only while selecting a lower-friction Chinese
+  font with clear app redistribution rights.
+
+### Sama Latin
+
+Source: Adobe Fonts / Ek Type.
+
+Expected use:
+
+- Visual reference only; not part of the active app font stack.
+
+Style direction:
+
+- Mono-linear construction.
+- Rounded terminals.
+- Soft, friendly Latin tone without becoming decorative.
+
+License direction:
+
+- Use through Adobe Fonts only where Adobe's license supports the output.
+- Do not self-host or embed the font files in the desktop app without a
+  separate license from the foundry / authorized reseller.
+
+### AR YuanGBStd
+
+Source: Adobe Fonts / Arphic Types.
+
+Expected use:
+
+- Visual reference only; not part of the active app font stack.
+
+Style direction:
+
+- Rounded Chinese typeface influenced by Heiti structure.
+- Softer than severe Heiti, while still balanced enough for production UI.
+
+License direction:
+
+- Use through Adobe Fonts only where Adobe's license supports the output.
+- Do not self-host or embed the font files in the desktop app without a
+  separate license from the foundry / authorized reseller.
 
 ### Satoshi
 
@@ -90,21 +161,21 @@ License direction:
   resell.
 - If bundled, keep license/notice text with the app.
 
-### MiSans
+### Final Chinese UI Font
 
-Source: Xiaomi / HyperOS font distribution.
+Status: not selected yet.
 
-Expected use:
+Selection requirements:
 
-- Chinese UI fallback.
-- Mixed Chinese/English app text.
-- Dense production panels.
+- Similar soft / rounded tone to `AR YuanGBStd`, but with lower licensing
+  friction.
+- Must allow desktop app bundling / redistribution, or provide a clear paid
+  license path that is simple enough to adopt.
+- Must cover simplified Chinese UI text well.
+- Must sit comfortably beside `Satoshi` in mixed labels.
+- Must remain readable in dense production UI at 12-14px.
 
-License direction:
-
-- Official distribution allows commercial work use, but the app should keep the
-  original license notice and avoid redistributing modified font files.
-- Use only the official font package.
+Until selected, use `Noto Sans SC` as the Chinese fallback in builds.
 
 ### Noto Sans SC
 
@@ -114,7 +185,7 @@ Expected use:
 
 - Safe CJK fallback.
 - Missing glyph fallback.
-- Legal safety fallback if MiSans packaging is not ready.
+- Legal safety fallback while the final Chinese UI font is selected.
 
 License direction:
 
@@ -140,6 +211,8 @@ THIRD_PARTY_NOTICES.md
 - Do not rename font families to make them look first-party.
 - Do not edit, subset, or repackage font files until licensing and build needs
   are reviewed.
+- Do not bundle Adobe Fonts files into the packaged desktop app unless app
+  embedding / redistribution rights have been purchased and recorded.
 
 If packaging risk is a concern, start with CSS fallback names first and add
 bundled files in a later PR.
