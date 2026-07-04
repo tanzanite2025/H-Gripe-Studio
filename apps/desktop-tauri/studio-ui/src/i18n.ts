@@ -384,6 +384,12 @@ export const messages = {
   "palette.group": { en: "Group", zh: "分组" },
   "palette.noMatch": { en: "No nodes match “{query}”.", zh: "没有匹配「{query}」的节点。" },
   "palette.hint": { en: "Drag onto the canvas, or click to add.", zh: "拖到画布上，或点击添加。" },
+  "palette.canvasControls": { en: "Canvas controls", zh: "画布控制" },
+  "canvas.zoomIn": { en: "Zoom in", zh: "放大" },
+  "canvas.zoomOut": { en: "Zoom out", zh: "缩小" },
+  "canvas.fitView": { en: "Fit view", zh: "适应视图" },
+  "canvas.lock": { en: "Lock canvas interaction", zh: "锁定画布交互" },
+  "canvas.unlock": { en: "Unlock canvas interaction", zh: "解锁画布交互" },
 
   // ---- Mask-Edit modal (MaskEditModal) — tool labels/hints live in maskToolsI18n.ts ----
   "mask.titleSubject": { en: "Subject Mask / Matte", zh: "主体蒙版 / 抠像" },

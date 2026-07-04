@@ -1,4 +1,6 @@
 import { useContext, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useReactFlow, useStore, useStoreApi } from "@xyflow/react";
+import type { EdgeStyle } from "./FlowCanvas";
 import { paletteGroups, type NodeSpec, type PaletteCategory } from "../graph/nodeSpecs";
 import { GROUP_ZH, localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT, type MsgKey } from "../i18n";
@@ -6,6 +8,9 @@ import { LangContext, useT, type MsgKey } from "../i18n";
 interface PaletteProps {
   /** Click-to-add (node is placed at a default spot on the canvas). */
   onAdd: (kind: string) => void;
+  /** Edge rendering style shown/changed in the canvas-controls section. */
+  edgeType: EdgeStyle;
+  onChangeEdgeType: (style: EdgeStyle) => void;
 }
 
 // `internal` primitives never appear in the palette, so they carry no label.
@@ -42,6 +47,77 @@ const GROUP_ITEM = {
   description: "A resizable frame. Drag nodes inside to group them; members move together.",
 };
 
+// Icons for the canvas-controls accordion. Paths set their own fill/stroke so
+// they render as open strokes rather than filled shapes.
+function ZoomInIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 5 V19 M5 12 H19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ZoomOutIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M5 12 H19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function FitViewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function LockIcon({ locked }: { locked: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      {locked ? (
+        <path d="M8 11 V8 a4 4 0 0 1 8 0 V11" fill="none" stroke="currentColor" strokeWidth="2" />
+      ) : (
+        <path d="M8 11 V8 a4 4 0 0 1 8 0" fill="none" stroke="currentColor" strokeWidth="2" />
+      )}
+    </svg>
+  );
+}
+
+function CurvedEdgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 19 C 11 19, 13 5, 20 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OrthogonalEdgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 19 H12 V5 H20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SmartEdgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 19 H8 V5 H20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="12" y="12" width="7" height="7" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 export function matches(spec: { title: string; kind: string; description: string }, q: string): boolean {
   if (!q) return true;
   const hay = `${spec.title} ${spec.kind} ${spec.description}`.toLowerCase();
@@ -72,11 +148,25 @@ function loadOpenSection(): string | null {
 
 // Left rail listing the available node kinds. Each item can be dragged onto the
 // canvas (drop position is honoured) or clicked to add at a default location.
-export function Palette({ onAdd }: PaletteProps) {
+export function Palette({ onAdd, edgeType, onChangeEdgeType }: PaletteProps) {
   const [width, setWidth] = useState(loadPaletteWidth);
   const [openSection, setOpenSection] = useState<string | null>(loadOpenSection);
   const lang = useContext(LangContext);
   const t = useT();
+
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const store = useStoreApi();
+  const interactive = useStore(
+    (s) => s.nodesDraggable || s.nodesConnectable || s.elementsSelectable,
+  );
+  const toggleInteractive = () => {
+    const next = !interactive;
+    store.setState({
+      nodesDraggable: next,
+      nodesConnectable: next,
+      elementsSelectable: next,
+    });
+  };
 
   const toggleSection = (key: string) => {
     const next = openSection === key ? null : key;
@@ -123,7 +213,7 @@ export function Palette({ onAdd }: PaletteProps) {
   );
 
   return (
-    <aside className="palette" style={{ width }}>
+    <aside className="palette" style={{ width }} aria-label={t("palette.heading")}>
       <div
         className="palette-resize"
         role="separator"
@@ -132,7 +222,6 @@ export function Palette({ onAdd }: PaletteProps) {
         title="Drag to resize node palette"
         onPointerDown={startResize}
       />
-      <h2>{t("palette.heading")}</h2>
       <div className="palette-sections">
         {groups.map(({ category, specs }) => {
           const open = openSection === category;
@@ -207,8 +296,79 @@ export function Palette({ onAdd }: PaletteProps) {
             </div>
           )}
         </div>
+        <div className={`palette-group${openSection === "controls" ? " open" : ""}`}>
+          <button
+            type="button"
+            className="palette-group-header"
+            aria-expanded={openSection === "controls"}
+            onClick={() => toggleSection("controls")}
+          >
+            <span className="palette-group-title">{t("palette.canvasControls")}</span>
+            <span className="palette-group-toggle" aria-hidden="true">
+              {openSection === "controls" ? "\u2212" : "+"}
+            </span>
+          </button>
+          {openSection === "controls" && (
+            <div className="palette-group-body">
+              <div className="palette-controls-row">
+                <button
+                  className="palette-control-button"
+                  onClick={() => void zoomIn()}
+                  title={t("canvas.zoomIn")}
+                  aria-label={t("canvas.zoomIn")}
+                >
+                  <ZoomInIcon />
+                </button>
+                <button
+                  className="palette-control-button"
+                  onClick={() => void zoomOut()}
+                  title={t("canvas.zoomOut")}
+                  aria-label={t("canvas.zoomOut")}
+                >
+                  <ZoomOutIcon />
+                </button>
+                <button
+                  className="palette-control-button"
+                  onClick={() => void fitView()}
+                  title={t("canvas.fitView")}
+                  aria-label={t("canvas.fitView")}
+                >
+                  <FitViewIcon />
+                </button>
+                <button
+                  className={`palette-control-button${interactive ? "" : " active"}`}
+                  onClick={toggleInteractive}
+                  title={interactive ? t("canvas.lock") : t("canvas.unlock")}
+                  aria-label={interactive ? t("canvas.lock") : t("canvas.unlock")}
+                  aria-pressed={!interactive}
+                >
+                  <LockIcon locked={!interactive} />
+                </button>
+              </div>
+              <div className="palette-controls-row">
+                {(
+                  [
+                    { style: "default", title: t("label.edgesCurved"), icon: <CurvedEdgeIcon /> },
+                    { style: "smoothstep", title: t("label.edgesOrthogonal"), icon: <OrthogonalEdgeIcon /> },
+                    { style: "smart", title: t("label.edgesAvoid"), icon: <SmartEdgeIcon /> },
+                  ] as const
+                ).map(({ style, title, icon }) => (
+                  <button
+                    key={style}
+                    className={`palette-control-button${edgeType === style ? " active" : ""}`}
+                    onClick={() => onChangeEdgeType(style)}
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={edgeType === style}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-      <p className="muted palette-hint">{t("palette.hint")}</p>
     </aside>
   );
 }
