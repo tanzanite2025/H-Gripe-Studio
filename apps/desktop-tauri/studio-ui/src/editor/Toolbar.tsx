@@ -34,6 +34,9 @@ export interface ToolbarProps {
   // System model manager (Models / APIs)
   onOpenModels: () => void;
 
+  // Unified image editor (mask + crop) for an image source card.
+  onOpenImageEdit: () => void;
+
   // Panels
   showProject: boolean;
   setShowProject: Dispatch<SetStateAction<boolean>>;
@@ -68,6 +71,7 @@ export function Toolbar({
   isDesktop,
   onToggleLang,
   onOpenModels,
+  onOpenImageEdit,
   showProject,
   setShowProject,
   showSnapshots,
@@ -101,6 +105,9 @@ export function Toolbar({
               ! {issues.length} {issues.length > 1 ? t("issues.many") : t("issues.one")}
             </span>
           )}
+          <button onClick={onOpenImageEdit} title={t("btn.imageEditTitle")}>
+            {t("btn.imageEdit")}
+          </button>
           {isDesktop && (
             <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>
               {showProject ? t("btn.hideProject") : t("btn.project")}
