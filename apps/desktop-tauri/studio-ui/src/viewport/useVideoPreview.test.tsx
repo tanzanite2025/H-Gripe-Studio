@@ -42,6 +42,33 @@ describe("useVideoPreview coalescing", () => {
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });
 
+  it("passes video_clip reference targets through without the resource registry", async () => {
+    await viewportBridge.registerTimeline("tl-1", [
+      { clipId: "clip_a", kind: "video", path: "/tmp/a.mp4", startSec: 0, durationSec: 2 },
+    ]);
+    const files = await import("../bridge/files");
+    vi.mocked(files.registerResource).mockClear();
+    const setTarget = vi.spyOn(viewportBridge, "setViewportTarget");
+    const { result, unmount } = renderHook(() => useVideoPreview(320));
+    act(() => {
+      result.current.showFrame({
+        target: { kind: "video_clip", timelineId: "tl-1", clipId: "clip_a", timeSec: 0.5 },
+        gradeDoc: null,
+      });
+    });
+    await waitFor(() => expect(result.current.state.pending).toBe(false));
+    expect(result.current.state.frame).toMatch(/^data:image\//);
+    expect(files.registerResource).not.toHaveBeenCalled();
+    expect(setTarget).toHaveBeenLastCalledWith(expect.any(String), {
+      kind: "video_clip",
+      timelineId: "tl-1",
+      clipId: "clip_a",
+      timeSec: 0.5,
+    });
+    unmount();
+    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+  });
+
   it("collapses a burst of requests to the newest (latest-wins)", async () => {
     const setTarget = vi.spyOn(viewportBridge, "setViewportTarget");
     const { result, unmount } = renderHook(() => useVideoPreview(320));
