@@ -125,6 +125,40 @@ describe("useVideoPreview coalescing", () => {
     unmount();
   });
 
+  it("hides the surface on a gap and re-shows it before the next frame", async () => {
+    const setPresented = vi.spyOn(viewportBridge, "setViewportPresented");
+    const { result, unmount } = renderHook(() => useVideoPreview(320));
+    act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null }));
+    await waitFor(() => expect(result.current.state.frame).not.toBeNull());
+    expect(setPresented).not.toHaveBeenCalled();
+
+    act(() => result.current.showFrame(null));
+    await waitFor(() => expect(result.current.state.frame).toBeNull());
+    expect(setPresented).toHaveBeenLastCalledWith(expect.any(String), false);
+
+    act(() => result.current.showFrame({ target: still("b.png"), gradeDoc: null }));
+    await waitFor(() => expect(result.current.state.frame).not.toBeNull());
+    expect(setPresented).toHaveBeenLastCalledWith(expect.any(String), true);
+    unmount();
+  });
+
+  it("reports a natively presented frame without a frame url", async () => {
+    vi.spyOn(viewportBridge, "renderViewportFrame").mockResolvedValue({
+      data_url: "",
+      width: 640,
+      height: 360,
+      backend: { requested: "auto", actual: "wgpu" },
+      presented: true,
+    });
+    const { result, unmount } = renderHook(() => useVideoPreview(320));
+    act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null }));
+    await waitFor(() => expect(result.current.state.pending).toBe(false));
+    expect(result.current.state.presented).toBe(true);
+    expect(result.current.state.frame).toBeNull();
+    expect(result.current.state.backend?.actual).toBe("wgpu");
+    unmount();
+  });
+
   it("stays empty and settles outside the resource registry", async () => {
     const files = await import("../bridge/files");
     vi.mocked(files.registerResource).mockResolvedValueOnce(null as never);

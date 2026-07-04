@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { describeDeviceReport, deviceReportFromViewportBackend } from "../runtime/deviceReport";
 import { useViewControls } from "../viewport/useViewControls";
 import { useVideoPreview, type VideoPreviewTarget } from "../viewport/useVideoPreview";
+import { useViewportPlacement } from "../viewport/useViewportPlacement";
 import type { MediaAsset } from "./mediaBin";
 import { resolvePreviewFrame } from "./previewFrame";
 import { timelineDuration, type TimelineModel } from "./timeline";
@@ -83,10 +84,13 @@ export function ProgramMonitor({
   const [playing, setPlaying] = useState(false);
   const playheadRef = useRef(0);
   playheadRef.current = playheadSec;
-  const { state, showFrame } = useVideoPreview();
+  const { state, showFrame, host } = useVideoPreview();
   // Monitor zoom/pan is viewport state: the viewport re-crops its cached
   // frame proxy, so a view tick never re-decodes the frame.
-  const { view, stageProps } = useViewControls(!!state.frame);
+  const { view, stageProps } = useViewControls(!!state.frame || state.presented);
+  // Keep the native surface window placed under the monitor's frame element
+  // (WGPU surface swap): frames present there and skip the PNG transport.
+  useViewportPlacement(host, stageProps.ref);
 
   const duration = Math.max(timelineDuration(timeline), 0);
   const clampedSec = Math.min(playheadSec, duration);
@@ -148,8 +152,11 @@ export function ProgramMonitor({
 
   return (
     <div className="production-monitor">
-      <div className="production-monitor-frame" {...stageProps}>
-        {state.frame && target ? (
+      <div
+        className={`production-monitor-frame${state.presented ? " presented" : ""}`}
+        {...stageProps}
+      >
+        {state.presented && target ? null : state.frame && target ? (
           <img src={state.frame} alt={t("drawer.monitorTitle")} />
         ) : (
           <span className="production-monitor-empty muted">
