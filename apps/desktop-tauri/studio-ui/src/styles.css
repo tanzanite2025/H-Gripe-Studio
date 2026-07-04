@@ -801,8 +801,12 @@ button:disabled { opacity: 0.6; cursor: default; }
 .port-block-pair .port-side-in .port { left: -22px; }
 .port-block-pair .port-side-out .port { right: -22px; }
 .port-label { font-size: 10px; line-height: 1.2; color: var(--muted); }
-/* zoom-LOD: collapse blocks to slim colour bars; the dots stay centred. */
-.node.lod .node-ports { gap: 2px; padding: 4px 6px 2px; }
+/* zoom-LOD: collapse blocks to slim colour bars; the dots stay centred. The
+   card keeps its expanded footprint (min-height pinned by HgripeNode), so the
+   bars stretch to distribute over the full height instead of crowding the
+   top of a truncated-looking card. */
+.node.lod { display: flex; flex-direction: column; }
+.node.lod .node-ports { flex: 1; gap: 2px; padding: 4px 6px 4px; justify-content: space-evenly; }
 .node.lod .port-label { display: none; }
 .node.lod .port-block { min-height: 8px; padding: 0; }
 
