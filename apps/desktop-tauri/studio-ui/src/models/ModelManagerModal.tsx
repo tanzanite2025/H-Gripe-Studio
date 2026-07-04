@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { tauriInvoke } from "../bridge/core";
+import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
 import { listProfiles } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
+import { summarizeCapabilities } from "../runtime/capabilitySummary";
 import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
@@ -98,6 +100,18 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   const [editingApi, setEditingApi] = useState<ApiProfileEntry | null>(null);
   const [editingLocal, setEditingLocal] = useState<LocalModelEntry | null>(null);
   const [message, setMessage] = useState<string>("");
+  // Capability probe summary (diagnostics only, manual refresh; seeded from
+  // the cached report so reopening the modal shows the last snapshot).
+  const [probe, setProbe] = useState<EngineProbeReport | null>(() => lastEngineProbe());
+  const [probing, setProbing] = useState(false);
+
+  const handleProbe = useCallback(() => {
+    setProbing(true);
+    probeEnginesCached(true)
+      .then((report) => setProbe(report))
+      .catch((err) => setMessage(String(err)))
+      .finally(() => setProbing(false));
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -374,6 +388,26 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
               {localModels.length === 0 && (
                 <p className="muted">{t("models.emptyLocal")}</p>
               )}
+              <div className="model-manager-capability">
+                <div className="model-manager-list-actions">
+                  <span className="muted">{t("models.capabilityTitle")}</span>
+                  <button onClick={handleProbe} disabled={probing}>
+                    {probing ? t("models.probing") : t("models.probeEngines")}
+                  </button>
+                </div>
+                {probe ? (
+                  <ul className="model-manager-capability-lines">
+                    {summarizeCapabilities(probe).map((line) => (
+                      <li key={line.label} className={line.tone === "warn" ? "warn" : ""}>
+                        <code>{line.label}</code>
+                        <span className="muted"> · {line.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">{t("models.capabilityHint")}</p>
+                )}
+              </div>
               <ul className="model-manager-list">
                 {localModels.map((m) => (
                   <li
