@@ -1,6 +1,10 @@
 # Run Scope And Execution Affordance Plan
 
-> Status: active.
+> Status: complete. Landed via PRs #402 (RunScope type + scope resolver, steps
+> 1–2), #403 (row-level run for integrated cards, step 3), #404 (card /
+> selection / downstream run affordances + row-scoped ref validation, steps
+> 4–7), and #405 (pre-execution run reports, step 8). Execution zones and
+> execution nodes stay future reference ideas (step 9).
 > Purpose: define how users run parts of a canvas without introducing confusing
 > execution zones or execution nodes too early.
 
@@ -37,7 +41,7 @@ The model/backend foundation is already in place:
 
 Therefore this plan should not rebuild model/backend selection. Row/card scoped
 runs should reuse the completed backend selection contract in
-[`../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md)
+[`NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md)
 and the existing backend validation path.
 
 The remaining execution work is scope and affordance:
@@ -128,7 +132,7 @@ Repair / Repaint [Run]
   chooses a downstream command
 
 This pairs with the completed
-[`NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md):
+[`NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md):
 row run executes the row with its selected built-in/API/local backend and row
 params, after the same backend ref validation used by full-canvas runs.
 
@@ -455,7 +459,8 @@ They should not be required for:
    the scope + node/row counts, each integrated card's running vs. skipped
    rows, and the API-profile / local-model refs (with device/precision
    policies) carried by the executing nodes.
-9. Only then revisit execution zones or execution nodes.
+9. Only then revisit execution zones or execution nodes — deferred; see
+   "Future Reference" sections above for the rules that must be settled first.
 
 ## Success Criteria
 
