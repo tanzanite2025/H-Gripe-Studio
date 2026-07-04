@@ -2,7 +2,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { Node } from "@xyflow/react";
 
 import { NodeSearchBox } from "./NodeSearchBox";
-import type { CanvasDocument } from "./canvasDocument";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
 
@@ -28,10 +27,6 @@ export interface ToolbarProps {
   // Status
   issues: ValidationIssue[];
   isDesktop: boolean;
-  /** The active canvas document (title / path / dirty in the global row). */
-  document: CanvasDocument;
-  saved: boolean;
-  message: string;
 
   // History
   canUndo: boolean;
@@ -80,9 +75,6 @@ export interface ToolbarProps {
 export function Toolbar({
   issues,
   isDesktop,
-  document,
-  saved,
-  message,
   canUndo,
   canRedo,
   onUndo,
@@ -113,33 +105,16 @@ export function Toolbar({
   return (
     <header className="toolbar">
       <div className="toolbar-title-row">
-        <div className="toolbar-document">
-          {isDesktop && (
-            <span className="muted current-file" title={document.path ?? t("status.untitledTitle")}>
-              {document.title}
-              {document.dirty ? " *" : ""}
-            </span>
-          )}
-        </div>
-
         <div className="toolbar-search">
           <NodeSearchBox nodes={nodes} onJump={onJumpToNode} />
         </div>
 
         <div className="toolbar-title-status">
-          {message && (
-            <span className="muted toolbar-message" title={message}>
-              {message}
-            </span>
-          )}
           {issues.length > 0 && (
             <span className="issues" title={issues.map((i) => i.message).join("\n")}>
               ! {issues.length} {issues.length > 1 ? t("issues.many") : t("issues.one")}
             </span>
           )}
-          <span className="muted autosave" title={t("status.autosaveTitle")}>
-            {saved ? t("status.autosaved") : t("status.saving")}
-          </span>
           <button onClick={onOpenModels} title={t("btn.modelsTitle")}>
             {t("btn.models")}
           </button>

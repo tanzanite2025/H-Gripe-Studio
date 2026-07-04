@@ -1260,15 +1260,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             }
           : null;
 
-  // The assembled canvas document: the editor's graph/selection/viewport
-  // shell plus the controller-owned file and run state, in one object.
-  const canvasDocument = canvas.describe({
-    path: currentFile,
-    dirty: fileDirty,
-    runState: running ? "running" : "idle",
-    untitledLabel: t("status.untitled"),
-  });
-
   const closeEditor = () => {
     setMaskEditNodeId(null);
     setCropEditNodeId(null);
@@ -1281,9 +1272,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       <Toolbar
         issues={issues}
         isDesktop={isDesktop}
-        document={canvasDocument}
-        saved={saved}
-        message={message}
         canUndo={history.canUndo}
         canRedo={history.canRedo}
         onUndo={undo}
@@ -1328,24 +1316,34 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       />
 
       <NodeEditingContext.Provider value={editing}>
+        {isDesktop && showProject && (
+          <div className="media-viewer-backdrop" onClick={() => setShowProject(false)}>
+            <div className="project-modal" onClick={(e) => e.stopPropagation()}>
+              <ProjectPanel
+                projectDir={projectDir}
+                files={workflowFiles}
+                recentFiles={recentFiles}
+                currentFile={currentFile}
+                busy={projectBusy}
+                onPickFolder={() => void handlePickFolder()}
+                onRefresh={() => projectDir && void refreshProjectFiles(projectDir)}
+                onOpenFile={(path) => {
+                  setShowProject(false);
+                  void openFromPath(path);
+                }}
+                onNew={() => {
+                  setShowProject(false);
+                  openNewCanvas();
+                }}
+                onNewInFolder={() => void handleNewInFolder()}
+                onRenameFile={(path) => void handleRenameFile(path)}
+                onDuplicateFile={(path) => void handleDuplicateFile(path)}
+                onDeleteFile={(path) => void handleDeleteFile(path)}
+              />
+            </div>
+          </div>
+        )}
         <div className="workspace">
-          {isDesktop && showProject && (
-            <ProjectPanel
-              projectDir={projectDir}
-              files={workflowFiles}
-              recentFiles={recentFiles}
-              currentFile={currentFile}
-              busy={projectBusy}
-              onPickFolder={() => void handlePickFolder()}
-              onRefresh={() => projectDir && void refreshProjectFiles(projectDir)}
-              onOpenFile={(path) => void openFromPath(path)}
-              onNew={openNewCanvas}
-              onNewInFolder={() => void handleNewInFolder()}
-              onRenameFile={(path) => void handleRenameFile(path)}
-              onDuplicateFile={(path) => void handleDuplicateFile(path)}
-              onDeleteFile={(path) => void handleDeleteFile(path)}
-            />
-          )}
           {showSnapshots && (
             <SnapshotsPanel
               snapshots={snapshots}
@@ -1414,6 +1412,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 batchCount={batchCount}
                 onRunBatch={() => void runBatch()}
               />
+              <div className="canvas-status" aria-live="polite">
+                {message && (
+                  <span className="canvas-status-message" title={message}>
+                    {message}
+                  </span>
+                )}
+                <span className="canvas-status-autosave" title={t("status.autosaveTitle")}>
+                  {saved ? t("status.autosaved") : t("status.saving")}
+                </span>
+              </div>
             </div>
             {showLog && (
               <RunLog
