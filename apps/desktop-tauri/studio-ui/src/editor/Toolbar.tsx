@@ -2,7 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { Node } from "@xyflow/react";
 
 import { NodeSearchBox } from "./NodeSearchBox";
-import { baseName } from "./ProjectPanel";
+import type { CanvasDocument } from "./canvasDocument";
 import type { EdgeStyle } from "./FlowCanvas";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
@@ -11,8 +11,8 @@ export interface ToolbarProps {
   // Status
   issues: ValidationIssue[];
   isDesktop: boolean;
-  currentFile: string | null;
-  fileDirty: boolean;
+  /** The active canvas document (title / path / dirty in the global row). */
+  document: CanvasDocument;
   saved: boolean;
   message: string;
 
@@ -81,8 +81,7 @@ export interface ToolbarProps {
 export function Toolbar({
   issues,
   isDesktop,
-  currentFile,
-  fileDirty,
+  document,
   saved,
   message,
   canUndo,
@@ -133,9 +132,9 @@ export function Toolbar({
       <div className="toolbar-title-row">
         <div className="toolbar-document">
           {isDesktop && (
-            <span className="muted current-file" title={currentFile ?? t("status.untitledTitle")}>
-              {currentFile ? baseName(currentFile) : t("status.untitled")}
-              {fileDirty ? " *" : ""}
+            <span className="muted current-file" title={document.path ?? t("status.untitledTitle")}>
+              {document.title}
+              {document.dirty ? " *" : ""}
             </span>
           )}
         </div>

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
   useReactFlow,
   type Edge,
   type Node,
@@ -20,6 +18,7 @@ import { PreviewModal } from "./editor/PreviewModal";
 import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
+import { useCanvasDocument } from "./editor/useCanvasDocument";
 import {
   detachChildren,
   findContainingGroup,
@@ -141,9 +140,22 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   }, []);
   const restoredOnMount = useRef(initial.nodes !== initialNodes);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The graph the editor shows, wrapped in one canvas document shell
+  // (multi-canvas workspace plan Phase 2): graph, selection, and pane
+  // viewport live under a stable document identity so tabs can hold one
+  // object per canvas later.
+  const canvas = useCanvasDocument(initial);
+  const {
+    nodes,
+    setNodes,
+    onNodesChange,
+    edges,
+    setEdges,
+    onEdgesChange,
+    selectedId,
+    setSelectedId,
+    setViewport,
+  } = canvas;
   const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
@@ -1050,6 +1062,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             }
           : null;
 
+  // The assembled canvas document: the editor's graph/selection/viewport
+  // shell plus the controller-owned file and run state, in one object.
+  const canvasDocument = canvas.describe({
+    path: currentFile,
+    dirty: fileDirty,
+    runState: running ? "running" : "idle",
+    untitledLabel: t("status.untitled"),
+  });
+
   const closeEditor = () => {
     setMaskEditNodeId(null);
     setCropEditNodeId(null);
@@ -1062,8 +1083,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       <Toolbar
         issues={issues}
         isDesktop={isDesktop}
-        currentFile={currentFile}
-        fileDirty={fileDirty}
+        document={canvasDocument}
         saved={saved}
         message={message}
         canUndo={history.canUndo}
@@ -1163,6 +1183,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 onAddNode={addNode}
                 onBeforeConnect={takeSnapshot}
                 onNodeDragStop={handleNodeDragStop}
+                onViewportChange={setViewport}
                 snapToGrid={snapToGrid}
                 helperLines={helperLines}
                 edgeType={edgeType}
