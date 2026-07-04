@@ -990,7 +990,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       : gradeEditNode
         ? {
             editor: "grade",
-            target: { title: t("grade.title"), imagePath: connectedImagePath(gradeEditNode.id) ?? null },
+            target: {
+              title: t("grade.title"),
+              imagePath: connectedImagePath(gradeEditNode.id) ?? null,
+              nodeId: gradeEditNode.id,
+            },
             initialDoc:
               typeof (gradeEditNode.data as HgripeNodeData).params.grade_doc === "string"
                 ? ((gradeEditNode.data as HgripeNodeData).params.grade_doc as string)
