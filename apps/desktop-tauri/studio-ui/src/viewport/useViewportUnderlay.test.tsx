@@ -7,7 +7,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { openMockViewportCount } from "../bridge/viewport";
+import { openMockViewportCount, registerLayeredAsset } from "../bridge/viewport";
 import { useViewportUnderlay } from "./useViewportUnderlay";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 
@@ -69,6 +69,41 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(result.current.settled).toBe(true));
     expect(result.current.dims).toEqual({ w: 640, h: 640 });
     expect(openMockViewportCount()).toBe(1);
+    unmount();
+    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+  });
+
+  it("renders a target source directly, without the resource registry", async () => {
+    await registerLayeredAsset("layered-n1", [
+      { layerId: "layer_subject", rgbaPath: "/tmp/subject.png" },
+    ]);
+    const files = await import("../bridge/files");
+    const { result, unmount } = renderHook(() =>
+      useViewportUnderlay(
+        "image_edit",
+        { kind: "image_layer", assetId: "layered-n1", layerId: "layer_subject" },
+        640,
+      ),
+    );
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    expect(result.current.underlay).toMatch(/^data:image\//);
+    expect(result.current.dims).toEqual({ w: 640, h: 640 });
+    // Reference targets skip path registration entirely.
+    expect(files.registerResource).not.toHaveBeenCalled();
+    unmount();
+    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+  });
+
+  it("settles null on an unregistered image_layer target", async () => {
+    const { result, unmount } = renderHook(() =>
+      useViewportUnderlay(
+        "image_edit",
+        { kind: "image_layer", assetId: "layered-missing", layerId: "layer_x" },
+        640,
+      ),
+    );
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    expect(result.current.underlay).toBeNull();
     unmount();
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });

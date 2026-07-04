@@ -7,9 +7,34 @@
 
 import { useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
-import type { ViewportBackend, ViewportKind } from "../bridge/viewport";
+import type { ViewportBackend, ViewportKind, ViewportTarget } from "../bridge/viewport";
 import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
+
+/**
+ * What the underlay presents: an image file by path (registered as an image
+ * resource on open) or a reference target the host resolves itself (e.g. an
+ * `image_layer` of a registered layered asset).
+ */
+export type ViewportUnderlaySource = string | ViewportTarget;
+
+/** Stable identity of a source, for effect dependencies. */
+function sourceKey(source: ViewportUnderlaySource | undefined): string {
+  if (source === undefined) return "none";
+  if (typeof source === "string") return `path:${source}`;
+  switch (source.kind) {
+    case "image":
+      return `image:${source.resourceId}`;
+    case "image_layer":
+      return `image_layer:${source.assetId}:${source.layerId}`;
+    case "video_clip":
+      return `video_clip:${source.timelineId}:${source.clipId}:${source.timeSec}`;
+    case "video_frame":
+      return `video_frame:${source.resourceId}:${source.timeSec}`;
+    case "node_output":
+      return `node_output:${source.nodeId}${source.outputPort ? `:${source.outputPort}` : ""}`;
+  }
+}
 
 export interface ViewportUnderlay {
   /** Presented frame as an image source, or null (browser preview / error). */
@@ -26,15 +51,17 @@ export interface ViewportUnderlay {
 }
 
 /**
- * Open a `kind` viewport targeting `imagePath` for the lifetime of the caller
+ * Open a `kind` viewport targeting `source` for the lifetime of the caller
  * and present its rendered frame. The viewport is created on demand (never at
- * startup), destroyed on unmount, and re-targeted when the path changes.
- * Outside Tauri the resource registry is unavailable and everything stays
- * null — editors keep their checkerboard fallback.
+ * startup), destroyed on unmount, and re-targeted when the source changes. A
+ * path source registers as an image resource on open; a target source is set
+ * as-is (the caller has already registered its referents, e.g. via
+ * `registerLayeredAsset`). Outside Tauri the resource registry is unavailable
+ * and a path source stays null — editors keep their checkerboard fallback.
  */
 export function useViewportUnderlay(
   kind: ViewportKind,
-  imagePath: string | undefined,
+  source: ViewportUnderlaySource | undefined,
   size = 1280,
   /** Presentation zoom/pan (viewport state): a change re-renders through the
    * open viewport's cached source proxy — the source is never re-decoded. */
@@ -54,9 +81,16 @@ export function useViewportUnderlay(
   const viewRef = useRef(view);
   viewRef.current = view;
 
+  // The source object identity may change every render; key the open effect
+  // on its stable identity and read the latest value through a ref.
+  const key = sourceKey(source);
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+
   useEffect(() => {
     setState({ underlay: null, dims: null, backend: null, settled: false });
-    if (!imagePath) return;
+    const src = sourceRef.current;
+    if (src === undefined) return;
     let cancelled = false;
     let host: WgpuViewportHost | null = null;
     const settle = () => {
@@ -64,10 +98,16 @@ export function useViewportUnderlay(
     };
 
     (async () => {
-      const res = await registerResource(imagePath);
-      if (!res || cancelled) {
-        settle();
-        return;
+      let target: ViewportTarget;
+      if (typeof src === "string") {
+        const res = await registerResource(src);
+        if (!res || cancelled) {
+          settle();
+          return;
+        }
+        target = { kind: "image", resourceId: res.id };
+      } else {
+        target = src;
       }
       host = await WgpuViewportHost.open(kind);
       if (cancelled) {
@@ -77,10 +117,7 @@ export function useViewportUnderlay(
         return;
       }
       await host.command({ kind: "resize", width: size, height: size });
-      await host.command({
-        kind: "set_target",
-        target: { kind: "image", resourceId: res.id },
-      });
+      await host.command({ kind: "set_target", target });
       const initialView = viewRef.current;
       if (!isIdentityView(initialView)) {
         await host.command({ kind: "set_view", ...initialView });
@@ -108,7 +145,7 @@ export function useViewportUnderlay(
       hostRef.current = null;
       void host?.close();
     };
-  }, [kind, imagePath, size]);
+  }, [kind, key, size]);
 
   useEffect(() => {
     const host = hostRef.current;
