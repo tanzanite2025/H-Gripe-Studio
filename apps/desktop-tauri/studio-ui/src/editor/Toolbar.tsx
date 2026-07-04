@@ -63,7 +63,6 @@ export interface ToolbarProps {
   onJumpToNode: (nodeId: string) => void;
 
   // File actions
-  onNew: () => void;
   onOpen: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -125,7 +124,6 @@ export function Toolbar({
   historyCount,
   nodes,
   onJumpToNode,
-  onNew,
   onOpen,
   onSave,
   onSaveAs,
@@ -210,11 +208,6 @@ export function Toolbar({
           {isDesktop && (
             <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>
               {showProject ? t("btn.hideProject") : t("btn.project")}
-            </button>
-          )}
-          {isDesktop && (
-            <button onClick={onNew} title={t("btn.newTitle")}>
-              {t("btn.new")}
             </button>
           )}
           <button onClick={onOpen} title={isDesktop ? t("btn.openTitle") : t("btn.loadTitle")}>
