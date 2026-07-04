@@ -43,6 +43,9 @@ export interface ToolbarProps {
   // Language
   onToggleLang: () => void;
 
+  // System model manager (Models / APIs)
+  onOpenModels: () => void;
+
   // Panels
   showProject: boolean;
   setShowProject: Dispatch<SetStateAction<boolean>>;
@@ -107,6 +110,7 @@ export function Toolbar({
   onUndo,
   onRedo,
   onToggleLang,
+  onOpenModels,
   showProject,
   setShowProject,
   showSnapshots,
@@ -170,6 +174,9 @@ export function Toolbar({
           <span className="muted autosave" title={t("status.autosaveTitle")}>
             {saved ? t("status.autosaved") : t("status.saving")}
           </span>
+          <button onClick={onOpenModels} title={t("btn.modelsTitle")}>
+            {t("btn.models")}
+          </button>
           <button onClick={onToggleLang} title={t("label.langTitle")} className="lang-toggle">
             {t("label.lang")}
           </button>

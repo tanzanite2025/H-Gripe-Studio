@@ -78,6 +78,7 @@ fn main() {
             commands::runtime::get_runtime_info,
             commands::runtime::doctor,
             commands::config::get_profiles,
+            commands::config::probe_model_weights,
             commands::history::list_history,
             commands::history::history_detail,
             commands::history::history_cleanup_preview,

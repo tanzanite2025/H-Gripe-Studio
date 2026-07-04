@@ -104,6 +104,7 @@ import {
 import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
+import { ModelManagerModal } from "./models/ModelManagerModal";
 import { useT } from "./i18n";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
@@ -198,6 +199,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [layerVisibility, setLayerVisibility] = useState<Record<string, boolean>>({});
   // On-demand export dialog (plan step 9): opened by the drawer's export command.
   const [exportOpen, setExportOpen] = useState(false);
+  // System "Models / APIs" manager (system model manager surface plan):
+  // opened from the global toolbar entry, never automatically.
+  const [modelsOpen, setModelsOpen] = useState(false);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -1229,6 +1233,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onUndo={undo}
         onRedo={redo}
         onToggleLang={onToggleLang}
+        onOpenModels={() => setModelsOpen(true)}
         showProject={showProject}
         setShowProject={setShowProject}
         showSnapshots={showSnapshots}
@@ -1420,6 +1425,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       )}
 
       <EditorHost request={editorRequest} onClose={closeEditor} />
+
+      {modelsOpen && <ModelManagerModal onClose={() => setModelsOpen(false)} />}
 
       {exportOpen && (
         <ExportDialog

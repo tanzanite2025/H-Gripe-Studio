@@ -260,12 +260,20 @@ This keeps first launch fast and prevents UI panels from causing runtime stalls.
 
 ## Implementation Order
 
-1. Add the global `Models / APIs` entry point.
-2. Add the manager shell modal with `API Profiles` and `Local Models` tabs.
-3. Add persistent refs and in-memory registry shape.
-4. Migrate API profile creation/edit/test into the API tab.
-5. Migrate local model entries/path/test into the Local Models tab.
-6. Add capability-filtered selector API for cards.
+1. ✅ Add the global `Models / APIs` entry point (toolbar global row).
+2. ✅ Add the manager shell modal with `API Profiles` and `Local Models` tabs
+   (`studio-ui/src/models/ModelManagerModal.tsx`).
+3. ✅ Add persistent refs and in-memory registry shape
+   (`studio-ui/src/models/backendRegistry.ts`, persisted registry keyed by
+   stable `ref`s; raw keys never stored).
+4. ✅ Migrate API profile creation/edit/test into the API tab (add / edit /
+   duplicate / remove, manual connection test, manual import of the existing
+   H-Gripe provider profiles via `get_profiles`).
+5. ✅ Migrate local model entries/path/test into the Local Models tab (weights
+   path binding, device/precision/fallback policies, manual weights probe via
+   the `probe_model_weights` command — desktop only).
+6. ✅ Add capability-filtered selector API for cards (`apiProfilesFor` /
+   `localModelsFor` / `backendsFor` / `resolveBackendRef`).
 7. Update cards to use refs from selectors instead of raw provider/model fields.
 8. Keep legacy raw fields loadable behind advanced/debug compatibility.
 
