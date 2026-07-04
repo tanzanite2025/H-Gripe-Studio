@@ -263,7 +263,11 @@ Goal: make each accelerated backend robust before unifying scheduling.
   resolve to CPU with distinct visible reasons; accelerated providers slot
   into the resolver when compiled in.
 - Consider DirectML only after the CUDA/CPU contract is stable.
-- Report model path, provider, and fallback reason.
+- ✅ Report model path, provider, and fallback reason — `SubjectSegmenter`
+  exposes `model_path()` (the weight file(s) inference ran on; encoder +
+  decoder for SAM 2) and `matte_report.model_path` carries it alongside the
+  existing `provider` / `engine_fallback_reason`; absent for weight-free
+  lanes (manual/hybrid and the builtin fallback).
 
 ### External Model Plugins
 
