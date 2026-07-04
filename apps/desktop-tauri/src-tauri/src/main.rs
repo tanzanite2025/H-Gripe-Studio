@@ -88,6 +88,8 @@ fn main() {
             studio::read_studio_autosave,
             studio::write_studio_autosave,
             studio::clear_studio_autosave,
+            studio::read_studio_project_manifest,
+            studio::write_studio_project_manifest,
             studio::pick_workflow_save_path,
             studio::pick_workflow_open_path,
             studio::pick_project_folder,

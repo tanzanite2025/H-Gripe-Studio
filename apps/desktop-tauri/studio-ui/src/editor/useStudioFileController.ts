@@ -125,6 +125,8 @@ export interface StudioFileController {
   suppressNextDirty: () => void;
   /** Rebind the file state (path + dirty) when the active canvas changes. */
   adoptFileState: (path: string | null, dirty: boolean) => void;
+  /** True once the desktop autosave restore settled (immediately in browser). */
+  autosaveRestoreDone: boolean;
 }
 
 // Owns the studio's file/persistence layer: workspace autosave, explicit
@@ -691,6 +693,7 @@ export function useStudioFileController({
       autoSnapshotBeforeRun,
       suppressNextDirty,
       adoptFileState,
+      autosaveRestoreDone: desktopAutosaveReady,
     }),
     [
       saved,
@@ -729,6 +732,7 @@ export function useStudioFileController({
       autoSnapshotBeforeRun,
       suppressNextDirty,
       adoptFileState,
+      desktopAutosaveReady,
     ],
   );
 }
