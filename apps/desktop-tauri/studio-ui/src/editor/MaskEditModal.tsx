@@ -55,6 +55,7 @@ import {
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
 import { catmullRomClosed } from "./maskEditModal/pathGeometry";
+import { buildEdgeMap, snapLoopToEdges, type EdgeMap } from "./maskEditModal/magneticSnap";
 import { hitTestPathOp, translateAnchors } from "./maskEditModal/pathEditTools";
 import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
@@ -232,6 +233,12 @@ export function MaskEditModal({
   // Dodge / burn direction of the in-progress stroke (Alt at pointer-down
   // burns — darkens — instead of dodging).
   const dodgeBurnMode = useRef<"dodge" | "burn">("dodge");
+  // Sponge direction of the in-progress stroke (Alt at pointer-down softens
+  // toward mid-grey instead of pushing toward hard on/off).
+  const spongeMode = useRef<"saturate" | "desaturate">("saturate");
+  // Magnetic lasso: an edge map over the underlay's visible window, captured
+  // at drag start so the drawn loop can snap to image edges on release.
+  const magneticEdge = useRef<EdgeMap | null>(null);
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
@@ -558,6 +565,45 @@ export function MaskEditModal({
     [underlay, presented, viewportHost, frameView, dims.w, dims.h],
   );
 
+  // Magnetic lasso: capture the underlay's visible window as an edge map at
+  // drag start (async — the frame decodes first). The map lands in
+  // `magneticEdge` for the commit-time snap; with no underlay (browser
+  // preview) it stays null and the lasso commits unsnapped.
+  const captureEdgeMap = useCallback(() => {
+    magneticEdge.current = null;
+    const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
+    const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
+    const offX = Math.round(frameView.panX * dims.w);
+    const offY = Math.round(frameView.panY * dims.h);
+    if (!underlay) {
+      if (!presented || !viewportHost || !viewportHost.isOpen) return;
+      viewportHost
+        .readPixels()
+        .then((px) => {
+          // The readback is at the frame's own resolution; only a readback
+          // matching the window maps 1:1 onto image-space coordinates.
+          if (px.width !== winW || px.height !== winH) return;
+          magneticEdge.current = buildEdgeMap(px.pixels, px.width, px.height, offX, offY);
+        })
+        .catch(() => {
+          /* leave unsnapped */
+        });
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const off = document.createElement("canvas");
+      off.width = winW;
+      off.height = winH;
+      const ctx = off.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, winW, winH);
+      const { data } = ctx.getImageData(0, 0, winW, winH);
+      magneticEdge.current = buildEdgeMap(data, winW, winH, offX, offY);
+    };
+    img.src = underlay;
+  }, [underlay, presented, viewportHost, frameView, dims.w, dims.h]);
+
   // Redraw the overlay: committed brush strokes and the in-progress
   // stroke/marquee. The underlay presents separately (an image layer under
   // this canvas at the rendered window's rect), so the canvas stays
@@ -607,7 +653,7 @@ export function MaskEditModal({
       }
     }
 
-    if (tool.kind === "clone" && cloneSource.current) paintCloneSource(ctx, cloneSource.current);
+    if ((tool.kind === "clone" || tool.id === "healing_brush") && cloneSource.current) paintCloneSource(ctx, cloneSource.current);
     if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
     if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
     if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples);
@@ -755,7 +801,8 @@ export function MaskEditModal({
       return;
     }
     if (tool.kind === "path") {
-      if (tool.id === "lasso" || tool.id === "freeform_pen") {
+      if (tool.id === "lasso" || tool.id === "freeform_pen" || tool.id === "magnetic_lasso") {
+        if (tool.id === "magnetic_lasso") captureEdgeMap();
         drawing.current = { points: [pt] };
         forceRedraw((n) => n + 1);
         return;
@@ -771,7 +818,7 @@ export function MaskEditModal({
       setPenAnchors((prev) => [...prev, pt]);
       return;
     }
-    if (tool.kind === "clone") {
+    if (tool.kind === "clone" || tool.id === "healing_brush") {
       // Alt+click picks the source; painting without one is inert.
       if (e.altKey) {
         cloneSource.current = pt;
@@ -782,7 +829,8 @@ export function MaskEditModal({
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal" || tool.kind === "history" || tool.kind === "dodge") {
-      if (tool.kind === "dodge") dodgeBurnMode.current = e.altKey ? "burn" : "dodge";
+      if (tool.id === "sponge") spongeMode.current = e.altKey ? "desaturate" : "saturate";
+      else if (tool.kind === "dodge") dodgeBurnMode.current = e.altKey ? "burn" : "dodge";
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "transform") {
@@ -904,8 +952,42 @@ export function MaskEditModal({
     if (drawing.current) {
       const pts = drawing.current.points;
       drawing.current = null;
-      if (tool.id === "lasso" || tool.id === "freeform_pen") {
-        commitPath(tool.id, pts);
+      if (tool.id === "lasso" || tool.id === "freeform_pen" || tool.id === "magnetic_lasso") {
+        // The magnetic lasso snaps the drawn loop to nearby image edges at
+        // commit time (the search window scales with the drawn size).
+        const edge = tool.id === "magnetic_lasso" ? magneticEdge.current : null;
+        commitPath(tool.id, edge ? snapLoopToEdges(edge, pts, Math.max(6, dims.w * 0.008)) : pts);
+        magneticEdge.current = null;
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "quick_select") {
+        // Quick selection: every stroke point seeds a tolerance flood-fill on
+        // the real image; the fills union into the mask on run.
+        dispatch({ type: "op", op: { type: "quick_select", amount: tolerance, points: pts } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "background_eraser") {
+        // Background eraser: pixels inside the brush discs matching the
+        // colour under each stamp's centre are erased on run.
+        dispatch({ type: "op", op: { type: "background_eraser", amount: brushSize, points: pts, tolerance } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "healing_brush") {
+        // Healing brush: like the clone stamp but the copied patch blends
+        // through a feathered edge (source fixed at the drag start).
+        const src = cloneSource.current;
+        if (src) {
+          const [dx, dy] = [src[0] - pts[0][0], src[1] - pts[0][1]];
+          dispatch({ type: "op", op: { type: "healing_brush", amount: brushSize, points: pts, dx, dy } });
+        }
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "sponge") {
+        dispatch({ type: "op", op: { type: "sponge", amount: brushSize, points: pts, mode: spongeMode.current } });
         forceRedraw((n) => n + 1);
         return;
       }

@@ -106,6 +106,8 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "wand", label: "Wand", status: "ready", kind: "click", lane: "render", hint: "Flood-fill a region by colour similarity (wand_tolerance)." },
   { id: "paint_bucket", label: "Paint bucket", status: "ready", kind: "click", lane: "render", hint: "Paint bucket: click to flood-fill similar colours into the mask (tolerance-driven, like the wand)." },
   { id: "magic_eraser", label: "Magic eraser", status: "ready", kind: "click", mode: "subtract", lane: "render", hint: "Magic eraser: click to erase similar colours out of the mask — a wand flood-fill that subtracts." },
+  { id: "quick_select", label: "Quick selection", status: "ready", kind: "paint", mode: "add", lane: "render", hint: "Quick selection: paint over the subject — each point seeds a tolerance flood-fill and the fills union into the mask." },
+  { id: "background_eraser", label: "Background eraser", status: "ready", kind: "paint", mode: "subtract", lane: "render", hint: "Background eraser: paint and pixels matching the colour under the brush centre are erased from the mask (tolerance-keyed)." },
   { id: "rect", label: "Rect", status: "ready", kind: "marquee", mode: "add", lane: "interactive", hint: "Marquee add a rectangle." },
   { id: "ellipse", label: "Ellipse", status: "ready", kind: "marquee", mode: "add", lane: "interactive", hint: "Marquee add an ellipse." },
   { id: "invert", label: "Invert", status: "ready", kind: "global", lane: "preview", hint: "Invert the whole mask." },
@@ -119,8 +121,10 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "matting", label: "Matting", status: "ready", kind: "matte", lane: "render", hint: "Paint the trimap unknown band over hair / fur / glass — the matter resolves it into soft alpha." },
   { id: "heal", label: "Heal", status: "ready", kind: "heal", lane: "preview", hint: "Spot-healing brush: paint over a blemish — the region is rebuilt smoothly from the surrounding mask (a revisable step)." },
   { id: "clone", label: "Clone", status: "ready", kind: "clone", lane: "preview", hint: "Clone stamp: Alt+click picks a source point, then paint copies the mask from the source offset (a revisable step)." },
+  { id: "healing_brush", label: "Healing brush", status: "ready", kind: "heal", lane: "preview", hint: "Healing brush: Alt+click picks a source, then paint blends the mask from the source offset with feathered edges (a revisable step)." },
   { id: "history_brush", label: "History brush", status: "ready", kind: "history", lane: "preview", hint: "History brush: paint a region back to the layer's initial state — the mask before any edit steps (a revisable step)." },
   { id: "dodge_burn", label: "Dodge / burn", status: "ready", kind: "dodge", lane: "preview", hint: "Dodge / burn: paint to locally lighten the mask (Alt-drag darkens) — a revisable step." },
+  { id: "sponge", label: "Sponge", status: "ready", kind: "dodge", lane: "preview", hint: "Sponge: paint to push the mask toward hard on/off (Alt-drag softens toward mid-grey) — a revisable step." },
   { id: "eyedropper", label: "Eyedropper", status: "ready", kind: "sample", lane: "interactive", hint: "Eyedropper: click to sample the image colour under the cursor — the swatch shows in tool options." },
   { id: "color_sampler", label: "Color sampler", status: "ready", kind: "sample", lane: "interactive", hint: "Color sampler: click to pin up to four persistent colour readouts — listed in tool options, markers on the canvas." },
   { id: "ruler", label: "Ruler", status: "ready", kind: "sample", lane: "interactive", hint: "Ruler: drag to measure distance and angle — a pure view read, nothing is recorded." },
@@ -131,6 +135,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "direct_select", label: "Direct selection", status: "ready", kind: "path_edit", lane: "interactive", hint: "Direct selection: click a committed path to select it, then drag individual anchors (Done commits)." },
   { id: "shape", label: "Shape", status: "ready", kind: "shape", lane: "interactive", hint: "Drag a box — the chosen shape (triangle / polygon / star / line) commits as an ordinary path step (add / subtract / intersect)." },
   { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
+  { id: "magnetic_lasso", label: "Magnetic lasso", status: "ready", kind: "path", lane: "interactive", hint: "Magnetic lasso: drag a loop and the points snap to nearby image edges on release." },
   { id: "polygon_lasso", label: "Polygonal lasso", status: "ready", kind: "path", lane: "interactive", hint: "Polygonal lasso: click straight segments around the subject; click the first point (or Close path) to close." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
@@ -140,12 +145,9 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
-  { id: "magnetic_lasso", label: "Magnetic lasso", status: "planned", kind: "path", lane: "interactive", hint: "Magnetic lasso: the path snaps to nearby edges as you drag (planned)." },
   { id: "object_select", label: "Object selection", status: "planned", kind: "click", lane: "render", hint: "Object selection: drag a box and the model masks the object inside (planned)." },
-  { id: "quick_select", label: "Quick selection", status: "planned", kind: "paint", lane: "render", hint: "Quick selection: paint and the selection grows along matching edges (planned)." },
   { id: "perspective_crop", label: "Perspective crop", status: "planned", kind: "marquee", lane: "preview", hint: "Perspective crop: drag a quad and it is straightened into a rectangle (planned)." },
   { id: "remove", label: "Remove", status: "planned", kind: "heal", lane: "render", hint: "Remove tool: brush over an object and a model fills the area (planned)." },
-  { id: "healing_brush", label: "Healing brush", status: "planned", kind: "heal", lane: "preview", hint: "Healing brush: Alt+click a source, then paint to blend it over flaws (planned)." },
   { id: "patch", label: "Patch", status: "planned", kind: "heal", lane: "preview", hint: "Patch: lasso a region, drag it onto clean texture to repair (planned)." },
   { id: "content_aware_move", label: "Content-aware move", status: "planned", kind: "transform", lane: "render", hint: "Content-aware move: drag a selection and the hole is filled behind it (planned)." },
   { id: "red_eye", label: "Red eye", status: "planned", kind: "click", lane: "preview", hint: "Red eye: click a pupil to remove the red reflection (planned)." },
@@ -153,8 +155,6 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "mixer_brush", label: "Mixer brush", status: "planned", kind: "paint", lane: "render", hint: "Mixer brush: blends colours like wet paint (planned)." },
   { id: "pattern_stamp", label: "Pattern stamp", status: "planned", kind: "clone", lane: "preview", hint: "Pattern stamp: paint with a repeating pattern (planned)." },
   { id: "art_history_brush", label: "Art history brush", status: "planned", kind: "history", lane: "preview", hint: "Art history brush: stylised strokes sourced from a history state (planned)." },
-  { id: "background_eraser", label: "Background eraser", status: "planned", kind: "paint", lane: "render", hint: "Background eraser: erases the sampled colour under the brush centre (planned)." },
-  { id: "sponge", label: "Sponge", status: "planned", kind: "dodge", lane: "preview", hint: "Sponge: paint to saturate or desaturate locally (planned)." },
   { id: "type_horizontal", label: "Horizontal type", status: "planned", kind: "shape", lane: "interactive", hint: "Horizontal type: click to place editable text (planned)." },
   { id: "type_vertical", label: "Vertical type", status: "planned", kind: "shape", lane: "interactive", hint: "Vertical type: click to place vertical editable text (planned)." },
 ] as const;
@@ -163,7 +163,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
 export const ANCHOR_PATH_TOOLS: readonly string[] = ["pen", "polygon_lasso", "curvature_pen"];
 
 /** Path tools that record a freehand drag loop, closed on pointer-up. */
-export const FREEHAND_PATH_TOOLS: readonly string[] = ["lasso", "freeform_pen"];
+export const FREEHAND_PATH_TOOLS: readonly string[] = ["lasso", "freeform_pen", "magnetic_lasso"];
 
 /**
  * A Photoshop toolbar slot (PS_TOOLBAR_PARITY_PLAN § "Proposed Registry
