@@ -868,6 +868,41 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
     }
 }
 
+/// Binary frame transport: the same render as [`viewport_render_frame`], but
+/// the frame crosses the IPC boundary as raw bytes instead of a base64 data
+/// URL inside a JSON string. Payload layout:
+/// `[u32 LE meta length][meta JSON {width, height, backend}][PNG bytes]`.
+#[tauri::command]
+pub(crate) fn viewport_render_frame_bin(
+    viewport_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let frame = viewport_render_frame(viewport_id)?;
+    Ok(tauri::ipc::Response::new(frame_bin_payload(&frame)?))
+}
+
+fn frame_bin_payload(frame: &ViewportFrame) -> Result<Vec<u8>, String> {
+    let png = frame
+        .data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| "frame is not a PNG data URL".to_string())
+        .and_then(crate::commands::thumbnails::base64_decode)?;
+    let meta = serde_json::json!({
+        "width": frame.width,
+        "height": frame.height,
+        "backend": frame.backend,
+    })
+    .to_string();
+    let mut payload = Vec::with_capacity(4 + meta.len() + png.len());
+    payload.extend_from_slice(
+        &u32::try_from(meta.len())
+            .map_err(|_| "meta too large")?
+            .to_le_bytes(),
+    );
+    payload.extend_from_slice(meta.as_bytes());
+    payload.extend_from_slice(&png);
+    Ok(payload)
+}
+
 /// Render one video source frame at the viewport's size, applying its grade
 /// doc and view. Graded/viewed frames decode through the native media engine
 /// with the proxy cached per viewport keyed by path + timestamp + size, so
@@ -1008,6 +1043,44 @@ mod tests {
         // Destroyed viewports are gone.
         assert!(viewport_resize(desc.viewport_id.clone(), 1, 1).is_err());
         assert!(viewport_destroy(desc.viewport_id).is_err());
+    }
+
+    #[test]
+    fn frame_bin_payload_carries_meta_header_and_png_bytes() {
+        let png = {
+            let img = image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]));
+            let mut out = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+                .expect("encode png");
+            out
+        };
+        let frame = ViewportFrame {
+            data_url: format!(
+                "data:image/png;base64,{}",
+                crate::commands::thumbnails::base64_encode(&png)
+            ),
+            width: 3,
+            height: 2,
+            backend: cpu_backend(),
+        };
+
+        let payload = frame_bin_payload(&frame).expect("payload");
+        let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
+        let meta: serde_json::Value =
+            serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
+        assert_eq!(meta["width"], 3);
+        assert_eq!(meta["height"], 2);
+        assert_eq!(meta["backend"]["actual"], "cpu");
+        // The trailing bytes are the PNG, byte for byte (base64 round-trips).
+        assert_eq!(&payload[4 + meta_len..], &png[..]);
+
+        let bad = ViewportFrame {
+            data_url: "data:image/jpeg;base64,xxxx".to_string(),
+            width: 1,
+            height: 1,
+            backend: cpu_backend(),
+        };
+        assert!(frame_bin_payload(&bad).is_err());
     }
 
     #[test]

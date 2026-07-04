@@ -30,10 +30,34 @@ export interface ViewportDescriptor {
 }
 
 export interface ViewportFrame {
+  /** Presentable image source. On desktop this is a `blob:` object URL over
+   * the binary frame payload (the caller owns revocation); in the browser
+   * preview it is a data URL. */
   data_url: string;
   width: number;
   height: number;
   backend: ViewportBackend;
+}
+
+/** Binary frame payload layout (see `viewport_render_frame_bin`):
+ * `[u32 LE meta length][meta JSON {width, height, backend}][PNG bytes]`.
+ * Exported for tests; product code receives decoded frames from
+ * `renderViewportFrame`. */
+export function decodeFramePayload(payload: ArrayBuffer | Uint8Array): ViewportFrame {
+  const bytes =
+    payload instanceof Uint8Array
+      ? payload
+      : new Uint8Array(payload);
+  if (bytes.byteLength < 4) throw new Error("viewport frame payload is truncated");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const metaLen = view.getUint32(0, true);
+  if (4 + metaLen > bytes.byteLength) throw new Error("viewport frame meta is truncated");
+  const meta = JSON.parse(
+    new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)),
+  ) as { width: number; height: number; backend: ViewportBackend };
+  const png = bytes.subarray(4 + metaLen);
+  const data_url = URL.createObjectURL(new Blob([new Uint8Array(png)], { type: "image/png" }));
+  return { data_url, width: meta.width, height: meta.height, backend: meta.backend };
 }
 
 // --- browser-preview mock transport -----------------------------------------
@@ -283,7 +307,12 @@ export async function setViewportView(
 
 export async function renderViewportFrame(viewportId: string): Promise<ViewportFrame> {
   const invoke = tauriInvoke();
-  if (invoke) return (await invoke("viewport_render_frame", { viewportId })) as ViewportFrame;
+  if (invoke) {
+    const payload = (await invoke("viewport_render_frame_bin", { viewportId })) as
+      | ArrayBuffer
+      | Uint8Array;
+    return decodeFramePayload(payload);
+  }
   const vp = mockGet(viewportId);
   if (!vp.target) throw new Error(`viewport ${viewportId} has no target`);
   // Like the desktop transport, a zoomed view renders the `1/zoom` window.

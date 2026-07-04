@@ -127,6 +127,7 @@ fn main() {
             commands::viewport::viewport_set_grade,
             commands::viewport::viewport_set_view,
             commands::viewport::viewport_render_frame,
+            commands::viewport::viewport_render_frame_bin,
             commands::viewport::viewport_register_layered_asset,
             commands::viewport::viewport_register_timeline,
             commands::viewport::viewport_register_node_output,

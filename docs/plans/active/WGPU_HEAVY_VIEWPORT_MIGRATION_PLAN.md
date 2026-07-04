@@ -64,10 +64,12 @@ Implemented (PRs #329-379):
 
 Remaining work, roughly in priority order:
 
-1. Native texture presentation: frames still cross the host boundary as PNG
-   data URLs into an `<img>`. Replace with a real WGPU surface/texture swap
-   on desktop (readback only when needed); the host command protocol already
-   isolates callers from this change.
+1. Native texture presentation: frames now cross the host boundary as binary
+   payloads (`viewport_render_frame_bin`: length-prefixed meta JSON + PNG
+   bytes presented via short-lived object URLs) instead of base64 data URLs
+   inside JSON. Remaining: replace the PNG hop with a real WGPU
+   surface/texture swap on desktop (readback only when needed); the host
+   command protocol already isolates callers from this change.
 2. Mask editor presentation: underlay detail now follows canvas zoom — the
    modal requests the visible window (`viewWindow`) from the viewport host
    and places the rendered frame at the window's rect under the edit canvas

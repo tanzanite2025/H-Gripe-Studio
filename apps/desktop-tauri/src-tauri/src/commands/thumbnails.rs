@@ -32,6 +32,35 @@ pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// Inverse of [`base64_encode`] (standard alphabet, `=` padding). Rejects any
+/// byte outside the alphabet so a malformed payload fails loudly.
+pub(crate) fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut rev = [0xffu8; 256];
+    for (i, &b) in TABLE.iter().enumerate() {
+        rev[b as usize] = i as u8;
+    }
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for &b in s.as_bytes() {
+        if b == b'=' {
+            break;
+        }
+        let v = rev[b as usize];
+        if v == 0xff {
+            return Err(format!("invalid base64 byte: 0x{b:02x}"));
+        }
+        buf = (buf << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
 /// In-memory thumbnail cache key: canonical path + target size + the source's
 /// mtime and length, so editing or replacing the file invalidates its entry.
 /// Returns `None` if the file's metadata cannot be read (the caller then just
