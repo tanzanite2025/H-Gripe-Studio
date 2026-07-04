@@ -31,9 +31,16 @@ Implemented (PRs #329–#371):
   per-clip grade docs, latest-wins seek coalescing, play/pause playback, and
   a bounded per-viewport LRU proxy cache. Hook contracts are pinned by tests
   (`useViewportUnderlay`, `useVideoPreview`).
-- Phase 5 (export alignment): mostly complete. Timeline export reuses the
-  render plan and per-clip `GradeDoc`s at encode time and reports graded
-  frame count and grade backend; kernel golden tests keep CPU/GPU parity.
+- Phase 5 (export alignment): complete. Timeline export reuses the render
+  plan and per-clip `GradeDoc`s at encode time and reports graded frame count
+  and grade backend; kernel golden tests keep CPU/GPU parity, and a
+  pipeline-level test asserts export output matches the viewport preview
+  within a defined tolerance.
+- Host-side `image_layer` targets: layered assets register their layer
+  artifacts with the viewport host by path
+  (`viewport_register_layered_asset`), so `image_layer` viewport targets
+  resolve Rust-side like image resources — same proxy cache, grade, and view
+  path. `video_clip` and `node_output` still resolve on the frontend.
 
 Remaining work, roughly in priority order:
 
@@ -46,13 +53,12 @@ Remaining work, roughly in priority order:
    at fixed detail, so deep zoom is soft. Move overlay/brush presentation to
    the viewport and tie underlay detail to canvas zoom without changing the
    recorded pixel space.
-3. Remaining viewport targets: `image_layer`, `video_clip`, and `node_output`
-   targets resolve on the frontend today (layer artifacts are registered by
-   path). Implement them host-side so the selection-target model is uniform.
-4. Preview/export tolerance: add an end-to-end assertion that an exported
-   still/video grade matches the preview within a defined tolerance (kernel
-   parity is tested; the pipeline-level check is not).
-5. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
+3. Remaining viewport targets: `video_clip` and `node_output` targets still
+   resolve on the frontend. Implement them host-side (as done for
+   `image_layer`) so the selection-target model is uniform, and move layer
+   editors onto `image_layer` targets instead of registering layer paths as
+   plain image resources.
+4. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
 
 ## Purpose

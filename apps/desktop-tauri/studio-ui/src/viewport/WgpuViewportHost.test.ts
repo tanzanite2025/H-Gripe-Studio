@@ -2,7 +2,7 @@
 // outside Tauri, so the bridge takes the browser-preview path).
 
 import { describe, expect, it } from "vitest";
-import { openMockViewportCount } from "../bridge/viewport";
+import { openMockViewportCount, registerLayeredAsset } from "../bridge/viewport";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 describe("WgpuViewportHost", () => {
@@ -31,6 +31,41 @@ describe("WgpuViewportHost", () => {
   it("refuses to render before a target is set", async () => {
     const host = await WgpuViewportHost.open("grade_preview");
     await expect(host.renderFrame()).rejects.toThrow(/no target/);
+    await host.close();
+  });
+
+  it("resolves image_layer targets through the layered asset registry", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    // Unregistered assets and layers fail at set time, not at first render.
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "image_layer", assetId: "layered-n1", layerId: "layer_subject" },
+      }),
+    ).rejects.toThrow(/unknown layered asset id/);
+
+    await registerLayeredAsset("layered-n1", [
+      { layerId: "layer_subject", rgbaPath: "/tmp/subject.png" },
+    ]);
+    await expect(
+      host.command({
+        kind: "set_target",
+        target: { kind: "image_layer", assetId: "layered-n1", layerId: "layer_missing" },
+      }),
+    ).rejects.toThrow(/unknown layer id/);
+
+    await host.command({
+      kind: "set_target",
+      target: { kind: "image_layer", assetId: "layered-n1", layerId: "layer_subject" },
+    });
+    await host.command({ kind: "resize", width: 320, height: 240 });
+    const frame = await host.renderFrame();
+    expect(frame.data_url.startsWith("data:image/")).toBe(true);
+
+    // Registration validates its inputs like the desktop host.
+    await expect(registerLayeredAsset("", [])).rejects.toThrow(/must not be empty/);
+    await expect(registerLayeredAsset("layered-empty", [])).rejects.toThrow(/no layers/);
+
     await host.close();
   });
 

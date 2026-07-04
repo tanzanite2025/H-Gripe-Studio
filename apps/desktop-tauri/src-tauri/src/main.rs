@@ -124,6 +124,7 @@ fn main() {
             commands::viewport::viewport_set_grade,
             commands::viewport::viewport_set_view,
             commands::viewport::viewport_render_frame,
+            commands::viewport::viewport_register_layered_asset,
             commands::media::resource_info,
             commands::media::resource_thumbnail,
             commands::shell::read_text_file,

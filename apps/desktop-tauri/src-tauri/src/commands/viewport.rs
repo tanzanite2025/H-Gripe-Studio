@@ -251,6 +251,100 @@ fn cached_proxy(
     Ok(srgb)
 }
 
+/// Cap on registered layered assets. Entries are small (ids and paths), but
+/// the registry lives for the whole app session; past the cap the oldest
+/// registrations drop (FIFO) and are simply re-registered on the next open.
+const MAX_LAYERED_ASSETS: usize = 256;
+
+/// One registered layer artifact: the layer's flattened RGBA file, by path.
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct LayeredAssetLayer {
+    #[serde(rename = "layerId")]
+    pub layer_id: String,
+    #[serde(rename = "rgbaPath")]
+    pub rgba_path: String,
+}
+
+struct LayeredAssetRegistry {
+    /// asset id -> (layer id -> rgba path)
+    map: HashMap<String, HashMap<String, String>>,
+    /// Insertion order of asset ids, oldest first, for FIFO eviction.
+    order: Vec<String>,
+}
+
+static LAYERED_ASSETS: OnceLock<Mutex<LayeredAssetRegistry>> = OnceLock::new();
+
+fn layered_assets() -> &'static Mutex<LayeredAssetRegistry> {
+    LAYERED_ASSETS.get_or_init(|| {
+        Mutex::new(LayeredAssetRegistry {
+            map: HashMap::new(),
+            order: Vec::new(),
+        })
+    })
+}
+
+fn layered_asset_layer_path(asset_id: &str, layer_id: &str) -> Result<String, String> {
+    let reg = layered_assets()
+        .lock()
+        .map_err(|_| "layered asset registry poisoned")?;
+    let layers = reg
+        .map
+        .get(asset_id)
+        .ok_or_else(|| format!("unknown layered asset id: {asset_id}"))?;
+    layers
+        .get(layer_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown layer id {layer_id} on layered asset {asset_id}"))
+}
+
+/// Register (or refresh) the layer artifacts of a layered asset so viewports
+/// can resolve `image_layer` targets host-side, by reference. Layers are
+/// registered by path — never pixels — mirroring the resource registry; a
+/// re-registration after an edit replaces the asset's layer set.
+#[tauri::command]
+pub(crate) fn viewport_register_layered_asset(
+    asset_id: String,
+    layers: Vec<LayeredAssetLayer>,
+) -> Result<(), String> {
+    if asset_id.is_empty() {
+        return Err("layered asset id must not be empty".to_string());
+    }
+    if layers.is_empty() {
+        return Err(format!(
+            "layered asset {asset_id} has no layers to register"
+        ));
+    }
+    let mut set = HashMap::new();
+    for layer in layers {
+        if layer.layer_id.is_empty() {
+            return Err(format!(
+                "layered asset {asset_id} has a layer with an empty id"
+            ));
+        }
+        if !std::path::Path::new(&layer.rgba_path).is_file() {
+            return Err(format!(
+                "layer {} of asset {asset_id} points at a missing file: {}",
+                layer.layer_id, layer.rgba_path
+            ));
+        }
+        set.insert(layer.layer_id, layer.rgba_path);
+    }
+    let mut reg = layered_assets()
+        .lock()
+        .map_err(|_| "layered asset registry poisoned")?;
+    if reg.map.insert(asset_id.clone(), set).is_none() {
+        reg.order.push(asset_id);
+        while reg.map.len() > MAX_LAYERED_ASSETS {
+            if reg.order.is_empty() {
+                break;
+            }
+            let oldest = reg.order.remove(0);
+            reg.map.remove(&oldest);
+        }
+    }
+    Ok(())
+}
+
 const VIEWPORT_KINDS: [&str; 3] = ["image_edit", "grade_preview", "video_preview"];
 
 #[tauri::command]
@@ -316,12 +410,16 @@ pub(crate) fn viewport_set_target(
 ) -> Result<(), String> {
     // Validate reference targets eagerly so a bad id fails at set time, not at
     // the first render.
-    if let ViewportTarget::Image { resource_id } | ViewportTarget::VideoFrame { resource_id, .. } =
-        &target
-    {
-        if resource::get(resource_id).is_none() {
-            return Err(format!("unknown resource id: {resource_id}"));
+    match &target {
+        ViewportTarget::Image { resource_id } | ViewportTarget::VideoFrame { resource_id, .. } => {
+            if resource::get(resource_id).is_none() {
+                return Err(format!("unknown resource id: {resource_id}"));
+            }
         }
+        ViewportTarget::ImageLayer { asset_id, layer_id } => {
+            layered_asset_layer_path(asset_id, layer_id)?;
+        }
+        ViewportTarget::VideoClip { .. } | ViewportTarget::NodeOutput { .. } => {}
     }
     let id = parse_id(&viewport_id)?;
     let mut map = viewports()
@@ -421,50 +519,13 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
         ViewportTarget::Image { resource_id } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
-            let size = width.max(height).clamp(64, 2048);
-            if grade_doc.is_some() || !view.is_identity() {
-                // Graded and/or viewed frame: run the grading kernel (identity
-                // when no doc is set) over the view window of the target's
-                // sRGB proxy. The proxy is cached on the viewport, so a slider
-                // drag or a pan/zoom tick re-runs only crop + kernel.
-                let doc = parse_grade_doc(grade_doc.as_ref())?;
-                let detail = proxy_detail_size(size, view);
-                let key = ProxyKey {
-                    path: entry.path.clone(),
-                    time_bits: None,
-                    size: detail,
-                };
-                let proxy = cached_proxy(id, key, || {
-                    load_image_srgb_proxy(std::path::Path::new(&entry.path), detail)
-                })?;
-                let source = if view.is_identity() {
-                    None
-                } else {
-                    Some(crop_view(&proxy, view))
-                };
-                let graded =
-                    grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
-                return Ok(ViewportFrame {
-                    data_url: graded.data_url,
-                    width: graded.width,
-                    height: graded.height,
-                    backend: ViewportBackend {
-                        requested: "auto".to_string(),
-                        actual: graded.backend.to_string(),
-                        fallback_reason: None,
-                    },
-                });
-            }
-            // CPU placeholder transport: reuse the cached thumbnail pipeline at
-            // the viewport's size (bounded so a huge surface cannot request a
-            // full decode through this path).
-            let thumb = generate_thumbnail_inner(&entry.path, size, None)?;
-            Ok(ViewportFrame {
-                data_url: thumb.data_url,
-                width: thumb.width,
-                height: thumb.height,
-                backend: cpu_backend(),
-            })
+            render_image_path(id, &entry.path, width, height, grade_doc, view)
+        }
+        ViewportTarget::ImageLayer { asset_id, layer_id } => {
+            // Layer artifacts resolve through the layered asset registry —
+            // the same reference-not-pixels contract as image resources.
+            let path = layered_asset_layer_path(&asset_id, &layer_id)?;
+            render_image_path(id, &path, width, height, grade_doc, view)
         }
         #[cfg(feature = "native-ffmpeg")]
         ViewportTarget::VideoFrame {
@@ -535,12 +596,65 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
         ViewportTarget::VideoFrame { .. } => {
             Err("video frame targets require the native media engine".to_string())
         }
-        ViewportTarget::ImageLayer { .. }
-        | ViewportTarget::VideoClip { .. }
-        | ViewportTarget::NodeOutput { .. } => {
+        ViewportTarget::VideoClip { .. } | ViewportTarget::NodeOutput { .. } => {
             Err("target kind not supported by the phase 1 transport".to_string())
         }
     }
+}
+
+/// Render one still-image source (an image resource or a layer artifact) at
+/// the viewport's size, applying its grade doc and view. The decoded sRGB
+/// proxy is cached on the viewport keyed by path + size, so a slider drag or
+/// a pan/zoom tick re-runs only crop + kernel.
+fn render_image_path(
+    id: u64,
+    path: &str,
+    width: u32,
+    height: u32,
+    grade_doc: Option<Value>,
+    view: ViewportView,
+) -> Result<ViewportFrame, String> {
+    let size = width.max(height).clamp(64, 2048);
+    if grade_doc.is_some() || !view.is_identity() {
+        // Graded and/or viewed frame: run the grading kernel (identity when
+        // no doc is set) over the view window of the source's sRGB proxy.
+        let doc = parse_grade_doc(grade_doc.as_ref())?;
+        let detail = proxy_detail_size(size, view);
+        let key = ProxyKey {
+            path: path.to_string(),
+            time_bits: None,
+            size: detail,
+        };
+        let proxy = cached_proxy(id, key, || {
+            load_image_srgb_proxy(std::path::Path::new(path), detail)
+        })?;
+        let source = if view.is_identity() {
+            None
+        } else {
+            Some(crop_view(&proxy, view))
+        };
+        let graded = grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
+        return Ok(ViewportFrame {
+            data_url: graded.data_url,
+            width: graded.width,
+            height: graded.height,
+            backend: ViewportBackend {
+                requested: "auto".to_string(),
+                actual: graded.backend.to_string(),
+                fallback_reason: None,
+            },
+        });
+    }
+    // CPU placeholder transport: reuse the cached thumbnail pipeline at the
+    // viewport's size (bounded so a huge surface cannot request a full decode
+    // through this path).
+    let thumb = generate_thumbnail_inner(path, size, None)?;
+    Ok(ViewportFrame {
+        data_url: thumb.data_url,
+        width: thumb.width,
+        height: thumb.height,
+        backend: cpu_backend(),
+    })
 }
 
 #[cfg(test)]
@@ -809,6 +923,103 @@ mod tests {
 
         viewport_destroy(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn image_layer_targets_resolve_through_the_layered_asset_registry() {
+        // Two real layer artifacts of different colors, registered by path.
+        let dir = std::env::temp_dir();
+        let subject_path = dir.join("hgripe_viewport_layer_subject.png");
+        let background_path = dir.join("hgripe_viewport_layer_background.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([200, 40, 40, 255]))
+            .save(&subject_path)
+            .expect("write subject layer");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([40, 40, 200, 255]))
+            .save(&background_path)
+            .expect("write background layer");
+        let layer = |layer_id: &str, path: &std::path::Path| LayeredAssetLayer {
+            layer_id: layer_id.to_string(),
+            rgba_path: path.to_string_lossy().to_string(),
+        };
+        viewport_register_layered_asset(
+            "layered-n1".to_string(),
+            vec![
+                layer("layer_subject", &subject_path),
+                layer("layer_background", &background_path),
+            ],
+        )
+        .expect("register layered asset");
+
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageLayer {
+                asset_id: "layered-n1".to_string(),
+                layer_id: "layer_subject".to_string(),
+            },
+        )
+        .expect("set image_layer target");
+        let frame = viewport_render_frame(desc.viewport_id.clone()).expect("render layer");
+        assert!(frame.data_url.starts_with("data:image/png;base64,"));
+        assert_eq!((frame.width, frame.height), (64, 64));
+
+        // Unknown layer / asset ids fail at set time, not at the first render.
+        let err = viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageLayer {
+                asset_id: "layered-n1".to_string(),
+                layer_id: "layer_missing".to_string(),
+            },
+        )
+        .expect_err("unknown layer id must be rejected");
+        assert!(err.contains("unknown layer id"), "{err}");
+        let err = viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageLayer {
+                asset_id: "layered-missing".to_string(),
+                layer_id: "layer_subject".to_string(),
+            },
+        )
+        .expect_err("unknown asset id must be rejected");
+        assert!(err.contains("unknown layered asset id"), "{err}");
+
+        // Re-registration replaces the asset's layer set.
+        viewport_register_layered_asset(
+            "layered-n1".to_string(),
+            vec![layer("layer_background", &background_path)],
+        )
+        .expect("re-register layered asset");
+        assert!(layered_asset_layer_path("layered-n1", "layer_subject").is_err());
+        assert!(layered_asset_layer_path("layered-n1", "layer_background").is_ok());
+
+        viewport_destroy(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&subject_path);
+        let _ = std::fs::remove_file(&background_path);
+    }
+
+    #[test]
+    fn register_layered_asset_validates_ids_and_paths() {
+        assert!(viewport_register_layered_asset("".to_string(), vec![]).is_err());
+        assert!(viewport_register_layered_asset("layered-empty".to_string(), vec![]).is_err());
+        let err = viewport_register_layered_asset(
+            "layered-bad".to_string(),
+            vec![LayeredAssetLayer {
+                layer_id: "layer_1".to_string(),
+                rgba_path: "/does/not/exist.png".to_string(),
+            }],
+        )
+        .expect_err("missing artifact file must be rejected");
+        assert!(err.contains("missing file"), "{err}");
+        let err = viewport_register_layered_asset(
+            "layered-bad".to_string(),
+            vec![LayeredAssetLayer {
+                layer_id: String::new(),
+                rgba_path: "/does/not/exist.png".to_string(),
+            }],
+        )
+        .expect_err("empty layer id must be rejected");
+        assert!(err.contains("empty id"), "{err}");
     }
 
     #[test]
