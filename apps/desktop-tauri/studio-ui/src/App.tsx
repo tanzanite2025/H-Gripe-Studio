@@ -1225,15 +1225,20 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         : mediaEditSource
           ? {
               editor: "media",
-              target: {
-                title: t("node.mediaEdit"),
-                imagePath:
-                  (mediaEditSource.data as HgripeNodeData).imagePath ??
-                  (typeof (mediaEditSource.data as HgripeNodeData).params?.path === "string"
-                    ? ((mediaEditSource.data as HgripeNodeData).params.path as string)
-                    : null),
-                nodeId: mediaEditSource.id,
-              },
+              target: (() => {
+                const data = mediaEditSource.data as HgripeNodeData;
+                const imagePath =
+                  data.imagePath ??
+                  (typeof data.params?.path === "string" ? (data.params.path as string) : null);
+                // Title: the image's filename, so the bar reads
+                // "photo.png · image editor".
+                const base = imagePath?.split(/[\\/]/).pop();
+                return {
+                  title: base || t("mediaEdit.title"),
+                  imagePath,
+                  nodeId: mediaEditSource.id,
+                };
+              })(),
               // Apply spawns exactly one bound edit node of the chosen kind from
               // the source (never mutating it) and runs it — same pipeline as the
               // right-click auto entries, but seeded with the manual edits.

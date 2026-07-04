@@ -12,7 +12,18 @@
   --ps-row-h: 34px; /* layer-row height */
 }
 
-.media-viewer.mask-edit { width: min(1280px, 94vw); height: 88vh; }
+.media-viewer.mask-edit {
+  width: 100%;
+  max-width: 100%;
+  height: 95vh;
+  max-height: 95vh;
+}
+/* The image-editor shells span the full viewport width, so the backdrop's
+   framing padding goes. */
+.media-viewer-backdrop:has(> .mask-edit),
+.media-viewer-backdrop:has(> .crop-edit) {
+  padding: 0;
+}
 .mask-edit-body {
   flex: 1;
   min-height: 0;

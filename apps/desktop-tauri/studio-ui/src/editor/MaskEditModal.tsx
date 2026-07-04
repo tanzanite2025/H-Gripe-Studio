@@ -80,6 +80,8 @@ interface MaskEditModalProps {
   onClose: () => void;
   /** Optional bar content (e.g. the unified editor's tool-group switcher). */
   headerExtra?: ReactNode;
+  /** Editor name shown after the title (defaults to "mask editor"). */
+  editorName?: string;
 }
 
 let strokeSeq = 0;
@@ -106,6 +108,7 @@ export function MaskEditModal({
   onCommit,
   onClose,
   headerExtra,
+  editorName,
 }: MaskEditModalProps) {
   const t = useT();
   const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
@@ -946,7 +949,7 @@ export function MaskEditModal({
       <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="media-viewer-bar">
           <span className="media-viewer-name" title={title}>
-            {title} <span className="muted">· {t("mask.editor")}</span>
+            {title} <span className="muted">· {editorName ?? t("mask.editor")}</span>
           </span>
           {headerExtra}
           <div className="media-viewer-actions">

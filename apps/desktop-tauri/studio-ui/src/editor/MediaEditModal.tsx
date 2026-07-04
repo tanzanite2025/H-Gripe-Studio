@@ -69,6 +69,7 @@ export function MediaEditModal({
         onCommit={onCommitMask}
         onClose={onClose}
         headerExtra={switcher}
+        editorName={t("mediaEdit.editor")}
       />
     );
   }
@@ -84,6 +85,7 @@ export function MediaEditModal({
       onCommit={onCommitCrop}
       onClose={onClose}
       headerExtra={switcher}
+      editorName={t("mediaEdit.editor")}
     />
   );
 }

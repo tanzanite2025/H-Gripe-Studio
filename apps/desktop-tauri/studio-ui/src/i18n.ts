@@ -270,6 +270,8 @@ export const messages = {
     en: "Open the unified editor (mask + crop) and apply to a bound edit node",
     zh: "打开统一编辑器（蒙版 + 裁剪），确定后生成一个绑定的编辑节点",
   },
+  "mediaEdit.editor": { en: "image editor", zh: "图片编辑器" },
+  "mediaEdit.title": { en: "Image editor", zh: "图片编辑器" },
   "mediaEdit.mask": { en: "Mask", zh: "蒙版" },
   "mediaEdit.crop": { en: "Crop", zh: "裁剪" },
   "node.cropAuto": { en: "Crop to subject [Auto]", zh: "裁剪到主体【自动】" },
