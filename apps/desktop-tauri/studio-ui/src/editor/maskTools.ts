@@ -126,51 +126,106 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
+  { id: "polygon_lasso", label: "Polygonal lasso", status: "planned", kind: "path", lane: "interactive", hint: "Polygonal lasso: click straight segments around the subject (planned)." },
+  { id: "magnetic_lasso", label: "Magnetic lasso", status: "planned", kind: "path", lane: "interactive", hint: "Magnetic lasso: the path snaps to nearby edges as you drag (planned)." },
+  { id: "object_select", label: "Object selection", status: "planned", kind: "click", lane: "render", hint: "Object selection: drag a box and the model masks the object inside (planned)." },
+  { id: "quick_select", label: "Quick selection", status: "planned", kind: "paint", lane: "render", hint: "Quick selection: paint and the selection grows along matching edges (planned)." },
+  { id: "perspective_crop", label: "Perspective crop", status: "planned", kind: "marquee", lane: "preview", hint: "Perspective crop: drag a quad and it is straightened into a rectangle (planned)." },
+  { id: "color_sampler", label: "Color sampler", status: "planned", kind: "sample", lane: "interactive", hint: "Color sampler: pin up to four persistent colour readouts (planned)." },
+  { id: "ruler", label: "Ruler", status: "planned", kind: "sample", lane: "interactive", hint: "Ruler: drag to measure distance and angle (planned)." },
+  { id: "remove", label: "Remove", status: "planned", kind: "heal", lane: "render", hint: "Remove tool: brush over an object and a model fills the area (planned)." },
+  { id: "healing_brush", label: "Healing brush", status: "planned", kind: "heal", lane: "preview", hint: "Healing brush: Alt+click a source, then paint to blend it over flaws (planned)." },
+  { id: "patch", label: "Patch", status: "planned", kind: "heal", lane: "preview", hint: "Patch: lasso a region, drag it onto clean texture to repair (planned)." },
+  { id: "content_aware_move", label: "Content-aware move", status: "planned", kind: "transform", lane: "render", hint: "Content-aware move: drag a selection and the hole is filled behind it (planned)." },
+  { id: "red_eye", label: "Red eye", status: "planned", kind: "click", lane: "preview", hint: "Red eye: click a pupil to remove the red reflection (planned)." },
+  { id: "pencil", label: "Pencil", status: "planned", kind: "paint", lane: "interactive", hint: "Pencil: hard-edged aliased paint strokes (planned)." },
+  { id: "color_replacement", label: "Color replacement", status: "planned", kind: "paint", lane: "render", hint: "Color replacement: paint a new hue while keeping texture (planned)." },
+  { id: "mixer_brush", label: "Mixer brush", status: "planned", kind: "paint", lane: "render", hint: "Mixer brush: blends colours like wet paint (planned)." },
+  { id: "pattern_stamp", label: "Pattern stamp", status: "planned", kind: "clone", lane: "preview", hint: "Pattern stamp: paint with a repeating pattern (planned)." },
+  { id: "art_history_brush", label: "Art history brush", status: "planned", kind: "history", lane: "preview", hint: "Art history brush: stylised strokes sourced from a history state (planned)." },
+  { id: "background_eraser", label: "Background eraser", status: "planned", kind: "paint", lane: "render", hint: "Background eraser: erases the sampled colour under the brush centre (planned)." },
+  { id: "magic_eraser", label: "Magic eraser", status: "planned", kind: "click", lane: "render", hint: "Magic eraser: click to erase similar colours, like a wand + delete (planned)." },
+  { id: "paint_bucket", label: "Paint bucket", status: "planned", kind: "click", lane: "preview", hint: "Paint bucket: flood-fill similar colours with the selection (planned)." },
+  { id: "sponge", label: "Sponge", status: "planned", kind: "dodge", lane: "preview", hint: "Sponge: paint to saturate or desaturate locally (planned)." },
+  { id: "freeform_pen", label: "Freeform pen", status: "planned", kind: "path", lane: "interactive", hint: "Freeform pen: draw a path freehand; anchors are added automatically (planned)." },
+  { id: "curvature_pen", label: "Curvature pen", status: "planned", kind: "path", lane: "interactive", hint: "Curvature pen: click points and smooth curves are fitted through them (planned)." },
+  { id: "type_horizontal", label: "Horizontal type", status: "planned", kind: "shape", lane: "interactive", hint: "Horizontal type: click to place editable text (planned)." },
+  { id: "type_vertical", label: "Vertical type", status: "planned", kind: "shape", lane: "interactive", hint: "Vertical type: click to place vertical editable text (planned)." },
+  { id: "path_select", label: "Path selection", status: "planned", kind: "path", lane: "interactive", hint: "Path selection: select and move whole committed paths (planned)." },
+  { id: "direct_select", label: "Direct selection", status: "planned", kind: "path", lane: "interactive", hint: "Direct selection: select and move individual path anchors (planned)." },
 ] as const;
 
 /**
- * Toolbar groups in Photoshop's toolbar order (selection → paint → vector →
- * whole-mask operations → navigation), rendered with separators between
- * groups so tools sit where a PS user expects them. Every `MASK_TOOLS` id
- * appears in exactly one group (pinned by a registry test).
+ * A Photoshop toolbar slot (PS_TOOLBAR_PARITY_PLAN § "Proposed Registry
+ * Shape"): one visible toolbar button owning a PS shortcut letter and a
+ * flyout of tool variants. `variants` lists `MASK_TOOLS` ids in flyout
+ * order; planned variants render greyed and disabled, holding the PS slot
+ * shape until they ship.
  */
-export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = [
-  // Selection block (PS V / M / L / W / C / I row): move, marquees, lasso,
-  // wand / SAM points, crop, eyedropper.
-  ["move", "rect", "ellipse", "lasso", "wand", "point", "crop", "eyedropper"],
-  // Paint / retouch block (PS J / B / S / Y / E / G / O row): heal, brush,
-  // matting band, clone stamp, history brush, eraser, gradient, dodge/burn.
-  ["heal", "brush", "matting", "clone", "history_brush", "eraser", "gradient", "dodge_burn"],
-  // Vector block (PS P / U): pen, shapes.
-  ["pen", "shape"],
-  // Whole-mask operations (PS menu commands; toolbar buttons here).
-  ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"],
-  // Navigation: hand, rotate-view, zoom.
-  ["hand", "rotate_view", "zoom"],
+export interface PsToolSlot {
+  id: string;
+  /** The PS single-letter shortcut this slot owns (display only). */
+  shortcut?: string;
+  label: string;
+  variants: readonly string[];
+}
+
+/**
+ * The left toolbar as Photoshop slot sections (rendered with separators).
+ * Slot order follows Photoshop's tool-slot order (V / M / L / W / C / I,
+ * then J / B / S / Y / E / G / O, then P / T / A / U, then navigation);
+ * every `MASK_TOOLS` id appears in exactly one slot (pinned by a registry
+ * test). The whole-mask operations slot is a temporary home until they move
+ * to a right-panel Mask Ops group (plan step 4).
+ */
+export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
+  [
+    { id: "move", shortcut: "V", label: "Move", variants: ["move"] },
+    { id: "marquee", shortcut: "M", label: "Marquee", variants: ["rect", "ellipse"] },
+    { id: "lasso", shortcut: "L", label: "Lasso", variants: ["lasso", "polygon_lasso", "magnetic_lasso"] },
+    { id: "selection", shortcut: "W", label: "Selection", variants: ["object_select", "quick_select", "wand", "point"] },
+    { id: "crop", shortcut: "C", label: "Crop", variants: ["crop", "perspective_crop"] },
+    { id: "sample", shortcut: "I", label: "Sample", variants: ["eyedropper", "color_sampler", "ruler"] },
+  ],
+  [
+    { id: "repair", shortcut: "J", label: "Repair", variants: ["heal", "remove", "healing_brush", "patch", "content_aware_move", "red_eye"] },
+    { id: "brush", shortcut: "B", label: "Brush", variants: ["brush", "pencil", "color_replacement", "mixer_brush", "matting"] },
+    { id: "stamp", shortcut: "S", label: "Stamp", variants: ["clone", "pattern_stamp"] },
+    { id: "history", shortcut: "Y", label: "History", variants: ["history_brush", "art_history_brush"] },
+    { id: "eraser", shortcut: "E", label: "Eraser", variants: ["eraser", "background_eraser", "magic_eraser"] },
+    { id: "fill", shortcut: "G", label: "Fill", variants: ["gradient", "paint_bucket"] },
+    { id: "dodge", shortcut: "O", label: "Dodge", variants: ["dodge_burn", "sponge"] },
+  ],
+  [
+    { id: "pen", shortcut: "P", label: "Pen", variants: ["pen", "freeform_pen", "curvature_pen"] },
+    { id: "type", shortcut: "T", label: "Type", variants: ["type_horizontal", "type_vertical"] },
+    { id: "path_select", shortcut: "A", label: "Path Select", variants: ["path_select", "direct_select"] },
+    { id: "shape", shortcut: "U", label: "Shape", variants: ["shape"] },
+  ],
+  [
+    { id: "mask_ops", label: "Mask Ops", variants: ["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"] },
+  ],
+  [
+    { id: "hand", shortcut: "H", label: "Hand", variants: ["hand"] },
+    { id: "rotate_view", shortcut: "R", label: "Rotate View", variants: ["rotate_view"] },
+    { id: "zoom", shortcut: "Z", label: "Zoom", variants: ["zoom"] },
+  ],
 ] as const;
 
 /**
- * PS-style toolbar slots: each section (rendered with a separator) is a list
- * of slots, and each slot holds one or more tool variants sharing a single
- * icon button. Multi-tool slots show the last-used variant's icon and open a
- * flyout card (long-press / right-click, like PS) listing the variants.
- * Every `MASK_TOOLS` id appears in exactly one slot (pinned by a registry
- * test); `MASK_TOOL_GROUPS` above stays the flat per-section view.
+ * Flat per-section view of the slot registry (separator-delimited id lists),
+ * derived from `PS_TOOL_SECTIONS` so the two can never drift.
  */
-export const MASK_TOOL_SLOTS: readonly (readonly (readonly string[])[])[] = [
-  // Selection: move | marquees (rect/ellipse) | lasso | wand + SAM point |
-  // crop | eyedropper.
-  [["move"], ["rect", "ellipse"], ["lasso"], ["wand", "point"], ["crop"], ["eyedropper"]],
-  // Paint / retouch: heal | brush + matting band | clone | history brush |
-  // eraser | gradient | dodge/burn.
-  [["heal"], ["brush", "matting"], ["clone"], ["history_brush"], ["eraser"], ["gradient"], ["dodge_burn"]],
-  // Vector: pen | shape.
-  [["pen"], ["shape"]],
-  // Whole-mask operations (PS menu commands) folded into one flyout slot.
-  [["invert", "fill_holes", "smooth", "grow", "shrink", "feather", "blur", "sharpen"]],
-  // Navigation: hand + rotate view | zoom.
-  [["hand", "rotate_view"], ["zoom"]],
-] as const;
+export const MASK_TOOL_GROUPS: readonly (readonly string[])[] = PS_TOOL_SECTIONS.map(
+  (section) => section.flatMap((slot) => slot.variants),
+);
+
+/**
+ * Slot-variant view (section → slot → variant ids), derived from
+ * `PS_TOOL_SECTIONS` for consumers that only need the id nesting.
+ */
+export const MASK_TOOL_SLOTS: readonly (readonly (readonly string[])[])[] =
+  PS_TOOL_SECTIONS.map((section) => section.map((slot) => slot.variants));
 
 export const READY_TOOLS = MASK_TOOLS.filter((t) => t.status === "ready");
 export const PLANNED_TOOLS = MASK_TOOLS.filter((t) => t.status === "planned");

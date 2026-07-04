@@ -81,6 +81,14 @@
   pointer-events: none;
 }
 .mask-tool.active .mask-tool-key { opacity: 0.85; }
+/* Planned (coming-soon) variants keep their PS slot shape but render greyed
+   and inert. */
+.mask-tool.planned,
+.mask-flyout-item.planned {
+  opacity: 0.35;
+  cursor: default;
+}
+.mask-tool.planned:hover:not(:disabled) { background: transparent; }
 /* PS's tiny corner triangle marking a slot that hides more variants. */
 .mask-tool .flyout-corner {
   position: absolute;
