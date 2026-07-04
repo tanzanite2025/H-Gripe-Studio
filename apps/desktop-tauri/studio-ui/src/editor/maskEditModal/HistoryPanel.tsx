@@ -23,6 +23,9 @@ function opLabel(op: EditOp): string {
   if (op.type === "healing_brush") return `healing r${op.amount ?? 8} Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}`;
   if (op.type === "quick_select") return `quick select tol${op.amount ?? 0} (${op.points?.length ?? 0})`;
   if (op.type === "background_eraser") return `bg eraser r${op.amount ?? 8} tol${op.tolerance ?? 0}`;
+  if (op.type === "patch") return `patch Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)} (${op.points?.length ?? 0})`;
+  if (op.type === "perspective_crop") return "perspective crop";
+  if (op.type === "red_eye") return `red eye @${Math.round(op.region?.[0] ?? 0)},${Math.round(op.region?.[1] ?? 0)}`;
   return op.type;
 }
 

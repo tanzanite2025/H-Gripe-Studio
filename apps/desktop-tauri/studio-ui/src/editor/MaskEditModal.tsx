@@ -46,6 +46,7 @@ import {
   paintPath,
   paintPenAnchors,
   paintPreviewOverlay,
+  paintQuadDraft,
   paintQuickMask,
   paintRetouchBand,
   paintRuler,
@@ -54,7 +55,7 @@ import {
   paintStroke,
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
-import { catmullRomClosed } from "./maskEditModal/pathGeometry";
+import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap, snapLoopToEdges, type EdgeMap } from "./maskEditModal/magneticSnap";
 import { hitTestPathOp, translateAnchors } from "./maskEditModal/pathEditTools";
 import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
@@ -239,6 +240,14 @@ export function MaskEditModal({
   // Magnetic lasso: an edge map over the underlay's visible window, captured
   // at drag start so the drawn loop can snap to image edges on release.
   const magneticEdge = useRef<EdgeMap | null>(null);
+  // Patch tool: the committed lasso loop awaiting its drop drag, and the
+  // in-progress drop drag (the loop's translation vector).
+  const patchLoop = useRef<[number, number][] | null>(null);
+  const patchDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // Perspective crop: the adjustable quad draft (TL, TR, BR, BL image-space)
+  // between the box drag and the commit click, plus the corner being dragged.
+  const [quadDraft, setQuadDraft] = useState<[number, number][] | null>(null);
+  const quadCorner = useRef<number | null>(null);
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
@@ -349,6 +358,11 @@ export function MaskEditModal({
   const selectTool = (id: string) => {
     if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
     cancelPathEdit();
+    if (id !== "patch") {
+      patchLoop.current = null;
+      patchDrag.current = null;
+    }
+    if (id !== "perspective_crop") setQuadDraft(null);
     setToolId(id);
     const slot = psSlotOf(id);
     if (slot && slot.variants.length > 1) setSlotFaces((f) => ({ ...f, [slot.id]: id }));
@@ -639,7 +653,7 @@ export function MaskEditModal({
     state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
     const live = drawing.current;
     if (live) {
-      if (tool.kind === "path") {
+      if (tool.kind === "path" || tool.id === "patch") {
         paintLassoLoop(ctx, live.points);
       } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
         paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, dodgeBurnMode.current));
@@ -674,7 +688,15 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine]);
+    const pl = patchLoop.current;
+    if (pl) {
+      const pd = patchDrag.current;
+      const [ox, oy] = pd ? [pd.end[0] - pd.start[0], pd.end[1] - pd.start[1]] : [0, 0];
+      paintLassoLoop(ctx, pd ? pl.map(([x, y]) => [x + ox, y + oy] as [number, number]) : pl, true);
+      if (pd) paintDragArrow(ctx, pd.start, pd.end);
+    }
+    if (quadDraft) paintQuadDraft(ctx, quadDraft);
+  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft]);
 
   useEffect(() => {
     redraw();
@@ -818,6 +840,40 @@ export function MaskEditModal({
       setPenAnchors((prev) => [...prev, pt]);
       return;
     }
+    if (tool.id === "patch") {
+      // Patch: a drag from inside the pending loop drops it; anywhere else
+      // starts a fresh lasso.
+      const loop = patchLoop.current;
+      if (loop && pointInPolygon(pt, loop)) {
+        patchDrag.current = { start: pt, end: pt };
+      } else {
+        patchLoop.current = null;
+        drawing.current = { points: [pt] };
+      }
+      forceRedraw((n) => n + 1);
+      return;
+    }
+    if (tool.id === "perspective_crop") {
+      // Perspective crop: drag corners of the pending quad, click inside it
+      // to commit, or drag a fresh box.
+      const quad = quadDraft;
+      if (quad) {
+        const grabRadius = Math.max(10, dims.w * 0.012);
+        const idx = quad.findIndex(([qx, qy]) => Math.hypot(qx - pt[0], qy - pt[1]) <= grabRadius);
+        if (idx >= 0) {
+          quadCorner.current = idx;
+          return;
+        }
+        setQuadDraft(null);
+        if (pointInPolygon(pt, quad)) {
+          dispatch({ type: "op", op: { type: "perspective_crop", region: quad.flat() } });
+          return;
+        }
+      }
+      marquee.current = { start: pt, end: pt };
+      forceRedraw((n) => n + 1);
+      return;
+    }
     if (tool.kind === "clone" || tool.id === "healing_brush") {
       // Alt+click picks the source; painting without one is inert.
       if (e.altKey) {
@@ -846,6 +902,12 @@ export function MaskEditModal({
       shapeDrag.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "click") {
+      if (tool.id === "red_eye") {
+        // Red eye: the contiguous red-dominant region around the click
+        // floods into the mask on run.
+        dispatch({ type: "op", op: { type: "red_eye", region: pt } });
+        return;
+      }
       // Wand-family flood fill, seeded at the click: the paint bucket adds
       // like the wand; the magic eraser records mode "subtract" and the
       // backend clears the flooded region instead.
@@ -905,6 +967,17 @@ export function MaskEditModal({
       redraw();
       return;
     }
+    if (quadCorner.current != null) {
+      const p = toImage(e);
+      const idx = quadCorner.current;
+      setQuadDraft((prev) => (prev ? prev.map((q, i) => (i === idx ? p : q)) : prev));
+      return;
+    }
+    if (patchDrag.current) {
+      patchDrag.current.end = toImage(e);
+      redraw();
+      return;
+    }
     if (drawing.current) {
       drawing.current.points.push(toImage(e));
       redraw();
@@ -949,6 +1022,23 @@ export function MaskEditModal({
       forceRedraw((n) => n + 1);
       return;
     }
+    if (quadCorner.current != null) {
+      quadCorner.current = null;
+      return;
+    }
+    if (patchDrag.current) {
+      const { start, end } = patchDrag.current;
+      patchDrag.current = null;
+      const loop = patchLoop.current;
+      if (loop && Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1) {
+        // Patch: covered pixel `p` refills from `p + [dx, dy]` — the drop
+        // site is the clean-texture source.
+        dispatch({ type: "op", op: { type: "patch", points: loop, dx: end[0] - start[0], dy: end[1] - start[1] } });
+        patchLoop.current = null;
+      }
+      forceRedraw((n) => n + 1);
+      return;
+    }
     if (drawing.current) {
       const pts = drawing.current.points;
       drawing.current = null;
@@ -988,6 +1078,13 @@ export function MaskEditModal({
       }
       if (tool.id === "sponge") {
         dispatch({ type: "op", op: { type: "sponge", amount: brushSize, points: pts, mode: spongeMode.current } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "patch") {
+        // The released lasso becomes the pending loop; the next drag from
+        // inside it records the patch op.
+        patchLoop.current = pts.length >= 3 ? pts : null;
         forceRedraw((n) => n + 1);
         return;
       }
@@ -1063,7 +1160,18 @@ export function MaskEditModal({
       marquee.current = null;
       const region = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
       if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
-        dispatch({ type: "op", op: { type: tool.id, region } });
+        if (tool.id === "perspective_crop") {
+          // The box becomes an adjustable quad; the commit happens on the
+          // click inside it.
+          setQuadDraft([
+            [region[0], region[1]],
+            [region[2], region[1]],
+            [region[2], region[3]],
+            [region[0], region[3]],
+          ]);
+        } else {
+          dispatch({ type: "op", op: { type: tool.id, region } });
+        }
       }
       forceRedraw((n) => n + 1);
     } else if (shapeDrag.current) {
@@ -1092,6 +1200,11 @@ export function MaskEditModal({
     if (t.status !== "ready") return;
     if (!ANCHOR_PATH_TOOLS.includes(t.id)) setPenAnchors([]);
     cancelPathEdit();
+    if (t.id !== "patch") {
+      patchLoop.current = null;
+      patchDrag.current = null;
+    }
+    if (t.id !== "perspective_crop") setQuadDraft(null);
     if (t.kind === "global") {
       // Amount-taking morphology ops (grow/shrink/feather/smooth) enter a live
       // preview mode — the user tunes the amount and commits via Apply. The

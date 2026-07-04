@@ -629,6 +629,107 @@ export interface ProxyBuildOptions {
 
 const DEFAULT_PROXY_WIDTH = 320;
 
+// Feathered edge (image px) of the patch tool's blend into the surroundings.
+const PATCH_FEATHER = 4;
+
+/**
+ * Patch (PS J flyout, on a mask): the lassoed polygon is refilled from the
+ * `dx`/`dy` drop offset, blended through a feathered coverage like the
+ * healing brush. Mirrors the Rust `patch_region`.
+ */
+export function patchRegion(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length < 3) return;
+  const dx = Math.round((op.dx ?? 0) * scale);
+  const dy = Math.round((op.dy ?? 0) * scale);
+  const coverage = createProxyMask(mask.w, mask.h);
+  fillPath(
+    coverage,
+    { id: "patch", mode: "add", tool: "patch", closed: true, points: points.map(([x, y]) => ({ x, y })) },
+    scale,
+  );
+  const soft = boxBlur(coverage, Math.max(1, Math.round(PATCH_FEATHER * scale)));
+  const base = Uint8Array.from(mask.data);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const i = y * mask.w + x;
+      const w = soft.data[i] / 255;
+      if (w === 0) continue;
+      const sx = x + dx;
+      const sy = y + dy;
+      const cloned = sx >= 0 && sx < mask.w && sy >= 0 && sy < mask.h ? base[sy * mask.w + sx] : 0;
+      mask.data[i] = Math.round(base[i] * (1 - w) + cloned * w);
+    }
+  }
+}
+
+/**
+ * Homography coefficients mapping the unit square onto the quad
+ * `[p00, p10, p11, p01]` (TL, TR, BR, BL):
+ * `X = (a·u + b·v + c) / (g·u + h·v + 1)`, same for `Y` with `d, e, f`.
+ * Degenerate quads fall back to the affine map (`g = h = 0`).
+ */
+export function quadHomography(quad: readonly (readonly [number, number])[]): number[] {
+  const [p00, p10, p11, p01] = quad;
+  const sx = p00[0] - p10[0] + p11[0] - p01[0];
+  const sy = p00[1] - p10[1] + p11[1] - p01[1];
+  const d1x = p10[0] - p11[0];
+  const d1y = p10[1] - p11[1];
+  const d2x = p01[0] - p11[0];
+  const d2y = p01[1] - p11[1];
+  const den = d1x * d2y - d1y * d2x;
+  let g = 0;
+  let h = 0;
+  if ((sx !== 0 || sy !== 0) && Math.abs(den) > 1e-9) {
+    g = (sx * d2y - sy * d2x) / den;
+    h = (d1x * sy - sx * d1y) / den;
+  }
+  const a = p10[0] - p00[0] + g * p10[0];
+  const b = p01[0] - p00[0] + h * p01[0];
+  const c = p00[0];
+  const d = p10[1] - p00[1] + g * p10[1];
+  const e = p01[1] - p00[1] + h * p01[1];
+  const f = p00[1];
+  return [a, b, c, d, e, f, g, h];
+}
+
+/**
+ * Perspective crop (PS C flyout, on a mask): straighten the quad
+ * `region: [x0,y0, x1,y1, x2,y2, x3,y3]` (TL, TR, BR, BL image-space) into
+ * its bounding rectangle — each rect pixel inverse-maps through the
+ * rect→quad homography (nearest-neighbour), everything outside the rect is
+ * cleared. Mirrors the Rust `perspective_crop_mask`.
+ */
+export function perspectiveCrop(mask: ProxyMask, op: MaskOperation, scale: number): ProxyMask {
+  const q = op.region;
+  if (!q || q.length < 8) return mask;
+  const quad: [number, number][] = [0, 1, 2, 3].map((i) => [q[i * 2] * scale, q[i * 2 + 1] * scale]);
+  const bx1 = Math.min(quad[0][0], quad[1][0], quad[2][0], quad[3][0]);
+  const by1 = Math.min(quad[0][1], quad[1][1], quad[2][1], quad[3][1]);
+  const bx2 = Math.max(quad[0][0], quad[1][0], quad[2][0], quad[3][0]);
+  const by2 = Math.max(quad[0][1], quad[1][1], quad[2][1], quad[3][1]);
+  const bw = Math.max(bx2 - bx1, 1e-6);
+  const bh = Math.max(by2 - by1, 1e-6);
+  const [a, b, c, d, e, f, g, h] = quadHomography(quad);
+  const out = createProxyMask(mask.w, mask.h);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (cx < bx1 || cx > bx2 || cy < by1 || cy > by2) continue;
+      const u = (cx - bx1) / bw;
+      const v = (cy - by1) / bh;
+      const den = g * u + h * v + 1;
+      if (Math.abs(den) < 1e-9) continue;
+      const sx = Math.floor((a * u + b * v + c) / den);
+      const sy = Math.floor((d * u + e * v + f) / den);
+      if (sx < 0 || sy < 0 || sx >= mask.w || sy >= mask.h) continue;
+      out.data[y * mask.w + x] = mask.data[sy * mask.w + sx];
+    }
+  }
+  return out;
+}
+
 /**
  * Rasterise one committed pen / lasso path onto the proxy: flatten the anchor
  * loop to a straight-edged polygon (proxy resolution makes bezier flattening
@@ -698,11 +799,15 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       spongeStroke(mask, op, scale);
     } else if (op.type === "healing_brush") {
       healingBrushStroke(mask, op, scale);
+    } else if (op.type === "patch") {
+      patchRegion(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
+    } else if (op.type === "perspective_crop") {
+      mask = perspectiveCrop(mask, op, scale);
     } else if (op.type === "transform") {
       mask = transformMask(mask, (op.dx ?? 0) * scale, (op.dy ?? 0) * scale, op.scale ?? 1, op.rotate ?? 0);
-    } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser") {
+    } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser" || op.type === "red_eye") {
       // Need the real image; not previewable on the proxy.
     } else {
       const radius = op.amount != null ? Math.round(op.amount * scale) : 0;

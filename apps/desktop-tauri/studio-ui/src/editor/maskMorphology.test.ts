@@ -16,6 +16,9 @@ import {
   historyStroke,
   invert,
   isPreviewableOp,
+  patchRegion,
+  perspectiveCrop,
+  quadHomography,
   PREVIEWABLE_OP_IDS,
   PROXY_TILE_SIZE,
   ProxyLayerCache,
@@ -150,6 +153,54 @@ describe("maskMorphology preview primitives", () => {
     const before = new Uint8Array(mask.data);
     healingBrushStroke(mask, { type: "healing_brush", amount: 4, points: [], dx: 1, dy: 1 }, 1);
     expect(mask.data).toEqual(before);
+  });
+
+  it("patchRegion refills the lassoed polygon from the drop offset", () => {
+    // An empty mask with an on-square at the top-left: patching with the
+    // drop offset pointing into the square refills the loop from it.
+    const mask = createProxyMask(41, 41);
+    for (let y = 0; y <= 12; y++) for (let x = 0; x <= 12; x++) mask.data[y * 41 + x] = 255;
+    patchRegion(mask, { type: "patch", points: [[20, 20], [32, 20], [32, 32], [20, 32]], dx: -20, dy: -20 }, 1);
+    expect(mask.data[26 * 41 + 26]).toBeGreaterThan(200); // sampled from (6, 6)
+    expect(mask.data[39 * 41 + 5]).toBe(0); // far from the loop untouched
+    // A degenerate loop is a no-op.
+    const before = new Uint8Array(mask.data);
+    patchRegion(mask, { type: "patch", points: [[1, 1], [2, 2]], dx: 5, dy: 5 }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("quadHomography maps the unit square onto the quad", () => {
+    const quad: [number, number][] = [[10, 10], [30, 5], [35, 35], [5, 30]];
+    const [a, b, c, d, e, f, g, h] = quadHomography(quad);
+    const map = (u: number, v: number): [number, number] => {
+      const den = g * u + h * v + 1;
+      return [(a * u + b * v + c) / den, (d * u + e * v + f) / den];
+    };
+    expect(map(0, 0)[0]).toBeCloseTo(10);
+    expect(map(0, 0)[1]).toBeCloseTo(10);
+    expect(map(1, 0)[0]).toBeCloseTo(30);
+    expect(map(1, 0)[1]).toBeCloseTo(5);
+    expect(map(1, 1)[0]).toBeCloseTo(35);
+    expect(map(1, 1)[1]).toBeCloseTo(35);
+    expect(map(0, 1)[0]).toBeCloseTo(5);
+    expect(map(0, 1)[1]).toBeCloseTo(30);
+  });
+
+  it("perspectiveCrop straightens the quad into its bounding rectangle", () => {
+    // An axis-aligned quad is an identity warp inside its bounds and clears
+    // everything outside.
+    const mask = filledSquare(40, 0);
+    const out = perspectiveCrop(mask, { type: "perspective_crop", region: [10, 10, 30, 10, 30, 30, 10, 30] }, 1);
+    expect(out.data[20 * 40 + 20]).toBe(255); // inside the rect preserved
+    expect(out.data[5 * 40 + 5]).toBe(0); // outside the rect cleared
+    // A skewed quad samples the quad's corner regions into the rect's.
+    const m2 = createProxyMask(40, 40);
+    for (let y = 3; y < 8; y++) for (let x = 27; x < 33; x++) m2.data[y * 40 + x] = 255; // blob at the quad's TR
+    const o2 = perspectiveCrop(m2, { type: "perspective_crop", region: [10, 10, 30, 5, 35, 35, 5, 30] }, 1);
+    expect(o2.data[5 * 40 + 34]).toBe(255); // rect TR samples the quad TR blob
+    expect(o2.data[34 * 40 + 6]).toBe(0); // rect BL far from any on-pixels
+    // A missing quad returns the mask unchanged.
+    expect(perspectiveCrop(mask, { type: "perspective_crop" }, 1)).toBe(mask);
   });
 
   it("stampDisc fills a clamped circular region", () => {

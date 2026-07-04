@@ -198,13 +198,13 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn` | `sponge` | `healing_brush` | `quick_select` | `background_eraser`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn` | `sponge` | `healing_brush` | `quick_select` | `background_eraser` | `patch` | `perspective_crop` | `red_eye`. */
   type: string;
   /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone` / `history_brush` / `dodge_burn`: brush radius px), when relevant. */
   amount?: number;
-  /** `[x, y]` seed for `wand`, or `[x1, y1, x2, y2]` for marquee / `crop` ops (for `gradient`: the drag vector start → end). */
+  /** `[x, y]` seed for `wand` / `red_eye`, `[x1, y1, x2, y2]` for marquee / `crop` ops (for `gradient`: the drag vector start → end), or the quad corners `[x0,y0, x1,y1, x2,y2, x3,y3]` (TL, TR, BR, BL) for `perspective_crop`. */
   region?: number[];
-  /** `heal` / `clone` / `history_brush` / `dodge_burn`: the stroke polyline in image px. `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset; `history_brush` restores the region to the layer's initial (pre-edit) state; `dodge_burn` lightens (`mode: "dodge"`) or darkens (`mode: "burn"`) the region. */
+  /** `heal` / `clone` / `history_brush` / `dodge_burn`: the stroke polyline in image px (`patch`: the lassoed polygon). `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset; `history_brush` restores the region to the layer's initial (pre-edit) state; `dodge_burn` lightens (`mode: "dodge"`) or darkens (`mode: "burn"`) the region. */
   points?: [number, number][];
   /** `gradient` / `fill`: `add` unions in, `subtract` cuts away (absent ⇒ `add`). `dodge_burn`: `dodge` lightens, `burn` darkens (absent ⇒ `dodge`). `sponge`: `saturate` pushes covered pixels away from mid-grey, `desaturate` toward it (absent ⇒ `saturate`). */
   mode?: string;
@@ -213,8 +213,9 @@ export interface MaskOperation {
   // --- `transform` op params (M5 free transform / move) -----------------
   // A `transform` step moves the mask by `dx`/`dy` px and scales / rotates
   // it about the canvas centre. Absent fields read as the identity, so a
-  // move-tool drag records only `dx`/`dy`. A `clone` step reuses `dx`/`dy`
-  // as the source offset: painted pixel `p` reads from `p + [dx, dy]`.
+  // move-tool drag records only `dx`/`dy`. `clone` / `healing_brush` /
+  // `patch` steps reuse `dx`/`dy` as the source offset: covered pixel `p`
+  // reads from `p + [dx, dy]`.
   /** Horizontal translation in image px. Absent ⇒ 0. */
   dx?: number;
   /** Vertical translation in image px. Absent ⇒ 0. */
