@@ -111,7 +111,10 @@ export function ToolOptionsPanel({
   // Brush-like tools stamp with a sized tip; everything else (move, marquee,
   // path, view, sample…) has no brush, so no size slider (PS contextual
   // options: only show what the tool in hand actually uses).
-  const usesBrushSize = ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind);
+  const usesBrushSize = ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind) && tool.id !== "quick_select";
+  // Tolerance-keyed tools: the wand family's click floods, plus the painted
+  // quick selection (per-point floods) and background eraser (colour key).
+  const usesTolerance = tool.kind === "click" || tool.id === "quick_select" || tool.id === "background_eraser";
   return (
     <div className="mask-panel-body">
       {usesBrushSize ? (
@@ -123,7 +126,7 @@ export function ToolOptionsPanel({
           </span>
         </label>
       ) : null}
-      {(tool.kind === "paint" || tool.kind === "matte") && tool.id !== "pencil" ? (
+      {(tool.kind === "paint" || tool.kind === "matte") && !["pencil", "quick_select", "background_eraser"].includes(tool.id) ? (
         <>
           <label className="field">
             <span>{t("mask.brushHardness")}</span>
@@ -327,7 +330,7 @@ export function ToolOptionsPanel({
           </span>
         </div>
       ) : null}
-      {tool.kind === "click" ? (
+      {usesTolerance ? (
         <label className="field">
           <span>{t("mask.wandTolerance")}</span>
           <span className="slider-row">

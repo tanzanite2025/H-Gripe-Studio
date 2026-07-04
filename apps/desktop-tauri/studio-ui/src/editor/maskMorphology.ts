@@ -334,6 +334,64 @@ export function dodgeBurnStroke(mask: ProxyMask, op: MaskOperation, scale: numbe
   }
 }
 
+// Per-stroke exposure of the sponge tool: each pass moves the covered pixels
+// half-way toward hard on/off (saturate) or toward mid-grey (desaturate).
+const SPONGE_EXPOSURE = 0.5;
+
+/**
+ * Sponge (PS O flyout, on a mask): locally push the mask's soft values toward
+ * hard on/off (`mode: "saturate"`) or toward mid-grey (`mode: "desaturate"`)
+ * under a painted stroke. Mirrors the Rust `sponge_region`.
+ */
+export function spongeStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const desaturate = op.mode === "desaturate";
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "sponge", mode: "add", radius, points }, scale);
+  for (let i = 0; i < mask.data.length; i++) {
+    if (coverage.data[i] === 0) continue;
+    const v = mask.data[i];
+    mask.data[i] = Math.round(
+      desaturate
+        ? v + (128 - v) * SPONGE_EXPOSURE
+        : v >= 128
+          ? v + (255 - v) * SPONGE_EXPOSURE
+          : v * (1 - SPONGE_EXPOSURE),
+    );
+  }
+}
+
+/**
+ * Healing brush (PS J flyout, on a mask): copy the mask into a painted stroke
+ * from the `dx`/`dy` source offset like the clone stamp, but blend through a
+ * feathered coverage so the patch's edges melt into the surroundings.
+ * Mirrors the Rust `healing_brush_region`.
+ */
+export function healingBrushStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const dx = Math.round((op.dx ?? 0) * scale);
+  const dy = Math.round((op.dy ?? 0) * scale);
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "healing_brush", mode: "add", radius, points }, scale);
+  const soft = boxBlur(coverage, Math.max(1, Math.round((radius * scale) / 2)));
+  const base = Uint8Array.from(mask.data);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const i = y * mask.w + x;
+      const w = soft.data[i] / 255;
+      if (w === 0) continue;
+      const sx = x + dx;
+      const sy = y + dy;
+      const cloned = sx >= 0 && sx < mask.w && sy >= 0 && sy < mask.h ? base[sy * mask.w + sx] : 0;
+      mask.data[i] = Math.round(base[i] * (1 - w) + cloned * w);
+    }
+  }
+}
+
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
 function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
   const region = op.region;
@@ -636,12 +694,16 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       if (base) historyStroke(mask, base, op, scale);
     } else if (op.type === "dodge_burn") {
       dodgeBurnStroke(mask, op, scale);
+    } else if (op.type === "sponge") {
+      spongeStroke(mask, op, scale);
+    } else if (op.type === "healing_brush") {
+      healingBrushStroke(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "transform") {
       mask = transformMask(mask, (op.dx ?? 0) * scale, (op.dy ?? 0) * scale, op.scale ?? 1, op.rotate ?? 0);
-    } else if (op.type === "wand") {
-      // Needs the real image; not previewable on the proxy.
+    } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser") {
+      // Need the real image; not previewable on the proxy.
     } else {
       const radius = op.amount != null ? Math.round(op.amount * scale) : 0;
       mask = applyOp(mask, op.type, radius);

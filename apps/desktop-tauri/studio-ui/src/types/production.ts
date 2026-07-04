@@ -198,7 +198,7 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn` | `sponge` | `healing_brush` | `quick_select` | `background_eraser`. */
   type: string;
   /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone` / `history_brush` / `dodge_burn`: brush radius px), when relevant. */
   amount?: number;
@@ -206,8 +206,10 @@ export interface MaskOperation {
   region?: number[];
   /** `heal` / `clone` / `history_brush` / `dodge_burn`: the stroke polyline in image px. `heal` rebuilds the painted region from its surroundings; `clone` copies the mask from the `dx`/`dy` source offset; `history_brush` restores the region to the layer's initial (pre-edit) state; `dodge_burn` lightens (`mode: "dodge"`) or darkens (`mode: "burn"`) the region. */
   points?: [number, number][];
-  /** `gradient` / `fill`: `add` unions in, `subtract` cuts away (absent ⇒ `add`). `dodge_burn`: `dodge` lightens, `burn` darkens (absent ⇒ `dodge`). */
+  /** `gradient` / `fill`: `add` unions in, `subtract` cuts away (absent ⇒ `add`). `dodge_burn`: `dodge` lightens, `burn` darkens (absent ⇒ `dodge`). `sponge`: `saturate` pushes covered pixels away from mid-grey, `desaturate` toward it (absent ⇒ `saturate`). */
   mode?: string;
+  /** `background_eraser`: colour tolerance (0..255) against the sample under the brush centre. */
+  tolerance?: number;
   // --- `transform` op params (M5 free transform / move) -----------------
   // A `transform` step moves the mask by `dx`/`dy` px and scales / rotates
   // it about the canvas centre. Absent fields read as the identity, so a

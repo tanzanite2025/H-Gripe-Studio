@@ -100,6 +100,20 @@ describe("mask tool registry", () => {
     for (const t of MASK_TOOLS) expect(hasToolIcon(t.id), t.id).toBe(true);
   });
 
+  it("ships the batch-2 kernel-aligned tools as ready (M14)", () => {
+    const expected: Record<string, string> = {
+      quick_select: "paint",
+      background_eraser: "paint",
+      magnetic_lasso: "path",
+      sponge: "dodge",
+      healing_brush: "heal",
+    };
+    for (const [id, kind] of Object.entries(expected)) {
+      expect(maskTool(id)?.status, id).toBe("ready");
+      expect(maskTool(id)?.kind, id).toBe(kind);
+    }
+  });
+
   it("the default tool is ready and selectable", () => {
     expect(maskTool(DEFAULT_TOOL_ID)?.status).toBe("ready");
     expect(DEFAULT_TOOL_ID).toBe("brush");

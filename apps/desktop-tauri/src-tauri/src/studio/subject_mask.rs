@@ -535,7 +535,8 @@ mod replay_cache {
 
     /// Cache key for one upper layer's replay: dims + tolerance + the ops
     /// JSON, plus a fingerprint of the source pixels when the stack contains
-    /// a `wand` op (the only op that reads the image).
+    /// an op that reads the image (wand family / quick selection /
+    /// background eraser).
     pub(super) fn layer_key(
         width: u32,
         height: u32,
@@ -552,7 +553,12 @@ mod replay_cache {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .any(|op| op.get("type").and_then(Value::as_str) == Some("wand"));
+            .any(|op| {
+                matches!(
+                    op.get("type").and_then(Value::as_str),
+                    Some("wand" | "quick_select" | "background_eraser")
+                )
+            });
         if has_wand {
             hash = fnv1a(hash, image.as_raw());
         }
@@ -853,6 +859,42 @@ fn apply_queued_operation(
             wand_select(image, mask, x as u32, y as u32, tolerance, fill);
             operations.push(json!({ "type": "wand", "tolerance": tolerance, "subtract": subtract }));
         }
+        Some("quick_select") => {
+            // Quick selection (PS W flyout): every stroke point seeds a
+            // tolerance flood-fill; the fills union into the mask.
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let tolerance = amount
+                .map(|t| (t as i64).clamp(0, 255) as i32)
+                .unwrap_or(default_tolerance);
+            let (w, h) = image.dimensions();
+            for &(px, py) in &points {
+                if px < 0.0 || py < 0.0 || px >= w as f32 || py >= h as f32 {
+                    continue;
+                }
+                wand_select(image, mask, px as u32, py as u32, tolerance, MASK_ON);
+            }
+            operations.push(json!({ "type": "quick_select", "tolerance": tolerance, "seeds": points.len() }));
+        }
+        Some("background_eraser") => {
+            // Background eraser (PS E flyout): for each stamp along the
+            // stroke, pixels inside the brush disc whose colour stays within
+            // `tolerance` of the colour under the stamp's centre are erased.
+            let radius = amount.unwrap_or(8.0).max(1.0) as u32;
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let tolerance = op
+                .get("tolerance")
+                .and_then(Value::as_f64)
+                .map(|t| (t as i64).clamp(0, 255) as i32)
+                .unwrap_or(default_tolerance);
+            background_erase(image, mask, &points, radius, tolerance);
+            operations.push(json!({ "type": "background_eraser", "radius": radius, "tolerance": tolerance }));
+        }
         Some(kind @ ("rect" | "ellipse")) => {
             if region.len() < 4 {
                 return;
@@ -968,6 +1010,45 @@ fn apply_queued_operation(
             stamp_stroke(&mut coverage, &points, radius, MASK_ON);
             clone_region(mask, &coverage, dx, dy);
             operations.push(json!({ "type": "clone", "radius": radius, "dx": dx, "dy": dy }));
+        }
+        Some("healing_brush") => {
+            // Healing brush (M14): copy the mask into the stroke coverage
+            // from the `dx`/`dy` source offset like the clone stamp, but
+            // blend through a feathered coverage so the patch's edges melt
+            // into the surroundings.
+            let radius = amount.unwrap_or(8.0).max(1.0) as u32;
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let field =
+                |key: &str| op.get(key).and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+            let (dx, dy) = (field("dx"), field("dy"));
+            let (w, h) = mask.dimensions();
+            let mut coverage = GrayImage::new(w, h);
+            stamp_stroke(&mut coverage, &points, radius, MASK_ON);
+            healing_brush_region(mask, &coverage, dx, dy, radius);
+            operations.push(json!({ "type": "healing_brush", "radius": radius, "dx": dx, "dy": dy }));
+        }
+        Some("sponge") => {
+            // Sponge (M14): push the mask's soft values toward hard on/off
+            // (`saturate`) or toward mid-grey (`desaturate`) under the stroke
+            // coverage.
+            let radius = amount.unwrap_or(8.0).max(1.0) as u32;
+            let points = parse_points(op.get("points"));
+            if points.is_empty() {
+                return;
+            }
+            let desaturate = op.get("mode").and_then(Value::as_str) == Some("desaturate");
+            let (w, h) = mask.dimensions();
+            let mut coverage = GrayImage::new(w, h);
+            stamp_stroke(&mut coverage, &points, radius, MASK_ON);
+            sponge_region(mask, &coverage, desaturate);
+            operations.push(json!({
+                "type": "sponge",
+                "radius": radius,
+                "mode": if desaturate { "desaturate" } else { "saturate" },
+            }));
         }
         Some("dodge_burn") => {
             // Dodge / burn (M13): lighten or darken the mask under the stroke
@@ -1337,6 +1418,144 @@ fn clone_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy: i64) {
             };
             mask.put_pixel(x, y, Luma([v]));
         }
+    }
+}
+
+/// Background eraser (PS E flyout, on a mask): for each stamp along the
+/// stroke, erase mask pixels inside the brush disc whose colour stays within
+/// `tolerance` (max per-channel RGB distance) of the image colour under the
+/// stamp's centre.
+fn background_erase(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    points: &[(f32, f32)],
+    radius: u32,
+    tolerance: i32,
+) {
+    let (width, height) = image.dimensions();
+    let r = radius as i32;
+    for &(px, py) in points {
+        let cx = px.round() as i32;
+        let cy = py.round() as i32;
+        if cx < 0 || cy < 0 || cx as u32 >= width || cy as u32 >= height {
+            continue;
+        }
+        let seed = image.get_pixel(cx as u32, cy as u32).0;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                let x = cx + dx;
+                let y = cy + dy;
+                if x < 0 || y < 0 || x as u32 >= width || y as u32 >= height {
+                    continue;
+                }
+                let c = image.get_pixel(x as u32, y as u32).0;
+                let dist = (0..3)
+                    .map(|ch| (i32::from(c[ch]) - i32::from(seed[ch])).abs())
+                    .max()
+                    .unwrap_or(0);
+                if dist <= tolerance {
+                    mask.put_pixel(x as u32, y as u32, Luma([MASK_OFF]));
+                }
+            }
+        }
+    }
+}
+
+/// Separable box blur (one pass), clamped at the borders. Mirrors the proxy
+/// `boxBlur` in `maskMorphology.ts` (round-half-up on positive values).
+fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
+    let (w, h) = mask.dimensions();
+    if radius == 0 {
+        return mask.clone();
+    }
+    let r = radius as i64;
+    let win = (2 * r + 1) as f64;
+    let at = |img: &GrayImage, x: i64, y: i64| {
+        f64::from(
+            img.get_pixel(
+                x.clamp(0, i64::from(w) - 1) as u32,
+                y.clamp(0, i64::from(h) - 1) as u32,
+            )
+            .0[0],
+        )
+    };
+    let mut tmp = GrayImage::new(w, h);
+    for y in 0..h {
+        let mut sum = 0.0;
+        for x in -r..=r {
+            sum += at(mask, x, i64::from(y));
+        }
+        for x in 0..w {
+            tmp.put_pixel(x, y, Luma([(sum / win).round() as u8]));
+            sum += at(mask, i64::from(x) + r + 1, i64::from(y)) - at(mask, i64::from(x) - r, i64::from(y));
+        }
+    }
+    let mut out = GrayImage::new(w, h);
+    for x in 0..w {
+        let mut sum = 0.0;
+        for y in -r..=r {
+            sum += at(&tmp, i64::from(x), y);
+        }
+        for y in 0..h {
+            out.put_pixel(x, y, Luma([(sum / win).round() as u8]));
+            sum += at(&tmp, i64::from(x), i64::from(y) + r + 1) - at(&tmp, i64::from(x), i64::from(y) - r);
+        }
+    }
+    out
+}
+
+/// Healing brush (PS J flyout, on a mask): copy the mask inside `coverage`
+/// from the `dx`/`dy` source offset like `clone_region`, but blend through a
+/// feathered (box-blurred) coverage so the patch's edges melt into the
+/// surroundings. Mirrors the proxy `healingBrushStroke` in
+/// `maskMorphology.ts`.
+fn healing_brush_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy: i64, radius: u32) {
+    let (w, h) = mask.dimensions();
+    let soft = box_blur(coverage, ((f64::from(radius) / 2.0).round() as u32).max(1));
+    let base = mask.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let weight = f64::from(soft.get_pixel(x, y).0[0]) / 255.0;
+            if weight == 0.0 {
+                continue;
+            }
+            let sx = x as i64 + dx;
+            let sy = y as i64 + dy;
+            let cloned = if sx >= 0 && sx < i64::from(w) && sy >= 0 && sy < i64::from(h) {
+                f64::from(base.get_pixel(sx as u32, sy as u32).0[0])
+            } else {
+                0.0
+            };
+            let v = f64::from(base.get_pixel(x, y).0[0]);
+            mask.put_pixel(x, y, Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]));
+        }
+    }
+}
+
+/// Per-stroke exposure of the sponge tool: each pass moves the covered pixels
+/// half-way toward hard on/off (saturate) or toward mid-grey (desaturate).
+const SPONGE_EXPOSURE: f64 = 0.5;
+
+/// Sponge (PS O flyout, on a mask): locally push the mask's soft values
+/// toward hard on/off (saturate) or toward mid-grey (desaturate) inside
+/// `coverage`. Mirrors the proxy `spongeStroke` in `maskMorphology.ts`.
+fn sponge_region(mask: &mut GrayImage, coverage: &GrayImage, desaturate: bool) {
+    for (m, c) in mask.pixels_mut().zip(coverage.pixels()) {
+        if c.0[0] == 0 {
+            continue;
+        }
+        let v = f64::from(m.0[0]);
+        let out = if desaturate {
+            v + (128.0 - v) * SPONGE_EXPOSURE
+        } else if v >= 128.0 {
+            v + (255.0 - v) * SPONGE_EXPOSURE
+        } else {
+            v * (1.0 - SPONGE_EXPOSURE)
+        };
+        m.0[0] = out.round().clamp(0.0, 255.0) as u8;
     }
 }
 
@@ -2323,6 +2542,57 @@ mod tests {
         assert_eq!(mask.get_pixel(0, 0).0[0], 128); // outside the stroke
         dodge_burn_region(&mut mask, &coverage, true);
         assert_eq!(mask.get_pixel(10, 10).0[0], 96); // 192 * 0.5
+    }
+
+    #[test]
+    fn sponge_region_pushes_toward_hard_or_mid() {
+        // Above mid-grey, saturating pushes toward on; desaturating pulls
+        // back toward mid-grey; below mid-grey, saturating pushes toward off.
+        let mut mask = solid(21, 21, 192);
+        let mut coverage = GrayImage::new(21, 21);
+        stamp_stroke(&mut coverage, &[(10.0, 10.0)], 3, MASK_ON);
+        sponge_region(&mut mask, &coverage, false);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 224); // 192 + 63 * 0.5, rounded
+        assert_eq!(mask.get_pixel(0, 0).0[0], 192); // outside the stroke
+        sponge_region(&mut mask, &coverage, true);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 176); // 224 + (128 - 224) * 0.5
+        mask.put_pixel(10, 10, Luma([64]));
+        sponge_region(&mut mask, &coverage, false);
+        assert_eq!(mask.get_pixel(10, 10).0[0], 32);
+    }
+
+    #[test]
+    fn healing_brush_region_blends_source_through_feathered_edge() {
+        // An empty mask with an on-square at the top-left: healing with the
+        // source offset pointing into the square copies it under the stroke
+        // centre; far from the stroke stays untouched.
+        let mut mask = solid(41, 41, MASK_OFF);
+        for y in 0..=12 {
+            for x in 0..=12 {
+                mask.put_pixel(x, y, Luma([MASK_ON]));
+            }
+        }
+        let mut coverage = GrayImage::new(41, 41);
+        stamp_stroke(&mut coverage, &[(25.0, 25.0)], 4, MASK_ON);
+        healing_brush_region(&mut mask, &coverage, -20, -20, 4);
+        assert!(mask.get_pixel(25, 25).0[0] > 200); // sampled from (5, 5)
+        assert_eq!(mask.get_pixel(38, 38).0[0], MASK_OFF); // far untouched
+    }
+
+    #[test]
+    fn background_erase_clears_matching_colours_inside_disc() {
+        // Left half dark, right half bright, mask fully on: erasing with the
+        // brush centred in the dark half clears only dark pixels in the disc.
+        let mut image = RgbaImage::new(21, 21);
+        for (x, _y, p) in image.enumerate_pixels_mut() {
+            let v = if x < 10 { 10 } else { 240 };
+            p.0 = [v, v, v, 255];
+        }
+        let mut mask = solid(21, 21, MASK_ON);
+        background_erase(&image, &mut mask, &[(9.0, 10.0)], 4, 32);
+        assert_eq!(mask.get_pixel(9, 10).0[0], MASK_OFF); // centre erased
+        assert_eq!(mask.get_pixel(12, 10).0[0], MASK_ON); // bright side kept
+        assert_eq!(mask.get_pixel(2, 10).0[0], MASK_ON); // outside the disc
     }
 
     #[test]

@@ -12,6 +12,7 @@ import {
   feather,
   fillHoles,
   healStroke,
+  healingBrushStroke,
   historyStroke,
   invert,
   isPreviewableOp,
@@ -21,6 +22,7 @@ import {
   sharpen,
   tileRects,
   smooth,
+  spongeStroke,
   stampDisc,
   stampSoftDisc,
   transformMask,
@@ -114,6 +116,39 @@ describe("maskMorphology preview primitives", () => {
     // An empty stroke is a no-op.
     const before = new Uint8Array(mask.data);
     dodgeBurnStroke(mask, { type: "dodge_burn", amount: 3, points: [] }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("spongeStroke pushes covered pixels toward hard on/off or mid-grey", () => {
+    const mask = createProxyMask(21, 21);
+    mask.data.fill(192);
+    spongeStroke(mask, { type: "sponge", amount: 3, points: [[10, 10]] }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(224); // 192 + 63 * 0.5, rounded
+    expect(mask.data[0]).toBe(192); // outside the stroke untouched
+    spongeStroke(mask, { type: "sponge", amount: 3, points: [[10, 10]], mode: "desaturate" }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(176); // 224 + (128 - 224) * 0.5
+    // Below mid-grey, saturating pushes toward off.
+    mask.data[10 * 21 + 10] = 64;
+    spongeStroke(mask, { type: "sponge", amount: 3, points: [[10, 10]] }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(32);
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    spongeStroke(mask, { type: "sponge", amount: 3, points: [] }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("healingBrushStroke blends the source patch through a feathered edge", () => {
+    // An empty mask with an on-square at the top-left: healing with the
+    // source offset pointing into the square copies it under the stroke
+    // centre but leaves the far surroundings untouched.
+    const mask = createProxyMask(41, 41);
+    for (let y = 0; y <= 12; y++) for (let x = 0; x <= 12; x++) mask.data[y * 41 + x] = 255;
+    healingBrushStroke(mask, { type: "healing_brush", amount: 4, points: [[25, 25]], dx: -20, dy: -20 }, 1);
+    expect(mask.data[25 * 41 + 25]).toBeGreaterThan(200); // sampled from (5, 5)
+    expect(mask.data[38 * 41 + 38]).toBe(0); // far from the stroke untouched
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    healingBrushStroke(mask, { type: "healing_brush", amount: 4, points: [], dx: 1, dy: 1 }, 1);
     expect(mask.data).toEqual(before);
   });
 
