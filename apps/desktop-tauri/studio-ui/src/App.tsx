@@ -1344,7 +1344,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               onSelectNode={focusNode}
             />
           )}
-          <Palette onAdd={addNode} />
+          <Palette onAdd={addNode} edgeType={edgeType} onChangeEdgeType={changeEdgeType} />
           <div className="canvas">
             <div className="canvas-flow">
               <FlowCanvas
@@ -1363,7 +1363,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 snapToGrid={snapToGrid}
                 helperLines={helperLines}
                 edgeType={edgeType}
-                onChangeEdgeType={changeEdgeType}
                 showMinimap={showMinimap}
                 onNodeContextMenu={openNodeMenu}
                 onPaneContextMenu={openPaneMenu}

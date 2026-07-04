@@ -914,14 +914,6 @@ button:disabled { opacity: 0.6; cursor: default; }
   pointer-events: none;
   overflow: hidden;
 }
-.palette h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  flex: none;
-  color: var(--muted);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-.palette-hint { display: none; }
 .palette-sections {
   display: flex;
   flex-direction: column;
@@ -1066,7 +1058,36 @@ button:disabled { opacity: 0.6; cursor: default; }
 .palette-badge-local { color: var(--t-image); }
 .palette-badge-api { color: var(--t-latent); }
 .palette-badge-hybrid { color: var(--t-any); }
-.palette-hint { font-size: 11px; margin-top: 8px; }
+/* Canvas-controls accordion: rows of square icon buttons (zoom / fit / lock,
+ * edge style). Buttons keep the pill radius from the global button rule. */
+.palette-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.palette-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+}
+.palette-control-button svg {
+  width: 16px;
+  height: 16px;
+}
+.palette-control-button:hover {
+  background: rgba(91, 140, 255, 0.12);
+  border-color: rgba(91, 140, 255, 0.4);
+}
+.palette-control-button.active {
+  background: var(--accent, #4c7dff);
+  color: #fff;
+}
 .snap-toggle {
   display: inline-flex;
   align-items: center;
