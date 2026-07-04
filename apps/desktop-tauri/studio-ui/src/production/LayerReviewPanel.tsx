@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { registerLayeredAsset } from "../bridge/viewport";
 import { useT } from "../i18n";
 import { useViewControls } from "../viewport/useViewControls";
-import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import {
+  useViewportUnderlay,
+  type ViewportUnderlaySource,
+} from "../viewport/useViewportUnderlay";
 import type { LayerCandidate, LayeredImageAsset } from "./layeredImage";
 
 export interface LayerReviewPanelProps {
@@ -35,25 +39,61 @@ function layerVisible(layer: LayerCandidate, visibility: Record<string, boolean>
 }
 
 /**
+ * Register the asset's layer RGBA artifacts with the viewport host so its
+ * layers can be targeted as `image_layer` references. Returns the asset id
+ * once registration lands (re-registration after a merge/split replaces the
+ * host's layer set), or null while pending / after a failure.
+ */
+function useRegisteredLayeredAsset(asset: LayeredImageAsset): string | null {
+  const [registered, setRegistered] = useState<string | null>(null);
+  const layerKey = asset.layers.map((l) => `${l.id}:${l.rgba?.path ?? ""}`).join("|");
+  useEffect(() => {
+    setRegistered(null);
+    const layers = asset.layers
+      .filter((l) => l.rgba)
+      .map((l) => ({ layerId: l.id, rgbaPath: l.rgba!.path }));
+    if (layers.length === 0) return;
+    let cancelled = false;
+    registerLayeredAsset(asset.id, layers)
+      .then(() => {
+        if (!cancelled) setRegistered(asset.id);
+      })
+      .catch(() => {
+        // Layer targets fall back to plain artifact paths.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, layerKey]);
+  return registered;
+}
+
+/**
  * Preview of the current review target: the selected layer's RGBA cutout
  * (toggleable to its mask) or the asset's composite when the whole asset is
- * targeted. Presentation flows through the viewport host by resource
- * reference — the artifact path is registered, an `image_edit` viewport
+ * targeted. Presentation flows through the viewport host by reference — the
+ * layer cutout as an `image_layer` target of the registered layered asset,
+ * mask/composite artifacts by registered path — an `image_edit` viewport
  * renders it, and the raw pixels never enter webview state. The browser
  * preview (no resource registry) shows a text placeholder instead.
  */
 function LayerPreview({ asset, layer }: { asset: LayeredImageAsset; layer: LayerCandidate | null }) {
   const t = useT();
   const [showMask, setShowMask] = useState(false);
+  const registeredAssetId = useRegisteredLayeredAsset(asset);
   const path = layer
     ? showMask
       ? layer.mask.path
       : layer.rgba?.path ?? layer.mask.path
     : asset.preview_composite.path;
+  const source: ViewportUnderlaySource =
+    layer && !showMask && layer.rgba && registeredAssetId === asset.id
+      ? { kind: "image_layer", assetId: asset.id, layerId: layer.id }
+      : path;
   // Zoom/pan is viewport state, shared across layer/mask flips so an
   // inspected region stays framed while comparing candidates.
   const { view, stageProps } = useViewControls();
-  const { underlay, settled } = useViewportUnderlay("image_edit", path, 320, view);
+  const { underlay, settled } = useViewportUnderlay("image_edit", source, 320, view);
 
   return (
     <div className="layer-review-preview">

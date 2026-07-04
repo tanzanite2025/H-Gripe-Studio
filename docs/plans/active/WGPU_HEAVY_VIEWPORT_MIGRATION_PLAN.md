@@ -40,7 +40,10 @@ Implemented (PRs #329–#371):
   artifacts with the viewport host by path
   (`viewport_register_layered_asset`), so `image_layer` viewport targets
   resolve Rust-side like image resources — same proxy cache, grade, and view
-  path. `video_clip` and `node_output` still resolve on the frontend.
+  path. The layer review preview presents the selected layer cutout as an
+  `image_layer` target of the registered asset (mask/composite artifacts
+  still register by path). `video_clip` and `node_output` still resolve on
+  the frontend.
 
 Remaining work, roughly in priority order:
 
