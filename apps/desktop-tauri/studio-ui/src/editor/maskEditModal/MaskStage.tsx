@@ -6,6 +6,8 @@
 // canvas shows a frame decoded at matching detail (WGPU migration Phase 2).
 
 import type { MutableRefObject } from "react";
+import type { ViewportBackend } from "../../bridge/viewport";
+import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../../viewport/view";
 import { isFitView, viewTransform, type CanvasView } from "../canvasView";
 
@@ -17,6 +19,8 @@ interface MaskStageProps {
   underlay: string | null;
   /** The window `underlay` was rendered for, placing it in the frame. */
   frameView: ViewportViewState;
+  /** Backend report of the presented underlay frame (fallback contract). */
+  backend: ViewportBackend | null;
   /** Transparency preview: hide the underlay (the canvas paints a backdrop). */
   overlayOnly: boolean;
   spacePan: boolean;
@@ -26,7 +30,7 @@ interface MaskStageProps {
   onPointerUp: () => void;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, frameView, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, frameView, backend, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp }: MaskStageProps) {
   return (
     <div className="mask-edit-stage">
       <div
@@ -66,6 +70,7 @@ export function MaskStage({ canvasRef, dims, view, underlay, frameView, overlayO
           onContextMenu={(e) => e.preventDefault()}
         />
       </div>
+      <ViewportBackendBadge backend={backend} />
     </div>
   );
 }

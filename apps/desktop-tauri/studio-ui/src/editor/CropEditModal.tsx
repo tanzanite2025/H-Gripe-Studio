@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
 import { useT } from "../i18n";
 
@@ -316,6 +317,7 @@ export function CropEditModal({
                   <span className="crop-handle se" onPointerDown={onPointerDown("se")} />
                 </div>
               ) : null}
+              <ViewportBackendBadge backend={viewport.backend} />
             </div>
             <small className="muted">
               {mode === "manual" ? t("crop.drawHint") : t("crop.autoHint")}
