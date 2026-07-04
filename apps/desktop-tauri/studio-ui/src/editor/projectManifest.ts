@@ -12,6 +12,8 @@ export interface ProjectCanvasState {
   id: string;
   path: string | null;
   dirty: boolean;
+  /** User-set tab display name overriding the path-derived title. */
+  name: string | null;
   selectedNodeId: string | null;
   viewport: CanvasViewport;
   graph: WorkflowGraph;
@@ -49,6 +51,7 @@ function parseCanvas(raw: unknown): ProjectCanvasState | null {
     id: o.id,
     path: typeof o.path === "string" ? o.path : null,
     dirty: o.dirty === true,
+    name: typeof o.name === "string" && o.name ? o.name : null,
     selectedNodeId: typeof o.selectedNodeId === "string" ? o.selectedNodeId : null,
     viewport: isViewport(o.viewport) ? o.viewport : DEFAULT_CANVAS_VIEWPORT,
     graph,

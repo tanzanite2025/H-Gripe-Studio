@@ -20,6 +20,14 @@ export const messages = {
   "status.untitledTitle": { en: "untitled (not yet saved to a file)", zh: "未命名（尚未保存到文件）" },
   "canvasTabs.new": { en: "New canvas", zh: "新建画布" },
   "canvasTabs.close": { en: "Close canvas", zh: "关闭画布" },
+  "canvasTabs.menu": { en: "Canvas actions", zh: "画布操作" },
+  "canvasTabs.save": { en: "Save", zh: "保存" },
+  "canvasTabs.saveAs": { en: "Save as…", zh: "另存为…" },
+  "canvasTabs.rename": { en: "Rename", zh: "重命名" },
+  "canvasTabs.renamePrompt": {
+    en: "Tab name (leave empty to use the file name):",
+    zh: "标签名称（留空则使用文件名）：",
+  },
   "canvasTabs.confirmClose": {
     en: "Close this canvas and discard its unsaved changes?",
     zh: "关闭此画布并丢弃未保存的更改？",

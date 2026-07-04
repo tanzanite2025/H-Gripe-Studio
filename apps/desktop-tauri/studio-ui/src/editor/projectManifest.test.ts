@@ -31,6 +31,7 @@ function manifest(): ProjectManifest {
         id: "c1",
         path: "C:/flows/a.json",
         dirty: false,
+        name: null,
         selectedNodeId: null,
         viewport: { x: 10, y: -5, zoom: 1.5 },
         graph: graph(),
@@ -39,6 +40,7 @@ function manifest(): ProjectManifest {
         id: "c2",
         path: null,
         dirty: true,
+        name: "draft",
         selectedNodeId: "n1",
         viewport: DEFAULT_CANVAS_VIEWPORT,
         graph: graph(),
@@ -90,6 +92,7 @@ describe("project manifest", () => {
     expect(parsed?.canvases[0]).toMatchObject({
       path: null,
       dirty: false,
+      name: null,
       selectedNodeId: null,
       viewport: DEFAULT_CANVAS_VIEWPORT,
     });
