@@ -101,9 +101,12 @@ Remaining work (next stage), roughly in priority order:
    they depend on item 1, not on the PNG transport).
 3. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
-4. Shared `DeviceReport` wiring: formalise the already-reported
-   requested/actual backend fields into the shared device vocabulary from
-   `GPU_DEVICE_STRATEGY_PLAN.md`.
+4. ✅ Shared `DeviceReport` wiring: the viewport-presented surfaces report
+   through the shared vocabulary from `GPU_DEVICE_STRATEGY_PLAN.md` — the
+   program monitor and grade preview render normalized badges, and the
+   remaining underlay surfaces (mask/crop editors, media viewer, preview
+   gate) show the shared `ViewportBackendBadge` (used device, ⚠ on
+   fallback, full one-line report as tooltip).
 
 ## Purpose
 

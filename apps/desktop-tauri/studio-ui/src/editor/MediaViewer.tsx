@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 
 // Large image extensions we know how to display. Anything else falls back to a
 // "open externally" hint rather than trying to decode it in the webview.
@@ -73,6 +74,7 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
           ) : (
             <p className="muted">loading…</p>
           )}
+          <ViewportBackendBadge backend={viewport.backend} />
         </div>
         <code className="media-viewer-path">{path}</code>
       </div>

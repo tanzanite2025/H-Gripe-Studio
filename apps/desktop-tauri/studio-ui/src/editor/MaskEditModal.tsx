@@ -947,6 +947,7 @@ export function MaskEditModal({
             view={view}
             underlay={underlay}
             frameView={frameView}
+            backend={viewport.backend}
             overlayOnly={overlayOnly}
             spacePan={spacePan}
             toolId={tool.id}

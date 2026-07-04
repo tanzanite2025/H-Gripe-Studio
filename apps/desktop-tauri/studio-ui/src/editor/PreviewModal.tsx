@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../viewport/view";
 
 // Shared "review gate" modal.
@@ -48,12 +49,15 @@ function PreviewImage({ path, view }: { path: string; view: ViewportViewState })
 
   if (viewport.underlay)
     return (
-      <img
-        className="media-viewer-img"
-        src={viewport.underlay}
-        alt={basename(path)}
-        draggable={false}
-      />
+      <>
+        <img
+          className="media-viewer-img"
+          src={viewport.underlay}
+          alt={basename(path)}
+          draggable={false}
+        />
+        <ViewportBackendBadge backend={viewport.backend} />
+      </>
     );
   if (viewport.settled) return <p className="muted">preview unavailable (backend mocked)</p>;
   return <p className="muted">loading…</p>;
