@@ -1,6 +1,8 @@
 # System Model Manager Surface Plan
 
-> Status: active.
+> Status: complete. Landed via PRs #393 (manager surface, registry, selector
+> APIs), #394 (card API profile selection), and #395 (card local model
+> selection).
 > Purpose: define the system-level UI surface that owns API profiles and local
 > model bindings, so card-level model dropdowns all read from one consistent
 > source of truth.

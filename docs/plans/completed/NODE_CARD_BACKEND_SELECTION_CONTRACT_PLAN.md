@@ -1,6 +1,8 @@
 # Node Card Backend Selection Contract Plan
 
-> Status: active.
+> Status: complete. Landed via PRs #394 (steps 7–8 for leaf cards), #395
+> (local model selection), #396 (Image Processing row-level bindings, steps
+> 3–6), and #397 (pre-run ref validation, step 8).
 > Purpose: define how production cards consume system-managed API/local model
 > backends without turning the graph into a web of model configuration nodes.
 
