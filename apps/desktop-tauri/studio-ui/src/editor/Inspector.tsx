@@ -12,7 +12,12 @@ import {
 import { ParamField } from "./ParamField";
 import { BackendSelector } from "../models/BackendSelector";
 import { LocalModelSelector } from "../models/LocalModelSelector";
-import type { ModelCapability } from "../models/backendRegistry";
+import {
+  ROW_BACKEND_BINDINGS,
+  backendCapability,
+  localModelCapability,
+  rowBindingActive,
+} from "../models/backendBindings";
 import { OutputPicker } from "./OutputPicker";
 import { MediaViewer } from "./MediaViewer";
 import type { HgripeNodeData } from "./HgripeNode";
@@ -26,87 +31,6 @@ function engineProbeKind(kind: string, paramKey: string): string | null {
   const row = paramKey.slice(0, -".engine".length);
   return LOWERED_CARD_ROWS[kind]?.find((def) => def.row === row)?.kind ?? null;
 }
-
-// Which manager capability a node's backend selector filters by. Selection is
-// stored as `api_profile_ref`; legacy provider/model/credentials_ref params are
-// still written alongside so the existing executors keep working (backend
-// selection contract plan, migration notes).
-function backendCapability(kind: string, params: Record<string, unknown>): ModelCapability | null {
-  if (kind === "generate")
-    return String(params.operation ?? "") === "image.edit" ? "image.edit" : "image.generate";
-  if (kind === "promptOptimize" && String(params.mode ?? "") === "api") return "prompt.rewrite";
-  if (kind === "detailRepaint") return "image.edit";
-  return null;
-}
-
-// Which manager capability a node's local model selector filters by. Selection
-// stores `local_model_ref` and mirrors the node's device/precision fields
-// where present; the legacy `engine` select stays as the advanced escape hatch.
-function localModelCapability(
-  kind: string,
-  params: Record<string, unknown>,
-): ModelCapability | null {
-  if (kind === "subjectMask") return "mask.subject";
-  if (kind === "refineMaskEdge") return "matte.refine";
-  if (kind === "imageEnhance") return "image.upscale";
-  if (kind === "matchLightColor") return "image.enhance";
-  if (
-    kind === "detailRepaint" &&
-    ["sd_inpaint", "sdxl_inpaint", "flux_fill"].includes(String(params.engine ?? ""))
-  )
-    return "image.inpaint";
-  return null;
-}
-
-// Row-level backend bindings for integrated cards (backend selection contract
-// plan, steps 3–6): each entry renders one capability-filtered selector whose
-// selection is stored under the card's `<row>.`-namespaced params, so lowering
-// forwards it to the leaf executor unchanged.
-interface RowBackendBinding {
-  /** Card param the selected ref is stored under. */
-  paramKey: string;
-  kind: "api" | "local";
-  capability: ModelCapability;
-  /** i18n key for the row's field label. */
-  labelKey: Parameters<ReturnType<typeof useT>>[0];
-  /** Only render when this param has one of the listed values. */
-  visibleWhen?: { param: string; in: string[] };
-}
-
-function paramDefault(spec: ReturnType<typeof nodeSpec>, key: string): unknown {
-  return spec.params.find((p) => p.key === key)?.defaultValue;
-}
-
-const ROW_BACKEND_BINDINGS: Record<string, RowBackendBinding[]> = {
-  imageProcessing: [
-    {
-      paramKey: "enhance.local_model_ref",
-      kind: "local",
-      capability: "image.upscale",
-      labelKey: "models.selector.rowEnhance",
-    },
-    {
-      paramKey: "mask.local_model_ref",
-      kind: "local",
-      capability: "mask.subject",
-      labelKey: "models.selector.rowMask",
-    },
-    {
-      paramKey: "repair.api_profile_ref",
-      kind: "api",
-      capability: "image.edit",
-      labelKey: "models.selector.rowRepairApi",
-      visibleWhen: { param: "repair.engine", in: ["provider"] },
-    },
-    {
-      paramKey: "repair.local_model_ref",
-      kind: "local",
-      capability: "image.inpaint",
-      labelKey: "models.selector.rowRepairLocal",
-      visibleWhen: { param: "repair.engine", in: ["sd_inpaint", "sdxl_inpaint", "flux_fill"] },
-    },
-  ],
-};
 
 interface InspectorProps {
   node: Node;
@@ -224,19 +148,13 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
       )}
 
       {(ROW_BACKEND_BINDINGS[spec.kind] ?? [])
-        .filter(
-          (b) =>
-            !b.visibleWhen ||
-            b.visibleWhen.in.includes(
-              String(data.params[b.visibleWhen.param] ?? paramDefault(spec, b.visibleWhen.param)),
-            ),
-        )
+        .filter((b) => rowBindingActive(b, spec.kind, data.params))
         .map((b) =>
           b.kind === "api" ? (
             <BackendSelector
               key={b.paramKey}
               capability={b.capability}
-              label={t(b.labelKey)}
+              label={t(b.labelKey as Parameters<typeof t>[0])}
               value={String(data.params[b.paramKey] ?? "")}
               onApply={(profile) => {
                 onParamChange(node.id, b.paramKey, profile.ref);
@@ -252,7 +170,7 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
             <LocalModelSelector
               key={b.paramKey}
               capability={b.capability}
-              label={t(b.labelKey)}
+              label={t(b.labelKey as Parameters<typeof t>[0])}
               value={String(data.params[b.paramKey] ?? "")}
               onApply={(model) => onParamChange(node.id, b.paramKey, model.ref)}
             />
