@@ -837,6 +837,8 @@ fn apply_queued_operation(
     match op.get("type").and_then(Value::as_str) {
         Some("wand") => {
             // Region carries the `[x, y]` seed; `amount` is the tolerance.
+            // `mode: "subtract"` (magic eraser) clears the flooded region
+            // instead of selecting it.
             let (Some(&x), Some(&y)) = (region.first(), region.get(1)) else {
                 return;
             };
@@ -846,8 +848,10 @@ fn apply_queued_operation(
             let tolerance = amount
                 .map(|t| (t as i64).clamp(0, 255) as i32)
                 .unwrap_or(default_tolerance);
-            wand_select(image, mask, x as u32, y as u32, tolerance);
-            operations.push(json!({ "type": "wand", "tolerance": tolerance }));
+            let subtract = op.get("mode").and_then(Value::as_str) == Some("subtract");
+            let fill = if subtract { MASK_OFF } else { MASK_ON };
+            wand_select(image, mask, x as u32, y as u32, tolerance, fill);
+            operations.push(json!({ "type": "wand", "tolerance": tolerance, "subtract": subtract }));
         }
         Some(kind @ ("rect" | "ellipse")) => {
             if region.len() < 4 {
@@ -1145,9 +1149,18 @@ fn transform_mask(mask: &GrayImage, dx: f64, dy: f64, scale: f64, rotate: f64) -
     out
 }
 
-/// Flood-fill from a seed, selecting the contiguous region whose colour stays
-/// within `tolerance` (max per-channel RGB distance) of the seed colour.
-fn wand_select(image: &RgbaImage, mask: &mut GrayImage, seed_x: u32, seed_y: u32, tolerance: i32) {
+/// Flood-fill from a seed, painting `fill` over the contiguous region whose
+/// colour stays within `tolerance` (max per-channel RGB distance) of the seed
+/// colour — `MASK_ON` selects (wand / paint bucket), `MASK_OFF` erases (magic
+/// eraser).
+fn wand_select(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    seed_x: u32,
+    seed_y: u32,
+    tolerance: i32,
+    fill: u8,
+) {
     let (width, height) = image.dimensions();
     if seed_x >= width || seed_y >= height {
         return;
@@ -1167,7 +1180,7 @@ fn wand_select(image: &RgbaImage, mask: &mut GrayImage, seed_x: u32, seed_y: u32
         if dist > tolerance {
             continue;
         }
-        mask.put_pixel(x, y, Luma([MASK_ON]));
+        mask.put_pixel(x, y, Luma([fill]));
         for (nx, ny) in neighbours(x, y, width, height) {
             let idx = (ny * width + nx) as usize;
             if !visited[idx] {
@@ -2093,12 +2106,18 @@ mod tests {
             }
         }
         let mut mask = solid(4, 2, MASK_OFF);
-        wand_select(&image, &mut mask, 0, 0, 20);
+        wand_select(&image, &mut mask, 0, 0, 20, MASK_ON);
         for y in 0..2 {
             assert_eq!(mask.get_pixel(0, y).0[0], MASK_ON);
             assert_eq!(mask.get_pixel(1, y).0[0], MASK_ON);
             assert_eq!(mask.get_pixel(2, y).0[0], MASK_OFF);
             assert_eq!(mask.get_pixel(3, y).0[0], MASK_OFF);
+        }
+        // Magic eraser: the same flood with `MASK_OFF` clears the region.
+        wand_select(&image, &mut mask, 0, 0, 20, MASK_OFF);
+        for y in 0..2 {
+            assert_eq!(mask.get_pixel(0, y).0[0], MASK_OFF);
+            assert_eq!(mask.get_pixel(1, y).0[0], MASK_OFF);
         }
     }
 

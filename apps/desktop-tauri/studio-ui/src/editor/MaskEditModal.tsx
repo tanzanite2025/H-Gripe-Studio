@@ -3,6 +3,7 @@ import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import type { ViewportMaskOverlay } from "../bridge/viewport";
 import {
+  ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
   maskTool,
   DEFAULT_TOOL_ID,
@@ -38,6 +39,7 @@ import { maskEditReducer, type FillDraft } from "./maskEditModal/actions";
 import {
   paintAnchorDraft,
   paintCloneSource,
+  paintColorSamples,
   paintDragArrow,
   paintLassoLoop,
   paintMarquee,
@@ -46,11 +48,15 @@ import {
   paintPreviewOverlay,
   paintQuickMask,
   paintRetouchBand,
+  paintRuler,
   paintSamPoints,
   paintShapeDraft,
   paintStroke,
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
+import { catmullRomClosed } from "./maskEditModal/pathGeometry";
+import { hitTestPathOp, translateAnchors } from "./maskEditModal/pathEditTools";
+import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
 import "./maskEditModal/maskEditModal.css";
@@ -229,6 +235,14 @@ export function MaskEditModal({
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
+  // Color sampler pins (up to four persistent readouts, PS I flyout) — a
+  // pure view read, session-local, never recorded on the document.
+  const [colorSamples, setColorSamples] = useState<ColorSample[]>([]);
+  // Ruler measurement: the last committed drag (session-local view read).
+  const [rulerLine, setRulerLine] = useState<RulerLine | null>(null);
+  const rulerDrag = useRef<RulerLine | null>(null);
+  // Path-selection whole-path drag: the last pointer position (image px).
+  const wholePathDrag = useRef<[number, number] | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
@@ -326,7 +340,7 @@ export function MaskEditModal({
   // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
   // active only while this modal is mounted, shadowing the canvas shortcuts.
   const selectTool = (id: string) => {
-    if (id !== "pen") setPenAnchors([]);
+    if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
     cancelPathEdit();
     setToolId(id);
     const slot = psSlotOf(id);
@@ -407,21 +421,8 @@ export function MaskEditModal({
     tool_move: () => selectSlot("move"),
     tool_crop: () => selectSlot("crop"),
     free_transform: () => openFreeTransform(),
-    tool_path_select: () => {
-      // PS `A` (direct selection): re-edit the anchors of the last path op.
-      if (editingPathRef.current != null) {
-        commitPathEdit();
-        return;
-      }
-      const ops = activeOps(stateRef.current.current);
-      for (let i = ops.length - 1; i >= 0; i--) {
-        if (isPathOp(ops[i])) {
-          startPathEdit(i);
-          return;
-        }
-      }
-      return false;
-    },
+    // PS `A`: the path-selection slot (path / direct selection tools).
+    tool_path_select: () => selectSlot("path_select"),
     undo: () => dispatch({ type: "undo" }),
     redo: () => dispatch({ type: "redo" }),
     redo_alt: () => dispatch({ type: "redo" }),
@@ -515,14 +516,17 @@ export function MaskEditModal({
   // (`readPixels`, surface swap Phase S4) answers instead.
   const viewportHost = viewport.host;
   const sampleUnderlay = useCallback(
-    (pt: [number, number]) => {
+    (pt: [number, number], onSample?: (hex: string) => void) => {
       const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
       const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
       const x = Math.round(pt[0] - frameView.panX * dims.w);
       const y = Math.round(pt[1] - frameView.panY * dims.h);
       if (x < 0 || y < 0 || x >= winW || y >= winH) return;
-      const sample = (r: number, g: number, b: number) =>
-        setSampledColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
+      const sample = (r: number, g: number, b: number) => {
+        const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+        if (onSample) onSample(hex);
+        else setSampledColor(hex);
+      };
       if (!underlay) {
         if (!presented || !viewportHost || !viewportHost.isOpen) return;
         viewportHost
@@ -606,6 +610,9 @@ export function MaskEditModal({
     if (tool.kind === "clone" && cloneSource.current) paintCloneSource(ctx, cloneSource.current);
     if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
     if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
+    if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples);
+    const rl = rulerDrag.current ?? (tool.id === "ruler" ? rulerLine : null);
+    if (rl) paintRuler(ctx, rl);
     paintSamPoints(ctx, state.current.points);
     // With a host frame — a PNG underlay or a natively presented surface —
     // the selection tint is composited host-side (the viewport mask
@@ -621,7 +628,7 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
+  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine]);
 
   useEffect(() => {
     redraw();
@@ -662,8 +669,10 @@ export function MaskEditModal({
     setQuickProxy(buildProxyMask(state.current, dims, { cache: proxyCache.current }).mask);
   }, [quickMask, state.current, dims]);
 
-  // Commit a closed pen / lasso path (straight anchors; no handles from the UI).
-  const commitPath = (toolName: "pen" | "lasso", pts: [number, number][]) => {
+  // Commit a closed path (straight anchors; no handles from the UI). The
+  // tool name is recorded for provenance — the rasteriser only reads
+  // mode / closed / points, so every path tool replays identically.
+  const commitPath = (toolName: string, pts: [number, number][]) => {
     if (pts.length < 3) return;
     dispatch({
       type: "path",
@@ -678,7 +687,10 @@ export function MaskEditModal({
   };
 
   const closePenPath = () => {
-    commitPath("pen", penAnchors);
+    // The curvature pen smooths at commit time: a closed Catmull-Rom curve
+    // through the anchors, sampled into an ordinary dense path polygon.
+    if (toolId === "curvature_pen") commitPath(toolId, catmullRomClosed(penAnchors));
+    else commitPath(toolId, penAnchors);
     setPenAnchors([]);
   };
 
@@ -705,9 +717,14 @@ export function MaskEditModal({
       return;
     }
     if (editingPath != null && anchorDraft) {
-      // Anchor re-editing mode: grab the nearest anchor square, if any.
       (e.target as Element).setPointerCapture?.(e.pointerId);
       const [x, y] = toImage(e);
+      if (tool.id === "path_select") {
+        // Path selection: any drag moves the whole selected path.
+        wholePathDrag.current = [x, y];
+        return;
+      }
+      // Anchor re-editing mode: grab the nearest anchor square, if any.
       const grabRadius = Math.max(10, dims.w * 0.012);
       let best = -1;
       let bestDist = grabRadius;
@@ -730,13 +747,21 @@ export function MaskEditModal({
     if (activeIsAdjustment && tool.kind !== "point" && !toMatteTarget) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const pt = toImage(e);
+    if (tool.kind === "path_edit") {
+      // Path / direct selection: click near a committed path outline to
+      // re-open it through the ordinary anchor-edit flow (M2).
+      const hit = hitTestPathOp(activeOps(state.current), pt, Math.max(10, dims.w * 0.012));
+      if (hit >= 0) startPathEdit(hit);
+      return;
+    }
     if (tool.kind === "path") {
-      if (tool.id === "lasso") {
+      if (tool.id === "lasso" || tool.id === "freeform_pen") {
         drawing.current = { points: [pt] };
         forceRedraw((n) => n + 1);
         return;
       }
-      // Pen: clicking near the first anchor closes the path.
+      // Anchor tools (pen / polygonal lasso / curvature pen): clicking near
+      // the first anchor closes the path.
       const closeRadius = Math.max(8, dims.w * 0.01);
       const first = penAnchors[0];
       if (penAnchors.length >= 3 && first && Math.hypot(pt[0] - first[0], pt[1] - first[1]) <= closeRadius) {
@@ -773,12 +798,26 @@ export function MaskEditModal({
       shapeDrag.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "click") {
-      // Magic-wand: record a seeded flood-fill op for the backend.
-      dispatch({ type: "op", op: { type: "wand", amount: tolerance, region: pt } });
+      // Wand-family flood fill, seeded at the click: the paint bucket adds
+      // like the wand; the magic eraser records mode "subtract" and the
+      // backend clears the flooded region instead.
+      dispatch({
+        type: "op",
+        op: { type: "wand", amount: tolerance, region: pt, ...(tool.mode === "subtract" ? { mode: "subtract" } : null) },
+      });
     } else if (tool.kind === "sample") {
-      // Eyedropper: read the underlay colour under the click — a pure view
-      // read, nothing is recorded on the document.
-      sampleUnderlay(pt);
+      // Sample tools are pure view reads — nothing lands on the document.
+      if (tool.id === "ruler") {
+        rulerDrag.current = { start: pt, end: pt };
+        forceRedraw((n) => n + 1);
+      } else if (tool.id === "color_sampler") {
+        // Pin up to four persistent readouts (PS colour sampler).
+        sampleUnderlay(pt, (hex) =>
+          setColorSamples((prev) => (prev.length >= 4 ? prev : [...prev, { x: pt[0], y: pt[1], hex }])),
+        );
+      } else {
+        sampleUnderlay(pt);
+      }
     } else if (tool.kind === "point") {
       // SAM 2 point prompt: left button includes (positive), right button
       // excludes (negative). Right-click's context menu is suppressed below.
@@ -800,10 +839,22 @@ export function MaskEditModal({
       setView((v) => panBy(v, dx, dy, ...viewBase()));
       return;
     }
+    if (wholePathDrag.current) {
+      const [x, y] = toImage(e);
+      const [px, py] = wholePathDrag.current;
+      wholePathDrag.current = [x, y];
+      setAnchorDraft((prev) => (prev ? translateAnchors(prev, x - px, y - py) : prev));
+      return;
+    }
     if (draggingAnchor.current != null) {
       const [x, y] = toImage(e);
       const idx = draggingAnchor.current;
       setAnchorDraft((prev) => (prev ? prev.map((p, i) => (i === idx ? { ...p, x, y } : p)) : prev));
+      return;
+    }
+    if (rulerDrag.current) {
+      rulerDrag.current.end = toImage(e);
+      redraw();
       return;
     }
     if (drawing.current) {
@@ -833,16 +884,28 @@ export function MaskEditModal({
       panDrag.current = null;
       return;
     }
+    if (wholePathDrag.current) {
+      wholePathDrag.current = null;
+      forceRedraw((n) => n + 1);
+      return;
+    }
     if (draggingAnchor.current != null) {
       draggingAnchor.current = null;
+      forceRedraw((n) => n + 1);
+      return;
+    }
+    if (rulerDrag.current) {
+      const { start, end } = rulerDrag.current;
+      rulerDrag.current = null;
+      setRulerLine(Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1 ? { start, end } : null);
       forceRedraw((n) => n + 1);
       return;
     }
     if (drawing.current) {
       const pts = drawing.current.points;
       drawing.current = null;
-      if (tool.id === "lasso") {
-        commitPath("lasso", pts);
+      if (tool.id === "lasso" || tool.id === "freeform_pen") {
+        commitPath(tool.id, pts);
         forceRedraw((n) => n + 1);
         return;
       }
@@ -878,6 +941,9 @@ export function MaskEditModal({
         forceRedraw((n) => n + 1);
         return;
       }
+      // The pencil is a brush with hardness / flow pinned to 100% (a hard
+      // aliased stamp); its strokes never record the soft-brush fields.
+      const hardTool = tool.id === "pencil";
       const stroke: BrushStroke = {
         id: nextId("stroke"),
         mode: tool.mode ?? "add",
@@ -885,7 +951,7 @@ export function MaskEditModal({
         points: pts,
         // Soft-brush fields are recorded only for soft strokes so hard
         // strokes keep the legacy shape (and byte-identical replay).
-        ...(brushHardness < 1 || brushFlow < 1
+        ...(!hardTool && (brushHardness < 1 || brushFlow < 1)
           ? { hardness: brushHardness, flow: brushFlow, spacing: brushSpacing }
           : null),
       };
@@ -942,7 +1008,7 @@ export function MaskEditModal({
   // paint/click/marquee/path tools become the active mode; `planned` tools are inert.
   const onToolClick = (t: MaskTool) => {
     if (t.status !== "ready") return;
-    if (t.id !== "pen") setPenAnchors([]);
+    if (!ANCHOR_PATH_TOOLS.includes(t.id)) setPenAnchors([]);
     cancelPathEdit();
     if (t.kind === "global") {
       // Amount-taking morphology ops (grow/shrink/feather/smooth) enter a live
@@ -1076,6 +1142,10 @@ export function MaskEditModal({
               setBrushFlow={setBrushFlow}
               brushSpacing={brushSpacing}
               sampledColor={sampledColor}
+              colorSamples={colorSamples}
+              clearColorSamples={() => setColorSamples([])}
+              rulerLine={rulerLine}
+              clearRuler={() => setRulerLine(null)}
               shapeKind={shapeKind}
               setShapeKind={setShapeKind}
               shapeSides={shapeSides}
