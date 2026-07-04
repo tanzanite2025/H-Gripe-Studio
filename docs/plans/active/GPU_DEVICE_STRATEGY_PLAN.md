@@ -5,9 +5,10 @@
 > `DeviceReport` vocabulary, and normalizers for the local-engine `*_report`
 > outputs and viewport `ViewportBackend` frames live in
 > `studio-ui/src/runtime/deviceReport.ts`, and every run now logs a per-node
-> `device requested -> used (backend; fallback)` line. Remaining: Rust-side
-> vocabulary, capability-summary refinement, and the medium/long-term
-> hardening below.
+> `device requested -> used (backend; fallback)` line, and the grade panel /
+> program monitor backend badges render from the same vocabulary with
+> fallbacks kept visible. Remaining: Rust-side vocabulary, capability-summary
+> refinement, and the medium/long-term hardening below.
 
 ## Purpose
 
@@ -384,7 +385,11 @@ This should be a settings surface, not a required setup wizard.
    (`logDeviceReports` in `useStudioRunController`). Viewport frames have a
    normalizer; wiring their frames into the same log is part of the WGPU
    surface work.
-5. Normalize UI display of requested/used/fallback.
+5. ✅ (viewport surfaces) Normalize UI display of requested/used/fallback:
+   the grade panel's backend badge and the program monitor's frame badge now
+   render from the shared `DeviceReport` (label from `used`, tooltip with
+   `requested -> used` + fallback reason, and a visible ⚠ marker on fallback
+   instead of silently hiding it). Node-report/capability panels still pending.
 6. Add or refine capability summary as diagnostics only.
 7. ✅ Add contract tests for report behavior
    (`studio-ui/src/runtime/deviceReport.test.ts`: `auto` always yields a

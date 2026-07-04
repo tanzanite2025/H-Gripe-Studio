@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { registerTimeline, type TimelineClipRef } from "../bridge/viewport";
 import { useT } from "../i18n";
+import { describeDeviceReport, deviceReportFromViewportBackend } from "../runtime/deviceReport";
 import { useViewControls } from "../viewport/useViewControls";
 import { useVideoPreview, type VideoPreviewTarget } from "../viewport/useVideoPreview";
 import type { MediaAsset } from "./mediaBin";
@@ -132,6 +133,12 @@ export function ProgramMonitor({
     return () => cancelAnimationFrame(raf);
   }, [playing, duration]);
 
+  // Normalized device transparency for the backend badge (shared vocabulary).
+  const backendReport = useMemo(
+    () => (state.backend ? deviceReportFromViewportBackend(state.backend) : null),
+    [state.backend],
+  );
+
   const togglePlay = () => {
     if (duration <= 0) return;
     // Play from the start when the playhead sits at the end.
@@ -149,9 +156,10 @@ export function ProgramMonitor({
             {state.error ?? (target && state.pending ? "…" : t("drawer.monitorEmpty"))}
           </span>
         )}
-        {state.backend ? (
-          <span className="production-monitor-backend">
-            {state.backend.actual}
+        {backendReport ? (
+          <span className="production-monitor-backend" title={describeDeviceReport(backendReport)}>
+            {backendReport.used}
+            {backendReport.fallbackReason ? " ⚠" : null}
             {view.zoom > 1 ? <> · {Math.round(view.zoom * 100)}%</> : null}
           </span>
         ) : null}
