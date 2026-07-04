@@ -1,6 +1,7 @@
 # Studio Project Multi-Canvas Workspace Plan
 
-> Status: active.
+> Status: completed. All five migration phases landed (PRs #382–#386), plus
+> the "Open Workflow imports into a new tab" behavior (PR #387).
 > Purpose: define the long-term project, multi-canvas tab, and toolbar
 > information architecture so the studio does not keep patching the current
 > single-canvas shell.
@@ -235,7 +236,7 @@ project, document, canvas, and global commands belong.
 
 ## Migration Path
 
-### Phase 1: Naming And Toolbar Semantics
+### Phase 1: Naming And Toolbar Semantics (done, PR #382)
 
 - Rename ambiguous `New` surfaces into `New Project` or `New Canvas`.
 - Move global language control to the app/global row.
@@ -244,31 +245,46 @@ project, document, canvas, and global commands belong.
 - Group connection style, minimap, snapping, search, and zoom as canvas tools.
 - Keep current single-canvas state internally.
 
-### Phase 2: CanvasDocument Wrapper
+### Phase 2: CanvasDocument Wrapper (done, PR #383)
 
 - Wrap the current graph state in one `CanvasDocument`.
 - Move selected node, viewport, dirty state, and history scope into that wrapper.
 - Keep persistence compatible with the current workflow format.
 
-### Phase 3: In-Memory Multi-Canvas Tabs
+### Phase 3: In-Memory Multi-Canvas Tabs (done, PR #384)
 
 - Add a tab bar for multiple open `CanvasDocument` objects.
 - Make undo/redo, search, inspector, run state, and snapshots use the active
   canvas id.
 - Ensure `New Canvas` never mutates or clears another tab.
 
-### Phase 4: Project Manifest Persistence
+### Phase 4: Project Manifest Persistence (done, PR #385)
 
 - Add a project manifest that lists canvas documents and asset refs.
 - Save and restore multiple canvas tabs.
 - Track dirty state at both project and canvas levels.
 
-### Phase 5: Project-Level Commands And Batch
+### Phase 5: Project-Level Commands And Batch (done, PR #386)
 
 - Add explicit project-level run/export only after document scoping is stable.
 - Make batch commands visibly different from active-canvas commands.
 - Keep project-level actions out of the normal canvas editing toolbar unless
   the user enters a project/batch mode.
+
+### Delivered Shape
+
+- Canvas tab row with per-tab dirty markers, close buttons, and `New Canvas`
+  (`CanvasTabs`, `useCanvasDocument`); undo/snapshot/inspector scope follows
+  the active document id.
+- Open tab set persists through a project manifest (`project.manifest.json`
+  next to the workspace autosave on desktop, localStorage in the browser
+  preview); the legacy single autosave keeps working underneath.
+- `Open Workflow` imports into a new tab; opening an already-open path
+  activates its tab instead of duplicating it (PR #387).
+- Project-level batch: a "Run all canvases" action on the tab row (shown with
+  2+ tabs, outside the canvas toolbar) runs every open canvas sequentially
+  under one `"project"` run-history record; only the active canvas paints
+  statuses/previews, parked canvases report through the run log.
 
 ## Non-Goals
 
