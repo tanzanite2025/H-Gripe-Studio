@@ -3,7 +3,6 @@
 // editor below shows. Purely presentational — the document store lives in
 // useCanvasDocument.
 
-import { useEffect, useRef, useState } from "react";
 import { canvasDocumentTitle } from "./canvasDocument";
 import type { CanvasTabInfo } from "./useCanvasDocument";
 import { useT } from "../i18n";
@@ -28,6 +27,60 @@ interface CanvasTabsProps {
   running: boolean;
 }
 
+// Per-tab action icons; open strokes so they read at 14px on the dark pills.
+function SaveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M5 4 H16 L20 8 V19 A1 1 0 0 1 19 20 H5 A1 1 0 0 1 4 19 V5 A1 1 0 0 1 5 4 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path d="M8 4 V9 H15 V4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <rect x="8" y="13" width="8" height="7" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function SaveAsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M5 4 H13 L17 8 V11 M4.5 12 V5 A1 1 0 0 1 5 4 M4.5 16 V19 A1 1 0 0 0 5.5 20 H10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M20 12.5 L14.5 18 L12.5 20 H14.5 L16.5 18 L22 12.5 A1.4 1.4 0 0 0 20 12.5 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function RenameIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M16.5 4.5 L19.5 7.5 L8 19 H5 V16 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path d="M14 7 L17 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function CanvasTabs({
   tabs,
   activeId,
@@ -44,28 +97,6 @@ export function CanvasTabs({
 }: CanvasTabsProps) {
   const t = useT();
   const untitled = t("status.untitled");
-  // Open tab menu (dropdown is position:fixed so the scrollable tab row
-  // cannot clip it; the anchor point comes from the toggle button).
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  const menuId = menu?.id ?? null;
-  const rowRef = useRef<HTMLDivElement | null>(null);
-
-  // Close the tab menu on any click outside the row or on Escape.
-  useEffect(() => {
-    if (!menuId) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rowRef.current?.contains(e.target as Node)) setMenu(null);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu(null);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [menuId]);
 
   const rename = (id: string, currentTitle: string) => {
     const input = window.prompt(t("canvasTabs.renamePrompt"), currentTitle);
@@ -75,98 +106,82 @@ export function CanvasTabs({
   };
 
   return (
-    <div className="canvas-tabs" role="tablist" ref={rowRef}>
-      {tabs.map((tab) => {
-        const active = tab.id === activeId;
-        const path = active ? activePath : tab.path;
-        const dirty = active ? activeDirty : tab.dirty;
-        const title = tab.name ?? canvasDocumentTitle(path, untitled);
-        return (
-          <div
-            key={tab.id}
-            role="tab"
-            aria-selected={active}
-            className={`canvas-tab${active ? " active" : ""}`}
-            title={path ?? untitled}
-            onClick={() => onActivate(tab.id)}
-          >
-            <span className="canvas-tab-title">
-              {title}
-              {dirty ? " *" : ""}
-            </span>
-            <button
-              className="canvas-tab-menu-button"
-              aria-label={t("canvasTabs.menu")}
-              title={t("canvasTabs.menu")}
-              aria-expanded={menuId === tab.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                const rect = e.currentTarget.getBoundingClientRect();
-                setMenu((cur) =>
-                  cur?.id === tab.id ? null : { id: tab.id, x: rect.left, y: rect.bottom + 4 },
-                );
-              }}
+    <div className="canvas-tabs" role="tablist">
+      <div className="canvas-tabs-strip">
+        {tabs.map((tab) => {
+          const active = tab.id === activeId;
+          const path = active ? activePath : tab.path;
+          const dirty = active ? activeDirty : tab.dirty;
+          const title = tab.name ?? canvasDocumentTitle(path, untitled);
+          return (
+            <div
+              key={tab.id}
+              role="tab"
+              aria-selected={active}
+              className={`canvas-tab${active ? " active" : ""}`}
+              title={path ?? untitled}
+              onClick={() => onActivate(tab.id)}
             >
-              ⋯
-            </button>
-            <button
-              className="canvas-tab-close"
-              aria-label={t("canvasTabs.close")}
-              title={t("canvasTabs.close")}
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(tab.id);
-              }}
-            >
-              ×
-            </button>
-            {menu?.id === tab.id && (
-              <div
-                className="canvas-tab-menu"
-                role="menu"
-                style={{ left: menu.x, top: menu.y }}
-                onClick={(e) => e.stopPropagation()}
+              <span className="canvas-tab-title">
+                {title}
+                {dirty ? " *" : ""}
+              </span>
+              <button
+                className="canvas-tab-action"
+                aria-label={t("canvasTabs.save")}
+                title={t("canvasTabs.save")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSaveTab(tab.id);
+                }}
               >
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setMenu(null);
-                    onSaveTab(tab.id);
-                  }}
-                >
-                  {t("canvasTabs.save")}
-                </button>
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setMenu(null);
-                    onSaveAsTab(tab.id);
-                  }}
-                >
-                  {t("canvasTabs.saveAs")}
-                </button>
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setMenu(null);
-                    rename(tab.id, title);
-                  }}
-                >
-                  {t("canvasTabs.rename")}
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      })}
-      <button
-        className="canvas-tab-new"
-        aria-label={t("canvasTabs.new")}
-        title={t("canvasTabs.new")}
-        onClick={onNewCanvas}
-      >
-        +
-      </button>
+                <SaveIcon />
+              </button>
+              <button
+                className="canvas-tab-action"
+                aria-label={t("canvasTabs.saveAs")}
+                title={t("canvasTabs.saveAs")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSaveAsTab(tab.id);
+                }}
+              >
+                <SaveAsIcon />
+              </button>
+              <button
+                className="canvas-tab-action"
+                aria-label={t("canvasTabs.rename")}
+                title={t("canvasTabs.rename")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  rename(tab.id, title);
+                }}
+              >
+                <RenameIcon />
+              </button>
+              <button
+                className="canvas-tab-close"
+                aria-label={t("canvasTabs.close")}
+                title={t("canvasTabs.close")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(tab.id);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+        <button
+          className="canvas-tab-new"
+          aria-label={t("canvasTabs.new")}
+          title={t("canvasTabs.new")}
+          onClick={onNewCanvas}
+        >
+          +
+        </button>
+      </div>
       {tabs.length > 1 && (
         <button
           className="canvas-tabs-run-project"

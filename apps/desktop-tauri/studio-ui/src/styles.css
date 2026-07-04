@@ -137,22 +137,30 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 /* canvas tab row (multi-canvas workspace): one tab per open canvas document */
 .canvas-tabs {
+  position: relative;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 8px 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
   user-select: none;
 }
-/* Pill-shaped tabs: each canvas is a capsule with its own actions menu. */
+/* Centered scroll strip so the pills stay mid-row however many are open. */
+.canvas-tabs-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* Pill-shaped tabs: each canvas is a capsule with inline file actions. */
 .canvas-tab {
-  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px 4px 12px;
+  gap: 6px;
+  padding: 7px 8px 7px 16px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.03);
@@ -168,14 +176,19 @@ button:disabled { opacity: 0.6; cursor: default; }
   border-color: rgba(91, 140, 255, 0.45);
   color: var(--text);
 }
-.canvas-tab-title { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-.canvas-tab-menu-button,
+.canvas-tab-title {
+  max-width: 200px;
+  margin-right: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-tab-action,
 .canvas-tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   background: transparent;
   border: none;
   border-radius: 999px;
@@ -184,50 +197,30 @@ button:disabled { opacity: 0.6; cursor: default; }
   line-height: 1;
   cursor: pointer;
 }
-.canvas-tab-menu-button:hover,
+.canvas-tab-action svg {
+  width: 14px;
+  height: 14px;
+}
+.canvas-tab-action:hover,
 .canvas-tab-close:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.1);
 }
-/* Per-tab dropdown: save / save as / rename. */
-.canvas-tab-menu {
-  position: fixed;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  min-width: 120px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(24, 26, 33, 0.97);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(6px);
-}
-.canvas-tab-menu button {
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 10px;
-  text-align: left;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.canvas-tab-menu button:hover { background: rgba(91, 140, 255, 0.16); }
 .canvas-tab-new {
+  flex: none;
   background: transparent;
   border: 1px dashed var(--border);
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 6px 12px;
   color: var(--muted);
   line-height: 1.4;
   cursor: pointer;
 }
 .canvas-tab-new:hover { color: var(--text); }
-/* project-level batch action: visually distinct from canvas run controls */
+/* project-level batch action: pinned right so the tab strip stays centered */
 .canvas-tabs-run-project {
-  margin-left: auto;
+  position: absolute;
+  right: 12px;
   background: transparent;
   border: 1px solid var(--accent, #7aa2f7);
   border-radius: 6px;
