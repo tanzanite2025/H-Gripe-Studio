@@ -21,6 +21,10 @@ export interface NodeCardShellProps {
   onOpenInspector?: () => void;
   /** Content rendered inside an input port's block, keyed by port id (e.g. the params belonging to that block). */
   portContent?: Record<string, ReactNode>;
+  /** When set, paired semantic rows show a run button that runs just that row. */
+  onRunRow?: (rowId: string) => void;
+  /** Tooltip for the per-row run button. */
+  runRowTitle?: string;
   children?: ReactNode;
 }
 
@@ -33,6 +37,8 @@ export function NodeCardShell({
   titleExtra,
   onOpenInspector,
   portContent,
+  onRunRow,
+  runRowTitle,
   children,
 }: NodeCardShellProps) {
   return (
@@ -67,7 +73,13 @@ export function NodeCardShell({
         <div className="node-ports">
           {groupPortRows(spec).map((row) =>
             row.paired ? (
-              <PairedPortRow key={`row-${row.key}`} row={row} portContent={portContent} />
+              <PairedPortRow
+                key={`row-${row.key}`}
+                row={row}
+                portContent={portContent}
+                onRun={onRunRow ? () => onRunRow(row.key) : undefined}
+                runTitle={runRowTitle}
+              />
             ) : row.inputs.length > 0 ? (
               <PortBlock key={`in-${row.key}`} port={row.inputs[0]} side="in">
                 {portContent?.[row.inputs[0].id]}
@@ -128,13 +140,32 @@ export function groupPortRows(spec: NodeSpec): PortRowGroup[] {
 function PairedPortRow({
   row,
   portContent,
+  onRun,
+  runTitle,
 }: {
   row: PortRowGroup;
   portContent?: Record<string, ReactNode>;
+  onRun?: () => void;
+  runTitle?: string;
 }) {
   const type = (row.inputs[0] ?? row.outputs[0]).type;
   return (
     <div className={`port-block port-block-pair port-type-${type}`}>
+      {onRun && (
+        <button
+          type="button"
+          className="port-row-run nodrag nowheel"
+          title={runTitle}
+          aria-label={runTitle}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRun();
+          }}
+        >
+          ▶
+        </button>
+      )}
       <div className="port-side port-side-in">
         {row.inputs.map((p) => (
           <div key={p.id} className="port-entry">

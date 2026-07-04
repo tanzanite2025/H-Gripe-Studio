@@ -17,6 +17,7 @@ import { ParamField } from "./ParamField";
 import { useNodeEditing } from "./editingContext";
 import { psdTemplatePathWarning } from "./psdcheck";
 import { NodeCardShell } from "./NodeCardShell";
+import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import type { LayeredImageAsset } from "../production/layeredImage";
 
 export interface HgripeNodeData extends Record<string, unknown> {
@@ -420,6 +421,13 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
     : undefined;
   const templateWarn =
     spec.kind === "psdTemplate" ? psdTemplatePathWarning(String(d.params.path ?? "")) : null;
+  // Integrated cards (lowered row-by-row) get a per-row run affordance that
+  // executes just that row's input chain (RunScope `card_row`).
+  const runCardRow = editing?.runCardRow;
+  const onRunRow =
+    runCardRow && spec.kind in LOWERED_CARD_ROWS
+      ? (rowId: string) => runCardRow(id, rowId)
+      : undefined;
 
   return (
     <NodeCardShell
@@ -431,6 +439,8 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
       onOpenInspector={() => editing?.openInspector?.(id)}
       portContent={lod ? undefined : portContent}
+      onRunRow={lod ? undefined : onRunRow}
+      runRowTitle={t("node.runRowTitle")}
     >
       {!lod && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>

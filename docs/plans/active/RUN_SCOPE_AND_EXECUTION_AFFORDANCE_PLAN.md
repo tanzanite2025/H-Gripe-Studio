@@ -426,7 +426,13 @@ They should not be required for:
    controller's `run` / `runUpToNode` now build scopes and share one
    `runScope(scope)` pipeline, which is also exposed on the controller for
    future selection/card/downstream affordances.
-3. Add row-level run for integrated cards, starting with `Image Processing`.
+3. ✅ Add row-level run for integrated cards, starting with `Image Processing`:
+   `card_row` now narrows for real — the resolver keeps only the card edges of
+   the row's `<rowId>.` port prefix before taking the ancestor subgraph, so
+   lowering produces just that row's leaf and only its input chain runs (a
+   warning is logged when the row has no wired input). Every paired semantic
+   row on an integrated card shows a hover run button (`NodeCardShell`
+   `onRunRow` → `runCardRow` on the run controller / editing context).
 4. Reuse existing backend ref validation for row/card scoped runs.
 5. Add card-level run for integrated cards.
 6. Add toolbar/context menu commands for selection run.
