@@ -78,6 +78,7 @@ interface MockViewport {
   width: number;
   height: number;
   gradeDoc: unknown | null;
+  maskOverlay: ViewportMaskOverlay | null;
   view: { zoom: number; panX: number; panY: number };
 }
 
@@ -115,6 +116,7 @@ export async function createViewport(kind: ViewportKind): Promise<ViewportDescri
     width: 0,
     height: 0,
     gradeDoc: null,
+    maskOverlay: null,
     view: { zoom: 1, panX: 0, panY: 0 },
   });
   console.info(`[viewport] created ${viewport_id} kind=${kind} (mock)`);
@@ -280,6 +282,77 @@ export async function setViewportGrade(
     throw new Error(`temporal_denoise must be between 0 and 1, got ${temporalDenoise}`);
   }
   vp.gradeDoc = doc;
+}
+
+/** A working-scale mask the host tints over rendered frames (image_edit
+ * viewports): the mask editor's morphology preview or quick-mask ruby. The
+ * buffer covers the full document at proxy resolution; the host samples it at
+ * the view window so the tint follows zoom. */
+export interface ViewportMaskOverlay {
+  w: number;
+  h: number;
+  /** Row-major `w * h` coverage bytes (0..255). */
+  data: Uint8Array;
+  /** Tint colour (sRGB). */
+  rgb: [number, number, number];
+  /** Peak overlay opacity (0..=1) at full coverage. */
+  alpha: number;
+  /** Tint where coverage is low (quick mask: unselected area reads ruby). */
+  invert?: boolean;
+}
+
+/** Standard base64 of a byte buffer (chunked so large buffers don't overflow
+ * the argument list). */
+function base64Encode(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Set (or clear) the mask overlay an image-edit viewport composites over
+ * rendered frames — the selection tint presents host-side at the view
+ * window's detail instead of an upscaled document-size canvas overlay.
+ */
+export async function setViewportMaskOverlay(
+  viewportId: string,
+  overlay: ViewportMaskOverlay | null,
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_set_mask_overlay", {
+      viewportId,
+      overlay: overlay
+        ? {
+            w: overlay.w,
+            h: overlay.h,
+            data: base64Encode(overlay.data),
+            rgb: overlay.rgb,
+            alpha: overlay.alpha,
+            invert: overlay.invert ?? false,
+          }
+        : null,
+    });
+    return;
+  }
+  const vp = mockGet(viewportId);
+  if (vp.kind !== "image_edit") {
+    throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept a mask overlay`);
+  }
+  if (overlay) {
+    if (overlay.data.length !== overlay.w * overlay.h) {
+      throw new Error(
+        `mask overlay buffer is ${overlay.data.length} bytes, expected ${overlay.w * overlay.h}`,
+      );
+    }
+    if (!Number.isFinite(overlay.alpha) || overlay.alpha < 0 || overlay.alpha > 1) {
+      throw new Error(`mask overlay alpha must be between 0 and 1, got ${overlay.alpha}`);
+    }
+  }
+  vp.maskOverlay = overlay;
 }
 
 /**

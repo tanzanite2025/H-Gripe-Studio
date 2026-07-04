@@ -193,6 +193,10 @@ struct ViewportState {
     /// Grade document applied at render time (grade_preview viewports); the
     /// doc is parameters only — pixels are resolved through the target.
     grade_doc: Option<Value>,
+    /// Mask overlay composited over rendered frames (image_edit viewports):
+    /// the mask editor's proxy-resolution selection tint, presented by the
+    /// host at the view window's detail instead of a document-size canvas.
+    mask_overlay: Option<Arc<MaskOverlay>>,
     view: ViewportView,
     /// Most-recently-used first, at most [`PROXY_CACHE_DEPTH`] entries.
     proxies: Vec<SourceProxy>,
@@ -202,6 +206,88 @@ struct ViewportState {
     temporal_denoise: f32,
     /// The previous graded frame and its identity, for continuity checks.
     temporal: Option<TemporalChain>,
+}
+
+/// A single-channel mask the host tints over rendered frames. The buffer is
+/// proxy resolution (the mask editor's working scale) and covers the full
+/// document; compositing samples it bilinearly at the view window, so the
+/// tint follows zoom instead of upscaling a document-size canvas.
+struct MaskOverlay {
+    w: u32,
+    h: u32,
+    /// Row-major `w * h` coverage bytes (0..255).
+    data: Vec<u8>,
+    /// Tint colour (sRGB).
+    rgb: [u8; 3],
+    /// Peak overlay opacity (0..=1) at full coverage.
+    alpha: f32,
+    /// Tint where coverage is *low* instead of high (quick-mask ruby: the
+    /// unselected area reads red, the selection reads clear).
+    invert: bool,
+}
+
+impl MaskOverlay {
+    /// Bilinear coverage sample at normalized document coordinates.
+    fn coverage(&self, nx: f32, ny: f32) -> f32 {
+        let fx = (nx * self.w as f32 - 0.5).clamp(0.0, (self.w - 1) as f32);
+        let fy = (ny * self.h as f32 - 0.5).clamp(0.0, (self.h - 1) as f32);
+        let x0 = fx.floor() as u32;
+        let y0 = fy.floor() as u32;
+        let x1 = (x0 + 1).min(self.w - 1);
+        let y1 = (y0 + 1).min(self.h - 1);
+        let tx = fx - x0 as f32;
+        let ty = fy - y0 as f32;
+        let at = |x: u32, y: u32| f32::from(self.data[(y * self.w + x) as usize]) / 255.0;
+        let top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
+        let bot = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
+        top * (1.0 - ty) + bot * ty
+    }
+}
+
+/// Composite the mask overlay over a graded surface. `proxy_dims` is the
+/// full source proxy the surface was cropped from and `view` the crop, so
+/// each surface pixel maps back to normalized document coordinates (the
+/// overlay covers the whole document).
+fn composite_mask_overlay(
+    surface: &mut hgripe_grade::GradeSurface,
+    overlay: &MaskOverlay,
+    proxy_dims: (u32, u32),
+    view: ViewportView,
+) {
+    let (pw, ph) = proxy_dims;
+    let (sw, sh) = (surface.w, surface.h);
+    if sw == 0 || sh == 0 || pw == 0 || ph == 0 || overlay.w == 0 || overlay.h == 0 {
+        return;
+    }
+    // Recompute the crop rect exactly as `crop_view` placed it.
+    let zoom = view.zoom.max(1.0);
+    let vw = ((pw as f32 / zoom).round() as u32).clamp(1, pw);
+    let vh = ((ph as f32 / zoom).round() as u32).clamp(1, ph);
+    let x0 = ((view.pan_x * pw as f32).round() as i64).clamp(0, (pw - vw) as i64) as f32;
+    let y0 = ((view.pan_y * ph as f32).round() as i64).clamp(0, (ph - vh) as i64) as f32;
+    let tint = [
+        f32::from(overlay.rgb[0]) / 255.0,
+        f32::from(overlay.rgb[1]) / 255.0,
+        f32::from(overlay.rgb[2]) / 255.0,
+    ];
+    for py in 0..sh {
+        let ny = (y0 + (py as f32 + 0.5) / sh as f32 * vh as f32) / ph as f32;
+        for px in 0..sw {
+            let nx = (x0 + (px as f32 + 0.5) / sw as f32 * vw as f32) / pw as f32;
+            let mut c = overlay.coverage(nx, ny);
+            if overlay.invert {
+                c = 1.0 - c;
+            }
+            let a = (c * overlay.alpha).clamp(0.0, 1.0);
+            if a <= 0.0 {
+                continue;
+            }
+            let base = ((py * sw + px) * 4) as usize;
+            for ch in 0..3 {
+                surface.data[base + ch] = tint[ch] * a + surface.data[base + ch] * (1.0 - a);
+            }
+        }
+    }
 }
 
 /// The feedback state temporal denoise needs across renders: the previous
@@ -614,6 +700,7 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             width: 0,
             height: 0,
             grade_doc: None,
+            mask_overlay: None,
             view: ViewportView::IDENTITY,
             proxies: Vec::new(),
             temporal_denoise: 0.0,
@@ -745,6 +832,86 @@ pub(crate) fn viewport_set_grade(
     Ok(())
 }
 
+/// Wire form of a mask overlay: coverage bytes cross as base64 (they are
+/// proxy resolution — a few hundred pixels wide — so the payload stays small).
+#[derive(Deserialize)]
+pub(crate) struct MaskOverlayArg {
+    w: u32,
+    h: u32,
+    /// Base64 of row-major `w * h` coverage bytes.
+    data: String,
+    rgb: [u8; 3],
+    alpha: f32,
+    #[serde(default)]
+    invert: bool,
+}
+
+/// Largest accepted overlay buffer. Overlays are working-scale proxies; a
+/// document-resolution buffer through this path is a caller bug.
+const MAX_MASK_OVERLAY_PIXELS: u64 = 4096 * 4096;
+
+/// Set (or clear) the mask overlay an image-edit viewport composites over
+/// rendered frames — the mask editor's selection tint (morphology preview,
+/// quick mask), presented by the host at the view window's detail instead of
+/// an upscaled document-size canvas overlay.
+#[tauri::command]
+pub(crate) fn viewport_set_mask_overlay(
+    viewport_id: String,
+    overlay: Option<MaskOverlayArg>,
+) -> Result<(), String> {
+    let parsed = match overlay {
+        None => None,
+        Some(arg) => {
+            if arg.w == 0 || arg.h == 0 {
+                return Err("mask overlay dimensions must be positive".to_string());
+            }
+            if u64::from(arg.w) * u64::from(arg.h) > MAX_MASK_OVERLAY_PIXELS {
+                return Err(format!(
+                    "mask overlay too large: {}x{} (max {MAX_MASK_OVERLAY_PIXELS} pixels)",
+                    arg.w, arg.h
+                ));
+            }
+            if !arg.alpha.is_finite() || !(0.0..=1.0).contains(&arg.alpha) {
+                return Err(format!(
+                    "mask overlay alpha must be between 0 and 1, got {}",
+                    arg.alpha
+                ));
+            }
+            let data = crate::commands::thumbnails::base64_decode(&arg.data)?;
+            if data.len() != (arg.w as usize) * (arg.h as usize) {
+                return Err(format!(
+                    "mask overlay buffer is {} bytes, expected {}",
+                    data.len(),
+                    (arg.w as usize) * (arg.h as usize)
+                ));
+            }
+            Some(Arc::new(MaskOverlay {
+                w: arg.w,
+                h: arg.h,
+                data,
+                rgb: arg.rgb,
+                alpha: arg.alpha,
+                invert: arg.invert,
+            }))
+        }
+    };
+    let id = parse_id(&viewport_id)?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    if state.kind != "image_edit" {
+        return Err(format!(
+            "viewport {viewport_id} (kind={}) does not accept a mask overlay",
+            state.kind
+        ));
+    }
+    state.mask_overlay = parsed;
+    Ok(())
+}
+
 /// Set the viewport's presentation view (zoom/pan). Values must be finite and
 /// `zoom` positive; a zoom at or below 1 with zero pan is the identity view.
 #[tauri::command]
@@ -774,7 +941,7 @@ pub(crate) fn viewport_set_view(
 #[tauri::command]
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
     let id = parse_id(&viewport_id)?;
-    let (target, width, height, grade_doc, view, temporal_denoise) = {
+    let (target, width, height, grade_doc, view, temporal_denoise, mask_overlay) = {
         let map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
@@ -788,6 +955,7 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             state.grade_doc.clone(),
             state.view,
             state.temporal_denoise,
+            state.mask_overlay.clone(),
         )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
@@ -795,13 +963,29 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
         ViewportTarget::Image { resource_id } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
-            render_image_path(id, &entry.path, width, height, grade_doc, view)
+            render_image_path(
+                id,
+                &entry.path,
+                width,
+                height,
+                grade_doc,
+                view,
+                mask_overlay.as_deref(),
+            )
         }
         ViewportTarget::ImageLayer { asset_id, layer_id } => {
             // Layer artifacts resolve through the layered asset registry —
             // the same reference-not-pixels contract as image resources.
             let path = layered_asset_layer_path(&asset_id, &layer_id)?;
-            render_image_path(id, &path, width, height, grade_doc, view)
+            render_image_path(
+                id,
+                &path,
+                width,
+                height,
+                grade_doc,
+                view,
+                mask_overlay.as_deref(),
+            )
         }
         #[cfg(feature = "native-ffmpeg")]
         ViewportTarget::VideoFrame {
@@ -834,7 +1018,7 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             // timeline playhead to clip-local source time.
             let clip = timeline_clip(&timeline_id, &clip_id)?;
             if clip.kind == "still" {
-                return render_image_path(id, &clip.path, width, height, grade_doc, view);
+                return render_image_path(id, &clip.path, width, height, grade_doc, view, None);
             }
             let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
             #[cfg(feature = "native-ffmpeg")]
@@ -863,7 +1047,15 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             // Node outputs resolve through the node output registry — the
             // same reference-not-pixels contract as the other targets.
             let path = node_output_path(&node_id, output_port.as_deref())?;
-            render_image_path(id, &path, width, height, grade_doc, view)
+            render_image_path(
+                id,
+                &path,
+                width,
+                height,
+                grade_doc,
+                view,
+                mask_overlay.as_deref(),
+            )
         }
     }
 }
@@ -971,9 +1163,9 @@ fn render_video_path(
 }
 
 /// Render one still-image source (an image resource or a layer artifact) at
-/// the viewport's size, applying its grade doc and view. The decoded sRGB
-/// proxy is cached on the viewport keyed by path + size, so a slider drag or
-/// a pan/zoom tick re-runs only crop + kernel.
+/// the viewport's size, applying its grade doc, view and mask overlay. The
+/// decoded sRGB proxy is cached on the viewport keyed by path + size, so a
+/// slider drag or a pan/zoom tick re-runs only crop + kernel.
 fn render_image_path(
     id: u64,
     path: &str,
@@ -981,9 +1173,10 @@ fn render_image_path(
     height: u32,
     grade_doc: Option<Value>,
     view: ViewportView,
+    mask_overlay: Option<&MaskOverlay>,
 ) -> Result<ViewportFrame, String> {
     let size = width.max(height).clamp(64, 2048);
-    if grade_doc.is_some() || !view.is_identity() {
+    if grade_doc.is_some() || !view.is_identity() || mask_overlay.is_some() {
         // Graded and/or viewed frame: run the grading kernel (identity when
         // no doc is set) over the view window of the source's sRGB proxy.
         let doc = parse_grade_doc(grade_doc.as_ref())?;
@@ -1001,6 +1194,25 @@ fn render_image_path(
         } else {
             Some(crop_view(&proxy, view))
         };
+        if let Some(overlay) = mask_overlay {
+            // The overlay tints the *presented* frame: grade first, then
+            // composite, so the tint colour is not pushed through the kernel.
+            let started = Instant::now();
+            let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
+            let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
+            composite_mask_overlay(&mut surface, overlay, proxy.dimensions(), view);
+            let graded = crate::studio::encode_surface_preview(&surface, backend, started)?;
+            return Ok(ViewportFrame {
+                data_url: graded.data_url,
+                width: graded.width,
+                height: graded.height,
+                backend: ViewportBackend {
+                    requested: "auto".to_string(),
+                    actual: graded.backend.to_string(),
+                    fallback_reason: None,
+                },
+            });
+        }
         let graded = grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
         return Ok(ViewportFrame {
             data_url: graded.data_url,
@@ -1043,6 +1255,86 @@ mod tests {
         // Destroyed viewports are gone.
         assert!(viewport_resize(desc.viewport_id.clone(), 1, 1).is_err());
         assert!(viewport_destroy(desc.viewport_id).is_err());
+    }
+
+    #[test]
+    fn mask_overlay_only_on_image_edit_viewports_and_validates_the_buffer() {
+        let data = crate::commands::thumbnails::base64_encode(&[0u8; 4]);
+        let arg = |data: String| MaskOverlayArg {
+            w: 2,
+            h: 2,
+            data,
+            rgb: [86, 168, 255],
+            alpha: 0.55,
+            invert: false,
+        };
+
+        let grade = viewport_create("grade_preview".to_string()).expect("create");
+        let err = viewport_set_mask_overlay(grade.viewport_id.clone(), Some(arg(data.clone())))
+            .expect_err("grade_preview must reject a mask overlay");
+        assert!(err.contains("does not accept a mask overlay"));
+        viewport_destroy(grade.viewport_id).expect("destroy");
+
+        let vp = viewport_create("image_edit".to_string()).expect("create");
+        viewport_set_mask_overlay(vp.viewport_id.clone(), Some(arg(data.clone())))
+            .expect("image_edit accepts a mask overlay");
+        {
+            let map = viewports().lock().expect("lock");
+            let id = parse_id(&vp.viewport_id).expect("id");
+            assert!(map.get(&id).expect("open").mask_overlay.is_some());
+        }
+        // Wrong buffer length fails loudly.
+        let short = crate::commands::thumbnails::base64_encode(&[0u8; 3]);
+        let err = viewport_set_mask_overlay(vp.viewport_id.clone(), Some(arg(short)))
+            .expect_err("short buffer must be rejected");
+        assert!(err.contains("expected 4"));
+        // Out-of-range alpha fails loudly.
+        let mut bad = arg(data);
+        bad.alpha = 1.5;
+        assert!(viewport_set_mask_overlay(vp.viewport_id.clone(), Some(bad)).is_err());
+        // Clearing drops the overlay.
+        viewport_set_mask_overlay(vp.viewport_id.clone(), None).expect("clear");
+        {
+            let map = viewports().lock().expect("lock");
+            let id = parse_id(&vp.viewport_id).expect("id");
+            assert!(map.get(&id).expect("open").mask_overlay.is_none());
+        }
+        viewport_destroy(vp.viewport_id).expect("destroy");
+    }
+
+    #[test]
+    fn composite_tints_covered_pixels_and_inverts_for_quick_mask() {
+        let surface = |v: f32| hgripe_grade::GradeSurface {
+            w: 2,
+            h: 1,
+            data: vec![v; 2 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        // Left half covered, right half clear.
+        let overlay = MaskOverlay {
+            w: 2,
+            h: 1,
+            data: vec![255, 0],
+            rgb: [255, 0, 0],
+            alpha: 1.0,
+            invert: false,
+        };
+        let mut s = surface(0.0);
+        composite_mask_overlay(&mut s, &overlay, (2, 1), ViewportView::IDENTITY);
+        // Covered pixel reads the tint; the clear pixel is untouched.
+        assert!(s.data[0] > 0.9, "covered pixel red: {}", s.data[0]);
+        assert!(s.data[1] < 0.1, "covered pixel green: {}", s.data[1]);
+        assert_eq!(s.data[4], 0.0, "clear pixel untouched");
+
+        // Quick mask: inverted coverage tints the *unselected* pixel.
+        let ruby = MaskOverlay {
+            invert: true,
+            ..overlay
+        };
+        let mut q = surface(0.0);
+        composite_mask_overlay(&mut q, &ruby, (2, 1), ViewportView::IDENTITY);
+        assert!(q.data[0] < 0.1, "selected pixel clear: {}", q.data[0]);
+        assert!(q.data[4] > 0.9, "unselected pixel tinted: {}", q.data[4]);
     }
 
     #[test]

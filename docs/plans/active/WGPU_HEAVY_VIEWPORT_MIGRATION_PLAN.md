@@ -74,8 +74,13 @@ Remaining work, roughly in priority order:
    modal requests the visible window (`viewWindow`) from the viewport host
    and places the rendered frame at the window's rect under the edit canvas
    (rotated views keep the full frame; the recorded pixel space is
-   unchanged). Remaining: mask overlay + brush preview still paint in the
-   2D canvas at document resolution; move them to the viewport.
+   unchanged). The selection tint (morphology preview / quick-mask ruby) now
+   composites host-side: the modal sends the working-scale mask to the host
+   (`viewport_set_mask_overlay`) and the host tints the rendered frame at the
+   view window's detail. Remaining: the interactive brush/path/marquee
+   overlays still paint in the 2D canvas at document resolution; move them
+   to the viewport once it presents live surfaces (they are input-latency
+   bound, so they follow the WGPU surface swap, not the PNG transport).
 3. Remaining target wiring: the node-card grade modal, the mask/crop editors
    and the media source's unified editor now all preview through `node_output`
    targets (like the drawer Grade tab), so the selection-target model is

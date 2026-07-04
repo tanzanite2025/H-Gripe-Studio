@@ -39,6 +39,35 @@ describe("WgpuViewportHost", () => {
     await host.close();
   });
 
+  it("accepts a mask overlay on image_edit viewports only, and validates it", async () => {
+    const overlay = {
+      w: 2,
+      h: 2,
+      data: new Uint8Array(4),
+      rgb: [86, 168, 255] as [number, number, number],
+      alpha: 0.55,
+    };
+
+    const grade = await WgpuViewportHost.open("grade_preview");
+    await expect(
+      grade.command({ kind: "set_mask_overlay", overlay }),
+    ).rejects.toThrow(/does not accept a mask overlay/);
+    await grade.close();
+
+    const host = await WgpuViewportHost.open("image_edit");
+    await host.command({ kind: "set_mask_overlay", overlay });
+    // Wrong buffer length and out-of-range alpha fail loudly.
+    await expect(
+      host.command({ kind: "set_mask_overlay", overlay: { ...overlay, data: new Uint8Array(3) } }),
+    ).rejects.toThrow(/expected 4/);
+    await expect(
+      host.command({ kind: "set_mask_overlay", overlay: { ...overlay, alpha: 1.5 } }),
+    ).rejects.toThrow(/between 0 and 1/);
+    // Clearing is accepted.
+    await host.command({ kind: "set_mask_overlay", overlay: null });
+    await host.close();
+  });
+
   it("resolves node_output targets through the node output registry", async () => {
     const host = await WgpuViewportHost.open("image_edit");
     // Unregistered node outputs fail at set time, not at first render.
