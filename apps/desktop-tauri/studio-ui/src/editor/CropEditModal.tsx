@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
 import { useT } from "../i18n";
@@ -30,6 +31,8 @@ export interface CropCommit {
 interface CropEditModalProps {
   title: string;
   imagePath?: string | null;
+  /** Node whose output backs the underlay, for a `node_output` target. */
+  nodeId?: string | null;
   initialMode: "manual" | "auto_subject";
   initialBox: [number, number, number, number] | null;
   initialAspect: string;
@@ -68,6 +71,7 @@ function defaultBox(w: number, h: number): CropBox {
 export function CropEditModal({
   title,
   imagePath,
+  nodeId,
   initialMode,
   initialBox,
   initialAspect,
@@ -84,8 +88,10 @@ export function CropEditModal({
   const panDrag = useRef<{ x: number; y: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Underlay presentation goes through the viewport host (WGPU migration
-  // Phase 2); null in browser preview, where the fallback dims + box stay.
-  const viewport = useViewportUnderlay("image_edit", imagePath || undefined, 1280, view);
+  // Phase 2) by reference — a `node_output` target when a node id is given;
+  // null in browser preview, where the fallback dims + box stay.
+  const source = useNodeOutputSource(nodeId, imagePath);
+  const viewport = useViewportUnderlay("image_edit", source, 1280, view);
   const underlay = viewport.underlay;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
   const [mode, setMode] = useState<"manual" | "auto_subject">(initialMode);

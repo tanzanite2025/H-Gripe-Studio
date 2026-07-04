@@ -17,6 +17,8 @@ export type MediaEditGroup = "mask" | "crop";
 interface MediaEditModalProps {
   title: string;
   imagePath?: string | null;
+  /** Node whose output backs the underlay, for a `node_output` target. */
+  nodeId?: string | null;
   initialGroup?: MediaEditGroup;
   onCommitMask: (edits: MaskDocument) => void;
   onCommitCrop: (commit: CropCommit) => void;
@@ -26,6 +28,7 @@ interface MediaEditModalProps {
 export function MediaEditModal({
   title,
   imagePath,
+  nodeId,
   initialGroup = "mask",
   onCommitMask,
   onCommitCrop,
@@ -60,6 +63,7 @@ export function MediaEditModal({
       <MaskEditModal
         title={title}
         imagePath={imagePath}
+        nodeId={nodeId}
         initial={null}
         wandTolerance={24}
         onCommit={onCommitMask}
@@ -72,6 +76,7 @@ export function MediaEditModal({
     <CropEditModal
       title={title}
       imagePath={imagePath}
+      nodeId={nodeId}
       initialMode="manual"
       initialBox={null}
       initialAspect="free"
