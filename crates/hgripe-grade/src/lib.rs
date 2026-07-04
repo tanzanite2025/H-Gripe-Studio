@@ -8,6 +8,7 @@
 // `goldens/`, which the studio-ui preview mirror executes too — the two
 // implementations are proven against the same JSON, not kept in sync by hand.
 
+mod bake;
 mod blend;
 mod composite;
 mod doc;
@@ -19,6 +20,7 @@ mod scopes;
 mod surface;
 mod trc;
 
+pub use bake::{bake_cube, CubeBake, MAX_CUBE_SIZE};
 pub use blend::{blend_channel, blend_rgb, BlendMode};
 pub use composite::composite_over;
 #[cfg(feature = "parallel")]

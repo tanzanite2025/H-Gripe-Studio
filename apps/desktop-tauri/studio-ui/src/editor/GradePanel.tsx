@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { gradeExportCube } from "../bridge/grade";
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
 import { useGradeViewport } from "../viewport/useGradeViewport";
 import { useViewControls } from "../viewport/useViewControls";
@@ -188,6 +189,11 @@ export function GradePanel({
   // outside Tauri, where the mirror fallback shows the full frame.
   const { view, stageProps } = useViewControls();
   const cubeInputRef = useRef<HTMLInputElement | null>(null);
+  // Temporal denoise (video targets only): a pipeline stage after the doc,
+  // blending each graded frame against the previous graded frame host-side;
+  // the host restarts the chain on a seek or source change.
+  const [temporalDenoise, setTemporalDenoise] = useState(0);
+  const [exportNote, setExportNote] = useState<string | null>(null);
   // Monotonic preview sequence: only the latest request may publish a frame.
   const previewSeq = useRef(0);
   // Graded frames render through a grade_preview viewport (WGPU migration
@@ -235,7 +241,7 @@ export function GradePanel({
       setPreviewError(null);
       if (videoPath || imagePath) {
         try {
-          const result = await renderGraded(doc, view);
+          const result = await renderGraded(doc, view, videoPath ? temporalDenoise : 0);
           if (previewSeq.current !== seq) return;
           if (result) {
             setPreview(result.data_url);
@@ -260,7 +266,7 @@ export function GradePanel({
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [doc, view, imagePath, videoPath, videoTimestampSec, underlay, renderGraded]);
+  }, [doc, view, imagePath, videoPath, videoTimestampSec, underlay, renderGraded, temporalDenoise]);
 
   const updateOp = useCallback((index: number, next: GradeOp) => {
     setOps((prev) => prev.map((op, i) => (i === index ? next : op)));
@@ -290,6 +296,21 @@ export function GradePanel({
   const handleApply = () => {
     onCommit({ gradeDoc: JSON.stringify(docFromOps(ops)) });
   };
+
+  const handleExportCube = useCallback(async () => {
+    setExportNote(null);
+    try {
+      const result = await gradeExportCube(docFromOps(ops));
+      if (!result) return; // browser preview: no backend to bake with
+      const skipped = result.skipped_spatial_ops + result.dropped_masks;
+      setExportNote(
+        `${t("grade.exportCubeDone")} ${result.path}` +
+          (skipped > 0 ? ` · ${skipped} ${t("grade.exportCubeSkipped")}` : ""),
+      );
+    } catch (err) {
+      setExportNote(String(err));
+    }
+  }, [ops, t]);
 
   const slider = (
     label: string,
@@ -516,6 +537,10 @@ export function GradePanel({
       </div>
 
       <div className="mask-edit-controls grade-edit-controls">
+        {videoPath
+          ? slider(t("grade.temporalDenoise"), temporalDenoise, 0, 1, 0.05, setTemporalDenoise)
+          : null}
+
         {ops.map((op, i) => (
           <div className="grade-op" key={i}>
             <div className="grade-op-head">
@@ -555,6 +580,9 @@ export function GradePanel({
           <button type="button" title={t("grade.loadCubeTitle")} onClick={() => cubeInputRef.current?.click()}>
             {t("grade.loadCube")}
           </button>
+          <button type="button" title={t("grade.exportCubeTitle")} onClick={() => void handleExportCube()}>
+            {t("grade.exportCube")}
+          </button>
           <input
             ref={cubeInputRef}
             type="file"
@@ -567,6 +595,12 @@ export function GradePanel({
             }}
           />
         </div>
+
+        {exportNote ? (
+          <div className="field">
+            <small className="muted">{exportNote}</small>
+          </div>
+        ) : null}
 
         <div className="field grade-apply-row">
           <button type="button" className="primary" onClick={handleApply} title={t("grade.applyTitle")}>

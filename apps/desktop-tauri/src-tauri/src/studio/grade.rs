@@ -275,6 +275,63 @@ pub(crate) fn video_frame_grade_preview(
     grade_srgb_preview(srgb, doc, max_dim, started)
 }
 
+/// TS-facing result of a `.cube` LUT export.
+#[derive(Debug, Serialize)]
+pub(crate) struct CubeExportResult {
+    pub(crate) path: String,
+    pub(crate) size: u32,
+    /// Spatial ops (blur/sharpen/denoise/grain/vignette) excluded from the
+    /// bake — a LUT is a pure colour→colour map.
+    pub(crate) skipped_spatial_ops: usize,
+    /// Positional layer masks excluded from the bake (the layer still bakes,
+    /// applied everywhere).
+    pub(crate) dropped_masks: usize,
+}
+
+/// Bake a grade document to a `.cube` 3D LUT and write it under the project
+/// output dir — the interchange path out of the grading dialog (Resolve,
+/// FFmpeg `lut3d`, etc. consume the file). The bake samples the identity
+/// lattice through the kernel in sRGB, the space the dialog previews in;
+/// spatial ops and positional masks cannot live in a LUT and are excluded
+/// (reported on the result).
+#[tauri::command]
+pub(crate) fn grade_export_cube(
+    doc: Value,
+    size: Option<u32>,
+    output_name: Option<String>,
+) -> Result<CubeExportResult, String> {
+    let doc = parse_grade_doc(Some(&doc))?;
+    let size = size.unwrap_or(33);
+    let baked = hgripe_grade::bake_cube(&doc, size, GradeSpace::Srgb)?;
+
+    let base = match output_name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+    {
+        Some(name) => name,
+        None => format!(
+            "grade_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ),
+    };
+    studio_reject_unsafe_basename(&base)?;
+    let dir = crate::runtime_paths()?.output_dir;
+    std::fs::create_dir_all(&dir)
+        .map_err(|err| format!("failed to create output dir {}: {err}", dir.display()))?;
+    let out_path = dir.join(format!("{base}.cube"));
+    std::fs::write(&out_path, baked.cube)
+        .map_err(|err| format!("failed to write {}: {err}", out_path.display()))?;
+    Ok(CubeExportResult {
+        path: out_path.to_string_lossy().to_string(),
+        size,
+        skipped_spatial_ops: baked.skipped_spatial_ops,
+        dropped_masks: baked.dropped_masks,
+    })
+}
+
 /// Downscale an sRGB proxy to at most `max_dim` on the long edge.
 fn downscale_srgb(srgb: RgbaImage, max_dim: u32) -> RgbaImage {
     let (w, h) = srgb.dimensions();
@@ -332,24 +389,41 @@ pub(crate) fn grade_srgb_proxy(
     doc: &GradeDoc,
     started: Instant,
 ) -> Result<GradePreviewResult, String> {
+    let mut surface = srgb_proxy_surface(srgb)?;
+    let backend = apply_grade_doc(doc, &mut surface);
+    encode_surface_preview(&surface, backend, started)
+}
+
+/// Widen an sRGB 8-bit proxy to the kernel's f32 surface (no grading). Split
+/// from [`grade_srgb_proxy`] so callers can run pipeline stages between the
+/// kernel and the encode — e.g. the viewport's temporal denoise, which blends
+/// the graded surface against the previous graded frame.
+pub(crate) fn srgb_proxy_surface(srgb: &RgbaImage) -> Result<GradeSurface, String> {
     let (pw, ph) = srgb.dimensions();
     if pw == 0 || ph == 0 {
         return Err("Grade preview needs a non-empty image".to_string());
     }
-
     let data: Vec<f32> = srgb
         .as_raw()
         .iter()
         .map(|&v| f32::from(v) / 255.0)
         .collect();
-    let mut surface = GradeSurface {
+    Ok(GradeSurface {
         w: pw,
         h: ph,
         data,
         space: GradeSpace::Srgb,
-    };
-    let backend = apply_grade_doc(doc, &mut surface);
+    })
+}
 
+/// Encode a graded sRGB surface as the preview's PNG data-URL payload — the
+/// egress half of [`grade_srgb_proxy`].
+pub(crate) fn encode_surface_preview(
+    surface: &GradeSurface,
+    backend: &'static str,
+    started: Instant,
+) -> Result<GradePreviewResult, String> {
+    let (pw, ph) = (surface.w, surface.h);
     let out: Vec<u8> = surface
         .data
         .iter()
@@ -375,16 +449,15 @@ pub(crate) fn grade_srgb_proxy(
 
 /// Previous-frame accumulator for video grading: `temporal_denoise` is not a
 /// [`hgripe_grade::GradeOp`] (the op graph is stateless per frame) but a
-/// pipeline stage fed the prior *graded* frame. The video grading dialog owns
-/// one of these per playback session and calls [`TemporalAccumulator::push`]
-/// on each frame after [`apply_grade_doc`]; a seek or source change calls
+/// pipeline stage fed the prior *graded* frame. The viewport host owns one
+/// per video-grading viewport and calls [`TemporalAccumulator::push`] on each
+/// frame after [`apply_grade_doc`]; a seek or source change calls
 /// [`TemporalAccumulator::reset`].
-#[allow(dead_code)] // Reserved seam for the video grading dialog.
+#[derive(Default)]
 pub(crate) struct TemporalAccumulator {
     prev: Option<GradeSurface>,
 }
 
-#[allow(dead_code)] // Reserved seam for the video grading dialog.
 impl TemporalAccumulator {
     pub(crate) fn new() -> Self {
         Self { prev: None }

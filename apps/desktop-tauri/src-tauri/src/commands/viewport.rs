@@ -24,7 +24,9 @@ use serde_json::Value;
 
 use crate::commands::thumbnails::generate_thumbnail_inner;
 use crate::resource;
-use crate::studio::{grade_srgb_proxy, load_image_srgb_proxy, parse_grade_doc};
+use crate::studio::{
+    grade_srgb_proxy, load_image_srgb_proxy, parse_grade_doc, TemporalAccumulator,
+};
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -194,6 +196,75 @@ struct ViewportState {
     view: ViewportView,
     /// Most-recently-used first, at most [`PROXY_CACHE_DEPTH`] entries.
     proxies: Vec<SourceProxy>,
+    /// Temporal denoise amount (`0` disables) applied to graded video
+    /// frames after the grade doc, blending against the previous graded
+    /// frame ([`TemporalChain`]).
+    temporal_denoise: f32,
+    /// The previous graded frame and its identity, for continuity checks.
+    temporal: Option<TemporalChain>,
+}
+
+/// The feedback state temporal denoise needs across renders: the previous
+/// *graded* frame (inside the accumulator) plus which source frame it was,
+/// so a seek, a backwards step or a source change restarts the chain instead
+/// of blending across a cut.
+struct TemporalChain {
+    acc: TemporalAccumulator,
+    path: String,
+    time_sec: f64,
+}
+
+/// Largest forward playhead step still treated as continuous playback;
+/// anything larger (or backwards, or a paused re-render at the same
+/// timestamp) reads as a seek and restarts the temporal chain.
+const MAX_TEMPORAL_STEP_SEC: f64 = 0.5;
+
+/// Temporal-denoise a graded video frame against the viewport's previous
+/// graded frame when the playhead advanced continuously, then store the
+/// frame as the new feedback state. Discontinuities restart the chain (the
+/// frame passes through untouched). The registry lock is never held across
+/// the blend.
+#[cfg_attr(not(feature = "native-ffmpeg"), allow(dead_code))]
+fn apply_temporal(
+    id: u64,
+    path: &str,
+    time_sec: f64,
+    surface: &mut hgripe_grade::GradeSurface,
+    amount: f32,
+) -> Result<(), String> {
+    if amount <= 0.0 {
+        return Ok(());
+    }
+    let taken = {
+        let mut map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        match map.get_mut(&id) {
+            Some(state) => state.temporal.take(),
+            None => return Ok(()),
+        }
+    };
+    let continuous = taken.as_ref().is_some_and(|c| {
+        c.path == path && time_sec > c.time_sec && time_sec - c.time_sec <= MAX_TEMPORAL_STEP_SEC
+    });
+    let mut chain = match taken {
+        Some(chain) if continuous => chain,
+        _ => TemporalChain {
+            acc: TemporalAccumulator::new(),
+            path: path.to_string(),
+            time_sec,
+        },
+    };
+    chain.acc.push(surface, amount);
+    chain.path = path.to_string();
+    chain.time_sec = time_sec;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    if let Some(state) = map.get_mut(&id) {
+        state.temporal = Some(chain);
+    }
+    Ok(())
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();
@@ -545,6 +616,8 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             grade_doc: None,
             view: ViewportView::IDENTITY,
             proxies: Vec::new(),
+            temporal_denoise: 0.0,
+            temporal: None,
         },
     );
     eprintln!(
@@ -636,9 +709,21 @@ pub(crate) fn viewport_resize(viewport_id: String, width: u32, height: u32) -> R
 /// Grade preview viewports grade their target; video preview viewports grade
 /// the displayed frame with the same document model (Phase 4). Parameter
 /// updates flow through viewport state — the target reference and the
-/// transport stay untouched.
+/// transport stay untouched. `temporal_denoise` (`0..=1`, video targets
+/// only) blends each graded frame against the previous graded frame during
+/// continuous playback; `0` / absent disables and drops the feedback state.
 #[tauri::command]
-pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Result<(), String> {
+pub(crate) fn viewport_set_grade(
+    viewport_id: String,
+    doc: Option<Value>,
+    temporal_denoise: Option<f32>,
+) -> Result<(), String> {
+    let amount = temporal_denoise.unwrap_or(0.0);
+    if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
+        return Err(format!(
+            "temporal_denoise must be between 0 and 1, got {amount}"
+        ));
+    }
     let id = parse_id(&viewport_id)?;
     let mut map = viewports()
         .lock()
@@ -653,6 +738,10 @@ pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Res
         ));
     }
     state.grade_doc = doc;
+    state.temporal_denoise = amount;
+    if amount == 0.0 {
+        state.temporal = None;
+    }
     Ok(())
 }
 
@@ -685,7 +774,7 @@ pub(crate) fn viewport_set_view(
 #[tauri::command]
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
     let id = parse_id(&viewport_id)?;
-    let (target, width, height, grade_doc, view) = {
+    let (target, width, height, grade_doc, view, temporal_denoise) = {
         let map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
@@ -698,6 +787,7 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             state.height,
             state.grade_doc.clone(),
             state.view,
+            state.temporal_denoise,
         )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
@@ -720,7 +810,16 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
         } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
-            render_video_path(id, &entry.path, time_sec, width, height, grade_doc, view)
+            render_video_path(
+                id,
+                &entry.path,
+                time_sec,
+                width,
+                height,
+                grade_doc,
+                view,
+                temporal_denoise,
+            )
         }
         #[cfg(not(feature = "native-ffmpeg"))]
         ViewportTarget::VideoFrame { .. } => {
@@ -740,7 +839,16 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
             #[cfg(feature = "native-ffmpeg")]
             {
-                render_video_path(id, &clip.path, source_time, width, height, grade_doc, view)
+                render_video_path(
+                    id,
+                    &clip.path,
+                    source_time,
+                    width,
+                    height,
+                    grade_doc,
+                    view,
+                    temporal_denoise,
+                )
             }
             #[cfg(not(feature = "native-ffmpeg"))]
             {
@@ -768,6 +876,7 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
 /// bounded warm frame cache, latest-wins coalescing — then present via the
 /// thumbnail pipeline.
 #[cfg(feature = "native-ffmpeg")]
+#[allow(clippy::too_many_arguments)]
 fn render_video_path(
     id: u64,
     path: &str,
@@ -776,9 +885,10 @@ fn render_video_path(
     height: u32,
     grade_doc: Option<Value>,
     view: ViewportView,
+    temporal_denoise: f32,
 ) -> Result<ViewportFrame, String> {
     let size = width.max(height).clamp(64, 2048);
-    if grade_doc.is_some() || !view.is_identity() {
+    if grade_doc.is_some() || !view.is_identity() || temporal_denoise > 0.0 {
         let doc = parse_grade_doc(grade_doc.as_ref())?;
         let detail = proxy_detail_size(size, view);
         let key = ProxyKey {
@@ -794,7 +904,11 @@ fn render_video_path(
         } else {
             Some(crop_view(&proxy, view))
         };
-        let graded = grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
+        let started = Instant::now();
+        let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
+        let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
+        apply_temporal(id, path, time_sec, &mut surface, temporal_denoise)?;
+        let graded = crate::studio::encode_surface_preview(&surface, backend, started)?;
         return Ok(ViewportFrame {
             data_url: graded.data_url,
             width: graded.width,
@@ -906,18 +1020,68 @@ mod tests {
     #[test]
     fn grade_doc_only_on_grading_viewports() {
         let image = viewport_create("image_edit".to_string()).expect("create");
-        let err = viewport_set_grade(image.viewport_id.clone(), Some(serde_json::json!({})))
+        let err = viewport_set_grade(image.viewport_id.clone(), Some(serde_json::json!({})), None)
             .expect_err("image_edit must reject a grade doc");
         assert!(err.contains("does not accept a grade doc"));
         viewport_destroy(image.viewport_id).expect("destroy");
 
         for kind in ["grade_preview", "video_preview"] {
             let vp = viewport_create(kind.to_string()).expect("create");
-            viewport_set_grade(vp.viewport_id.clone(), Some(serde_json::json!({})))
+            viewport_set_grade(vp.viewport_id.clone(), Some(serde_json::json!({})), None)
                 .unwrap_or_else(|e| panic!("{kind} accepts a grade doc: {e}"));
-            viewport_set_grade(vp.viewport_id.clone(), None).expect("clearing the doc");
+            viewport_set_grade(vp.viewport_id.clone(), None, Some(0.5)).expect("clearing the doc");
+            let err = viewport_set_grade(vp.viewport_id.clone(), None, Some(1.5))
+                .expect_err("amount above 1 must be rejected");
+            assert!(err.contains("temporal_denoise"));
             viewport_destroy(vp.viewport_id).expect("destroy");
         }
+    }
+
+    #[test]
+    fn temporal_chain_blends_continuous_frames_and_restarts_on_seek() {
+        let desc = viewport_create("video_preview".to_string()).expect("create");
+        let id = parse_id(&desc.viewport_id).expect("id");
+        viewport_set_grade(desc.viewport_id.clone(), None, Some(1.0)).expect("set amount");
+
+        let frame = |v: f32| hgripe_grade::GradeSurface {
+            w: 1,
+            h: 1,
+            data: vec![v, v, v, 1.0],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+
+        // First frame passes through and seeds the chain.
+        let mut a = frame(0.0);
+        apply_temporal(id, "clip.mp4", 0.0, &mut a, 1.0).expect("first frame");
+        assert_eq!(a.data[0], 0.0);
+
+        // A small forward step blends toward the previous graded frame.
+        let mut b = frame(0.02);
+        apply_temporal(id, "clip.mp4", 0.04, &mut b, 1.0).expect("next frame");
+        assert!(b.data[0] < 0.02, "continuous playback blends");
+
+        // A backwards seek restarts the chain: the frame passes through.
+        let mut c = frame(0.02);
+        apply_temporal(id, "clip.mp4", 0.0, &mut c, 1.0).expect("seek back");
+        assert_eq!(c.data[0], 0.02);
+
+        // A forward jump past the continuity window also restarts it.
+        let mut d = frame(0.04);
+        apply_temporal(id, "clip.mp4", 5.0, &mut d, 1.0).expect("jump");
+        assert_eq!(d.data[0], 0.04);
+
+        // A source change restarts it too.
+        let mut e = frame(0.06);
+        apply_temporal(id, "other.mp4", 5.04, &mut e, 1.0).expect("source change");
+        assert_eq!(e.data[0], 0.06);
+
+        // Setting the amount back to 0 drops the feedback state.
+        viewport_set_grade(desc.viewport_id.clone(), None, None).expect("disable");
+        {
+            let map = viewports().lock().expect("lock");
+            assert!(map.get(&id).expect("open").temporal.is_none());
+        }
+        viewport_destroy(desc.viewport_id).expect("destroy");
     }
 
     #[test]
@@ -951,6 +1115,7 @@ mod tests {
         viewport_set_grade(
             desc.viewport_id.clone(),
             Some(serde_json::json!({ "layers": [] })),
+            None,
         )
         .expect("set grade");
 

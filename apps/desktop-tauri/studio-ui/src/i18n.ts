@@ -244,6 +244,21 @@ export const messages = {
     en: "Load a .cube LUT file as a 1D or 3D LUT op",
     zh: "加载 .cube LUT 文件为 1D 或 3D LUT op",
   },
+  "grade.exportCube": { en: "Export .cube", zh: "导出 .cube" },
+  "grade.exportCubeTitle": {
+    en: "Bake the grade to a .cube 3D LUT (color ops only; spatial ops and masks are excluded)",
+    zh: "将调色烘焙为 .cube 3D LUT（仅颜色 op；空间 op 和遮罩不参与）",
+  },
+  "grade.exportCubeDone": { en: "Exported LUT:", zh: "已导出 LUT：" },
+  "grade.exportCubeSkipped": {
+    en: "spatial ops/masks excluded",
+    zh: "个空间 op/遮罩未参与",
+  },
+  "grade.temporalDenoise": { en: "Temporal denoise", zh: "时域降噪" },
+  "grade.temporalDenoiseTitle": {
+    en: "Blend each graded frame against the previous frame during playback; resets on seek",
+    zh: "播放时将每帧与上一帧混合降噪；seek 时重置",
+  },
   "grade.opUneditable": {
     en: "This op has no dialog controls yet; it still applies.",
     zh: "该 op 暂无对话框控件；仍会生效。",

@@ -21,8 +21,10 @@ export type ViewportCommand =
   | { kind: "set_target"; target: ViewportTarget }
   | { kind: "set_view"; zoom: number; panX: number; panY: number }
   | { kind: "resize"; width: number; height: number }
-  /** Grade doc applied at render time; grade_preview viewports only. */
-  | { kind: "set_grade"; doc: unknown | null };
+  /** Grade doc applied at render time (grading viewports only);
+   * `temporalDenoise` (`0..=1`) blends graded video frames against the
+   * previous graded frame during continuous playback. */
+  | { kind: "set_grade"; doc: unknown | null; temporalDenoise?: number };
 
 export class WgpuViewportHost {
   private viewportId: string | null;
@@ -59,7 +61,7 @@ export class WgpuViewportHost {
         await resizeViewport(this.id(), cmd.width, cmd.height);
         return;
       case "set_grade":
-        await setViewportGrade(this.id(), cmd.doc);
+        await setViewportGrade(this.id(), cmd.doc, cmd.temporalDenoise ?? 0);
         return;
       case "set_view":
         await setViewportView(this.id(), cmd.zoom, cmd.panX, cmd.panY);

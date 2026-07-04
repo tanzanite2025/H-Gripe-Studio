@@ -144,6 +144,7 @@ fn main() {
             psd::get_model_paths,
             psd::set_model_paths,
             studio::grade_preview,
+            studio::grade_export_cube,
             #[cfg(feature = "native-ffmpeg")]
             studio::video_frame_grade_preview,
             commands::video::video_probe,
