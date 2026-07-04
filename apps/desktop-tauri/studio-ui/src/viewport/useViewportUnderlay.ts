@@ -47,6 +47,10 @@ export function useViewportUnderlay(
   const hostRef = useRef<WgpuViewportHost | null>(null);
   // The view last sent to the open host, to skip no-op `set_view` commands.
   const sentViewRef = useRef<ViewportViewState>(IDENTITY_VIEW);
+  // Latest requested view, so a host opened after a view change (e.g. the
+  // caller flipped targets while zoomed) renders that view, not identity.
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   useEffect(() => {
     setState({ underlay: null, dims: null, backend: null, settled: false });
@@ -75,10 +79,14 @@ export function useViewportUnderlay(
         kind: "set_target",
         target: { kind: "image", resourceId: res.id },
       });
+      const initialView = viewRef.current;
+      if (!isIdentityView(initialView)) {
+        await host.command({ kind: "set_view", ...initialView });
+      }
       const frame = await host.renderFrame();
       if (cancelled) return;
       hostRef.current = host;
-      sentViewRef.current = IDENTITY_VIEW;
+      sentViewRef.current = initialView;
       setState({
         underlay: frame.data_url,
         dims: { w: frame.width, h: frame.height },
