@@ -11,6 +11,8 @@ interface UseHistoryArgs {
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   limit?: number;
+  /** Undo scope key: each scope (canvas document) gets its own stack. */
+  scopeId?: string;
 }
 
 export interface History {
@@ -22,8 +24,20 @@ export interface History {
   canRedo: boolean;
 }
 
-export function useHistory({ nodes, edges, setNodes, setEdges, limit }: UseHistoryArgs): History {
-  const stack = useRef(createHistoryStack(limit));
+export function useHistory({ nodes, edges, setNodes, setEdges, limit, scopeId }: UseHistoryArgs): History {
+  // One stack per scope so one canvas never rewinds another's edits.
+  const stacks = useRef(new Map<string, ReturnType<typeof createHistoryStack>>());
+  const scope = useRef(scopeId ?? "");
+  scope.current = scopeId ?? "";
+  const limitRef = useRef(limit);
+  const stackFor = useCallback(() => {
+    let s = stacks.current.get(scope.current);
+    if (!s) {
+      s = createHistoryStack(limitRef.current);
+      stacks.current.set(scope.current, s);
+    }
+    return s;
+  }, []);
   // Latest graph in a ref so callbacks stay stable but read fresh state.
   const latest = useRef<GraphSnapshot>({ nodes, edges });
   latest.current = { nodes, edges };
@@ -35,33 +49,34 @@ export function useHistory({ nodes, edges, setNodes, setEdges, limit }: UseHisto
   });
 
   const takeSnapshot = useCallback(() => {
-    stack.current.push(current());
+    stackFor().push(current());
     force();
-  }, []);
+  }, [stackFor]);
 
   const undo = useCallback(() => {
-    const prev = stack.current.undo(current());
+    const prev = stackFor().undo(current());
     if (prev) {
       setNodes(prev.nodes);
       setEdges(prev.edges);
     }
     force();
-  }, [setNodes, setEdges]);
+  }, [stackFor, setNodes, setEdges]);
 
   const redo = useCallback(() => {
-    const next = stack.current.redo(current());
+    const next = stackFor().redo(current());
     if (next) {
       setNodes(next.nodes);
       setEdges(next.edges);
     }
     force();
-  }, [setNodes, setEdges]);
+  }, [stackFor, setNodes, setEdges]);
 
+  const active = stackFor();
   return {
     takeSnapshot,
     undo,
     redo,
-    canUndo: stack.current.canUndo(),
-    canRedo: stack.current.canRedo(),
+    canUndo: active.canUndo(),
+    canRedo: active.canRedo(),
   };
 }

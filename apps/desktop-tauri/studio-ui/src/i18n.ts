@@ -18,6 +18,12 @@ export const messages = {
   "status.saving": { en: "○ saving…", zh: "○ 保存中…" },
   "status.untitled": { en: "untitled", zh: "未命名" },
   "status.untitledTitle": { en: "untitled (not yet saved to a file)", zh: "未命名（尚未保存到文件）" },
+  "canvasTabs.new": { en: "New canvas", zh: "新建画布" },
+  "canvasTabs.close": { en: "Close canvas", zh: "关闭画布" },
+  "canvasTabs.confirmClose": {
+    en: "Close this canvas and discard its unsaved changes?",
+    zh: "关闭此画布并丢弃未保存的更改？",
+  },
   "status.autosaveTitle": {
     en: "this workflow is autosaved to the workspace and restored on next open",
     zh: "该工作流会自动保存到工作区，下次打开时恢复",

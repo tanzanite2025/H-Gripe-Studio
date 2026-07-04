@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -44,6 +44,10 @@ interface FlowCanvasProps {
   onNodeDragStop?: (node: Node) => void;
   /** Called when a pane pan/zoom settles, with the resulting viewport. */
   onViewportChange?: (viewport: Viewport) => void;
+  /** Identity of the shown canvas document; on change, `viewport` is restored. */
+  viewportKey?: string;
+  /** The viewport to restore when `viewportKey` changes (tab switch). */
+  viewport?: Viewport;
   /** Snap node positions to a grid while dragging. */
   snapToGrid?: boolean;
   /** Alignment guide lines (flow-space coords) to draw, if any. */
@@ -73,6 +77,8 @@ export function FlowCanvas({
   onBeforeConnect,
   onNodeDragStop,
   onViewportChange,
+  viewportKey,
+  viewport,
   snapToGrid = false,
   helperLines,
   edgeType = "default",
@@ -83,7 +89,18 @@ export function FlowCanvas({
   // Declared once so React does not re-create the map each render.
   const nodeTypes = useMemo(() => ({ hgripe: HgripeNode, group: GroupNode }), []);
   const edgeTypes = useMemo(() => ({ smart: SmartEdge, binding: BindingEdge }), []);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setViewport } = useReactFlow();
+
+  // Restore the pane viewport when the shown canvas document changes (tab
+  // switch). Skips the initial mount so `fitView` keeps framing the graph.
+  const lastViewportKey = useRef(viewportKey);
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+  useEffect(() => {
+    if (viewportKey === lastViewportKey.current) return;
+    lastViewportKey.current = viewportKey;
+    if (viewportRef.current) void setViewport(viewportRef.current);
+  }, [viewportKey, setViewport]);
 
   const portType = useCallback(
     (nodeId: string | null, handleId: string | null | undefined, dir: "in" | "out") => {
