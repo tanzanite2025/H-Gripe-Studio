@@ -62,6 +62,9 @@ import { LayersPanel } from "./maskEditModal/LayersPanel";
 import { HistoryPanel } from "./maskEditModal/HistoryPanel";
 import { InfoPanel } from "./maskEditModal/InfoPanel";
 import { PropertiesPanel } from "./maskEditModal/PropertiesPanel";
+import { AdjustmentsPanel } from "./maskEditModal/AdjustmentsPanel";
+import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
+import { PathsPanel } from "./maskEditModal/PathsPanel";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -90,14 +93,15 @@ interface MaskEditModalProps {
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
 
-// Default right-rail dock layout, mirroring PS: a 属性-style top group
-// (tool options / properties / mask ops / info) over a growing 图层 group
-// (layers / history). Users re-dock tabs by dragging; the result persists.
-const DOCK_STORAGE_KEY = "hgripe.studio.maskDock.v1";
+// Default right-rail dock layout, mirroring PS: a 调整/属性 top group (plus
+// the mask-specific tool options / mask ops / info tabs) over a growing
+// 图层/通道/路径 group (plus history). Users re-dock tabs by dragging; the
+// result persists.
+const DOCK_STORAGE_KEY = "hgripe.studio.maskDock.v2";
 const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
   groups: [
-    { tabs: ["options", "properties", "mask_ops", "info"], active: "options" },
-    { tabs: ["layers", "history"], active: "layers" },
+    { tabs: ["adjustments", "properties", "options", "mask_ops", "info"], active: "options" },
+    { tabs: ["layers", "channels", "paths", "history"], active: "layers" },
   ],
   railWidth: 240,
 };
@@ -1107,6 +1111,36 @@ export function MaskEditModal({
                   id: "properties",
                   label: t("mask.panelProperties"),
                   content: <PropertiesPanel adjustment={activeAdjustment} patchAdjustment={patchAdjustment} />,
+                },
+                adjustments: {
+                  id: "adjustments",
+                  label: t("mask.panelAdjustments"),
+                  content: <AdjustmentsPanel dispatch={dispatch} />,
+                },
+                channels: {
+                  id: "channels",
+                  label: t("mask.panelChannels"),
+                  content: (
+                    <ChannelsPanel
+                      layers={layers}
+                      active={state.current.active}
+                      dims={dims}
+                      quickMask={quickMask}
+                      setQuickMask={setQuickMask}
+                    />
+                  ),
+                },
+                paths: {
+                  id: "paths",
+                  label: t("mask.panelPaths"),
+                  content: (
+                    <PathsPanel
+                      ops={ops}
+                      editingPath={editingPath}
+                      startPathEdit={startPathEdit}
+                      cancelPathEdit={cancelPathEdit}
+                    />
+                  ),
                 },
                 mask_ops: {
                   id: "mask_ops",
