@@ -28,6 +28,7 @@ import {
 import { getHelperLines } from "./editor/helperLines";
 import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
+import { canvasDocumentTitle } from "./editor/canvasDocument";
 import { ProjectPanel } from "./editor/ProjectPanel";
 import { Toolbar } from "./editor/Toolbar";
 import { CanvasTabs } from "./editor/CanvasTabs";
@@ -35,7 +36,7 @@ import { RunLog } from "./editor/RunLogPanel";
 import { SnapshotsPanel } from "./editor/SnapshotsPanel";
 import { RunHistoryPanel } from "./editor/RunHistoryPanel";
 import { useKeyboardShortcuts } from "./editor/useKeyboardShortcuts";
-import { useStudioRunController } from "./editor/useStudioRunController";
+import { useStudioRunController, type ProjectRunCanvas } from "./editor/useStudioRunController";
 import { useStudioFileController } from "./editor/useStudioFileController";
 import { makeNode, useNodeEditing } from "./editor/useNodeEditing";
 import { useContextMenu } from "./editor/useContextMenu";
@@ -621,6 +622,25 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     return () => clearTimeout(timer);
   }, [manifestReady, canvas, nodes, edges, selectedId, currentFile, fileDirty, isDesktop, setMessage]);
 
+  // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
+  // graph in tab order. Defined below the run controller (see runAllCanvases).
+  const runProjectRef = useRef<((canvases: ProjectRunCanvas[]) => Promise<void>) | null>(null);
+  const runAllCanvases = useCallback(() => {
+    const { activeCanvasId, canvases } = canvas.exportCanvases({
+      path: currentFile,
+      dirty: fileDirty,
+    });
+    const untitled = t("status.untitled");
+    void runProjectRef.current?.(
+      canvases.map((c) => ({
+        id: c.id,
+        title: canvasDocumentTitle(c.path, untitled),
+        active: c.id === activeCanvasId,
+        graph: toWorkflowGraph(c.nodes, c.edges),
+      })),
+    );
+  }, [canvas, currentFile, fileDirty, t]);
+
   // Close a canvas tab, confirming first when it holds unsaved edits.
   const closeCanvasTab = useCallback(
     (id: string) => {
@@ -956,6 +976,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     run,
     runUpToNode,
     runBatch,
+    runProject,
     cancelRun,
     hasBatch,
     batchCount,
@@ -969,6 +990,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     autoSnapshotBeforeRun,
     projectStoreDir,
   });
+  runProjectRef.current = runProject;
 
   // Fire a queued "run up to node" after the committing param edit has been
   // applied to `nodes` (so the partial run sees the fresh params). Cleared
@@ -1244,6 +1266,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onActivate={activateCanvas}
         onClose={closeCanvasTab}
         onNewCanvas={openNewCanvas}
+        onRunProject={runAllCanvases}
+        running={running}
       />
 
       <NodeEditingContext.Provider value={editing}>

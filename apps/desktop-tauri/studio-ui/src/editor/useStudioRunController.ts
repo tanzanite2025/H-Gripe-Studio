@@ -74,6 +74,16 @@ function graphWithParamOverrides(
   };
 }
 
+/** One open canvas as submitted to the project-level batch run. */
+export interface ProjectRunCanvas {
+  id: string;
+  /** Display title for the run log (file stem or "untitled"). */
+  title: string;
+  /** True for the active tab: statuses/previews land on the visible cards. */
+  active: boolean;
+  graph: WorkflowGraph;
+}
+
 export interface StudioRunControllerOptions {
   /** Live editor graph (used to build the workflow to run). */
   nodes: Node[];
@@ -118,6 +128,8 @@ export interface StudioRunController {
   runUpToNode: (nodeId: string) => Promise<void>;
   /** Run the graph once per item of the (first) batch node. */
   runBatch: () => Promise<void>;
+  /** Project-level batch: run every open canvas's graph sequentially. */
+  runProject: (canvases: ProjectRunCanvas[]) => Promise<void>;
   /** Request cancellation of the active run (Rust backend or browser preview). */
   cancelRun: () => void;
   /** Whether the graph contains a batch node. */
@@ -712,6 +724,131 @@ export function useStudioRunController({
     setMessage,
   ]);
 
+  // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
+  // graph sequentially. Only the active canvas has visible cards, so only its
+  // statuses/previews are applied back; parked canvases run headlessly and
+  // report through the run log.
+  const runProject = useCallback(
+    async (canvases: ProjectRunCanvas[]) => {
+      const runnable = canvases.filter((c) => c.graph.nodes.length > 0);
+      if (runnable.length === 0) {
+        setMessage("project run: no canvases with nodes");
+        return;
+      }
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setRunning(true);
+      setShowLog(true);
+      runFailures.current = [];
+      autoSnapshotBeforeRun();
+      clearRunInfo();
+      const useRustBackend = isTauri();
+      const backend = useRustBackend ? "Rust backend" : "browser preview";
+      const rustRunId = useRustBackend ? beginRustRun() : null;
+      const startedAt = Date.now();
+      runEntriesRef.current = [];
+      let outcome: RunOutcome = "succeeded";
+      pushLog("info", `▶ project run started: ${runnable.length} canvas(es) (${backend})`);
+      const browserToken = useRustBackend ? null : { cancelled: false };
+      if (browserToken) browserCancel.current = browserToken;
+      // Log-only sinks for parked canvases: their node ids may collide with the
+      // active canvas's cards, so nothing is patched back onto the editor.
+      const headlessObserver = {
+        onStatus: () => {},
+        onNodeRun: (id: string, info: NodeRunInfo) => {
+          if (info.status === "failed") pushLog("error", describeNodeStatus(info.status, { durationMs: info.durationMs, error: info.error }), id);
+        },
+      };
+      const headlessEvent = (event: StudioGraphRunEvent) => {
+        if (event.status === "failed" && event.node_id) {
+          pushLog("error", describeNodeStatus("failed", { durationMs: event.duration_ms, error: event.error, detail: event.error_detail }), event.node_id);
+        }
+      };
+      let failedCanvases = 0;
+      try {
+        for (let i = 0; i < runnable.length; i++) {
+          const canvas = runnable[i];
+          if (browserToken?.cancelled) throw new Error("project run cancelled");
+          setMessage(`project run ${i + 1}/${runnable.length}: ${canvas.title}…`);
+          pushLog("info", `— canvas ${i + 1}/${runnable.length}: ${canvas.title}`);
+          const failuresBefore = runFailures.current.length;
+          try {
+            await warnPsdChain(canvas.graph);
+            const { graph, origin } = lowerWorkflowGraph(canvas.graph);
+            if (canvas.active) loweredOrigin.current = origin;
+            if (useRustBackend) {
+              const result = await runStudioGraph(
+                graph,
+                canvas.active ? applyStudioRunEvent : headlessEvent,
+                rustRunId ?? undefined,
+              );
+              if (canvas.active) {
+                applyStudioRunResult(result);
+                applyPreviews(graph, { outputs: studioOutputsToMap(result) });
+              }
+              const failed = Object.values(result.statuses).some((s) => toNodeStatus(s) === "failed");
+              if (failed) failedCanvases++;
+            } else {
+              const result = await runGraph(
+                graph,
+                defaultExecutors,
+                canvas.active ? observer : headlessObserver,
+                undefined,
+                () => browserToken?.cancelled ?? false,
+              );
+              if (canvas.active) applyPreviews(graph, result);
+              if (runFailures.current.length > failuresBefore) failedCanvases++;
+            }
+            pushLog("success", `✔ canvas finished: ${canvas.title}`);
+          } catch (err) {
+            const message = String(err);
+            if (message.toLowerCase().includes("cancel")) throw err;
+            // One broken canvas must not abort the rest of the project run.
+            failedCanvases++;
+            outcome = "failed";
+            pushLog("error", `✖ canvas failed: ${canvas.title}: ${message}`);
+          }
+        }
+        if (failedCanvases > 0) {
+          outcome = "failed";
+          setMessage(`project run done: ${failedCanvases}/${runnable.length} canvas(es) failed`);
+          pushLog("error", `✖ project run finished: ${failedCanvases}/${runnable.length} canvas(es) failed`);
+        } else {
+          setMessage(`project run done: ${runnable.length} canvas(es) (${backend})`);
+          pushLog("success", `✔ project run finished: ${runnable.length} canvas(es)`);
+        }
+      } catch (err) {
+        const message = String(err);
+        const cancelled = message.toLowerCase().includes("cancel");
+        outcome = cancelled ? "cancelled" : "failed";
+        setMessage(cancelled ? "project run cancelled" : `project run error: ${message}`);
+        pushLog(cancelled ? "warn" : "error", cancelled ? "project run cancelled" : `project run failed: ${message}`);
+      } finally {
+        if (rustRunId) endRustRun(rustRunId);
+        setRunning(false);
+        inFlight.current = false;
+        browserCancel.current = null;
+        highlightFailures();
+        recordRunHistory("project", startedAt, outcome, backend);
+      }
+    },
+    [
+      observer,
+      clearRunInfo,
+      applyPreviews,
+      applyStudioRunResult,
+      applyStudioRunEvent,
+      beginRustRun,
+      endRustRun,
+      pushLog,
+      autoSnapshotBeforeRun,
+      highlightFailures,
+      warnPsdChain,
+      recordRunHistory,
+      setMessage,
+    ],
+  );
+
   // Run history is a project-scoped store: persisted into the selected project
   // folder on desktop (so it travels with the project), else to localStorage.
   // The shared hook owns the load/persist effects.
@@ -749,6 +886,7 @@ export function useStudioRunController({
     run,
     runUpToNode,
     runBatch,
+    runProject,
     cancelRun,
     hasBatch: !!batchNode,
     batchCount,
