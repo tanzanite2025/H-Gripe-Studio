@@ -5,7 +5,7 @@ import { NodeSearchBox } from "./NodeSearchBox";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
 
-function UndoIcon() {
+export function UndoIcon() {
   return (
     <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M9 14 4 9l5-5" />
@@ -14,7 +14,7 @@ function UndoIcon() {
   );
 }
 
-function RedoIcon() {
+export function RedoIcon() {
   return (
     <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="m15 14 5-5-5-5" />
@@ -27,12 +27,6 @@ export interface ToolbarProps {
   // Status
   issues: ValidationIssue[];
   isDesktop: boolean;
-
-  // History
-  canUndo: boolean;
-  canRedo: boolean;
-  onUndo: () => void;
-  onRedo: () => void;
 
   // Language
   onToggleLang: () => void;
@@ -59,8 +53,6 @@ export interface ToolbarProps {
 
   // File actions
   onOpen: () => void;
-  onSave: () => void;
-  onSaveAs: () => void;
   fileInputRef: MutableRefObject<HTMLInputElement | null>;
   onFilePicked: (file: File) => void;
 }
@@ -75,10 +67,6 @@ export interface ToolbarProps {
 export function Toolbar({
   issues,
   isDesktop,
-  canUndo,
-  canRedo,
-  onUndo,
-  onRedo,
   onToggleLang,
   onOpenModels,
   showProject,
@@ -95,8 +83,6 @@ export function Toolbar({
   nodes,
   onJumpToNode,
   onOpen,
-  onSave,
-  onSaveAs,
   fileInputRef,
   onFilePicked,
 }: ToolbarProps) {
@@ -126,27 +112,6 @@ export function Toolbar({
 
       <div className="toolbar-action-row">
         <div className="toolbar-group">
-          <button
-            className="icon-button"
-            onClick={onUndo}
-            disabled={!canUndo}
-            title={t("btn.undoTitle")}
-            aria-label={t("btn.undoTitle")}
-          >
-            <UndoIcon />
-          </button>
-          <button
-            className="icon-button"
-            onClick={onRedo}
-            disabled={!canRedo}
-            title={t("btn.redoTitle")}
-            aria-label={t("btn.redoTitle")}
-          >
-            <RedoIcon />
-          </button>
-        </div>
-
-        <div className="toolbar-group">
           {isDesktop && (
             <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>
               {showProject ? t("btn.hideProject") : t("btn.project")}
@@ -155,14 +120,6 @@ export function Toolbar({
           <button onClick={onOpen} title={isDesktop ? t("btn.openTitle") : t("btn.loadTitle")}>
             {isDesktop ? t("btn.open") : t("btn.load")}
           </button>
-          <button onClick={onSave} title={isDesktop ? t("btn.saveTitleDesktop") : t("btn.saveTitleWeb")}>
-            {t("btn.save")}
-          </button>
-          {isDesktop && (
-            <button onClick={onSaveAs} title={t("btn.saveAsTitle")}>
-              {t("btn.saveAs")}
-            </button>
-          )}
         </div>
 
         <div className="toolbar-group">
@@ -174,11 +131,8 @@ export function Toolbar({
             {showLog ? t("btn.hideLog") : t("btn.log")}
             {logCount > 0 ? ` (${logCount})` : ""}
           </button>
-          <button
-            onClick={() => setShowHistory((s) => !s)}
-            title="show past runs (persisted with the project)"
-          >
-            {showHistory ? "Hide history" : "History"}
+          <button onClick={() => setShowHistory((s) => !s)} title={t("btn.historyTitle")}>
+            {showHistory ? t("btn.hideHistory") : t("btn.history")}
             {historyCount > 0 ? ` (${historyCount})` : ""}
           </button>
         </div>

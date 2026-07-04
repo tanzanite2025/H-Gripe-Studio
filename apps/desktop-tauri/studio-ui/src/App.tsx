@@ -32,7 +32,7 @@ import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
 import type { WorkflowGraph } from "./graph/model";
 import { canvasDocumentTitle } from "./editor/canvasDocument";
 import { ProjectPanel } from "./editor/ProjectPanel";
-import { Toolbar } from "./editor/Toolbar";
+import { RedoIcon, Toolbar, UndoIcon } from "./editor/Toolbar";
 import { CanvasTabs } from "./editor/CanvasTabs";
 import { RunLog } from "./editor/RunLogPanel";
 import { SnapshotsPanel } from "./editor/SnapshotsPanel";
@@ -1272,10 +1272,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       <Toolbar
         issues={issues}
         isDesktop={isDesktop}
-        canUndo={history.canUndo}
-        canRedo={history.canRedo}
-        onUndo={undo}
-        onRedo={redo}
         onToggleLang={onToggleLang}
         onOpenModels={() => setModelsOpen(true)}
         showProject={showProject}
@@ -1292,8 +1288,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         nodes={nodes}
         onJumpToNode={jumpToNode}
         onOpen={() => void handleOpen()}
-        onSave={() => void handleSave()}
-        onSaveAs={() => void handleSaveAs()}
         fileInputRef={fileInputRef}
         onFilePicked={(f) => void load(f)}
       />
@@ -1343,30 +1337,41 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             </div>
           </div>
         )}
+        {showSnapshots && (
+          <div className="media-viewer-backdrop" onClick={() => setShowSnapshots(false)}>
+            <div className="project-modal" onClick={(e) => e.stopPropagation()}>
+              <SnapshotsPanel
+                snapshots={snapshots}
+                autoSnapshot={autoSnapshot}
+                onToggleAutoSnapshot={setAutoSnapshot}
+                onCapture={captureSnapshot}
+                onRestore={restoreSnapshot}
+                onRename={renameSnapshotById}
+                onDelete={deleteSnapshot}
+                onDiff={diffSnapshot}
+                diff={snapshotDiff}
+                onClearDiff={clearSnapshotDiff}
+                onClose={() => setShowSnapshots(false)}
+              />
+            </div>
+          </div>
+        )}
+        {showHistory && (
+          <div className="media-viewer-backdrop" onClick={() => setShowHistory(false)}>
+            <div className="project-modal" onClick={(e) => e.stopPropagation()}>
+              <RunHistoryPanel
+                history={runHistory}
+                onClear={clearHistory}
+                onClose={() => setShowHistory(false)}
+                onSelectNode={(nodeId) => {
+                  setShowHistory(false);
+                  focusNode(nodeId);
+                }}
+              />
+            </div>
+          </div>
+        )}
         <div className="workspace">
-          {showSnapshots && (
-            <SnapshotsPanel
-              snapshots={snapshots}
-              autoSnapshot={autoSnapshot}
-              onToggleAutoSnapshot={setAutoSnapshot}
-              onCapture={captureSnapshot}
-              onRestore={restoreSnapshot}
-              onRename={renameSnapshotById}
-              onDelete={deleteSnapshot}
-              onDiff={diffSnapshot}
-              diff={snapshotDiff}
-              onClearDiff={clearSnapshotDiff}
-              onClose={() => setShowSnapshots(false)}
-            />
-          )}
-          {showHistory && (
-            <RunHistoryPanel
-              history={runHistory}
-              onClear={clearHistory}
-              onClose={() => setShowHistory(false)}
-              onSelectNode={focusNode}
-            />
-          )}
           <Palette
             onAdd={addNode}
             edgeType={edgeType}
@@ -1421,6 +1426,24 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 <span className="canvas-status-autosave" title={t("status.autosaveTitle")}>
                   {saved ? t("status.autosaved") : t("status.saving")}
                 </span>
+                <button
+                  className="canvas-status-history"
+                  onClick={undo}
+                  disabled={!history.canUndo}
+                  title={t("btn.undoTitle")}
+                  aria-label={t("btn.undoTitle")}
+                >
+                  <UndoIcon />
+                </button>
+                <button
+                  className="canvas-status-history"
+                  onClick={redo}
+                  disabled={!history.canRedo}
+                  title={t("btn.redoTitle")}
+                  aria-label={t("btn.redoTitle")}
+                >
+                  <RedoIcon />
+                </button>
               </div>
             </div>
             {showLog && (
