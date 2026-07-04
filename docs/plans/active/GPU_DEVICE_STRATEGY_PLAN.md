@@ -420,7 +420,12 @@ This should be a settings surface, not a required setup wizard.
    provider today, or the builtin fallback when no weights resolve), and the
    run log's `deviceReportFromNodeOutputs` reads `matte_report`. ORT
    CUDA/DirectML execution providers join when the runtime ships them.
-10. Keep heavy model runtimes outside the core app; accept plugin reports only.
+10. ✅ Keep heavy model runtimes outside the core app; accept plugin reports
+    only: the plugin boundary contract is `deviceReportFromPluginReport`
+    (`PluginDeviceReportLike`: requested vs actual device + precision,
+    fallback reason). A device/precision downgrade the plugin does not
+    explain gets a synthesised reason, so a silent downgrade cannot pass the
+    boundary. No plugin ships today; the contract is ready for when one does.
 11. ✅ Keep FFmpeg software native as baseline: `videoAssemble`'s
     `assemble_report` now carries engine telemetry (`engine: ffmpeg`,
     `device: ffmpeg_sw`, `device_requested: auto`, and a visible reason that

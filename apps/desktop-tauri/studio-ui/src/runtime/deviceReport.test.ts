@@ -4,6 +4,7 @@ import {
   describeDeviceReport,
   deviceReportFromEngineReport,
   deviceReportFromNodeOutputs,
+  deviceReportFromPluginReport,
   deviceReportFromViewportBackend,
 } from "./deviceReport";
 
@@ -172,6 +173,39 @@ describe("deviceReportFromNodeOutputs", () => {
     expect(report?.fallbackReason).toBe(
       "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)",
     );
+  });
+
+  it("normalises a plugin boundary report, keeping a silent downgrade visible", () => {
+    const honest = deviceReportFromPluginReport({
+      device_requested: "cuda",
+      device: "cuda",
+      precision_requested: "fp16",
+      precision: "fp16",
+      backend: "torch-plugin",
+    });
+    expect(honest.used).toBe("cuda");
+    expect(honest.accelerated).toBe(true);
+    expect(honest.backend).toBe("torch-plugin fp16");
+    expect(honest.fallbackReason).toBeUndefined();
+
+    const silentDowngrade = deviceReportFromPluginReport({
+      device_requested: "cuda",
+      device: "cpu",
+      precision_requested: "fp16",
+      precision: "fp32",
+    });
+    expect(silentDowngrade.used).toBe("cpu");
+    expect(silentDowngrade.accelerated).toBe(false);
+    expect(silentDowngrade.fallbackReason).toBe(
+      "plugin ran on cpu for a cuda request; precision fp16 -> fp32 (no reason reported)",
+    );
+
+    const reported = deviceReportFromPluginReport({
+      device_requested: "cuda",
+      device: "cpu",
+      fallback_reason: "CUDA out of memory",
+    });
+    expect(reported.fallbackReason).toBe("CUDA out of memory");
   });
 
   it("reads videoAssemble assemble_report as the software FFmpeg baseline", () => {
