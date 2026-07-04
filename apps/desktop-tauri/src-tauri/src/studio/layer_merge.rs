@@ -17,7 +17,7 @@ use super::persist::studio_reject_unsafe_basename;
 use super::pixel_ops;
 use super::studio_image;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct MergedLayerArtifacts {
     pub mask_path: String,
     pub rgba_path: String,
