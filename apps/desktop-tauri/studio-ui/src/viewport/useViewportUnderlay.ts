@@ -5,9 +5,10 @@
 // becomes a WGPU texture the editors do not change — only this hook's
 // presentation output does.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
 import type { ViewportBackend, ViewportKind } from "../bridge/viewport";
+import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 export interface ViewportUnderlay {
@@ -33,6 +34,9 @@ export function useViewportUnderlay(
   kind: ViewportKind,
   imagePath: string | undefined,
   size = 1280,
+  /** Presentation zoom/pan (viewport state): a change re-renders through the
+   * open viewport's cached source proxy — the source is never re-decoded. */
+  view: ViewportViewState = IDENTITY_VIEW,
 ): ViewportUnderlay {
   const [state, setState] = useState<ViewportUnderlay>({
     underlay: null,
@@ -40,6 +44,9 @@ export function useViewportUnderlay(
     backend: null,
     settled: false,
   });
+  const hostRef = useRef<WgpuViewportHost | null>(null);
+  // The view last sent to the open host, to skip no-op `set_view` commands.
+  const sentViewRef = useRef<ViewportViewState>(IDENTITY_VIEW);
 
   useEffect(() => {
     setState({ underlay: null, dims: null, backend: null, settled: false });
@@ -70,6 +77,8 @@ export function useViewportUnderlay(
       });
       const frame = await host.renderFrame();
       if (cancelled) return;
+      hostRef.current = host;
+      sentViewRef.current = IDENTITY_VIEW;
       setState({
         underlay: frame.data_url,
         dims: { w: frame.width, h: frame.height },
@@ -83,9 +92,36 @@ export function useViewportUnderlay(
 
     return () => {
       cancelled = true;
+      hostRef.current = null;
       void host?.close();
     };
   }, [kind, imagePath, size]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const sent = sentViewRef.current;
+    if (!host || !host.isOpen) return;
+    if (view.zoom === sent.zoom && view.panX === sent.panX && view.panY === sent.panY) return;
+    if (isIdentityView(view) && isIdentityView(sent)) return;
+    let cancelled = false;
+    sentViewRef.current = view;
+    (async () => {
+      await host.command({ kind: "set_view", ...view });
+      const frame = await host.renderFrame();
+      if (cancelled || hostRef.current !== host) return;
+      setState({
+        underlay: frame.data_url,
+        dims: { w: frame.width, h: frame.height },
+        backend: frame.backend,
+        settled: true,
+      });
+    })().catch(() => {
+      /* keep the previous frame */
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
 
   return state;
 }
