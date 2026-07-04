@@ -42,6 +42,11 @@ export interface NodeEditing {
    * result without a full-graph run.
    */
   runUpToNode?: (nodeId: string) => void;
+  /**
+   * Run one semantic row of an integrated card: only the row's input chain
+   * executes and only that row's leaf is lowered (RunScope `card_row`).
+   */
+  runCardRow?: (nodeId: string, rowId: string) => void;
 }
 
 // Lets memoized node cards edit their own params without threading callbacks

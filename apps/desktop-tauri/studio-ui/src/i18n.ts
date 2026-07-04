@@ -162,6 +162,10 @@ export const messages = {
     en: "Auto-detect the subject (Phase 2 models; Phase 1 seeds an empty mask)",
     zh: "自动检测主体（Phase 2 模型；Phase 1 生成空蒙版）",
   },
+  "node.runRowTitle": {
+    en: "Run this row (its input chain only)",
+    zh: "运行此行（仅其输入链）",
+  },
   "node.editMask": { en: "Edit Mask", zh: "编辑蒙版" },
   "node.editMaskTitle": {
     en: "Open the mask editor (brush / wand / morphology)",

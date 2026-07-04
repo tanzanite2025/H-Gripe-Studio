@@ -135,6 +135,8 @@ export interface StudioRunController {
   runUpToNode: (nodeId: string) => Promise<void>;
   /** Run an explicit scope (selection, card, downstream, …) on the active canvas. */
   runScope: (scope: RunScope) => Promise<void>;
+  /** Run one semantic row of an integrated card (its input chain only). */
+  runCardRow: (nodeId: string, rowId: string) => Promise<void>;
   /** Run the graph once per item of the (first) batch node. */
   runBatch: () => Promise<void>;
   /** Project-level batch: run every open canvas's graph sequentially. */
@@ -575,6 +577,12 @@ export function useStudioRunController({
     [runScope],
   );
 
+  const runCardRow = useCallback(
+    (nodeId: string, rowId: string) =>
+      runScope({ kind: "card_row", canvasId: ACTIVE_CANVAS, nodeId, rowId }),
+    [runScope],
+  );
+
   // Batch fan-out: run the graph once per item of the (first) batch node,
   // sweeping its `index`. In Tauri, the graph is copied with an index override
   // and sent to Rust; in browser preview, runGraph uses paramOverrides.
@@ -839,6 +847,7 @@ export function useStudioRunController({
     run,
     runUpToNode,
     runScope,
+    runCardRow,
     runBatch,
     runProject,
     cancelRun,

@@ -168,16 +168,27 @@ export function resolveRunScope(graph: WorkflowGraph, scope: RunScope): Resolved
       }
       return { graph: ancestorSubgraph(graph, scope.nodeId), warnings };
 
-    case "card_row":
-      // Row-scoped narrowing (plan step 3) is not implemented yet: resolve to
-      // the owning card's upstream chain and say so.
+    case "card_row": {
+      // Integrated cards expose one `<row>.` port prefix per semantic row and
+      // lower to one leaf per *wired* row (graph/lowering.ts). Keeping only the
+      // card edges of this row before taking the ancestor subgraph therefore
+      // narrows both the upstream chain and the lowering to that single row.
       if (!has(scope.nodeId)) {
         warnings.push(`card ${scope.nodeId} not found; running the full canvas`);
         return { graph, warnings };
       }
-      warnings.push(
-        `row-scoped execution is not implemented yet; running card ${scope.nodeId} with upstream`,
-      );
-      return { graph: ancestorSubgraph(graph, scope.nodeId), warnings };
+      const prefix = `${scope.rowId}.`;
+      const edges = graph.edges.filter((e) => {
+        if (e.source === scope.nodeId) return false;
+        if (e.target === scope.nodeId) return e.targetPort.startsWith(prefix);
+        return true;
+      });
+      if (!edges.some((e) => e.target === scope.nodeId)) {
+        warnings.push(
+          `card ${scope.nodeId} row ${scope.rowId} has no wired input; connect the row before running it`,
+        );
+      }
+      return { graph: ancestorSubgraph({ ...graph, edges }, scope.nodeId), warnings };
+    }
   }
 }

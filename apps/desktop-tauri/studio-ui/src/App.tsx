@@ -987,6 +987,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     clearHistory,
     run,
     runUpToNode,
+    runCardRow,
     runBatch,
     runProject,
     cancelRun,
@@ -1069,8 +1070,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       openMediaEdit,
       addBoundEdit,
       runUpToNode,
+      runCardRow,
     }),
-    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode],
+    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode, runCardRow],
   );
 
   // Canvas -> EditorHost adapter. The editors are application-level surfaces

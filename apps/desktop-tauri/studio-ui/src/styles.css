@@ -744,6 +744,27 @@ button:disabled { opacity: 0.6; cursor: default; }
   border-left: 3px solid var(--block-color);
   border-right: 3px solid var(--block-color);
 }
+/* per-row run button on integrated cards: runs just that row's input chain. */
+.port-row-run {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--block-color);
+  color: #fff;
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.port-block-pair:hover .port-row-run { opacity: 0.9; }
+.port-row-run:hover { opacity: 1; }
 .port-side { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
 .port-side-out { align-items: flex-end; }
 .port-entry { position: relative; display: flex; align-items: center; min-height: 14px; }

@@ -10,8 +10,8 @@ function node(id: string) {
   return { id, kind: "prompt", position: { x: 0, y: 0 }, params: {} };
 }
 
-function edge(source: string, target: string) {
-  return { id: `${source}->${target}`, source, sourcePort: "out", target, targetPort: "in" };
+function edge(source: string, target: string, targetPort = "in") {
+  return { id: `${source}->${target}`, source, sourcePort: "out", target, targetPort };
 }
 
 // a -> b -> c -> d, plus an unrelated branch x -> y.
@@ -79,9 +79,54 @@ describe("resolveRunScope", () => {
     expect(ids(r)).toEqual(new Set(["a", "b", "s"]));
   });
 
-  it("card_row resolves to the card's upstream chain with a warning for now", () => {
-    const r = resolveRunScope(g, { kind: "card_row", canvasId: "c1", nodeId: "s", rowId: "enhance" });
-    expect(ids(r)).toEqual(new Set(["a", "b", "s"]));
+  it("card_row on a node without row-prefixed ports warns and keeps just the node", () => {
+    const r = resolveRunScope(g, { kind: "card_row", canvasId: "c1", nodeId: "s", rowId: "in" });
+    expect(ids(r)).toEqual(new Set(["s"]));
+    expect(r.warnings).toHaveLength(1);
+  });
+});
+
+describe("card_row narrowing", () => {
+  // Two sources feed different rows of one integrated card.
+  const cardGraph = graph({
+    nodes: [node("src1"), node("src2"), node("card"), node("sink")],
+    edges: [
+      edge("src1", "card", "enhance.in"),
+      edge("src2", "card", "grade.in"),
+      { id: "e-out", source: "card", sourcePort: "enhance.out", target: "sink", targetPort: "in" },
+    ],
+  });
+
+  it("keeps only the row's input edges and their upstream", () => {
+    const r = resolveRunScope(cardGraph, {
+      kind: "card_row",
+      canvasId: "c1",
+      nodeId: "card",
+      rowId: "enhance",
+    });
+    expect(ids(r)).toEqual(new Set(["src1", "card"]));
+    expect(r.graph.edges).toEqual([edge("src1", "card", "enhance.in")]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("excludes downstream consumers of the row's output", () => {
+    const r = resolveRunScope(cardGraph, {
+      kind: "card_row",
+      canvasId: "c1",
+      nodeId: "card",
+      rowId: "grade",
+    });
+    expect(ids(r)).toEqual(new Set(["src2", "card"]));
+  });
+
+  it("warns when the row has no wired input", () => {
+    const r = resolveRunScope(cardGraph, {
+      kind: "card_row",
+      canvasId: "c1",
+      nodeId: "card",
+      rowId: "mask",
+    });
+    expect(ids(r)).toEqual(new Set(["card"]));
     expect(r.warnings).toHaveLength(1);
   });
 });
