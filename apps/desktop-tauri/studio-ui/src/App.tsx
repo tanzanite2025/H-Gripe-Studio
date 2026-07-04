@@ -58,6 +58,7 @@ import {
   readStudioProjectManifest,
   writeStudioProjectManifest,
   mergeLayerMasks,
+  pickFile,
   primeIngest,
   splitLayerMask,
 } from "./bridge/tauri";
@@ -1260,14 +1261,39 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             }
           : null;
 
-  // Toolbar entry for the unified image editor: target the selected image
-  // card, else the canvas's first image card.
-  const openImageEditor = () => {
+  // Toolbar entry for the unified image editor — a standalone surface: with an
+  // image card selected it auto-imports that card's image; otherwise the user
+  // picks a file, which lands on a new image card the editor opens on.
+  const openImageEditor = async () => {
     const isImage = (n: Node) => (n.data as HgripeNodeData).kind === "imageSource";
-    const target =
-      nodes.find((n) => selectedNodeIds.includes(n.id) && isImage(n)) ?? nodes.find(isImage);
-    if (target) openMediaEdit(target.id);
-    else window.alert(t("imageEdit.none"));
+    const selected = nodes.find((n) => selectedNodeIds.includes(n.id) && isImage(n));
+    if (selected) {
+      openMediaEdit(selected.id);
+      return;
+    }
+    const path = await pickFile({
+      title: t("imageEdit.pickTitle"),
+      filterName: "Images",
+      extensions: [...IMAGE_DROP_EXTS],
+    });
+    if (!path) {
+      // Browser preview has no native picker; guide toward selecting a card.
+      if (!isDesktop) window.alert(t("imageEdit.selectFirst"));
+      return;
+    }
+    takeSnapshot();
+    const origin = screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+    const node = {
+      ...makeNode(newNodeId("imageSource"), "imageSource", origin.x, origin.y, { path }),
+      selected: true,
+    };
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
+    setSelectedId(node.id);
+    void primeIngest([path]);
+    openMediaEdit(node.id);
   };
 
   const closeEditor = () => {
@@ -1284,18 +1310,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         isDesktop={isDesktop}
         onToggleLang={onToggleLang}
         onOpenModels={() => setModelsOpen(true)}
-        onOpenImageEdit={openImageEditor}
+        onOpenImageEdit={() => void openImageEditor()}
         showProject={showProject}
         setShowProject={setShowProject}
         showSnapshots={showSnapshots}
         setShowSnapshots={setShowSnapshots}
         showLog={showLog}
         setShowLog={setShowLog}
-        showHistory={showHistory}
-        setShowHistory={setShowHistory}
         snapshotCount={snapshots.length}
         logCount={runLog.length}
-        historyCount={runHistory.length}
         nodes={nodes}
         onJumpToNode={jumpToNode}
         fileInputRef={fileInputRef}
@@ -1427,6 +1450,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 hasBatch={hasBatch}
                 batchCount={batchCount}
                 onRunBatch={() => void runBatch()}
+                showHistory={showHistory}
+                historyCount={runHistory.length}
+                onToggleHistory={() => setShowHistory((s) => !s)}
               />
               <div className="canvas-status" aria-live="polite">
                 {message && (

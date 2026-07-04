@@ -43,6 +43,10 @@ export interface RunHudProps {
   hasBatch: boolean;
   batchCount: number;
   onRunBatch: () => void;
+  /** Run-history modal toggle — lives next to Run so past runs sit by the entry point. */
+  showHistory: boolean;
+  historyCount: number;
+  onToggleHistory: () => void;
 }
 
 /**
@@ -65,6 +69,9 @@ export function RunHud({
   hasBatch,
   batchCount,
   onRunBatch,
+  showHistory,
+  historyCount,
+  onToggleHistory,
 }: RunHudProps) {
   const t = useT();
   const lang = useContext(LangContext);
@@ -114,6 +121,10 @@ export function RunHud({
         >
           <PlayIcon />
           {running ? t("btn.running") : t("btn.run")}
+        </button>
+        <button onClick={onToggleHistory} title={t("btn.historyTitle")}>
+          {showHistory ? t("btn.hideHistory") : t("btn.history")}
+          {historyCount > 0 ? ` (${historyCount})` : ""}
         </button>
         <label className="run-hud-scope">
           <span className="muted">{t("hud.scope")}</span>
