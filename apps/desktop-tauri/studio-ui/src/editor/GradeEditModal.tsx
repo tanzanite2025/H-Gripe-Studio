@@ -12,13 +12,15 @@ export type { GradeCommit };
 interface GradeEditModalProps {
   title: string;
   imagePath?: string | null;
+  /** Node whose output is being graded, for a `node_output` preview target. */
+  nodeId?: string | null;
   /** The node's current `grade_doc` param (JSON string), if any. */
   initialDoc?: string | null;
   onCommit: (commit: GradeCommit) => void;
   onClose: () => void;
 }
 
-export function GradeEditModal({ title, imagePath, initialDoc, onCommit, onClose }: GradeEditModalProps) {
+export function GradeEditModal({ title, imagePath, nodeId, initialDoc, onCommit, onClose }: GradeEditModalProps) {
   const t = useT();
 
   useEffect(() => {
@@ -44,6 +46,7 @@ export function GradeEditModal({ title, imagePath, initialDoc, onCommit, onClose
         </div>
         <GradePanel
           imagePath={imagePath}
+          nodeId={nodeId}
           initialDoc={initialDoc}
           onCommit={(commit) => {
             onCommit(commit);

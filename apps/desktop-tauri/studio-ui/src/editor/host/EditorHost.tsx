@@ -32,6 +32,10 @@ export interface EditorTarget {
   imagePath: string | null;
   /** Display title for the editor chrome. */
   title: string;
+  /** Node whose output backs the target, when it is a node output: lets the
+   * grade preview present a `node_output` viewport target host-side rather
+   * than registering the path as a plain image resource. */
+  nodeId?: string | null;
 }
 
 /** A request to open one editor over a target, with its commit sink. */
@@ -100,6 +104,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
         <GradeEditModal
           title={request.target.title}
           imagePath={request.target.imagePath}
+          nodeId={request.target.nodeId}
           initialDoc={request.initialDoc}
           onCommit={request.onCommit}
           onClose={onClose}
