@@ -14,6 +14,7 @@
 // | detailWatchdog `watchdog_report`         | engine_requested, device_requested | engine, device              | engine_fallback_reason   |
 // | detailRepaint `repaint_report`           | engine_requested                   | engine, device, precision   | engine_fallback_reason   |
 // | subjectMask `matte_report` (auto modes)  | device_requested                   | engine, device              | engine_fallback_reason   |
+// | videoAssemble `assemble_report`          | device_requested                   | engine, device (ffmpeg_sw)  | engine_fallback_reason   |
 // | viewport frames (`ViewportBackend`)      | requested (auto|gpu|cpu)           | actual (wgpu|gpu|cpu)       | fallback_reason          |
 
 /** What the caller asked for (`device`/`viewport` request vocabulary). */
@@ -103,7 +104,10 @@ export function deviceReportFromEngineReport(report: EngineReportLike): DeviceRe
     requested: asRequest(report.device_requested),
     used,
     backend: backendParts.length > 0 ? backendParts.join(" ") : undefined,
-    accelerated: used !== "cpu" && used !== "provider" && used !== "unknown",
+    // Software FFmpeg is the vendored encode/decode baseline, not an
+    // accelerated backend (only `ffmpeg_hw` counts as accelerated).
+    accelerated:
+      used !== "cpu" && used !== "provider" && used !== "unknown" && used !== "ffmpeg_sw",
     fallbackReason: asText(report.engine_fallback_reason),
   };
 }
@@ -152,6 +156,7 @@ const REPORT_OUTPUT_KEYS = [
   "watchdog_report",
   "repaint_report",
   "matte_report",
+  "assemble_report",
 ];
 
 /**

@@ -421,7 +421,12 @@ This should be a settings surface, not a required setup wizard.
    run log's `deviceReportFromNodeOutputs` reads `matte_report`. ORT
    CUDA/DirectML execution providers join when the runtime ships them.
 10. Keep heavy model runtimes outside the core app; accept plugin reports only.
-11. Keep FFmpeg software native as baseline.
+11. ✅ Keep FFmpeg software native as baseline: `videoAssemble`'s
+    `assemble_report` now carries engine telemetry (`engine: ffmpeg`,
+    `device: ffmpeg_sw`, `device_requested: auto`, and a visible reason that
+    hardware encode is not enabled), the run log reads `assemble_report`, and
+    `ffmpeg_sw` is classified as the non-accelerated baseline in the shared
+    vocabulary. Hardware encode joins per step 12.
 12. Add hardware FFmpeg only behind explicit probe/report/fallback.
 13. Build cross-kernel device registry later.
 14. Build GPU queue/memory policy only after timeline/export workloads demand it.

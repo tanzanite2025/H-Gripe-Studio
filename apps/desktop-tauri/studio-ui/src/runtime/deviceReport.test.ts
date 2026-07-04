@@ -174,6 +174,27 @@ describe("deviceReportFromNodeOutputs", () => {
     );
   });
 
+  it("reads videoAssemble assemble_report as the software FFmpeg baseline", () => {
+    const report = deviceReportFromNodeOutputs({
+      video: "/out/clip.mp4",
+      assemble_report: {
+        codec: "libx264",
+        engine: "ffmpeg",
+        device: "ffmpeg_sw",
+        device_requested: "auto",
+        engine_fallback_reason:
+          "hardware encode not enabled (vendored libav software baseline)",
+      },
+    });
+    expect(report?.requested).toBe("auto");
+    expect(report?.used).toBe("ffmpeg_sw");
+    expect(report?.backend).toBe("ffmpeg");
+    expect(report?.accelerated).toBe(false);
+    expect(report?.fallbackReason).toBe(
+      "hardware encode not enabled (vendored libav software baseline)",
+    );
+  });
+
   it("skips a manual-lane matte_report that carries no engine telemetry", () => {
     expect(
       deviceReportFromNodeOutputs({
