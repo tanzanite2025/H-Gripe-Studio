@@ -49,13 +49,21 @@ struct Cached {
     n: u32,
 }
 
-/// Why a GPU grade could not run.
+/// Why a GPU grade could not run. Each variant is a distinct fallback
+/// reason (GPU_DEVICE_STRATEGY_PLAN grade-kernel hardening): callers report
+/// it and fall back to the CPU reference path.
 #[derive(Debug)]
 pub enum GpuError {
     /// No GPU adapter/device was available (headless CI, no drivers, …).
     /// Callers should fall back to the CPU path.
     NoAdapter,
-    /// The device was lost or a buffer mapping failed.
+    /// The generated WGSL failed validation / compilation on this device.
+    ShaderCompilation(String),
+    /// The surface exceeds the device's storage-buffer limits.
+    SurfaceTooLarge { bytes: u64, max: u64 },
+    /// Mapping the readback buffer for the graded result failed.
+    Readback(String),
+    /// The device was lost or another device-level error occurred.
     Device(String),
 }
 
@@ -63,6 +71,12 @@ impl std::fmt::Display for GpuError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GpuError::NoAdapter => write!(f, "no suitable GPU adapter"),
+            GpuError::ShaderCompilation(e) => write!(f, "shader compilation failed: {e}"),
+            GpuError::SurfaceTooLarge { bytes, max } => write!(
+                f,
+                "surface too large for GPU buffers ({bytes} bytes > device limit {max})"
+            ),
+            GpuError::Readback(e) => write!(f, "GPU readback failed: {e}"),
             GpuError::Device(e) => write!(f, "GPU device error: {e}"),
         }
     }
@@ -113,7 +127,17 @@ impl GpuGrader {
         if surface.w == 0 || surface.h == 0 {
             return Ok(());
         }
-        self.ensure_plan(doc, surface);
+        let limits = self.device.limits();
+        let surface_bytes = (surface.data.len() as u64) * 4;
+        let max_bytes =
+            u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
+        if surface_bytes > max_bytes {
+            return Err(GpuError::SurfaceTooLarge {
+                bytes: surface_bytes,
+                max: max_bytes,
+            });
+        }
+        self.ensure_plan(doc, surface)?;
         let cached = self.cached.as_ref().expect("plan built");
 
         let bytes = bytemuck_cast(&surface.data);
@@ -205,8 +229,8 @@ impl GpuGrader {
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| GpuError::Device(e.to_string()))?;
         rx.recv()
-            .map_err(|e| GpuError::Device(e.to_string()))?
-            .map_err(|e| GpuError::Device(format!("{e:?}")))?;
+            .map_err(|e| GpuError::Readback(e.to_string()))?
+            .map_err(|e| GpuError::Readback(format!("{e:?}")))?;
         {
             let view = slice.get_mapped_range();
             let out: &[f32] = bytemuck_cast_from(&view);
@@ -217,13 +241,17 @@ impl GpuGrader {
     }
 
     // Build (or reuse) the compiled plan for `doc` at `surface`'s shape.
-    fn ensure_plan(&mut self, doc: &GradeDoc, surface: &GradeSurface) {
+    // Shader/pipeline creation runs inside a validation error scope so a
+    // compilation failure surfaces as [`GpuError::ShaderCompilation`]
+    // instead of an uncaptured device error.
+    fn ensure_plan(&mut self, doc: &GradeDoc, surface: &GradeSurface) -> Result<(), GpuError> {
         let key = doc_key(doc);
         if let Some(c) = &self.cached {
             if c.key == key && c.w == surface.w && c.h == surface.h && c.space == surface.space {
-                return;
+                return Ok(());
             }
         }
+        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let plan = build_plan(doc, surface.w, surface.h, surface.space);
         if std::env::var("HGRIPE_GPU_DUMP_WGSL").is_ok() {
             eprintln!("{}", plan.shader);
@@ -284,6 +312,10 @@ impl GpuGrader {
                 contents: bytemuck_cast(&tables),
                 usage: wgpu::BufferUsages::STORAGE,
             });
+        if let Some(err) = pollster::block_on(self.device.pop_error_scope()) {
+            self.cached = None;
+            return Err(GpuError::ShaderCompilation(err.to_string()));
+        }
         self.cached = Some(Cached {
             key,
             w: surface.w,
@@ -295,6 +327,7 @@ impl GpuGrader {
             bind_layout,
             n: surface.w * surface.h,
         });
+        Ok(())
     }
 }
 
