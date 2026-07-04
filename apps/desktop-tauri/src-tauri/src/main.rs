@@ -132,6 +132,8 @@ fn main() {
             commands::viewport::viewport_register_layered_asset,
             commands::viewport::viewport_register_timeline,
             commands::viewport::viewport_register_node_output,
+            commands::viewport_surface::viewport_set_placement,
+            commands::viewport_surface::viewport_set_presented,
             commands::media::resource_info,
             commands::media::resource_thumbnail,
             commands::shell::read_text_file,

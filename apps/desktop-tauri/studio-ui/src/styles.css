@@ -22,13 +22,16 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* The desktop webview is transparent (native viewport surfaces present under
+ * it — WGPU surface swap Phase S1), so the page itself must not paint: the app
+ * root owns the opaque chrome background and viewport holes stay see-through. */
 body {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
-.app { display: flex; flex-direction: column; height: 100%; }
+.app { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 
 .toolbar {
   display: flex;

@@ -80,6 +80,8 @@ interface MockViewport {
   gradeDoc: unknown | null;
   maskOverlay: ViewportMaskOverlay | null;
   view: { zoom: number; panX: number; panY: number };
+  placement: ViewportPlacement | null;
+  presented: boolean;
 }
 
 const mockViewports = new Map<string, MockViewport>();
@@ -118,6 +120,8 @@ export async function createViewport(kind: ViewportKind): Promise<ViewportDescri
     gradeDoc: null,
     maskOverlay: null,
     view: { zoom: 1, panX: 0, panY: 0 },
+    placement: null,
+    presented: false,
   });
   console.info(`[viewport] created ${viewport_id} kind=${kind} (mock)`);
   return { viewport_id, kind, backend: MOCK_BACKEND };
@@ -398,7 +402,80 @@ export async function renderViewportFrame(viewportId: string): Promise<ViewportF
   };
 }
 
+/** Placement of a viewport's element rect, in logical CSS pixels relative to
+ * the webview's client origin, plus the device pixel ratio the host uses to
+ * convert to device pixels (WGPU surface swap Phase S1). */
+export interface ViewportPlacement {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  dpr: number;
+}
+
+/** Host report from `setViewportPlacement`: whether the native surface path
+ * took the placement. `presented: false` + a reason means the PNG transport
+ * stays authoritative (fallback contract — a decision, not a failure). */
+export interface ViewportPlacementReport {
+  presented: boolean;
+  fallback_reason?: string;
+}
+
+/**
+ * Report the viewport element's rect so the host can position its native
+ * surface window under it. On desktop the child window is created lazily on
+ * the first placement; in the browser preview (and on hosts without the
+ * surface path) this is a recorded no-op reporting fallback.
+ */
+export async function setViewportPlacement(
+  viewportId: string,
+  placement: ViewportPlacement,
+): Promise<ViewportPlacementReport> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    return (await invoke("viewport_set_placement", {
+      viewportId,
+      ...placement,
+    })) as ViewportPlacementReport;
+  }
+  const values = [placement.x, placement.y, placement.width, placement.height, placement.dpr];
+  if (values.some((v) => !Number.isFinite(v))) {
+    throw new Error("placement values must be finite");
+  }
+  if (placement.width < 0 || placement.height < 0) {
+    throw new Error(`placement size must not be negative: ${placement.width}x${placement.height}`);
+  }
+  mockGet(viewportId).placement = placement;
+  return { presented: false, fallback_reason: "browser preview mock transport" };
+}
+
+/**
+ * Show/hide the viewport's native surface window without destroying it
+ * (occlusion: modals over the hole, hidden panels). A recorded no-op in the
+ * browser preview.
+ */
+export async function setViewportPresented(
+  viewportId: string,
+  presented: boolean,
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_set_presented", { viewportId, presented });
+    return;
+  }
+  mockGet(viewportId).presented = presented;
+}
+
 /** Test-only: how many mock viewports are currently open. */
 export function openMockViewportCount(): number {
   return mockViewports.size;
+}
+
+/** Test-only: the mock viewport's last recorded placement/presented state. */
+export function mockViewportPresentation(viewportId: string): {
+  placement: ViewportPlacement | null;
+  presented: boolean;
+} {
+  const vp = mockGet(viewportId);
+  return { placement: vp.placement, presented: vp.presented };
 }

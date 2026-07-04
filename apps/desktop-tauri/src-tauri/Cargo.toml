@@ -31,7 +31,7 @@ grade-gpu = ["hgripe-grade/gpu"]
 # compiles the shared wgpu device + surface path in. Device init is lazy —
 # nothing runs at app startup — and when no adapter is available at runtime the
 # viewport host keeps the PNG/blob transport and reports the fallback.
-viewport-surface = ["dep:wgpu", "dep:pollster"]
+viewport-surface = ["dep:wgpu", "dep:pollster", "dep:windows-sys"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -93,3 +93,13 @@ hgripe-grade = { path = "../../../crates/hgripe-grade", features = ["parallel"] 
 # pinned by hgripe-grade's gpu backend, with surface presentation compiled in.
 wgpu = { version = "29.0.3", optional = true, default-features = false, features = ["dx12", "metal", "vulkan", "wgsl"] }
 pollster = { version = "0.4", optional = true }
+
+[target."cfg(windows)".dependencies]
+# Win32 child windows for native viewport surface presentation (feature
+# `viewport-surface`, plan Phase S1): one hidden, input-transparent child HWND
+# per presented viewport, kept below the webview in z-order.
+windows-sys = { version = "0.61", optional = true, features = [
+  "Win32_Foundation",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_WindowsAndMessaging",
+] }

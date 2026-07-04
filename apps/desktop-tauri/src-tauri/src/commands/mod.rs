@@ -12,3 +12,4 @@ pub(crate) mod tasks;
 pub(crate) mod thumbnails;
 pub(crate) mod video;
 pub(crate) mod viewport;
+pub(crate) mod viewport_surface;
