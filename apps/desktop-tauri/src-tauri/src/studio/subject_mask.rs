@@ -116,6 +116,12 @@ pub(super) fn execute_studio_subject_mask(
     let mut provider = "rust-native".to_string();
     let mut engine: Option<&'static str> = None;
     let mut engine_fallback_reason: Option<String> = None;
+    // The node's `device` param: the requested execution device for the ONNX
+    // lane (`auto` when unset). Recorded on the report whenever a segmenter
+    // ran, so a request is never silently dropped.
+    let device_request =
+        super::onnx_pool::OnnxDeviceRequest::from_param(&param_or(node, "device", "auto"));
+    let mut engine_device: Option<&'static str> = None;
 
     let placeholder = match optional(studio_value_to_string(inputs.get("placeholder_mask"))) {
         Some(path) => Some(load_mask_sized(&path, width, height, max_decode_pixels)?),
@@ -143,16 +149,19 @@ pub(super) fn execute_studio_subject_mask(
                 provider = segmenter.provider().to_string();
                 if provider == "builtin-cpu" {
                     engine = Some("cpu");
+                    engine_device = Some("cpu");
                     engine_fallback_reason = Some(
                         "no ONNX segmentation weights resolved; deterministic builtin CPU segmenter"
                             .to_string(),
                     );
                 } else {
+                    // Resolve the requested device against the providers this
+                    // build carries: cpu is honoured (no reason), cuda/auto
+                    // fall back with distinct visible reasons.
+                    let resolution = super::onnx_pool::resolve_provider(device_request);
                     engine = Some("onnxruntime");
-                    engine_fallback_reason = Some(
-                        "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)"
-                            .to_string(),
-                    );
+                    engine_device = Some(resolution.device);
+                    engine_fallback_reason = resolution.fallback_reason;
                 }
                 detected_subjects = result.detected_subjects;
                 operations.push(json!({
@@ -333,8 +342,8 @@ pub(super) fn execute_studio_subject_mask(
         mode,
         provider,
         engine,
-        device: engine.map(|_| "cpu"),
-        device_requested: engine.map(|_| "auto"),
+        device: engine_device,
+        device_requested: engine.map(|_| device_request.as_str()),
         engine_fallback_reason,
         source_mode: loaded.meta.source_mode.clone(),
         exif_transposed: loaded.meta.exif_transposed,
