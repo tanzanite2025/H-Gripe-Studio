@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { IDENTITY_VIEW, panView, zoomView, type ViewportViewState } from "../viewport/view";
 import { useT } from "../i18n";
 
 // Logical fallback size when the connected image has no decodable thumbnail
@@ -76,9 +77,15 @@ export function CropEditModal({
   headerExtra,
 }: CropEditModalProps) {
   const t = useT();
+  // Zoom/pan is viewport state (WGPU migration Phase 2): the underlay renders
+  // the view window over the cached proxy while the crop box stays in image
+  // pixels. Wheel zooms, middle-drag or Space+drag pans, double-click resets.
+  const [view, setView] = useState<ViewportViewState>(IDENTITY_VIEW);
+  const panDrag = useRef<{ x: number; y: number } | null>(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
   // Underlay presentation goes through the viewport host (WGPU migration
   // Phase 2); null in browser preview, where the fallback dims + box stay.
-  const viewport = useViewportUnderlay("image_edit", imagePath || undefined, 1280);
+  const viewport = useViewportUnderlay("image_edit", imagePath || undefined, 1280, view);
   const underlay = viewport.underlay;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
   const [mode, setMode] = useState<"manual" | "auto_subject">(initialMode);
@@ -104,9 +111,17 @@ export function CropEditModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === " " && !e.repeat) setSpaceHeld(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === " ") setSpaceHeld(false);
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, [onClose]);
 
   const ratio = useMemo(() => aspectRatio(aspect), [aspect]);
@@ -120,20 +135,37 @@ export function CropEditModal({
     [ratio],
   );
 
-  // Map a pointer event to image-pixel coordinates.
+  // Map a pointer event to image-pixel coordinates: the stage shows the view
+  // window ([panX, panX + 1/zoom] of the frame), so stage-relative positions
+  // pass through the view before scaling to pixels.
   const toImage = useCallback(
     (e: React.PointerEvent): [number, number] => {
       const stage = stageRef.current;
       if (!stage) return [0, 0];
       const rect = stage.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * dims.w;
-      const y = ((e.clientY - rect.top) / rect.height) * dims.h;
+      const x = (view.panX + (e.clientX - rect.left) / rect.width / view.zoom) * dims.w;
+      const y = (view.panY + (e.clientY - rect.top) / rect.height / view.zoom) * dims.h;
       return [x, y];
     },
-    [dims.w, dims.h],
+    [dims.w, dims.h, view],
   );
 
+  const handleWheel = (e: React.WheelEvent) => {
+    setView((v) => zoomView(v, e.deltaY < 0 ? 1.25 : 0.8));
+  };
+
+  const panning = spaceHeld || panDrag.current != null;
+
   const onPointerDown = (kind: DragKind) => (e: React.PointerEvent) => {
+    // Middle button (or Space held) pans the zoomed view instead of editing
+    // the crop box.
+    if (e.button === 1 || spaceHeld) {
+      if (view.zoom <= 1) return;
+      e.stopPropagation();
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      panDrag.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
     if (mode !== "manual") return;
     e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -149,6 +181,17 @@ export function CropEditModal({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    const pan = panDrag.current;
+    if (pan) {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const rect = stage.getBoundingClientRect();
+      const dx = e.clientX - pan.x;
+      const dy = e.clientY - pan.y;
+      panDrag.current = { x: e.clientX, y: e.clientY };
+      setView((v) => panView(v, dx, dy, rect.width, rect.height));
+      return;
+    }
     const d = drag.current;
     if (!d || mode !== "manual") return;
     const [px, py] = toImage(e);
@@ -189,19 +232,21 @@ export function CropEditModal({
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    if (drag.current) {
+    if (drag.current || panDrag.current) {
       (e.target as Element).releasePointerCapture?.(e.pointerId);
       drag.current = null;
+      panDrag.current = null;
     }
   };
 
   const display = clampBox(box, dims.w, dims.h);
-  // Box rect as percentages of the stage, so it tracks the letterboxed image.
+  // Box rect as percentages of the stage, mapped through the view window so
+  // it tracks the zoomed/panned underlay (the stage clips overflow).
   const pct = {
-    left: `${(display.x / dims.w) * 100}%`,
-    top: `${(display.y / dims.h) * 100}%`,
-    width: `${(display.w / dims.w) * 100}%`,
-    height: `${(display.h / dims.h) * 100}%`,
+    left: `${(display.x / dims.w - view.panX) * view.zoom * 100}%`,
+    top: `${(display.y / dims.h - view.panY) * view.zoom * 100}%`,
+    width: `${(display.w / dims.w) * view.zoom * 100}%`,
+    height: `${(display.h / dims.h) * view.zoom * 100}%`,
   };
 
   const handleApply = () => {
@@ -220,6 +265,7 @@ export function CropEditModal({
         <div className="media-viewer-bar">
           <span className="media-viewer-name" title={title}>
             {title} <span className="muted">· {t("crop.title")}</span>
+            {view.zoom > 1 ? <span className="muted"> · {Math.round(view.zoom * 100)}%</span> : null}
           </span>
           {headerExtra}
           <div className="media-viewer-actions">
@@ -237,7 +283,12 @@ export function CropEditModal({
             <div
               ref={stageRef}
               className={`crop-edit-stage${mode === "auto_subject" ? " auto" : ""}`}
-              style={{ aspectRatio: `${dims.w} / ${dims.h}` }}
+              style={{
+                aspectRatio: `${dims.w} / ${dims.h}`,
+                cursor: panning && view.zoom > 1 ? (panDrag.current ? "grabbing" : "grab") : undefined,
+              }}
+              onWheel={handleWheel}
+              onDoubleClick={() => setView(IDENTITY_VIEW)}
               onPointerDown={onPointerDown("draw")}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}

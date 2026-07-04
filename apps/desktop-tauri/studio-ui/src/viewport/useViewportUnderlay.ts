@@ -14,7 +14,9 @@ import { WgpuViewportHost } from "./WgpuViewportHost";
 export interface ViewportUnderlay {
   /** Presented frame as an image source, or null (browser preview / error). */
   underlay: string | null;
-  /** Frame pixel dimensions, or null until the first frame arrives. */
+  /** Full-frame pixel dimensions (the identity view's frame), or null until
+   * the first frame arrives. Stable across zoom/pan re-renders so callers
+   * can keep overlay geometry in one image-pixel space. */
   dims: { w: number; h: number } | null;
   /** Backend report of the last rendered frame (fallback contract). */
   backend: ViewportBackend | null;
@@ -87,9 +89,12 @@ export function useViewportUnderlay(
       if (cancelled) return;
       hostRef.current = host;
       sentViewRef.current = initialView;
+      // A non-identity first frame is the view window; scale back to the
+      // full-frame size so `dims` is view-independent.
+      const zoom = Math.max(initialView.zoom, 1);
       setState({
         underlay: frame.data_url,
-        dims: { w: frame.width, h: frame.height },
+        dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
         backend: frame.backend,
         settled: true,
       });
@@ -117,12 +122,13 @@ export function useViewportUnderlay(
       await host.command({ kind: "set_view", ...view });
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
-      setState({
+      // Keep `dims`: the view window changes size, the frame does not.
+      setState((s) => ({
+        ...s,
         underlay: frame.data_url,
-        dims: { w: frame.width, h: frame.height },
         backend: frame.backend,
         settled: true,
-      });
+      }));
     })().catch(() => {
       /* keep the previous frame */
     });
