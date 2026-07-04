@@ -111,10 +111,13 @@ export function ToolOptionsPanel({
   // Brush-like tools stamp with a sized tip; everything else (move, marquee,
   // path, view, sample…) has no brush, so no size slider (PS contextual
   // options: only show what the tool in hand actually uses).
-  const usesBrushSize = ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind) && tool.id !== "quick_select";
+  const usesBrushSize =
+    ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind) &&
+    !["quick_select", "patch"].includes(tool.id);
   // Tolerance-keyed tools: the wand family's click floods, plus the painted
   // quick selection (per-point floods) and background eraser (colour key).
-  const usesTolerance = tool.kind === "click" || tool.id === "quick_select" || tool.id === "background_eraser";
+  const usesTolerance =
+    (tool.kind === "click" && tool.id !== "red_eye") || tool.id === "quick_select" || tool.id === "background_eraser";
   return (
     <div className="mask-panel-body">
       {usesBrushSize ? (

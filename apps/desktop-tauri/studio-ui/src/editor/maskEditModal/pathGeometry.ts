@@ -6,6 +6,18 @@
 // rasteriser (frontend proxy and Rust backend) then replays it like any
 // other straight-segment path, so no new kernel op is needed.
 
+/** Even-odd point-in-polygon test against a closed loop. */
+export function pointInPolygon([px, py]: readonly [number, number], polygon: readonly [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0; i < polygon.length; i++) {
+    const [x0, y0] = polygon[i];
+    const [x1, y1] = polygon[(i + 1) % polygon.length];
+    if (y0 <= py === y1 <= py) continue;
+    if (px < x0 + ((py - y0) / (y1 - y0)) * (x1 - x0)) inside = !inside;
+  }
+  return inside;
+}
+
 /**
  * Sample a closed centripetal-flavoured Catmull-Rom spline through `anchors`.
  * Returns `samplesPerSeg` points per anchor segment (the anchors themselves

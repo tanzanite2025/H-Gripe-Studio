@@ -78,14 +78,35 @@ export function paintPath(ctx: CanvasRenderingContext2D, p: EditPath) {
 }
 
 /** A live lasso loop: thin dashed outline, not a brush band. */
-export function paintLassoLoop(ctx: CanvasRenderingContext2D, points: [number, number][]) {
+export function paintLassoLoop(ctx: CanvasRenderingContext2D, points: [number, number][], close = false) {
   ctx.strokeStyle = "rgba(86,168,255,0.9)";
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 4]);
   ctx.beginPath();
   points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+  if (close) ctx.closePath();
   ctx.stroke();
   ctx.setLineDash([]);
+}
+
+/** Perspective-crop quad draft: dashed outline plus draggable corner squares. */
+export function paintQuadDraft(ctx: CanvasRenderingContext2D, quad: readonly [number, number][]) {
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5, 3]);
+  ctx.beginPath();
+  quad.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (const [x, y] of quad) {
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.beginPath();
+    ctx.rect(x - 4, y - 4, 8, 8);
+    ctx.fill();
+    ctx.stroke();
+  }
 }
 
 /** The live retouch band colour: green heal / violet clone / amber history

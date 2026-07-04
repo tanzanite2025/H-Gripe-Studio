@@ -556,7 +556,7 @@ mod replay_cache {
             .any(|op| {
                 matches!(
                     op.get("type").and_then(Value::as_str),
-                    Some("wand" | "quick_select" | "background_eraser")
+                    Some("wand" | "quick_select" | "background_eraser" | "red_eye")
                 )
             });
         if has_wand {
@@ -857,7 +857,8 @@ fn apply_queued_operation(
             let subtract = op.get("mode").and_then(Value::as_str) == Some("subtract");
             let fill = if subtract { MASK_OFF } else { MASK_ON };
             wand_select(image, mask, x as u32, y as u32, tolerance, fill);
-            operations.push(json!({ "type": "wand", "tolerance": tolerance, "subtract": subtract }));
+            operations
+                .push(json!({ "type": "wand", "tolerance": tolerance, "subtract": subtract }));
         }
         Some("quick_select") => {
             // Quick selection (PS W flyout): every stroke point seeds a
@@ -876,7 +877,9 @@ fn apply_queued_operation(
                 }
                 wand_select(image, mask, px as u32, py as u32, tolerance, MASK_ON);
             }
-            operations.push(json!({ "type": "quick_select", "tolerance": tolerance, "seeds": points.len() }));
+            operations.push(
+                json!({ "type": "quick_select", "tolerance": tolerance, "seeds": points.len() }),
+            );
         }
         Some("background_eraser") => {
             // Background eraser (PS E flyout): for each stamp along the
@@ -893,7 +896,21 @@ fn apply_queued_operation(
                 .map(|t| (t as i64).clamp(0, 255) as i32)
                 .unwrap_or(default_tolerance);
             background_erase(image, mask, &points, radius, tolerance);
-            operations.push(json!({ "type": "background_eraser", "radius": radius, "tolerance": tolerance }));
+            operations.push(
+                json!({ "type": "background_eraser", "radius": radius, "tolerance": tolerance }),
+            );
+        }
+        Some("red_eye") => {
+            // Red eye (M15): region carries the `[x, y]` click; the
+            // contiguous red-dominant region around it floods into the mask.
+            let (Some(&x), Some(&y)) = (region.first(), region.get(1)) else {
+                return;
+            };
+            if x < 0.0 || y < 0.0 {
+                return;
+            }
+            red_eye_select(image, mask, x as u32, y as u32);
+            operations.push(json!({ "type": "red_eye" }));
         }
         Some(kind @ ("rect" | "ellipse")) => {
             if region.len() < 4 {
@@ -908,6 +925,13 @@ fn apply_queued_operation(
             }
             crop_mask(mask, &region);
             operations.push(json!({ "type": "crop" }));
+        }
+        Some("perspective_crop") => {
+            if region.len() < 8 {
+                return;
+            }
+            *mask = perspective_crop_mask(mask, &region);
+            operations.push(json!({ "type": "perspective_crop" }));
         }
         Some("gradient") => {
             if region.len() < 4 {
@@ -1028,7 +1052,32 @@ fn apply_queued_operation(
             let mut coverage = GrayImage::new(w, h);
             stamp_stroke(&mut coverage, &points, radius, MASK_ON);
             healing_brush_region(mask, &coverage, dx, dy, radius);
-            operations.push(json!({ "type": "healing_brush", "radius": radius, "dx": dx, "dy": dy }));
+            operations
+                .push(json!({ "type": "healing_brush", "radius": radius, "dx": dx, "dy": dy }));
+        }
+        Some("patch") => {
+            // Patch (M15): refill the lassoed polygon from the `dx`/`dy`
+            // drop offset, blended through a feathered edge like the
+            // healing brush.
+            let points = parse_points(op.get("points"));
+            if points.len() < 3 {
+                return;
+            }
+            let field =
+                |key: &str| op.get(key).and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+            let (dx, dy) = (field("dx"), field("dy"));
+            let (w, h) = mask.dimensions();
+            let mut coverage = GrayImage::new(w, h);
+            apply_mask_path(
+                &mut coverage,
+                &MaskPath {
+                    mode: PathMode::Add,
+                    tool: "patch".to_string(),
+                    polygon: points.clone(),
+                },
+            );
+            healing_brush_region(mask, &coverage, dx, dy, 2 * PATCH_FEATHER);
+            operations.push(json!({ "type": "patch", "dx": dx, "dy": dy, "points": points.len() }));
         }
         Some("sponge") => {
             // Sponge (M14): push the mask's soft values toward hard on/off
@@ -1272,6 +1321,46 @@ fn wand_select(
     }
 }
 
+/// Minimum redness (`r − max(g, b)`) for a pixel to read as part of a red
+/// reflection.
+const RED_EYE_MIN: i32 = 32;
+
+/// How red-dominant a pixel is: the red channel's excess over the stronger
+/// of green / blue.
+fn redness(px: [u8; 4]) -> i32 {
+    i32::from(px[0]) - i32::from(px[1]).max(i32::from(px[2]))
+}
+
+/// Red eye (PS J flyout, on a mask): flood-fill from the click over the
+/// contiguous red-dominant region (`redness ≥ RED_EYE_MIN`), selecting it
+/// into the mask. A click on a non-red pixel is a no-op.
+fn red_eye_select(image: &RgbaImage, mask: &mut GrayImage, seed_x: u32, seed_y: u32) {
+    let (width, height) = image.dimensions();
+    if seed_x >= width || seed_y >= height {
+        return;
+    }
+    if redness(image.get_pixel(seed_x, seed_y).0) < RED_EYE_MIN {
+        return;
+    }
+    let mut visited = vec![false; (width * height) as usize];
+    let mut queue = VecDeque::new();
+    queue.push_back((seed_x, seed_y));
+    visited[(seed_y * width + seed_x) as usize] = true;
+    while let Some((x, y)) = queue.pop_front() {
+        if redness(image.get_pixel(x, y).0) < RED_EYE_MIN {
+            continue;
+        }
+        mask.put_pixel(x, y, Luma([MASK_ON]));
+        for (nx, ny) in neighbours(x, y, width, height) {
+            let idx = (ny * width + nx) as usize;
+            if !visited[idx] {
+                visited[idx] = true;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+}
+
 fn neighbours(x: u32, y: u32, width: u32, height: u32) -> Vec<(u32, u32)> {
     let mut out = Vec::with_capacity(4);
     if x > 0 {
@@ -1490,7 +1579,8 @@ fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
         }
         for x in 0..w {
             tmp.put_pixel(x, y, Luma([(sum / win).round() as u8]));
-            sum += at(mask, i64::from(x) + r + 1, i64::from(y)) - at(mask, i64::from(x) - r, i64::from(y));
+            sum += at(mask, i64::from(x) + r + 1, i64::from(y))
+                - at(mask, i64::from(x) - r, i64::from(y));
         }
     }
     let mut out = GrayImage::new(w, h);
@@ -1501,7 +1591,8 @@ fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
         }
         for y in 0..h {
             out.put_pixel(x, y, Luma([(sum / win).round() as u8]));
-            sum += at(&tmp, i64::from(x), i64::from(y) + r + 1) - at(&tmp, i64::from(x), i64::from(y) - r);
+            sum += at(&tmp, i64::from(x), i64::from(y) + r + 1)
+                - at(&tmp, i64::from(x), i64::from(y) - r);
         }
     }
     out
@@ -1530,7 +1621,11 @@ fn healing_brush_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy:
                 0.0
             };
             let v = f64::from(base.get_pixel(x, y).0[0]);
-            mask.put_pixel(x, y, Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]));
+            mask.put_pixel(
+                x,
+                y,
+                Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]),
+            );
         }
     }
 }
@@ -1538,6 +1633,88 @@ fn healing_brush_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy:
 /// Per-stroke exposure of the sponge tool: each pass moves the covered pixels
 /// half-way toward hard on/off (saturate) or toward mid-grey (desaturate).
 const SPONGE_EXPOSURE: f64 = 0.5;
+
+/// Feathered edge (px) of the patch tool's blend into the surroundings — the
+/// patch op runs `healing_brush_region` at radius `2 * PATCH_FEATHER` (its
+/// blur is half the radius). Mirrors `PATCH_FEATHER` in `maskMorphology.ts`.
+const PATCH_FEATHER: u32 = 4;
+
+/// Homography coefficients mapping the unit square onto the quad
+/// `[p00, p10, p11, p01]` (TL, TR, BR, BL):
+/// `X = (a·u + b·v + c) / (g·u + h·v + 1)`, same for `Y` with `d, e, f`.
+/// Degenerate quads fall back to the affine map (`g = h = 0`). Mirrors the
+/// proxy `quadHomography` in `maskMorphology.ts`.
+fn quad_homography(quad: &[(f64, f64); 4]) -> [f64; 8] {
+    let (p00, p10, p11, p01) = (quad[0], quad[1], quad[2], quad[3]);
+    let sx = p00.0 - p10.0 + p11.0 - p01.0;
+    let sy = p00.1 - p10.1 + p11.1 - p01.1;
+    let d1x = p10.0 - p11.0;
+    let d1y = p10.1 - p11.1;
+    let d2x = p01.0 - p11.0;
+    let d2y = p01.1 - p11.1;
+    let den = d1x * d2y - d1y * d2x;
+    let mut g = 0.0;
+    let mut h = 0.0;
+    if (sx != 0.0 || sy != 0.0) && den.abs() > 1e-9 {
+        g = (sx * d2y - sy * d2x) / den;
+        h = (d1x * sy - sx * d1y) / den;
+    }
+    [
+        p10.0 - p00.0 + g * p10.0,
+        p01.0 - p00.0 + h * p01.0,
+        p00.0,
+        p10.1 - p00.1 + g * p10.1,
+        p01.1 - p00.1 + h * p01.1,
+        p00.1,
+        g,
+        h,
+    ]
+}
+
+/// Perspective crop (PS C flyout, on a mask): straighten the quad
+/// `region: [x0,y0, x1,y1, x2,y2, x3,y3]` (TL, TR, BR, BL image-space) into
+/// its bounding rectangle — each rect pixel inverse-maps through the
+/// rect→quad homography (nearest-neighbour), everything outside the rect is
+/// cleared. Mirrors the proxy `perspectiveCrop` in `maskMorphology.ts`.
+fn perspective_crop_mask(mask: &GrayImage, region: &[f64]) -> GrayImage {
+    let quad = [
+        (region[0], region[1]),
+        (region[2], region[3]),
+        (region[4], region[5]),
+        (region[6], region[7]),
+    ];
+    let bx1 = quad.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let by1 = quad.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let bx2 = quad.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let by2 = quad.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+    let bw = (bx2 - bx1).max(1e-6);
+    let bh = (by2 - by1).max(1e-6);
+    let [a, b, c, d, e, f, g, hh] = quad_homography(&quad);
+    let (w, h) = mask.dimensions();
+    let mut out = GrayImage::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let cx = f64::from(x) + 0.5;
+            let cy = f64::from(y) + 0.5;
+            if cx < bx1 || cx > bx2 || cy < by1 || cy > by2 {
+                continue;
+            }
+            let u = (cx - bx1) / bw;
+            let v = (cy - by1) / bh;
+            let den = g * u + hh * v + 1.0;
+            if den.abs() < 1e-9 {
+                continue;
+            }
+            let sx = ((a * u + b * v + c) / den).floor();
+            let sy = ((d * u + e * v + f) / den).floor();
+            if sx < 0.0 || sy < 0.0 || sx >= f64::from(w) || sy >= f64::from(h) {
+                continue;
+            }
+            out.put_pixel(x, y, *mask.get_pixel(sx as u32, sy as u32));
+        }
+    }
+    out
+}
 
 /// Sponge (PS O flyout, on a mask): locally push the mask's soft values
 /// toward hard on/off (saturate) or toward mid-grey (desaturate) inside
@@ -2577,6 +2754,76 @@ mod tests {
         healing_brush_region(&mut mask, &coverage, -20, -20, 4);
         assert!(mask.get_pixel(25, 25).0[0] > 200); // sampled from (5, 5)
         assert_eq!(mask.get_pixel(38, 38).0[0], MASK_OFF); // far untouched
+    }
+
+    #[test]
+    fn patch_op_refills_the_polygon_from_the_drop_offset() {
+        // An empty mask with an on-square at the top-left: patching with the
+        // drop offset pointing into the square refills the loop from it.
+        let mut mask = solid(41, 41, MASK_OFF);
+        for y in 0..=12 {
+            for x in 0..=12 {
+                mask.put_pixel(x, y, Luma([MASK_ON]));
+            }
+        }
+        let image = RgbaImage::new(41, 41);
+        let op = json!({
+            "type": "patch",
+            "points": [
+                { "x": 20.0, "y": 20.0 },
+                { "x": 32.0, "y": 20.0 },
+                { "x": 32.0, "y": 32.0 },
+                { "x": 20.0, "y": 32.0 },
+            ],
+            "dx": -20.0,
+            "dy": -20.0,
+        });
+        let mut log = Vec::new();
+        apply_queued_operation(&image, &mut mask, &op, 32, &mut log);
+        assert!(mask.get_pixel(26, 26).0[0] > 200); // sampled from (6, 6)
+        assert_eq!(mask.get_pixel(5, 39).0[0], MASK_OFF); // far untouched
+        assert_eq!(log.len(), 1);
+    }
+
+    #[test]
+    fn perspective_crop_mask_straightens_the_quad() {
+        // An axis-aligned quad is an identity warp inside its bounds and
+        // clears everything outside.
+        let mask = solid(40, 40, MASK_ON);
+        let out = perspective_crop_mask(&mask, &[10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0]);
+        assert_eq!(out.get_pixel(20, 20).0[0], MASK_ON); // inside preserved
+        assert_eq!(out.get_pixel(5, 5).0[0], MASK_OFF); // outside cleared
+
+        // A skewed quad samples the quad's corner regions into the rect's.
+        let mut m2 = GrayImage::new(40, 40);
+        for y in 3..8 {
+            for x in 27..33 {
+                m2.put_pixel(x, y, Luma([MASK_ON])); // blob at the quad's TR
+            }
+        }
+        let o2 = perspective_crop_mask(&m2, &[10.0, 10.0, 30.0, 5.0, 35.0, 35.0, 5.0, 30.0]);
+        assert_eq!(o2.get_pixel(34, 5).0[0], MASK_ON); // rect TR ← quad TR blob
+        assert_eq!(o2.get_pixel(6, 34).0[0], MASK_OFF); // rect BL far from blob
+    }
+
+    #[test]
+    fn red_eye_select_floods_the_red_dominant_region() {
+        // A red square on a grey image: clicking inside floods exactly the
+        // contiguous red-dominant pixels; clicking grey is a no-op.
+        let mut image = RgbaImage::from_pixel(21, 21, Rgba([90, 90, 90, 255]));
+        for y in 8..13 {
+            for x in 8..13 {
+                image.put_pixel(x, y, Rgba([200, 60, 60, 255]));
+            }
+        }
+        let mut mask = GrayImage::new(21, 21);
+        red_eye_select(&image, &mut mask, 10, 10);
+        assert_eq!(mask.get_pixel(10, 10).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(8, 8).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(0, 0).0[0], MASK_OFF);
+        let mut untouched = GrayImage::new(21, 21);
+        red_eye_select(&image, &mut untouched, 2, 2);
+        assert!(untouched.pixels().all(|p| p.0[0] == MASK_OFF));
     }
 
     #[test]
