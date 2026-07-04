@@ -11,6 +11,7 @@ import {
 } from "../bridge/engineProbe";
 import { ParamField } from "./ParamField";
 import { BackendSelector } from "../models/BackendSelector";
+import { LocalModelSelector } from "../models/LocalModelSelector";
 import type { ModelCapability } from "../models/backendRegistry";
 import { OutputPicker } from "./OutputPicker";
 import { MediaViewer } from "./MediaViewer";
@@ -35,6 +36,25 @@ function backendCapability(kind: string, params: Record<string, unknown>): Model
     return String(params.operation ?? "") === "image.edit" ? "image.edit" : "image.generate";
   if (kind === "promptOptimize" && String(params.mode ?? "") === "api") return "prompt.rewrite";
   if (kind === "detailRepaint") return "image.edit";
+  return null;
+}
+
+// Which manager capability a node's local model selector filters by. Selection
+// stores `local_model_ref` and mirrors the node's device/precision fields
+// where present; the legacy `engine` select stays as the advanced escape hatch.
+function localModelCapability(
+  kind: string,
+  params: Record<string, unknown>,
+): ModelCapability | null {
+  if (kind === "subjectMask") return "mask.subject";
+  if (kind === "refineMaskEdge") return "matte.refine";
+  if (kind === "imageEnhance") return "image.upscale";
+  if (kind === "matchLightColor") return "image.enhance";
+  if (
+    kind === "detailRepaint" &&
+    ["sd_inpaint", "sdxl_inpaint", "flux_fill"].includes(String(params.engine ?? ""))
+  )
+    return "image.inpaint";
   return null;
 }
 
@@ -110,6 +130,8 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
     (!p.visibleWhen || p.visibleWhen.in.includes(String(data.params[p.visibleWhen.param] ?? "")));
 
   const capability = backendCapability(spec.kind, data.params);
+  const localCapability = localModelCapability(spec.kind, data.params);
+  const hasParam = (key: string) => spec.params.some((p) => p.key === key);
   const normalParams = spec.params.filter((p) => isVisible(p) && !p.advanced);
   const advancedParams = spec.params.filter((p) => isVisible(p) && p.advanced);
 
@@ -134,6 +156,19 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
             if (profile.provider_kind) onParamChange(node.id, "provider", profile.provider_kind);
             if (profile.default_model) onParamChange(node.id, "model", profile.default_model);
             onParamChange(node.id, "credentials_ref", profile.credentials_ref);
+          }}
+        />
+      )}
+
+      {localCapability && (
+        <LocalModelSelector
+          capability={localCapability}
+          value={String(data.params.local_model_ref ?? "")}
+          onApply={(model) => {
+            onParamChange(node.id, "local_model_ref", model.ref);
+            if (hasParam("device") && model.device_policy !== "directml")
+              onParamChange(node.id, "device", model.device_policy);
+            if (hasParam("precision")) onParamChange(node.id, "precision", model.precision_policy);
           }}
         />
       )}

@@ -183,6 +183,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "将生成主体的光照与色彩向 PSD 背景靠拢，让合成不再显得「贴上去」：Reinhard Lab 迁移 / 直方图匹配，并向阴影与高光加权，同时保护品牌色。输出匹配后图像、匹配报告与提示词后缀。",
     params: {
       mode: { label: "模式" },
+      local_model_ref: {
+        label: "本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
+      },
       engine: {
         label: "引擎",
         hint: "cpu = 内置 Lab 迁移 / 直方图匹配（始终可用）；onnx_harmonize = 可选学习型协调器，权重/依赖缺失时回落 cpu",
@@ -371,6 +375,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "选取主体并生成 蒙版 / 抠像 / alpha 三件套。Phase 1 在原生 Rust 内进程运行（无 python 桥）：魔棒漫水选择 + 画笔/橡皮笔触（记录在 edit_paths 中）、形态学（扩张/收缩、填洞）以及最后的羽化。输出蒙版、alpha 图、抠像图与增强版抠像报告。自动主体模型模式（SAM/RMBG/BiRefNet）属于 Phase 2。",
     params: {
       mode: { label: "模式", hint: "Phase 1 运行 manual_* / hybrid 模式；auto_* 模型模式属于 Phase 2" },
+      local_model_ref: {
+        label: "本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
+      },
       sam2_variant: {
         label: "SAM 2 型号",
         hint: "点提示使用的 SAM 2 模型规格——越大越慢但边缘越干净；缺少权重时回退到 tiny（用 scripts/fetch-sam2 下载各型号）",
@@ -413,6 +421,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         label: "预设",
         hint: "clean = 紧致 1px 收边，natural = 柔和 6px 羽化，soft = 不收边，custom = 展开全部",
       },
+      local_model_ref: {
+        label: "本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
+      },
       engine: {
         label: "引擎",
         hint: "cpu = 内置启发式精修（始终可用）；onnx_matting = 可选学习抠像，需要连接 trimap，权重/依赖缺失时回落 cpu",
@@ -449,6 +461,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       mode: {
         label: "模式",
         hint: "conservative = 温和，texture_rebuild = 强细节，print_ready = 均衡，custom = 展开滑块",
+      },
+      local_model_ref: {
+        label: "本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
       },
       engine: {
         label: "引擎",
@@ -520,6 +536,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       api_profile_ref: {
         label: "API 配置引用",
         hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
+      },
+      local_model_ref: {
+        label: "本地模型引用",
+        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
       },
       provider: {
         label: "提供方",

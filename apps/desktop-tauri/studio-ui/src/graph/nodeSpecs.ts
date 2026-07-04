@@ -654,6 +654,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         inline: true,
       },
       {
+        key: "local_model_ref",
+        label: "Local model",
+        control: "text",
+        defaultValue: "",
+        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
+      },
+      {
         key: "engine",
         label: "Engine",
         control: "select",
@@ -961,6 +969,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "Phase 1 runs the manual_* / hybrid modes; the auto_* model modes are Phase 2",
       },
       {
+        key: "local_model_ref",
+        label: "Local model",
+        control: "text",
+        defaultValue: "",
+        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
+      },
+      {
         key: "sam2_variant",
         label: "SAM 2 variant",
         control: "select",
@@ -1264,6 +1280,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "clean = tight 1px bite, natural = soft 6px feather, soft = no bite, custom = expose all",
       },
       {
+        key: "local_model_ref",
+        label: "Local model",
+        control: "text",
+        defaultValue: "",
+        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
+      },
+      {
         key: "engine",
         label: "Engine",
         control: "select",
@@ -1389,6 +1413,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         defaultValue: "conservative",
         inline: true,
         hint: "conservative = gentle, texture_rebuild = strong detail, print_ready = balanced, custom = expose sliders",
+      },
+      {
+        key: "local_model_ref",
+        label: "Local model",
+        control: "text",
+        defaultValue: "",
+        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
       },
       {
         key: "engine",
@@ -1613,6 +1645,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         control: "text",
         defaultValue: "",
         hint: "managed backend ref from the Models / APIs manager (set by the backend selector)",
+        advanced: true,
+      },
+      {
+        key: "local_model_ref",
+        label: "Local model",
+        control: "text",
+        defaultValue: "",
+        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
         advanced: true,
       },
       {
