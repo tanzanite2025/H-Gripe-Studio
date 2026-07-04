@@ -17,6 +17,12 @@ interface MaskStageProps {
   view: CanvasView;
   /** Presented underlay frame (a view window of the image), or null. */
   underlay: string | null;
+  /** The frame is on the native surface window below the webview (surface
+   * swap): no `<img>` mounts and the stage keeps the hole see-through. */
+  presented: boolean;
+  /** Anchor the native surface window is placed under — the underlay
+   * window's rect in the frame, tracked whether or not a frame presents. */
+  underlayRef: MutableRefObject<HTMLDivElement | null>;
   /** The window `underlay` was rendered for, placing it in the frame. */
   frameView: ViewportViewState;
   /** Backend report of the presented underlay frame (fallback contract). */
@@ -30,9 +36,15 @@ interface MaskStageProps {
   onPointerUp: () => void;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, frameView, backend, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, backend, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp }: MaskStageProps) {
+  const windowRect = {
+    left: `${frameView.panX * 100}%`,
+    top: `${frameView.panY * 100}%`,
+    width: `${100 / frameView.zoom}%`,
+    height: `${100 / frameView.zoom}%`,
+  };
   return (
-    <div className="mask-edit-stage">
+    <div className={`mask-edit-stage${presented && !overlayOnly ? " presented" : ""}`}>
       <div
         className="mask-edit-frame"
         style={{
@@ -43,18 +55,14 @@ export function MaskStage({ canvasRef, dims, view, underlay, frameView, backend,
           transformOrigin: "center",
         }}
       >
+        <div ref={underlayRef} className="mask-edit-underlay-anchor" style={windowRect} />
         {underlay && !overlayOnly && (
           <img
             className="mask-edit-underlay"
             src={underlay}
             alt=""
             draggable={false}
-            style={{
-              left: `${frameView.panX * 100}%`,
-              top: `${frameView.panY * 100}%`,
-              width: `${100 / frameView.zoom}%`,
-              height: `${100 / frameView.zoom}%`,
-            }}
+            style={windowRect}
           />
         )}
         <canvas

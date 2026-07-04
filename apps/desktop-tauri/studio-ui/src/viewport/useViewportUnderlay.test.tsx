@@ -113,6 +113,35 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });
 
+  it("exposes the open host and re-renders on a presentability flip", async () => {
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useViewportUnderlay("image_edit", "a.png", 640, IDENTITY_VIEW, null, null, enabled),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() => expect(result.current.host).not.toBeNull());
+    const host = result.current.host as NonNullable<typeof result.current.host>;
+    const commands: unknown[] = [];
+    const originalCommand = host.command.bind(host);
+    vi.spyOn(host, "command").mockImplementation(async (cmd) => {
+      commands.push(cmd);
+      return originalCommand(cmd);
+    });
+
+    // Disabling presentation hides the surface, then re-renders through the
+    // same open host so the frame falls back to the PNG transport.
+    await act(async () => {
+      rerender({ enabled: false });
+    });
+    await waitFor(() =>
+      expect(commands).toContainEqual({ kind: "set_presented", presented: false }),
+    );
+    expect(openMockViewportCount()).toBe(1);
+    expect(result.current.underlay).toMatch(/^data:image\//);
+    unmount();
+    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+  });
+
   it("stays null and settles outside the resource registry", async () => {
     const files = await import("../bridge/files");
     vi.mocked(files.registerResource).mockResolvedValueOnce(null);

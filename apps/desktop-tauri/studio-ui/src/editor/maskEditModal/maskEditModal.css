@@ -160,6 +160,15 @@
   pointer-events: none;
   user-select: none;
 }
+/* Placement anchor for the native surface window (surface swap): the underlay
+   window's rect, painted by nothing — the surface below shows through. */
+.mask-edit-underlay-anchor {
+  position: absolute;
+  pointer-events: none;
+}
+/* Frame on the native surface window below the webview: drop the stage
+   checkerboard so the hole stays see-through. */
+.mask-edit-stage.presented { background: transparent; }
 .mask-edit-canvas {
   position: absolute;
   inset: 0;
