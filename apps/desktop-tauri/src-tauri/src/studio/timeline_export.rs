@@ -251,4 +251,83 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    fn base64_decode(s: &str) -> Vec<u8> {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::new();
+        let mut buf = 0u32;
+        let mut bits = 0u32;
+        for &b in s.as_bytes() {
+            if b == b'=' {
+                break;
+            }
+            let v = TABLE.iter().position(|&t| t == b).expect("base64 byte") as u32;
+            buf = (buf << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((buf >> bits) as u8);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn export_grade_matches_preview_within_tolerance() {
+        // Pipeline-level preview/export alignment (WGPU migration Phase 5):
+        // the viewport preview grades the display-space sRGB proxy while the
+        // export grades the full-precision working surface, so the two paths
+        // may differ only by quantization — never by a divergent kernel or
+        // color pipeline.
+        let dir = std::env::temp_dir().join(format!("hgripe_export_parity_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("still.png");
+        let mut img = image::RgbaImage::new(8, 8);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgba([(x * 32) as u8, (y * 32) as u8, 128, 255]);
+        }
+        image::DynamicImage::ImageRgba8(img).save(&src).unwrap();
+        let src_str = src.to_string_lossy().to_string();
+
+        let doc_str = r#"{"layers":[{"blend":"normal","opacity":1.0,"visible":true,"mask":null,"qualifier":null,"ops":[{"type":"exposure","ev":0.5},{"type":"saturation","amount":0.3},{"type":"contrast","amount":1.2,"pivot":0.5}]}]}"#;
+
+        // Export path: grade the working surface and write the frame file.
+        let result = resolve_graded_frames(
+            vec![src_str.clone()],
+            &[Some(doc_str.to_string())],
+            &dir.join("graded"),
+        )
+        .expect("export grading succeeds");
+        let exported = image::open(&result.frames[0]).unwrap().to_rgba8();
+
+        // Preview path: grade the cached sRGB proxy like the viewport does.
+        let doc = parse_grade_doc(Some(&Value::String(doc_str.to_string()))).unwrap();
+        let proxy = super::super::grade::load_image_srgb_proxy(&src, 64).unwrap();
+        let preview =
+            super::super::grade::grade_srgb_proxy(&proxy, &doc, std::time::Instant::now())
+                .expect("preview grading succeeds");
+        let png = base64_decode(
+            preview
+                .data_url
+                .strip_prefix("data:image/png;base64,")
+                .expect("png data url"),
+        );
+        let previewed = image::load_from_memory(&png).unwrap().to_rgba8();
+
+        assert_eq!(exported.dimensions(), previewed.dimensions());
+        let max_diff = exported
+            .pixels()
+            .zip(previewed.pixels())
+            .flat_map(|(a, b)| a.0.iter().zip(b.0.iter()))
+            .map(|(&a, &b)| (i16::from(a) - i16::from(b)).unsigned_abs())
+            .max()
+            .unwrap();
+        assert!(
+            max_diff <= 2,
+            "export and preview grades diverge by {max_diff}/255"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
