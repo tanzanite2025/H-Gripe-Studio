@@ -163,10 +163,12 @@ export async function renderViewportFrame(viewportId: string): Promise<ViewportF
   if (invoke) return (await invoke("viewport_render_frame", { viewportId })) as ViewportFrame;
   const vp = mockGet(viewportId);
   if (!vp.target) throw new Error(`viewport ${viewportId} has no target`);
+  // Like the desktop transport, a zoomed view renders the `1/zoom` window.
+  const zoom = Math.max(vp.view.zoom, 1);
   return {
     data_url: MOCK_FRAME_PNG,
-    width: Math.max(vp.width, 1),
-    height: Math.max(vp.height, 1),
+    width: Math.max(Math.round(vp.width / zoom), 1),
+    height: Math.max(Math.round(vp.height / zoom), 1),
     backend: MOCK_BACKEND,
   };
 }
