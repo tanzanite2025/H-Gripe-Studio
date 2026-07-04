@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampView, IDENTITY_VIEW, isIdentityView, panView, zoomView } from "./view";
+import { clampView, IDENTITY_VIEW, isIdentityView, panView, zoomView, zoomViewAt } from "./view";
 
 describe("viewport view math", () => {
   it("clamps zoom to [1, 8] and keeps the window inside the frame", () => {
@@ -18,6 +18,19 @@ describe("viewport view math", () => {
     expect(zoomed).toEqual({ zoom: 2, panX: 0.25, panY: 0.25 });
     // Zooming back out returns to the identity view.
     expect(zoomView(zoomed, 0.5)).toEqual(IDENTITY_VIEW);
+  });
+
+  it("zooms about an anchor point, keeping it fixed", () => {
+    // Anchor at the frame's top-left corner: it stays at the window's corner.
+    expect(zoomViewAt(IDENTITY_VIEW, 2, 0, 0)).toEqual({ zoom: 2, panX: 0, panY: 0 });
+    // Anchor at (0.25, 0.75) of the window: frame point (0.25, 0.75) is kept
+    // under the cursor after the 2x zoom.
+    const zoomed = zoomViewAt(IDENTITY_VIEW, 2, 0.25, 0.75);
+    expect(zoomed).toEqual({ zoom: 2, panX: 0.125, panY: 0.375 });
+    expect(zoomed.panX + 0.25 / zoomed.zoom).toBeCloseTo(0.25);
+    expect(zoomed.panY + 0.75 / zoomed.zoom).toBeCloseTo(0.75);
+    // Zooming out to 1x clamps back to the identity view.
+    expect(zoomViewAt(zoomed, 0.5, 0.9, 0.9)).toEqual(IDENTITY_VIEW);
   });
 
   it("pans by drag pixels scaled to the visible window", () => {

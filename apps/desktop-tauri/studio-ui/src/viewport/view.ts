@@ -28,10 +28,25 @@ export function clampView(view: ViewportViewState): ViewportViewState {
 
 /** Zoom by `factor` keeping the window's center fixed. */
 export function zoomView(view: ViewportViewState, factor: number): ViewportViewState {
+  return zoomViewAt(view, factor, 0.5, 0.5);
+}
+
+/**
+ * Zoom by `factor` keeping the frame point under (`fx`, `fy`) fixed, where
+ * `fx`/`fy` are the anchor's position within the visible window in [0, 1]
+ * (e.g. the cursor's stage-relative position, so wheel zoom is
+ * cursor-anchored).
+ */
+export function zoomViewAt(
+  view: ViewportViewState,
+  factor: number,
+  fx: number,
+  fy: number,
+): ViewportViewState {
   const zoom = Math.min(Math.max(view.zoom * factor, 1), MAX_VIEW_ZOOM);
-  const centerX = view.panX + 0.5 / view.zoom;
-  const centerY = view.panY + 0.5 / view.zoom;
-  return clampView({ zoom, panX: centerX - 0.5 / zoom, panY: centerY - 0.5 / zoom });
+  const anchorX = view.panX + fx / view.zoom;
+  const anchorY = view.panY + fy / view.zoom;
+  return clampView({ zoom, panX: anchorX - fx / zoom, panY: anchorY - fy / zoom });
 }
 
 /** Pan by a drag of (`dx`, `dy`) pixels over a stage of `w`×`h` pixels. */
