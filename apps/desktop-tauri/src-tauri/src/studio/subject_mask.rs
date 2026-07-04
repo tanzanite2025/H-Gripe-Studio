@@ -45,6 +45,17 @@ const SELECTED_THRESHOLD: u8 = 128;
 struct MatteReport {
     mode: String,
     provider: String,
+    /// Engine telemetry (GPU_DEVICE_STRATEGY_PLAN shared DeviceReport
+    /// vocabulary), present only when an `auto_*` mode ran a segmenter:
+    /// `onnxruntime` for the model backends, `cpu` for the builtin fallback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    engine: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_requested: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    engine_fallback_reason: Option<String>,
     source_mode: String,
     exif_transposed: bool,
     max_decode_pixels: u64,
@@ -103,6 +114,8 @@ pub(super) fn execute_studio_subject_mask(
     // `rust-native` for the manual / hybrid lanes; an `auto_*` mode reports the
     // segmenter that produced its base matte (today the builtin fallback).
     let mut provider = "rust-native".to_string();
+    let mut engine: Option<&'static str> = None;
+    let mut engine_fallback_reason: Option<String> = None;
 
     let placeholder = match optional(studio_value_to_string(inputs.get("placeholder_mask"))) {
         Some(path) => Some(load_mask_sized(&path, width, height, max_decode_pixels)?),
@@ -128,6 +141,19 @@ pub(super) fn execute_studio_subject_mask(
                     points: &points,
                 })?;
                 provider = segmenter.provider().to_string();
+                if provider == "builtin-cpu" {
+                    engine = Some("cpu");
+                    engine_fallback_reason = Some(
+                        "no ONNX segmentation weights resolved; deterministic builtin CPU segmenter"
+                            .to_string(),
+                    );
+                } else {
+                    engine = Some("onnxruntime");
+                    engine_fallback_reason = Some(
+                        "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)"
+                            .to_string(),
+                    );
+                }
                 detected_subjects = result.detected_subjects;
                 operations.push(json!({
                     "type": "auto_segment",
@@ -306,6 +332,10 @@ pub(super) fn execute_studio_subject_mask(
     let report = MatteReport {
         mode,
         provider,
+        engine,
+        device: engine.map(|_| "cpu"),
+        device_requested: engine.map(|_| "auto"),
+        engine_fallback_reason,
         source_mode: loaded.meta.source_mode.clone(),
         exif_transposed: loaded.meta.exif_transposed,
         max_decode_pixels,
@@ -3204,6 +3234,22 @@ mod tests {
         assert_eq!(subjects.len(), 1);
         let coverage = report.get("mask_coverage").and_then(Value::as_f64).unwrap();
         assert!(coverage > 0.0 && coverage <= 1.0, "coverage={coverage}");
+        // An auto mode always carries engine telemetry (shared DeviceReport
+        // vocabulary) with a visible reason when it did not accelerate.
+        let engine = report.get("engine").and_then(Value::as_str).unwrap();
+        assert!(
+            matches!(engine, "cpu" | "onnxruntime"),
+            "unexpected engine {engine}"
+        );
+        assert_eq!(report.get("device").and_then(Value::as_str), Some("cpu"));
+        assert_eq!(
+            report.get("device_requested").and_then(Value::as_str),
+            Some("auto")
+        );
+        assert!(report
+            .get("engine_fallback_reason")
+            .and_then(Value::as_str)
+            .is_some());
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -151,4 +151,34 @@ describe("deviceReportFromNodeOutputs", () => {
     expect(deviceReportFromNodeOutputs({ image: "/out/x.png" })).toBeNull();
     expect(deviceReportFromNodeOutputs({ repaint_report: { status: "unchanged" } })).toBeNull();
   });
+
+  it("reads subjectMask matte_report telemetry with its provider fallback visible", () => {
+    const report = deviceReportFromNodeOutputs({
+      mask: "/out/mask.png",
+      matte_report: {
+        mode: "auto_subject",
+        provider: "birefnet",
+        engine: "onnxruntime",
+        device: "cpu",
+        device_requested: "auto",
+        engine_fallback_reason:
+          "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)",
+      },
+    });
+    expect(report?.requested).toBe("auto");
+    expect(report?.used).toBe("cpu");
+    expect(report?.backend).toBe("onnxruntime");
+    expect(report?.accelerated).toBe(false);
+    expect(report?.fallbackReason).toBe(
+      "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)",
+    );
+  });
+
+  it("skips a manual-lane matte_report that carries no engine telemetry", () => {
+    expect(
+      deviceReportFromNodeOutputs({
+        matte_report: { mode: "hybrid", provider: "rust-native" },
+      }),
+    ).toBeNull();
+  });
 });
