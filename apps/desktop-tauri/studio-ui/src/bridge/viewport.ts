@@ -66,6 +66,13 @@ const mockLayeredAssets = new Map<string, Map<string, string>>();
 /** Mock registry of timelines: timeline id -> (clip id -> clip). */
 const mockTimelines = new Map<string, Map<string, TimelineClipRef>>();
 
+/** Mock registry of node outputs: "nodeId" or "nodeId:port" -> artifact path. */
+const mockNodeOutputs = new Map<string, string>();
+
+function nodeOutputKey(nodeId: string, outputPort?: string): string {
+  return outputPort ? `${nodeId}:${outputPort}` : nodeId;
+}
+
 function mockGet(viewportId: string): MockViewport {
   const vp = mockViewports.get(viewportId);
   if (!vp) throw new Error(`unknown viewport id: ${viewportId}`);
@@ -127,6 +134,12 @@ export async function setViewportTarget(
       throw new Error(`unknown clip id ${target.clipId} on timeline ${target.timelineId}`);
     }
   }
+  // node_output targets must reference a registered node output.
+  if (target.kind === "node_output") {
+    if (!mockNodeOutputs.has(nodeOutputKey(target.nodeId, target.outputPort))) {
+      throw new Error(`unknown node output: ${nodeOutputKey(target.nodeId, target.outputPort)}`);
+    }
+  }
   mockGet(viewportId).target = target;
 }
 
@@ -182,6 +195,26 @@ export async function registerTimeline(
   }
   if (!timelineId) throw new Error("timeline id must not be empty");
   mockTimelines.set(timelineId, new Map(clips.map((c) => [c.clipId, c])));
+}
+
+/**
+ * Register (or refresh) one node output's image artifact with the viewport
+ * host so `node_output` targets resolve host-side, by reference. A
+ * re-registration after a re-run replaces the artifact path.
+ */
+export async function registerNodeOutput(
+  nodeId: string,
+  path: string,
+  outputPort?: string,
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_register_node_output", { nodeId, outputPort: outputPort ?? null, path });
+    return;
+  }
+  if (!nodeId) throw new Error("node id must not be empty");
+  if (outputPort === "") throw new Error(`node ${nodeId} has an empty output port`);
+  mockNodeOutputs.set(nodeOutputKey(nodeId, outputPort), path);
 }
 
 export async function resizeViewport(

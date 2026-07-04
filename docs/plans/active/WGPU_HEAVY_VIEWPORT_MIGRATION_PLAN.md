@@ -42,7 +42,7 @@ Implemented (PRs #329–#371):
   resolve Rust-side like image resources — same proxy cache, grade, and view
   path. The layer review preview presents the selected layer cutout as an
   `image_layer` target of the registered asset (mask/composite artifacts
-  still register by path). `node_output` still resolves on the frontend.
+  still register by path).
 - Host-side `video_clip` targets: timelines register their clips by media
   path plus placement (`viewport_register_timeline`), so `video_clip`
   viewport targets resolve Rust-side — the host maps the timeline playhead
@@ -51,6 +51,11 @@ Implemented (PRs #329–#371):
   monitor registers the first video track's clips and presents playhead
   frames as `video_clip` targets, falling back to webview-resolved media
   targets while registration is pending or unavailable.
+- Host-side `node_output` targets: node runs register their image artifact
+  by path (`viewport_register_node_output`, keyed by node id + optional
+  output port), so `node_output` viewport targets resolve Rust-side through
+  the same image render path. All viewport target kinds now resolve
+  host-side.
 
 Remaining work, roughly in priority order:
 
@@ -63,9 +68,10 @@ Remaining work, roughly in priority order:
    at fixed detail, so deep zoom is soft. Move overlay/brush presentation to
    the viewport and tie underlay detail to canvas zoom without changing the
    recorded pixel space.
-3. Remaining viewport targets: `node_output` targets still resolve on the
-   frontend — implement them host-side (as done for `image_layer` and
-   `video_clip`) so the selection-target model is uniform.
+3. Remaining target wiring: all target kinds resolve host-side now, but the
+   grade tab still previews node outputs by registering the connected image
+   path as a plain image resource — move it onto `node_output` targets so
+   the selection-target model is uniform in the product layer too.
 4. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
    the viewport presentation (listed under "future overlays").
 
