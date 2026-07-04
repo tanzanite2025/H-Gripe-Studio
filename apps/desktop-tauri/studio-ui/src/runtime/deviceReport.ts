@@ -13,6 +13,7 @@
 // | refineMaskEdge `edge_report`             | engine_requested, device_requested | engine, device              | engine_fallback_reason   |
 // | detailWatchdog `watchdog_report`         | engine_requested, device_requested | engine, device              | engine_fallback_reason   |
 // | detailRepaint `repaint_report`           | engine_requested                   | engine, device, precision   | engine_fallback_reason   |
+// | subjectMask `matte_report` (auto modes)  | device_requested                   | engine, device              | engine_fallback_reason   |
 // | viewport frames (`ViewportBackend`)      | requested (auto|gpu|cpu)           | actual (wgpu|gpu|cpu)       | fallback_reason          |
 
 /** What the caller asked for (`device`/`viewport` request vocabulary). */
@@ -150,6 +151,7 @@ const REPORT_OUTPUT_KEYS = [
   "edge_report",
   "watchdog_report",
   "repaint_report",
+  "matte_report",
 ];
 
 /**

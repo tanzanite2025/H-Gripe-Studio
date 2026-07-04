@@ -411,7 +411,12 @@ This should be a settings surface, not a required setup wizard.
    `backend_fallback_reason` instead of silently reporting `cpu`. Remaining
    WGPU-surface reasons (texture too large, shader compile) land with the
    viewport migration.
-9. Harden ONNX provider reporting after WGPU reports are stable.
+9. ✅ (subjectMask) Harden ONNX provider reporting: an `auto_*` mode's
+   `matte_report` now carries engine telemetry (`engine: onnxruntime|cpu`,
+   `device`, `device_requested`, `engine_fallback_reason` — CPU execution
+   provider today, or the builtin fallback when no weights resolve), and the
+   run log's `deviceReportFromNodeOutputs` reads `matte_report`. ORT
+   CUDA/DirectML execution providers join when the runtime ships them.
 10. Keep heavy model runtimes outside the core app; accept plugin reports only.
 11. Keep FFmpeg software native as baseline.
 12. Add hardware FFmpeg only behind explicit probe/report/fallback.
