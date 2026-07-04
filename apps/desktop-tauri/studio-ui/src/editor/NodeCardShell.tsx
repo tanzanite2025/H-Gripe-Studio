@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode, Ref } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeSpec, PortSpec } from "../graph/nodeSpecs";
 import type { NodeStatus } from "../runtime/dag";
@@ -29,6 +29,10 @@ export interface NodeCardShellProps {
   onRunCard?: () => void;
   /** Tooltip for the card-level run button. */
   runCardTitle?: string;
+  /** Ref to the card's root element (e.g. to measure its expanded height). */
+  rootRef?: Ref<HTMLDivElement>;
+  /** Inline style on the card root (e.g. a preserved min-height under LOD). */
+  style?: CSSProperties;
   children?: ReactNode;
 }
 
@@ -45,10 +49,16 @@ export function NodeCardShell({
   runRowTitle,
   onRunCard,
   runCardTitle,
+  rootRef,
+  style,
   children,
 }: NodeCardShellProps) {
   return (
-    <div className={`node ${selected ? "selected" : ""} status-${status} ${lod ? "lod" : ""}`}>
+    <div
+      ref={rootRef}
+      style={style}
+      className={`node ${selected ? "selected" : ""} status-${status} ${lod ? "lod" : ""}`}
+    >
       <NodeTypeBadge family={spec.family} />
       <div className="node-header">
         <span className="node-title">{spec.title}</span>

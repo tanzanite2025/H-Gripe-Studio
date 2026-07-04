@@ -383,6 +383,15 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   // Collapse to a title-only card when zoomed far out. A boolean selector means
   // nodes only re-render when crossing the threshold, not on every zoom tick.
   const lod = useStore((s) => isLodActive(s.transform[2]));
+  // LOD hides the card's body for cheap rendering, but the card must keep its
+  // expanded footprint — a shrunken card reads as "truncated" when zoomed out
+  // and shifts the edge/handle geometry. Measure the expanded height (local,
+  // pre-zoom coordinates) and pin it as min-height while LOD is active.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const expandedHeight = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!lod && cardRef.current) expandedHeight.current = cardRef.current.offsetHeight;
+  });
   // Which input ports of this node currently have an incoming edge — used to
   // surface "image/template connected" hints on the PSD sink cards.
   const connectedPorts = useStore((s) =>
@@ -454,6 +463,8 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       runRowTitle={t("node.runRowTitle")}
       onRunCard={lod ? undefined : onRunCard}
       runCardTitle={t("node.runCardTitle")}
+      rootRef={cardRef}
+      style={lod && expandedHeight.current ? { minHeight: expandedHeight.current } : undefined}
     >
       {!lod && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>
