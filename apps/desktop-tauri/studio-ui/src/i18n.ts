@@ -25,6 +25,11 @@ export const messages = {
     zh: "关闭此画布并丢弃未保存的更改？",
   },
   "canvasTabs.restored": { en: "restored open canvases", zh: "已恢复打开的画布" },
+  "canvasTabs.runProject": { en: "Run all canvases", zh: "运行全部画布" },
+  "canvasTabs.runProjectTitle": {
+    en: "project-level batch: run every open canvas in order (results land on the active canvas only)",
+    zh: "项目级批量：按顺序运行所有打开的画布（结果仅显示在当前画布上）",
+  },
   "status.autosaveTitle": {
     en: "this workflow is autosaved to the workspace and restored on next open",
     zh: "该工作流会自动保存到工作区，下次打开时恢复",

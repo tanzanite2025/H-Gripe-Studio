@@ -245,6 +245,76 @@ describe("useStudioRunController", () => {
     expect(result.current.runHistory).toHaveLength(0);
   });
 
+  it("runs every canvas of a project run and records a project record", async () => {
+    const { options } = setup([makeNode("p1", "prompt")]);
+    const { result } = renderHook(() => useStudioRunController(options));
+
+    const graph = (id: string) => ({
+      version: 1 as const,
+      nodes: [{ id, kind: "prompt", position: { x: 0, y: 0 }, params: {} }],
+      edges: [],
+    });
+    await act(async () => {
+      await result.current.runProject([
+        { id: "c1", title: "a.json", active: false, graph: graph("n1") },
+        { id: "c2", title: "untitled", active: true, graph: graph("n2") },
+        { id: "c3", title: "empty", active: false, graph: { version: 1, nodes: [], edges: [] } },
+      ]);
+    });
+
+    // The empty canvas is skipped; the two runnable ones execute in order.
+    expect(runGraphMock).toHaveBeenCalledTimes(2);
+    expect(result.current.runHistory[0]).toMatchObject({ kind: "project", outcome: "succeeded" });
+    const messages = result.current.runLog.map((e) => e.message);
+    expect(messages.some((m) => m.includes("project run started: 2 canvas(es)"))).toBe(true);
+    expect(messages.some((m) => m.includes("canvas 1/2: a.json"))).toBe(true);
+    expect(messages.some((m) => m.includes("canvas 2/2: untitled"))).toBe(true);
+    expect(messages.some((m) => m.includes("project run finished: 2 canvas(es)"))).toBe(true);
+  });
+
+  it("keeps running remaining canvases when one fails and marks the project run failed", async () => {
+    runGraphMock
+      .mockRejectedValueOnce(new Error("kaboom"))
+      .mockResolvedValueOnce({ outputs: new Map() });
+    const { options, patchNode } = setup([makeNode("p1", "prompt")]);
+    const { result } = renderHook(() => useStudioRunController(options));
+
+    const graph = (id: string) => ({
+      version: 1 as const,
+      nodes: [{ id, kind: "prompt", position: { x: 0, y: 0 }, params: {} }],
+      edges: [],
+    });
+    await act(async () => {
+      await result.current.runProject([
+        { id: "c1", title: "broken", active: false, graph: graph("n1") },
+        { id: "c2", title: "fine", active: false, graph: graph("n2") },
+      ]);
+    });
+
+    expect(runGraphMock).toHaveBeenCalledTimes(2);
+    expect(result.current.runHistory[0]).toMatchObject({ kind: "project", outcome: "failed" });
+    const messages = result.current.runLog.map((e) => e.message);
+    expect(messages.some((m) => m.includes("canvas failed: broken"))).toBe(true);
+    expect(messages.some((m) => m.includes("1/2 canvas(es) failed"))).toBe(true);
+    // Parked canvases never patch the visible cards.
+    expect(patchNode).not.toHaveBeenCalled();
+  });
+
+  it("project run is a no-op when every canvas is empty", async () => {
+    const { options, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { result } = renderHook(() => useStudioRunController(options));
+
+    await act(async () => {
+      await result.current.runProject([
+        { id: "c1", title: "empty", active: true, graph: { version: 1, nodes: [], edges: [] } },
+      ]);
+    });
+
+    expect(setMessage).toHaveBeenCalledWith("project run: no canvases with nodes");
+    expect(runGraphMock).not.toHaveBeenCalled();
+    expect(result.current.runHistory).toHaveLength(0);
+  });
+
   it("clears the log and (with confirmation) the history", async () => {
     const { options } = setup([makeNode("p1", "prompt")]);
     const { result } = renderHook(() => useStudioRunController(options));

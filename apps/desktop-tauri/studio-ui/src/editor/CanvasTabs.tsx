@@ -16,6 +16,10 @@ interface CanvasTabsProps {
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onNewCanvas: () => void;
+  /** Project-level batch: run every open canvas (multi-canvas plan Phase 5). */
+  onRunProject: () => void;
+  /** Disables the project run while any run is in flight. */
+  running: boolean;
 }
 
 export function CanvasTabs({
@@ -26,6 +30,8 @@ export function CanvasTabs({
   onActivate,
   onClose,
   onNewCanvas,
+  onRunProject,
+  running,
 }: CanvasTabsProps) {
   const t = useT();
   const untitled = t("status.untitled");
@@ -72,6 +78,17 @@ export function CanvasTabs({
       >
         +
       </button>
+      {tabs.length > 1 && (
+        <button
+          className="canvas-tabs-run-project"
+          aria-label={t("canvasTabs.runProject")}
+          title={t("canvasTabs.runProjectTitle")}
+          disabled={running}
+          onClick={onRunProject}
+        >
+          {t("canvasTabs.runProject")}
+        </button>
+      )}
     </div>
   );
 }
