@@ -54,6 +54,7 @@ interface MockViewport {
   width: number;
   height: number;
   gradeDoc: unknown | null;
+  view: { zoom: number; panX: number; panY: number };
 }
 
 const mockViewports = new Map<string, MockViewport>();
@@ -71,7 +72,14 @@ export async function createViewport(kind: ViewportKind): Promise<ViewportDescri
   const invoke = tauriInvoke();
   if (invoke) return (await invoke("viewport_create", { kind })) as ViewportDescriptor;
   const viewport_id = `mock-vp-${mockNextId++}`;
-  mockViewports.set(viewport_id, { kind, target: null, width: 0, height: 0, gradeDoc: null });
+  mockViewports.set(viewport_id, {
+    kind,
+    target: null,
+    width: 0,
+    height: 0,
+    gradeDoc: null,
+    view: { zoom: 1, panX: 0, panY: 0 },
+  });
   console.info(`[viewport] created ${viewport_id} kind=${kind} (mock)`);
   return { viewport_id, kind, backend: MOCK_BACKEND };
 }
@@ -125,6 +133,29 @@ export async function setViewportGrade(viewportId: string, doc: unknown | null):
     throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept a grade doc`);
   }
   vp.gradeDoc = doc;
+}
+
+/**
+ * Set the viewport's presentation view. `zoom >= 1` selects a window `1/zoom`
+ * the size of the source; `panX`/`panY` place its top-left corner in
+ * normalized source coordinates (clamped inside the frame). Zoom 1 with zero
+ * pan is the identity view (the whole source).
+ */
+export async function setViewportView(
+  viewportId: string,
+  zoom: number,
+  panX: number,
+  panY: number,
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_set_view", { viewportId, zoom, panX, panY });
+    return;
+  }
+  if (!(Number.isFinite(zoom) && Number.isFinite(panX) && Number.isFinite(panY)) || zoom <= 0) {
+    throw new Error("view parameters must be finite with a positive zoom");
+  }
+  mockGet(viewportId).view = { zoom, panX, panY };
 }
 
 export async function renderViewportFrame(viewportId: string): Promise<ViewportFrame> {

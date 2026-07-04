@@ -10,6 +10,7 @@ import {
   resizeViewport,
   setViewportGrade,
   setViewportTarget,
+  setViewportView,
   type ViewportBackend,
   type ViewportFrame,
   type ViewportKind,
@@ -61,9 +62,7 @@ export class WgpuViewportHost {
         await setViewportGrade(this.id(), cmd.doc);
         return;
       case "set_view":
-        // Zoom/pan become viewport state in Phase 2 (image edit); the command
-        // shape is fixed now so callers do not grow a second protocol.
-        this.id();
+        await setViewportView(this.id(), cmd.zoom, cmd.panX, cmd.panY);
         return;
     }
   }

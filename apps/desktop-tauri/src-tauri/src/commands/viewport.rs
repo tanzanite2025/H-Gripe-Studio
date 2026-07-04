@@ -125,6 +125,42 @@ struct SourceProxy {
     srgb: Arc<RgbaImage>,
 }
 
+/// Presentation view state (WGPU migration Phase 2): `zoom >= 1` selects a
+/// window `1/zoom` the size of the source; `pan_x`/`pan_y` place the window's
+/// top-left corner in normalized source coordinates and are clamped so the
+/// window stays inside the frame. The identity view shows the whole source.
+#[derive(Clone, Copy)]
+struct ViewportView {
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+}
+
+impl ViewportView {
+    const IDENTITY: ViewportView = ViewportView {
+        zoom: 1.0,
+        pan_x: 0.0,
+        pan_y: 0.0,
+    };
+
+    fn is_identity(self) -> bool {
+        self.zoom <= 1.0 && self.pan_x == 0.0 && self.pan_y == 0.0
+    }
+}
+
+/// Crop `srgb` to the view's window. Cheap relative to decode: the input is
+/// the cached display-space proxy, so a pan/zoom tick re-crops the proxy
+/// without touching the source file.
+fn crop_view(srgb: &RgbaImage, view: ViewportView) -> RgbaImage {
+    let (w, h) = srgb.dimensions();
+    let zoom = view.zoom.max(1.0);
+    let vw = ((w as f32 / zoom).round() as u32).clamp(1, w);
+    let vh = ((h as f32 / zoom).round() as u32).clamp(1, h);
+    let x = ((view.pan_x * w as f32).round() as i64).clamp(0, (w - vw) as i64) as u32;
+    let y = ((view.pan_y * h as f32).round() as i64).clamp(0, (h - vh) as i64) as u32;
+    image::imageops::crop_imm(srgb, x, y, vw, vh).to_image()
+}
+
 struct ViewportState {
     kind: String,
     target: Option<ViewportTarget>,
@@ -133,6 +169,7 @@ struct ViewportState {
     /// Grade document applied at render time (grade_preview viewports); the
     /// doc is parameters only — pixels are resolved through the target.
     grade_doc: Option<Value>,
+    view: ViewportView,
     proxy: Option<SourceProxy>,
 }
 
@@ -206,6 +243,7 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             width: 0,
             height: 0,
             grade_doc: None,
+            view: ViewportView::IDENTITY,
             proxy: None,
         },
     );
@@ -300,10 +338,36 @@ pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Res
     Ok(())
 }
 
+/// Set the viewport's presentation view (zoom/pan). Values must be finite and
+/// `zoom` positive; a zoom at or below 1 with zero pan is the identity view.
+#[tauri::command]
+pub(crate) fn viewport_set_view(
+    viewport_id: String,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+) -> Result<(), String> {
+    if !(zoom.is_finite() && pan_x.is_finite() && pan_y.is_finite()) {
+        return Err("view parameters must be finite".to_string());
+    }
+    if zoom <= 0.0 {
+        return Err(format!("zoom must be positive, got {zoom}"));
+    }
+    let id = parse_id(&viewport_id)?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    state.view = ViewportView { zoom, pan_x, pan_y };
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
     let id = parse_id(&viewport_id)?;
-    let (target, width, height, grade_doc) = {
+    let (target, width, height, grade_doc, view) = {
         let map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
@@ -315,6 +379,7 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             state.width,
             state.height,
             state.grade_doc.clone(),
+            state.view,
         )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
@@ -323,11 +388,12 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
             let size = width.max(height).clamp(64, 2048);
-            if let Some(doc) = grade_doc {
-                // Graded frame: run the grading kernel over the target's sRGB
-                // proxy at the viewport size. The proxy is cached on the
-                // viewport, so a slider drag re-runs only the kernel.
-                let doc = parse_grade_doc(Some(&doc))?;
+            if grade_doc.is_some() || !view.is_identity() {
+                // Graded and/or viewed frame: run the grading kernel (identity
+                // when no doc is set) over the view window of the target's
+                // sRGB proxy. The proxy is cached on the viewport, so a slider
+                // drag or a pan/zoom tick re-runs only crop + kernel.
+                let doc = parse_grade_doc(grade_doc.as_ref())?;
                 let key = ProxyKey {
                     path: entry.path.clone(),
                     time_bits: None,
@@ -336,7 +402,13 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
                 let proxy = cached_proxy(id, key, || {
                     load_image_srgb_proxy(std::path::Path::new(&entry.path), size)
                 })?;
-                let graded = grade_srgb_proxy(&proxy, &doc, Instant::now())?;
+                let source = if view.is_identity() {
+                    None
+                } else {
+                    Some(crop_view(&proxy, view))
+                };
+                let graded =
+                    grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
                 return Ok(ViewportFrame {
                     data_url: graded.data_url,
                     width: graded.width,
@@ -367,12 +439,14 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
             let size = width.max(height).clamp(64, 2048);
-            if let Some(doc) = grade_doc {
-                // Graded frame: decode through the native media engine and run
-                // the grading kernel over its sRGB proxy. The decoded frame is
-                // cached on the viewport keyed by path + timestamp + size, so
-                // grading a paused frame re-runs only the kernel.
-                let doc = parse_grade_doc(Some(&doc))?;
+            if grade_doc.is_some() || !view.is_identity() {
+                // Graded and/or viewed frame: decode through the native media
+                // engine and run the grading kernel (identity when no doc is
+                // set) over the view window of its sRGB proxy. The decoded
+                // frame is cached on the viewport keyed by path + timestamp +
+                // size, so grading or panning a paused frame re-runs only
+                // crop + kernel.
+                let doc = parse_grade_doc(grade_doc.as_ref())?;
                 let key = ProxyKey {
                     path: entry.path.clone(),
                     time_bits: Some(time_sec.to_bits()),
@@ -385,7 +459,13 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
                         size,
                     )
                 })?;
-                let graded = grade_srgb_proxy(&proxy, &doc, Instant::now())?;
+                let source = if view.is_identity() {
+                    None
+                } else {
+                    Some(crop_view(&proxy, view))
+                };
+                let graded =
+                    grade_srgb_proxy(source.as_ref().unwrap_or(&proxy), &doc, Instant::now())?;
                 return Ok(ViewportFrame {
                     data_url: graded.data_url,
                     width: graded.width,
@@ -543,6 +623,59 @@ mod tests {
                 "resize invalidates the proxy"
             );
         }
+
+        viewport_destroy(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn set_view_validates_and_crops_the_rendered_frame() {
+        let path = std::env::temp_dir().join("hgripe_viewport_set_view.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([200, 100, 50, 255]))
+            .save(&path)
+            .expect("write test image");
+        let canonical = path.to_string_lossy().to_string();
+        let res_id = resource::id_for(&canonical);
+        resource::put(
+            &res_id,
+            resource::ResourceEntry {
+                path: canonical,
+                width: Some(64),
+                height: Some(64),
+            },
+        );
+
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        assert!(viewport_set_view(desc.viewport_id.clone(), f32::NAN, 0.0, 0.0).is_err());
+        assert!(viewport_set_view(desc.viewport_id.clone(), 0.0, 0.0, 0.0).is_err());
+        assert!(viewport_set_view(desc.viewport_id.clone(), 2.0, 0.25, f32::INFINITY).is_err());
+
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::Image {
+                resource_id: res_id,
+            },
+        )
+        .expect("set target");
+
+        let full = viewport_render_frame(desc.viewport_id.clone()).expect("identity render");
+        viewport_set_view(desc.viewport_id.clone(), 2.0, 0.25, 0.25).expect("set view");
+        let zoomed = viewport_render_frame(desc.viewport_id.clone()).expect("zoomed render");
+        assert_eq!(zoomed.width, full.width / 2, "zoom 2 halves the window");
+        assert_eq!(zoomed.height, full.height / 2);
+
+        // Pans past the edge clamp so the window stays inside the frame.
+        viewport_set_view(desc.viewport_id.clone(), 2.0, 5.0, -5.0).expect("set clamped view");
+        let clamped = viewport_render_frame(desc.viewport_id.clone()).expect("clamped render");
+        assert_eq!(clamped.width, full.width / 2);
+        assert_eq!(clamped.height, full.height / 2);
+
+        // Back to the identity view: the full frame again.
+        viewport_set_view(desc.viewport_id.clone(), 1.0, 0.0, 0.0).expect("reset view");
+        let reset = viewport_render_frame(desc.viewport_id.clone()).expect("reset render");
+        assert_eq!(reset.width, full.width);
+        assert_eq!(reset.height, full.height);
 
         viewport_destroy(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
