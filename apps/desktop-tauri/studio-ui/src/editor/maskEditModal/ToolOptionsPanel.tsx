@@ -2,7 +2,8 @@
 // contextual drafts (morphology preview, pen path, fill / transform / anchor).
 
 import { useContext, type Dispatch, type SetStateAction } from "react";
-import { toolTargets, type MaskTool, type PaintTarget, type ShapeKind } from "../maskTools";
+import { ANCHOR_PATH_TOOLS, toolTargets, type MaskTool, type PaintTarget, type ShapeKind } from "../maskTools";
+import type { ColorSample, RulerLine } from "./stagePainter";
 import { localizeTool } from "../maskToolsI18n";
 import { LangContext, useT } from "../../i18n";
 import { isPreviewableOp } from "../maskMorphology";
@@ -27,6 +28,12 @@ interface ToolOptionsPanelProps {
   setPaintTarget: (t: PaintTarget) => void;
   /** Eyedropper sample (`#rrggbb`); null until a colour has been picked. */
   sampledColor: string | null;
+  /** Colour-sampler pins (up to four persistent readouts). */
+  colorSamples: readonly ColorSample[];
+  clearColorSamples: () => void;
+  /** Last committed ruler measurement; null until a drag lands. */
+  rulerLine: RulerLine | null;
+  clearRuler: () => void;
   shapeKind: ShapeKind;
   setShapeKind: (k: ShapeKind) => void;
   shapeSides: number;
@@ -69,6 +76,10 @@ export function ToolOptionsPanel({
   paintTarget,
   setPaintTarget,
   sampledColor,
+  colorSamples,
+  clearColorSamples,
+  rulerLine,
+  clearRuler,
   shapeKind,
   setShapeKind,
   shapeSides,
@@ -112,7 +123,7 @@ export function ToolOptionsPanel({
           </span>
         </label>
       ) : null}
-      {tool.kind === "paint" || tool.kind === "matte" ? (
+      {(tool.kind === "paint" || tool.kind === "matte") && tool.id !== "pencil" ? (
         <>
           <label className="field">
             <span>{t("mask.brushHardness")}</span>
@@ -228,7 +239,7 @@ export function ToolOptionsPanel({
               </button>
             ))}
           </span>
-          {tool.id === "pen" && penAnchors.length > 0 ? (
+          {ANCHOR_PATH_TOOLS.includes(tool.id) && penAnchors.length > 0 ? (
             <span className="slider-row">
               <button className="primary" disabled={penAnchors.length < 3} onClick={closePenPath}>
                 {t("mask.closePath", { count: penAnchors.length })}
@@ -238,7 +249,66 @@ export function ToolOptionsPanel({
           ) : null}
         </div>
       ) : null}
-      {tool.kind === "sample" ? (
+      {tool.kind === "path_edit" ? (
+        <div className="field">
+          <small className="muted">{t("mask.pathEditToolHint")}</small>
+        </div>
+      ) : null}
+      {tool.id === "color_sampler" ? (
+        <div className="field">
+          <span>{t("mask.samplerTitle")}</span>
+          {colorSamples.length === 0 ? (
+            <small className="muted">{t("mask.samplerEmpty")}</small>
+          ) : (
+            <>
+              {colorSamples.map((s, i) => (
+                <span key={i} className="slider-row">
+                  <span
+                    className="mask-color-swatch"
+                    style={{
+                      display: "inline-block",
+                      width: 16,
+                      height: 16,
+                      borderRadius: 4,
+                      border: "1px solid rgba(255,255,255,0.3)",
+                      background: s.hex,
+                    }}
+                  />
+                  <output>
+                    #{i + 1} {s.hex} ({Math.round(s.x)}, {Math.round(s.y)})
+                  </output>
+                </span>
+              ))}
+              <span className="slider-row">
+                <button onClick={clearColorSamples}>{t("mask.samplerClear")}</button>
+              </span>
+            </>
+          )}
+        </div>
+      ) : null}
+      {tool.id === "ruler" ? (
+        <div className="field">
+          <span>{t("mask.rulerTitle")}</span>
+          {rulerLine ? (
+            <>
+              <output>
+                {(() => {
+                  const dx = rulerLine.end[0] - rulerLine.start[0];
+                  const dy = rulerLine.end[1] - rulerLine.start[1];
+                  const angle = (Math.atan2(-dy, dx) * 180) / Math.PI;
+                  return `L ${Math.round(Math.hypot(dx, dy))}px · W ${Math.round(Math.abs(dx))} · H ${Math.round(Math.abs(dy))} · ∠ ${angle.toFixed(1)}°`;
+                })()}
+              </output>
+              <span className="slider-row">
+                <button onClick={clearRuler}>{t("mask.rulerClear")}</button>
+              </span>
+            </>
+          ) : (
+            <small className="muted">{t("mask.rulerEmpty")}</small>
+          )}
+        </div>
+      ) : null}
+      {tool.kind === "sample" && tool.id === "eyedropper" ? (
         <div className="field">
           <span>{t("mask.sampledColor")}</span>
           <span className="slider-row">
@@ -257,7 +327,7 @@ export function ToolOptionsPanel({
           </span>
         </div>
       ) : null}
-      {tool.id === "wand" ? (
+      {tool.kind === "click" ? (
         <label className="field">
           <span>{t("mask.wandTolerance")}</span>
           <span className="slider-row">

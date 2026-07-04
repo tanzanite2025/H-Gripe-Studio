@@ -189,6 +189,57 @@ export function paintSamPoints(ctx: CanvasRenderingContext2D, points: { x: numbe
   });
 }
 
+/** A pinned colour-sampler readout (session-local view read, never recorded). */
+export interface ColorSample {
+  x: number;
+  y: number;
+  hex: string;
+}
+
+/** A ruler measurement drag (image px; session-local view read). */
+export interface RulerLine {
+  start: [number, number];
+  end: [number, number];
+}
+
+/** Colour-sampler pins: numbered circle markers filled with the sampled colour. */
+export function paintColorSamples(ctx: CanvasRenderingContext2D, samples: readonly ColorSample[]) {
+  samples.forEach(({ x, y, hex }, i) => {
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.fillText(String(i + 1), x + 9, y - 7);
+  });
+}
+
+/** Ruler line: endpoint ticks plus a distance / angle readout at the midpoint. */
+export function paintRuler(ctx: CanvasRenderingContext2D, { start, end }: RulerLine) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  ctx.strokeStyle = "rgba(255,214,90,0.95)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(start[0], start[1]);
+  ctx.lineTo(end[0], end[1]);
+  ctx.stroke();
+  for (const [x, y] of [start, end]) {
+    ctx.beginPath();
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const dist = Math.hypot(dx, dy);
+  const angle = (Math.atan2(-dy, dx) * 180) / Math.PI;
+  ctx.fillStyle = "rgba(255,214,90,0.95)";
+  ctx.font = "600 13px system-ui, sans-serif";
+  ctx.fillText(`${Math.round(dist)}px ∠${angle.toFixed(1)}°`, (start[0] + end[0]) / 2 + 8, (start[1] + end[1]) / 2 - 8);
+}
+
 /** Paint a proxy mask (scaled up to document size) as a tinted overlay.
  *  `alpha(a)` maps a 0–255 mask value to the overlay's per-pixel alpha. */
 function paintProxy(
