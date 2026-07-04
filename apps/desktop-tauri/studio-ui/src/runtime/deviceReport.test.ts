@@ -92,6 +92,17 @@ describe("deviceReportFromViewportBackend", () => {
     });
   });
 
+  it("carries the adapter detail into the backend text when present", () => {
+    const report = deviceReportFromViewportBackend({
+      requested: "auto",
+      actual: "wgpu",
+      detail: "NVIDIA GeForce RTX 4090 (Vulkan)",
+    });
+    expect(report.used).toBe("wgpu");
+    expect(report.backend).toBe("NVIDIA GeForce RTX 4090 (Vulkan)");
+    expect(report.accelerated).toBe(true);
+  });
+
   it("keeps cpu fallback visible with its reason", () => {
     const report = deviceReportFromViewportBackend({
       requested: "gpu",

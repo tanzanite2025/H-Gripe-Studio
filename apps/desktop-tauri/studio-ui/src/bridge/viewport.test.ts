@@ -3,7 +3,7 @@
 // the bridge decodes it into a presentable `ViewportFrame`.
 
 import { describe, expect, it } from "vitest";
-import { decodeFramePayload, type ViewportBackend } from "./viewport";
+import { decodeFramePayload, decodePixelsPayload, type ViewportBackend } from "./viewport";
 
 const BACKEND: ViewportBackend = { requested: "auto", actual: "cpu" };
 
@@ -55,5 +55,31 @@ describe("decodeFramePayload", () => {
     const bad = new Uint8Array(4);
     new DataView(bad.buffer).setUint32(0, 100, true);
     expect(() => decodeFramePayload(bad)).toThrow(/truncated/);
+  });
+});
+
+describe("decodePixelsPayload", () => {
+  it("decodes meta and returns the raw RGBA rows", () => {
+    const rgba = new Uint8Array(2 * 2 * 4).fill(7);
+    const pixels = decodePixelsPayload(
+      payload({ width: 2, height: 2, backend: BACKEND }, rgba),
+    );
+    expect(pixels.width).toBe(2);
+    expect(pixels.height).toBe(2);
+    expect(pixels.backend.actual).toBe("cpu");
+    expect(pixels.pixels).toEqual(rgba);
+  });
+
+  it("rejects a pixel buffer that does not match the dimensions", () => {
+    expect(() =>
+      decodePixelsPayload(payload({ width: 2, height: 2, backend: BACKEND }, new Uint8Array(3))),
+    ).toThrow(/expected 16/);
+  });
+
+  it("rejects truncated payloads", () => {
+    expect(() => decodePixelsPayload(new Uint8Array([1, 2]))).toThrow(/truncated/);
+    const bad = new Uint8Array(4);
+    new DataView(bad.buffer).setUint32(0, 100, true);
+    expect(() => decodePixelsPayload(bad)).toThrow(/truncated/);
   });
 });

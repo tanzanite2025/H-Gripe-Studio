@@ -169,6 +169,8 @@ export function deviceReportFromPluginReport(report: PluginDeviceReportLike): De
 export interface ViewportBackendLike {
   requested: string;
   actual: string;
+  /** Adapter name + backend when known (natively presented frames). */
+  detail?: string;
   fallback_reason?: string;
 }
 
@@ -179,7 +181,7 @@ export function deviceReportFromViewportBackend(backend: ViewportBackendLike): D
   return {
     requested: asRequest(backend.requested),
     used,
-    backend: actual === "gpu" ? "wgpu" : asText(backend.actual),
+    backend: asText(backend.detail) ?? (actual === "gpu" ? "wgpu" : asText(backend.actual)),
     accelerated: used === "wgpu",
     fallbackReason: asText(backend.fallback_reason),
   };
