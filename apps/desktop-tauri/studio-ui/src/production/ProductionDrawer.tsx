@@ -48,6 +48,8 @@ export interface ProductionDrawerProps {
   /** The current target's stored grade doc (JSON string), if any. */
   gradeDoc: string | null;
   onGradeCommit: (gradeDoc: string) => void;
+  /** A clip's stored grade doc (JSON string), for the program monitor. */
+  clipGradeDoc?: (clipId: string) => string | null;
   /** Layered asset of the selected split node, when one is targeted. */
   layeredAsset: LayeredImageAsset | null;
   /** Selected layer inside `layeredAsset` (`image_layer` target), if any. */
@@ -98,6 +100,7 @@ export function ProductionDrawer({
   gradeVideoPath,
   gradeDoc,
   onGradeCommit,
+  clipGradeDoc,
   layeredAsset,
   selectedLayerId,
   onSelectLayer,
@@ -271,7 +274,7 @@ export function ProductionDrawer({
             {timeline.tracks.every((track) => track.clips.length === 0) ? (
               <p className="production-timeline-empty">{t("drawer.timelineEmpty")}</p>
             ) : (
-              <ProgramMonitor timeline={timeline} assets={assets} />
+              <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
             )}
             <div className="production-timeline-tracks">
               {timeline.tracks.map((track) => {

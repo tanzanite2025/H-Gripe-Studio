@@ -316,9 +316,11 @@ pub(crate) fn viewport_resize(viewport_id: String, width: u32, height: u32) -> R
     Ok(())
 }
 
-/// Set (or clear) the grade document a grade_preview viewport applies at
-/// render time. Parameter updates flow through viewport state — the target
-/// reference and the transport stay untouched.
+/// Set (or clear) the grade document a viewport applies at render time.
+/// Grade preview viewports grade their target; video preview viewports grade
+/// the displayed frame with the same document model (Phase 4). Parameter
+/// updates flow through viewport state — the target reference and the
+/// transport stay untouched.
 #[tauri::command]
 pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Result<(), String> {
     let id = parse_id(&viewport_id)?;
@@ -328,7 +330,7 @@ pub(crate) fn viewport_set_grade(viewport_id: String, doc: Option<Value>) -> Res
     let state = map
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
-    if state.kind != "grade_preview" {
+    if !matches!(state.kind.as_str(), "grade_preview" | "video_preview") {
         return Err(format!(
             "viewport {viewport_id} (kind={}) does not accept a grade doc",
             state.kind
@@ -535,18 +537,20 @@ mod tests {
     }
 
     #[test]
-    fn grade_doc_only_on_grade_preview_viewports() {
+    fn grade_doc_only_on_grading_viewports() {
         let image = viewport_create("image_edit".to_string()).expect("create");
         let err = viewport_set_grade(image.viewport_id.clone(), Some(serde_json::json!({})))
             .expect_err("image_edit must reject a grade doc");
         assert!(err.contains("does not accept a grade doc"));
         viewport_destroy(image.viewport_id).expect("destroy");
 
-        let grade = viewport_create("grade_preview".to_string()).expect("create");
-        viewport_set_grade(grade.viewport_id.clone(), Some(serde_json::json!({})))
-            .expect("grade_preview accepts a grade doc");
-        viewport_set_grade(grade.viewport_id.clone(), None).expect("clearing the doc");
-        viewport_destroy(grade.viewport_id).expect("destroy");
+        for kind in ["grade_preview", "video_preview"] {
+            let vp = viewport_create(kind.to_string()).expect("create");
+            viewport_set_grade(vp.viewport_id.clone(), Some(serde_json::json!({})))
+                .unwrap_or_else(|e| panic!("{kind} accepts a grade doc: {e}"));
+            viewport_set_grade(vp.viewport_id.clone(), None).expect("clearing the doc");
+            viewport_destroy(vp.viewport_id).expect("destroy");
+        }
     }
 
     #[test]

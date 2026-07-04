@@ -129,7 +129,7 @@ export async function setViewportGrade(viewportId: string, doc: unknown | null):
     return;
   }
   const vp = mockGet(viewportId);
-  if (vp.kind !== "grade_preview") {
+  if (vp.kind !== "grade_preview" && vp.kind !== "video_preview") {
     throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept a grade doc`);
   }
   vp.gradeDoc = doc;

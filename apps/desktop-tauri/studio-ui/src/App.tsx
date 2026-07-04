@@ -613,6 +613,23 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   const audioEditClip = audioEditClipId ? findClip(timeline, audioEditClipId) : null;
 
+  // The program monitor applies each clip's stored grade doc to its frames —
+  // the same per-target documents the Grade tab edits.
+  const clipGradeDoc = useCallback(
+    (clipId: string): string | null => {
+      const found = findClip(timeline, clipId);
+      if (!found) return null;
+      const key = targetKey({
+        kind: "video_clip",
+        timelineId: timeline.id,
+        trackId: found.track.id,
+        clipId: found.clip.id,
+      });
+      return gradeDocs[key] ?? null;
+    },
+    [timeline, gradeDocs],
+  );
+
   const handleGradeCommit = useCallback(
     (gradeDoc: string) => {
       if (!productionTarget) return;
@@ -1155,6 +1172,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           gradeVideoPath={gradeSource.videoPath}
           gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
           onGradeCommit={handleGradeCommit}
+          clipGradeDoc={clipGradeDoc}
           layeredAsset={layeredAsset}
           selectedLayerId={selectedLayerId}
           onSelectLayer={setSelectedLayerId}

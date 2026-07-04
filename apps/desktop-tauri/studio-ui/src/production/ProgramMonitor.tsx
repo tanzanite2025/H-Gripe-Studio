@@ -16,9 +16,12 @@ import { timelineDuration, type TimelineModel } from "./timeline";
 export function ProgramMonitor({
   timeline,
   assets,
+  clipGradeDoc,
 }: {
   timeline: TimelineModel;
   assets: MediaAsset[];
+  /** The clip's stored grade doc (JSON string), applied to its frames. */
+  clipGradeDoc?: (clipId: string) => string | null;
 }) {
   const t = useT();
   const [playheadSec, setPlayheadSec] = useState(0);
@@ -31,9 +34,10 @@ export function ProgramMonitor({
     [timeline, assets, clampedSec],
   );
 
+  const gradeDoc = target ? (clipGradeDoc?.(target.clipId) ?? null) : null;
   useEffect(() => {
-    showFrame(target);
-  }, [target, showFrame]);
+    showFrame(target ? { target, gradeDoc } : null);
+  }, [target, gradeDoc, showFrame]);
 
   return (
     <div className="production-monitor">

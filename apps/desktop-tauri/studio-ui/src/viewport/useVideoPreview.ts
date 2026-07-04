@@ -5,6 +5,10 @@
 // flight, a newer request replaces the queued one (latest-wins), and stale
 // results are dropped — the Rust playback engine coalesces the same way on
 // its decode thread, so a slider burst decodes only the newest position.
+//
+// Frames render through the same grade document model as the grade preview:
+// a clip's stored grade doc is applied viewport-side to the displayed frame,
+// so the monitor shows graded output without a second color pipeline.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
@@ -25,17 +29,36 @@ interface MonitorState {
   host: WgpuViewportHost;
   /** Registered resource id per media path, so scrubbing re-registers nothing. */
   resources: Map<string, string>;
+  /** Grade doc (JSON string) currently set on the viewport, to skip no-op sets. */
+  gradeDoc: string | null;
+}
+
+/** A frame request: the resolved playhead media plus the clip's grade doc. */
+export interface VideoPreviewRequest {
+  target: PreviewFrameTarget;
+  /** The clip's stored grade doc (JSON string), applied to the frame. */
+  gradeDoc: string | null;
+}
+
+/** Parse a stored grade doc (JSON string) for the viewport; bad JSON clears. */
+function parseGradeDoc(gradeDoc: string | null): unknown | null {
+  if (!gradeDoc) return null;
+  try {
+    return JSON.parse(gradeDoc) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Present timeline frames through a `video_preview` viewport. Call
- * `showFrame(target)` with the resolved playhead media (null for a gap);
+ * `showFrame(request)` with the resolved playhead media (null for a gap);
  * the latest call wins. Outside Tauri the state stays empty (`frame: null`,
  * `settled` via `pending: false`) — the monitor renders its placeholder.
  */
 export function useVideoPreview(size = 1280): {
   state: VideoPreviewState;
-  showFrame: (target: PreviewFrameTarget | null) => void;
+  showFrame: (request: VideoPreviewRequest | null) => void;
 } {
   const [state, setState] = useState<VideoPreviewState>({
     frame: null,
@@ -46,7 +69,7 @@ export function useVideoPreview(size = 1280): {
   const monitorRef = useRef<Promise<MonitorState | null> | null>(null);
   const seqRef = useRef(0);
   const inFlightRef = useRef(false);
-  const queuedRef = useRef<PreviewFrameTarget | null | undefined>(undefined);
+  const queuedRef = useRef<VideoPreviewRequest | null | undefined>(undefined);
 
   useEffect(() => {
     return () => {
@@ -57,17 +80,18 @@ export function useVideoPreview(size = 1280): {
   }, []);
 
   const renderTarget = useCallback(
-    async (target: PreviewFrameTarget | null): Promise<void> => {
+    async (request: VideoPreviewRequest | null): Promise<void> => {
       const seq = ++seqRef.current;
-      if (target === null) {
+      if (request === null) {
         setState((s) => ({ ...s, frame: null, pending: false, error: null }));
         return;
       }
+      const { target, gradeDoc } = request;
       if (!monitorRef.current) {
         monitorRef.current = (async () => {
           const host = await WgpuViewportHost.open("video_preview");
           await host.command({ kind: "resize", width: size, height: size });
-          return { host, resources: new Map<string, string>() };
+          return { host, resources: new Map<string, string>(), gradeDoc: null };
         })().catch(() => null);
       }
       const monitor = await monitorRef.current;
@@ -91,6 +115,10 @@ export function useVideoPreview(size = 1280): {
             ? { kind: "video_frame", resourceId, timeSec: target.sourceTimeSec }
             : { kind: "image", resourceId },
       });
+      if (gradeDoc !== monitor.gradeDoc) {
+        await monitor.host.command({ kind: "set_grade", doc: parseGradeDoc(gradeDoc) });
+        monitor.gradeDoc = gradeDoc;
+      }
       const frame: ViewportFrame = await monitor.host.renderFrame();
       if (seqRef.current !== seq) return; // stale: a newer seek finished after us
       setState({ frame: frame.data_url, backend: frame.backend, pending: false, error: null });
@@ -112,10 +140,10 @@ export function useVideoPreview(size = 1280): {
   }, [renderTarget]);
 
   const showFrame = useCallback(
-    (target: PreviewFrameTarget | null) => {
+    (request: VideoPreviewRequest | null) => {
       // Latest-wins queue of depth one: a burst of scrub positions keeps only
       // the newest; the single in-flight render finishes and picks it up.
-      queuedRef.current = target;
+      queuedRef.current = request;
       setState((s) => (s.pending ? s : { ...s, pending: true }));
       if (!inFlightRef.current) {
         inFlightRef.current = true;
