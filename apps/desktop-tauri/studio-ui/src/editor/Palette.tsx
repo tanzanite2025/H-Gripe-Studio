@@ -29,6 +29,7 @@ const EXECUTOR_BADGE: Partial<Record<NodeSpec["executor"], string>> = {
 // MIME-ish key carried on drag so the canvas knows which node kind to create.
 export const DND_NODE_KIND = "application/hgripe-node-kind";
 const PALETTE_WIDTH_KEY = "hgripe.studio.paletteWidth.v1";
+const PALETTE_OPEN_KEY = "hgripe.studio.paletteOpenSection.v1";
 const PALETTE_MIN_WIDTH = 184;
 const PALETTE_MAX_WIDTH = 360;
 const PALETTE_DEFAULT_WIDTH = 220;
@@ -62,12 +63,26 @@ function loadPaletteWidth() {
   return Number.isFinite(parsed) ? clampPaletteWidth(parsed) : PALETTE_DEFAULT_WIDTH;
 }
 
+function loadOpenSection(): string | null {
+  if (typeof window === "undefined") return "source";
+  const raw = window.localStorage.getItem(PALETTE_OPEN_KEY);
+  if (raw === null) return "source";
+  return raw === "" ? null : raw;
+}
+
 // Left rail listing the available node kinds. Each item can be dragged onto the
 // canvas (drop position is honoured) or clicked to add at a default location.
 export function Palette({ onAdd }: PaletteProps) {
   const [width, setWidth] = useState(loadPaletteWidth);
+  const [openSection, setOpenSection] = useState<string | null>(loadOpenSection);
   const lang = useContext(LangContext);
   const t = useT();
+
+  const toggleSection = (key: string) => {
+    const next = openSection === key ? null : key;
+    setOpenSection(next);
+    window.localStorage.setItem(PALETTE_OPEN_KEY, next ?? "");
+  };
 
   const setPaletteWidth = (next: number) => {
     const clamped = clampPaletteWidth(next);
@@ -118,45 +133,76 @@ export function Palette({ onAdd }: PaletteProps) {
         onPointerDown={startResize}
       />
       <h2>{t("palette.heading")}</h2>
-      {groups.map(({ category, specs }) => (
-        <div key={category} className="palette-group">
-          <h3>{t(CATEGORY_LABEL[category])}</h3>
-          {specs.map((spec) => (
-            <button
-              key={spec.kind}
-              className="palette-item"
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData(DND_NODE_KIND, spec.kind);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onClick={() => onAdd(spec.kind)}
-              title={`${spec.title} - ${spec.description}`}
-            >
-              <span className="palette-item-title">{spec.title}</span>
-              {EXECUTOR_BADGE[spec.executor] && (
-                <span className={`palette-badge palette-badge-${spec.executor}`}>
-                  {EXECUTOR_BADGE[spec.executor]}
-                </span>
+      <div className="palette-sections">
+        {groups.map(({ category, specs }) => {
+          const open = openSection === category;
+          return (
+            <div key={category} className={`palette-group${open ? " open" : ""}`}>
+              <button
+                type="button"
+                className="palette-group-header"
+                aria-expanded={open}
+                onClick={() => toggleSection(category)}
+              >
+                <span className={`palette-chevron${open ? " open" : ""}`} aria-hidden="true" />
+                {t(CATEGORY_LABEL[category])}
+                <span className="palette-group-count">{specs.length}</span>
+              </button>
+              {open && (
+                <div className="palette-group-body">
+                  {specs.map((spec) => (
+                    <button
+                      key={spec.kind}
+                      className="palette-item"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(DND_NODE_KIND, spec.kind);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onClick={() => onAdd(spec.kind)}
+                      title={`${spec.title} - ${spec.description}`}
+                    >
+                      <span className="palette-item-title">{spec.title}</span>
+                      {EXECUTOR_BADGE[spec.executor] && (
+                        <span className={`palette-badge palette-badge-${spec.executor}`}>
+                          {EXECUTOR_BADGE[spec.executor]}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               )}
-            </button>
-          ))}
+            </div>
+          );
+        })}
+        <div className={`palette-group${openSection === "containers" ? " open" : ""}`}>
+          <button
+            type="button"
+            className="palette-group-header"
+            aria-expanded={openSection === "containers"}
+            onClick={() => toggleSection("containers")}
+          >
+            <span className={`palette-chevron${openSection === "containers" ? " open" : ""}`} aria-hidden="true" />
+            {t("palette.containers")}
+            <span className="palette-group-count">1</span>
+          </button>
+          {openSection === "containers" && (
+            <div className="palette-group-body">
+              <button
+                className="palette-item"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(DND_NODE_KIND, "group");
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onClick={() => onAdd("group")}
+                title={`${t("palette.group")} - ${lang === "zh" ? GROUP_ZH.description : GROUP_ITEM.description}`}
+              >
+                {t("palette.group")}
+              </button>
+            </div>
+          )}
         </div>
-      ))}
-      <div className="palette-group">
-        <h3>{t("palette.containers")}</h3>
-        <button
-          className="palette-item"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(DND_NODE_KIND, "group");
-            e.dataTransfer.effectAllowed = "move";
-          }}
-          onClick={() => onAdd("group")}
-          title={`${t("palette.group")} - ${lang === "zh" ? GROUP_ZH.description : GROUP_ITEM.description}`}
-        >
-          {t("palette.group")}
-        </button>
       </div>
       <p className="muted palette-hint">{t("palette.hint")}</p>
     </aside>
