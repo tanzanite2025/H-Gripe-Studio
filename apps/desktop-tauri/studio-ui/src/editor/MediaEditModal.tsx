@@ -20,6 +20,8 @@ interface MediaEditModalProps {
   /** Node whose output backs the underlay, for a `node_output` target. */
   nodeId?: string | null;
   initialGroup?: MediaEditGroup;
+  /** Blank-editor "open image" entry (shown when there is no image yet). */
+  onPickFile?: () => void;
   onCommitMask: (edits: MaskDocument) => void;
   onCommitCrop: (commit: CropCommit) => void;
   onClose: () => void;
@@ -30,6 +32,7 @@ export function MediaEditModal({
   imagePath,
   nodeId,
   initialGroup = "mask",
+  onPickFile,
   onCommitMask,
   onCommitCrop,
   onClose,
@@ -55,6 +58,11 @@ export function MediaEditModal({
       >
         {t("mediaEdit.crop")}
       </button>
+      {onPickFile && !imagePath ? (
+        <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
+          {t("mediaEdit.open")}
+        </button>
+      ) : null}
     </div>
   );
 
