@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import type { ViewportMaskOverlay } from "../bridge/viewport";
 import {
   MASK_TOOLS,
   maskTool,
@@ -124,6 +125,9 @@ export function MaskEditModal({
   // Quick-mask (Q): PS-style ruby overlay of the unselected area.
   const [quickMask, setQuickMask] = useState(false);
   const [quickProxy, setQuickProxy] = useState<ProxyMask | null>(null);
+  // Morphology preview proxy (grow/shrink/feather/smooth), recomputed by the
+  // preview lane effect below.
+  const [preview, setPreview] = useState<ProxyMask | null>(null);
   // Boolean mode the next committed pen / lasso path combines with.
   const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
   // Free-transform panel (M5, Ctrl+T): a numeric draft of move / scale /
@@ -156,8 +160,20 @@ export function MaskEditModal({
     () => viewWindow(view, canvasRef.current?.offsetWidth ?? 0, canvasRef.current?.offsetHeight ?? 0),
     [view],
   );
+  // The selection tint (morphology preview / quick-mask ruby) composites
+  // host-side over the rendered frame, so it follows the view window's
+  // detail; when no host frame presents (browser preview) the canvas
+  // painters below draw the same tint locally.
+  const previewing = isPreviewableOp(toolId) && preview != null;
+  const viewportMaskOverlay = useMemo<ViewportMaskOverlay | null>(() => {
+    const proxy = previewing && preview ? preview : quickMask && quickProxy ? quickProxy : null;
+    if (!proxy) return null;
+    return previewing && preview
+      ? { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [86, 168, 255], alpha: 0.55 }
+      : { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [224, 32, 32], alpha: 0.5, invert: true };
+  }, [previewing, preview, quickMask, quickProxy]);
   const source = useNodeOutputSource(nodeId, imagePath);
-  const viewport = useViewportUnderlay("image_edit", source, 1280, viewportView);
+  const viewport = useViewportUnderlay("image_edit", source, 1280, viewportView, viewportMaskOverlay);
   const underlay = viewport.underlay;
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
@@ -198,7 +214,6 @@ export function MaskEditModal({
   // do — off the global run lock, latest-wins so rapid drags don't pile up
   // (docs/cards/editor-resource-model.md § "Four lanes" → Preview).
   const previewLane = useRef(new PreviewLane());
-  const [preview, setPreview] = useState<ProxyMask | null>(null);
   // Persistent proxy render cache (M7): per-layer surfaces are reused across
   // rebuilds and the composite recomputes dirty tiles only, so a slider drag
   // or brush commit on a large document stays cheap.
@@ -243,7 +258,6 @@ export function MaskEditModal({
     window.addEventListener("keyup", up);
     return () => window.removeEventListener("keyup", up);
   }, []);
-  const previewing = isPreviewableOp(toolId) && preview != null;
   const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
 
   const penPendingRef = useRef(false);
@@ -511,8 +525,12 @@ export function MaskEditModal({
     if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
     if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
     paintSamPoints(ctx, state.current.points);
-    if (previewing && preview) paintPreviewOverlay(ctx, preview, dims.w, dims.h);
-    if (quickMask && quickProxy) paintQuickMask(ctx, quickProxy, dims.w, dims.h);
+    // With a host frame the selection tint is composited host-side (the
+    // viewport mask overlay); paint it locally only for the fallback stage.
+    if (!underlay) {
+      if (previewing && preview) paintPreviewOverlay(ctx, preview, dims.w, dims.h);
+      if (quickMask && quickProxy) paintQuickMask(ctx, quickProxy, dims.w, dims.h);
+    }
 
     const md = moveDrag.current ?? gradientDrag.current;
     if (md) paintDragArrow(ctx, md.start, md.end);
@@ -520,7 +538,7 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-  }, [dims.w, dims.h, overlayOnly, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
+  }, [dims.w, dims.h, overlayOnly, underlay, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides]);
 
   useEffect(() => {
     redraw();

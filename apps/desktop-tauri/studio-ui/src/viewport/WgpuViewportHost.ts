@@ -9,11 +9,13 @@ import {
   renderViewportFrame,
   resizeViewport,
   setViewportGrade,
+  setViewportMaskOverlay,
   setViewportTarget,
   setViewportView,
   type ViewportBackend,
   type ViewportFrame,
   type ViewportKind,
+  type ViewportMaskOverlay,
   type ViewportTarget,
 } from "../bridge/viewport";
 
@@ -24,7 +26,11 @@ export type ViewportCommand =
   /** Grade doc applied at render time (grading viewports only);
    * `temporalDenoise` (`0..=1`) blends graded video frames against the
    * previous graded frame during continuous playback. */
-  | { kind: "set_grade"; doc: unknown | null; temporalDenoise?: number };
+  | { kind: "set_grade"; doc: unknown | null; temporalDenoise?: number }
+  /** Mask overlay composited over rendered frames (image_edit viewports):
+   * the mask editor's selection tint, presented by the host at the view
+   * window's detail. */
+  | { kind: "set_mask_overlay"; overlay: ViewportMaskOverlay | null };
 
 export class WgpuViewportHost {
   private viewportId: string | null;
@@ -69,6 +75,9 @@ export class WgpuViewportHost {
         return;
       case "set_view":
         await setViewportView(this.id(), cmd.zoom, cmd.panX, cmd.panY);
+        return;
+      case "set_mask_overlay":
+        await setViewportMaskOverlay(this.id(), cmd.overlay);
         return;
     }
   }

@@ -7,7 +7,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
-import type { ViewportBackend, ViewportKind, ViewportTarget } from "../bridge/viewport";
+import type {
+  ViewportBackend,
+  ViewportKind,
+  ViewportMaskOverlay,
+  ViewportTarget,
+} from "../bridge/viewport";
 import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
@@ -70,6 +75,10 @@ export function useViewportUnderlay(
   /** Presentation zoom/pan (viewport state): a change re-renders through the
    * open viewport's cached source proxy — the source is never re-decoded. */
   view: ViewportViewState = IDENTITY_VIEW,
+  /** Mask overlay the host composites over frames (image_edit viewports):
+   * the selection tint presents at the view window's detail instead of an
+   * upscaled document-size canvas overlay. */
+  maskOverlay: ViewportMaskOverlay | null = null,
 ): ViewportUnderlay {
   const [state, setState] = useState<ViewportUnderlay>({
     underlay: null,
@@ -85,6 +94,10 @@ export function useViewportUnderlay(
   // caller flipped targets while zoomed) renders that view, not identity.
   const viewRef = useRef(view);
   viewRef.current = view;
+  // The overlay last sent to the open host, to skip no-op commands.
+  const sentOverlayRef = useRef<ViewportMaskOverlay | null>(null);
+  const overlayRef = useRef(maskOverlay);
+  overlayRef.current = maskOverlay;
 
   // The source object identity may change every render; key the open effect
   // on its stable identity and read the latest value through a ref.
@@ -127,10 +140,15 @@ export function useViewportUnderlay(
       if (!isIdentityView(initialView)) {
         await host.command({ kind: "set_view", ...initialView });
       }
+      const initialOverlay = overlayRef.current;
+      if (initialOverlay) {
+        await host.command({ kind: "set_mask_overlay", overlay: initialOverlay });
+      }
       const frame = await host.renderFrame();
       if (cancelled) return;
       hostRef.current = host;
       sentViewRef.current = initialView;
+      sentOverlayRef.current = initialOverlay;
       // A non-identity first frame is the view window; scale back to the
       // full-frame size so `dims` is view-independent.
       const zoom = Math.max(initialView.zoom, 1);
@@ -180,6 +198,30 @@ export function useViewportUnderlay(
       cancelled = true;
     };
   }, [view]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !host.isOpen) return;
+    if (maskOverlay === sentOverlayRef.current) return;
+    let cancelled = false;
+    sentOverlayRef.current = maskOverlay;
+    (async () => {
+      await host.command({ kind: "set_mask_overlay", overlay: maskOverlay });
+      const frame = await host.renderFrame();
+      if (cancelled || hostRef.current !== host) return;
+      setState((s) => ({
+        ...s,
+        underlay: frame.data_url,
+        backend: frame.backend,
+        settled: true,
+      }));
+    })().catch(() => {
+      /* keep the previous frame */
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [maskOverlay]);
 
   return state;
 }
