@@ -133,6 +133,9 @@ function docFromOps(ops: GradeOp[]): GradeDoc {
   return { layers: [{ blend: "normal", opacity: 1, visible: true, mask: null, ops }] };
 }
 
+/** Identity document: grading it renders the ungraded base frame. */
+const EMPTY_DOC: GradeDoc = docFromOps([]);
+
 // Run the TS mirror over a data-URL underlay: decode to canvas pixels, grade
 // the f32 sRGB surface in place, re-encode. The browser-preview / error path.
 async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<string | null> {
@@ -187,8 +190,18 @@ export function GradePanel({
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      // Video targets underlay with the poster frame nearest the timestamp;
-      // image targets with their own thumbnail.
+      // The ungraded base renders through the same grade viewport with the
+      // identity document: it warms the viewport's cached source proxy for
+      // the doc renders that follow, and video targets show the exact frame
+      // at the timestamp rather than the nearest poster.
+      const frame = await renderGraded(EMPTY_DOC).catch(() => null);
+      if (cancelled) return;
+      if (frame) {
+        setUnderlay(frame.data_url);
+        return;
+      }
+      // Browser preview (no viewport transport): the thumbnail bridge keeps
+      // an underlay available for the in-webview mirror fallback.
       const path = videoPath
         ? (await videoProbe(videoPath, videoTimestampSec)).poster_path
         : imagePath;
@@ -202,7 +215,7 @@ export function GradePanel({
     return () => {
       cancelled = true;
     };
-  }, [imagePath, videoPath, videoTimestampSec]);
+  }, [imagePath, videoPath, videoTimestampSec, renderGraded]);
 
   const doc = useMemo(() => docFromOps(ops), [ops]);
 
