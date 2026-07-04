@@ -196,7 +196,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .canvas-tabs-run-project:hover:not(:disabled) { background: rgba(122, 162, 247, 0.12); }
 
-.workspace { flex: 1; display: flex; min-height: 0; }
+.workspace { flex: 1; display: flex; min-height: 0; position: relative; }
 .canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .canvas-flow { flex: 1; min-height: 0; position: relative; }
 
@@ -896,27 +896,42 @@ button:disabled { opacity: 0.6; cursor: default; }
 .node.lod .port-label { display: none; }
 .node.lod .port-block { min-height: 8px; padding: 0; }
 
-/* palette (left rail) */
+/* palette: floating accordion cards over the canvas (no full-height rail).
+ * The container is a transparent, click-through overlay; only the cards,
+ * heading, and resize handle take pointer events. */
 .palette {
-  flex: 0 0 auto;
-  position: relative;
+  position: absolute;
+  z-index: 7;
+  top: 12px;
+  left: 12px;
   display: flex;
   flex-direction: column;
   width: 220px;
   min-width: 184px;
   max-width: 360px;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
-  padding: 12px;
+  max-height: calc(100% - 24px);
+  background: transparent;
+  pointer-events: none;
   overflow: hidden;
 }
-.palette h2 { margin: 0 0 8px; font-size: 14px; flex: none; }
+.palette h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  flex: none;
+  color: var(--muted);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.palette-hint { display: none; }
 .palette-sections {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+.palette-group,
+.palette-resize {
+  pointer-events: auto;
 }
 .palette-resize {
   position: absolute;
@@ -949,14 +964,16 @@ button:disabled { opacity: 0.6; cursor: default; }
   margin-bottom: 8px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(24, 26, 33, 0.92);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(6px);
   overflow: hidden;
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 .palette-group:hover { border-color: #3a3f4e; }
 .palette-group.open {
   flex: 0 1 auto;
-  background: rgba(91, 140, 255, 0.04);
+  background: rgba(28, 32, 44, 0.94);
   border-color: rgba(91, 140, 255, 0.35);
 }
 .palette-group-header {
