@@ -52,7 +52,6 @@ export interface ToolbarProps {
   onJumpToNode: (nodeId: string) => void;
 
   // File actions
-  onOpen: () => void;
   fileInputRef: MutableRefObject<HTMLInputElement | null>;
   onFilePicked: (file: File) => void;
 }
@@ -82,7 +81,6 @@ export function Toolbar({
   historyCount,
   nodes,
   onJumpToNode,
-  onOpen,
   fileInputRef,
   onFilePicked,
 }: ToolbarProps) {
@@ -101,28 +99,11 @@ export function Toolbar({
               ! {issues.length} {issues.length > 1 ? t("issues.many") : t("issues.one")}
             </span>
           )}
-          <button onClick={onOpenModels} title={t("btn.modelsTitle")}>
-            {t("btn.models")}
-          </button>
-          <button onClick={onToggleLang} title={t("label.langTitle")} className="lang-toggle">
-            {t("label.lang")}
-          </button>
-        </div>
-      </div>
-
-      <div className="toolbar-action-row">
-        <div className="toolbar-group">
           {isDesktop && (
             <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>
               {showProject ? t("btn.hideProject") : t("btn.project")}
             </button>
           )}
-          <button onClick={onOpen} title={isDesktop ? t("btn.openTitle") : t("btn.loadTitle")}>
-            {isDesktop ? t("btn.open") : t("btn.load")}
-          </button>
-        </div>
-
-        <div className="toolbar-group">
           <button onClick={() => setShowSnapshots((s) => !s)} title={t("btn.snapshotsTitle")}>
             {showSnapshots ? t("btn.hideSnapshots") : t("btn.snapshots")}
             {snapshotCount > 0 ? ` (${snapshotCount})` : ""}
@@ -135,8 +116,13 @@ export function Toolbar({
             {showHistory ? t("btn.hideHistory") : t("btn.history")}
             {historyCount > 0 ? ` (${historyCount})` : ""}
           </button>
+          <button onClick={onOpenModels} title={t("btn.modelsTitle")}>
+            {t("btn.models")}
+          </button>
+          <button onClick={onToggleLang} title={t("label.langTitle")} className="lang-toggle">
+            {t("label.lang")}
+          </button>
         </div>
-
       </div>
 
       <input

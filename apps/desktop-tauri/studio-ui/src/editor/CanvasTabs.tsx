@@ -17,6 +17,8 @@ interface CanvasTabsProps {
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onNewCanvas: () => void;
+  /** Open a workflow file via the system file picker (from the "+" menu). */
+  onOpenFile: () => void;
   /** Per-tab file actions; a non-active tab is activated first. */
   onSaveTab: (id: string) => void;
   onSaveAsTab: (id: string) => void;
@@ -85,6 +87,9 @@ function RenameIcon() {
   );
 }
 
+// Sentinel menu id for the "+" (new/open) dropdown, distinct from any tab id.
+const NEW_MENU_ID = "__new__";
+
 export function CanvasTabs({
   tabs,
   activeId,
@@ -93,6 +98,7 @@ export function CanvasTabs({
   onActivate,
   onClose,
   onNewCanvas,
+  onOpenFile,
   onSaveTab,
   onSaveAsTab,
   onRenameTab,
@@ -248,10 +254,43 @@ export function CanvasTabs({
           className="canvas-tab-new"
           aria-label={t("canvasTabs.new")}
           title={t("canvasTabs.new")}
-          onClick={onNewCanvas}
+          aria-expanded={menu?.id === NEW_MENU_ID}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenu((cur) =>
+              cur?.id === NEW_MENU_ID ? null : { id: NEW_MENU_ID, x: rect.left, y: rect.bottom + 6 },
+            );
+          }}
         >
           +
         </button>
+        {menu?.id === NEW_MENU_ID && (
+          <div
+            className="canvas-tab-menu"
+            role="menu"
+            style={{ left: menu.x, top: menu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                onNewCanvas();
+              }}
+            >
+              {t("canvasTabs.newBlank")}
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                onOpenFile();
+              }}
+            >
+              {t("canvasTabs.openFile")}
+            </button>
+          </div>
+        )}
       </div>
       {tabs.length > 1 && (
         <button

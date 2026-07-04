@@ -105,6 +105,8 @@ export const messages = {
     zh: "暂无运行记录 — 历史运行会记录在这里。",
   },
   "runhistory.noLog": { en: "No log lines for this run.", zh: "此次运行没有日志。" },
+  "canvasTabs.newBlank": { en: "New blank canvas", zh: "新建空白画布" },
+  "canvasTabs.openFile": { en: "Open file…", zh: "打开文件…" },
   "btn.tidyTitle": { en: "arrange nodes on a grid by DAG depth", zh: "按 DAG 深度在网格上排列节点" },
   "btn.log": { en: "Log", zh: "日志" },
   "btn.hideLog": { en: "Hide Log", zh: "隐藏日志" },
