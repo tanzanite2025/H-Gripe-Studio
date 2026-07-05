@@ -859,6 +859,36 @@ function fillPath(mask: ProxyMask, path: EditPath, scale: number): void {
   }
 }
 
+/**
+ * Confine a replayed step to its recorded marquee selection (PS selection
+ * semantics): pixels outside the `clip` region are restored from the
+ * pre-step mask. Mirrors the Rust `restore_outside_clip`.
+ */
+function restoreOutsideClip(mask: ProxyMask, before: ProxyMask, clip: NonNullable<EditOp["clip"]>, scale: number): void {
+  const [rx1, ry1, rx2, ry2] = clip.region;
+  const x1 = Math.min(rx1, rx2) * scale;
+  const y1 = Math.min(ry1, ry2) * scale;
+  const x2 = Math.max(rx1, rx2) * scale;
+  const y2 = Math.max(ry1, ry2) * scale;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  const rx = Math.max(0.5, (x2 - x1) / 2);
+  const ry = Math.max(0.5, (y2 - y1) / 2);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      let inside = px >= x1 && px <= x2 && py >= y1 && py <= y2;
+      if (inside && clip.ellipse) {
+        const nx = (px - cx) / rx;
+        const ny = (py - cy) / ry;
+        inside = nx * nx + ny * ny <= 1;
+      }
+      if (!inside) mask.data[y * mask.w + x] = before.data[y * mask.w + x];
+    }
+  }
+}
+
 // Replay one layer's ordered edit stack onto (a copy of) `mask`.
 function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
   // The layer's pre-edit state, the history brush's restore source (only
@@ -869,6 +899,7 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
     ? Uint8Array.from(mask.data)
     : null;
   for (const op of ops) {
+    const before = !op.disabled && op.clip ? cloneMask(mask) : null;
     if (op.disabled) {
       // Disabled history steps stay recorded but are skipped on replay.
     } else if (isPathOp(op)) {
@@ -914,6 +945,7 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       const radius = op.amount != null ? Math.round(op.amount * scale) : 0;
       mask = applyOp(mask, op.type, radius);
     }
+    if (before && op.clip) restoreOutsideClip(mask, before, op.clip, scale);
   }
   return mask;
 }

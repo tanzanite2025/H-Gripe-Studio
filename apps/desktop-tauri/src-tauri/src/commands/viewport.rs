@@ -212,6 +212,10 @@ struct ViewportState {
     /// the mask editor's proxy-resolution selection tint, presented by the
     /// host at the view window's detail instead of a document-size canvas.
     mask_overlay: Option<Arc<MaskOverlay>>,
+    /// Vector overlay stroked over rendered frames (image_edit viewports):
+    /// the mask editor's marquee marching ants, drawn at the view window's
+    /// detail instead of on a document-size canvas.
+    overlay_scene: Option<Arc<OverlayScene>>,
     view: ViewportView,
     /// Most-recently-used first, at most [`PROXY_CACHE_DEPTH`] entries.
     proxies: Vec<SourceProxy>,
@@ -300,6 +304,206 @@ fn composite_mask_overlay(
             let base = ((py * sw + px) * 4) as usize;
             for ch in 0..3 {
                 surface.data[base + ch] = tint[ch] * a + surface.data[base + ch] * (1.0 - a);
+            }
+        }
+    }
+}
+
+/// One primitive of a vector overlay scene, in normalized document
+/// coordinates (0..=1 over the full document, view-independent).
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OverlayItem {
+    /// Dashed rect / ellipse outline — the marquee selection's marching ants.
+    Marquee {
+        /// `[x1, y1, x2, y2]` corners, normalized.
+        region: [f32; 4],
+        #[serde(default)]
+        ellipse: bool,
+    },
+    /// A closed polygon — a committed pen / lasso path's outline, flattened
+    /// to straight segments by the sender (beziers are subdivided up front).
+    Polygon {
+        /// `[x, y]` vertices, normalized; the loop closes implicitly.
+        points: Vec<[f32; 2]>,
+        /// Outline colour, premul-free `[r, g, b, a]` in 0..=1.
+        stroke: [f32; 4],
+        /// Even-odd interior fill colour, when the shape reads as a region.
+        #[serde(default)]
+        fill: Option<[f32; 4]>,
+        /// Dash the outline (6-on/4-off) instead of a solid stroke.
+        #[serde(default)]
+        dash: bool,
+    },
+}
+
+/// A vector overlay the host strokes over rendered frames after grading and
+/// the mask tint. Primitives are document-space geometry; stroking happens in
+/// surface pixels, so outlines stay one screen pixel wide at any zoom.
+#[derive(Deserialize)]
+struct OverlayScene {
+    items: Vec<OverlayItem>,
+}
+
+/// Marquee outline styling, matching the editor's canvas painter
+/// (`paintMarquee`): dashed 6-on/4-off in the selection accent colour.
+const OVERLAY_DASH_ON: f32 = 6.0;
+const OVERLAY_DASH_PERIOD: f32 = 10.0;
+const OVERLAY_RGBA: [f32; 4] = [86.0 / 255.0, 168.0 / 255.0, 255.0 / 255.0, 0.9];
+
+/// Stroke a polyline over a graded surface, in surface pixel coordinates,
+/// optionally dashed. The dash phase runs along the whole polyline so
+/// corners do not restart the pattern.
+fn stroke_polyline(
+    surface: &mut hgripe_grade::GradeSurface,
+    pts: &[(f32, f32)],
+    rgba: [f32; 4],
+    dash: bool,
+) {
+    let (sw, sh) = (surface.w as i64, surface.h as i64);
+    let alpha = rgba[3];
+    let mut travelled = 0.0f32;
+    for seg in pts.windows(2) {
+        let (ax, ay) = seg[0];
+        let (bx, by) = seg[1];
+        let len = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+        if !len.is_finite() {
+            continue;
+        }
+        let steps = (len.ceil() as u32).clamp(1, 1 << 15);
+        for i in 0..steps {
+            let t = i as f32 / steps as f32;
+            let d = travelled + len * t;
+            if dash && d.rem_euclid(OVERLAY_DASH_PERIOD) >= OVERLAY_DASH_ON {
+                continue;
+            }
+            let xi = (ax + (bx - ax) * t).round() as i64;
+            let yi = (ay + (by - ay) * t).round() as i64;
+            if xi < 0 || yi < 0 || xi >= sw || yi >= sh {
+                continue;
+            }
+            let base = ((yi * sw + xi) * 4) as usize;
+            for ch in 0..3 {
+                surface.data[base + ch] =
+                    rgba[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
+            }
+        }
+        travelled += len;
+    }
+}
+
+/// Even-odd scanline fill of a closed polygon over a graded surface, in
+/// surface pixel coordinates — the same rule the canvas painter's
+/// `fill("evenodd")` applies to committed paths.
+fn fill_polygon_evenodd(
+    surface: &mut hgripe_grade::GradeSurface,
+    pts: &[(f32, f32)],
+    rgba: [f32; 4],
+) {
+    if pts.len() < 3 {
+        return;
+    }
+    let (sw, sh) = (surface.w, surface.h);
+    let alpha = rgba[3];
+    let mut xs: Vec<f32> = Vec::new();
+    for py in 0..sh {
+        let y = py as f32 + 0.5;
+        xs.clear();
+        for i in 0..pts.len() {
+            let (x0, y0) = pts[i];
+            let (x1, y1) = pts[(i + 1) % pts.len()];
+            if (y0 <= y) == (y1 <= y) {
+                continue;
+            }
+            xs.push(x0 + (y - y0) / (y1 - y0) * (x1 - x0));
+        }
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        for pair in xs.chunks(2) {
+            let [a, b] = *pair else { continue };
+            let from = (a.round().max(0.0)) as u32;
+            let to = (b.round().min(sw as f32)) as u32;
+            for px in from..to.min(sw) {
+                let base = ((py * sw + px) * 4) as usize;
+                for ch in 0..3 {
+                    surface.data[base + ch] =
+                        rgba[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
+                }
+            }
+        }
+    }
+}
+
+/// Stroke the overlay scene over a graded surface. `proxy_dims`/`view` map
+/// normalized document coordinates to surface pixels with the same crop rect
+/// arithmetic as [`composite_mask_overlay`], so the outline lands exactly on
+/// the pixels it selects.
+fn composite_overlay_scene(
+    surface: &mut hgripe_grade::GradeSurface,
+    scene: &OverlayScene,
+    proxy_dims: (u32, u32),
+    view: ViewportView,
+) {
+    let (pw, ph) = proxy_dims;
+    let (sw, sh) = (surface.w, surface.h);
+    if sw == 0 || sh == 0 || pw == 0 || ph == 0 {
+        return;
+    }
+    let zoom = view.zoom.max(1.0);
+    let vw = ((pw as f32 / zoom).round() as u32).clamp(1, pw);
+    let vh = ((ph as f32 / zoom).round() as u32).clamp(1, ph);
+    let x0 = ((view.pan_x * pw as f32).round() as i64).clamp(0, (pw - vw) as i64) as f32;
+    let y0 = ((view.pan_y * ph as f32).round() as i64).clamp(0, (ph - vh) as i64) as f32;
+    let map = |nx: f32, ny: f32| -> (f32, f32) {
+        (
+            (nx * pw as f32 - x0) / vw as f32 * sw as f32 - 0.5,
+            (ny * ph as f32 - y0) / vh as f32 * sh as f32 - 0.5,
+        )
+    };
+    for item in &scene.items {
+        match item {
+            OverlayItem::Marquee { region, ellipse } => {
+                let pts: Vec<(f32, f32)> = if *ellipse {
+                    let cx = (region[0] + region[2]) / 2.0;
+                    let cy = (region[1] + region[3]) / 2.0;
+                    let rx = (region[2] - region[0]).abs() / 2.0;
+                    let ry = (region[3] - region[1]).abs() / 2.0;
+                    // Sample density follows the on-surface radius so the
+                    // outline stays smooth at any zoom.
+                    let (cxs, cys) = map(cx, cy);
+                    let (exs, _) = map(cx + rx, cy);
+                    let (_, eys) = map(cx, cy + ry);
+                    let r_s = (exs - cxs).abs().max((eys - cys).abs());
+                    let n = ((std::f32::consts::TAU * r_s) as u32).clamp(64, 4096);
+                    (0..=n)
+                        .map(|i| {
+                            let t = i as f32 / n as f32 * std::f32::consts::TAU;
+                            map(cx + rx * t.cos(), cy + ry * t.sin())
+                        })
+                        .collect()
+                } else {
+                    let (x1, y1) = (region[0].min(region[2]), region[1].min(region[3]));
+                    let (x2, y2) = (region[0].max(region[2]), region[1].max(region[3]));
+                    vec![map(x1, y1), map(x2, y1), map(x2, y2), map(x1, y2), map(x1, y1)]
+                };
+                stroke_polyline(surface, &pts, OVERLAY_RGBA, true);
+            }
+            OverlayItem::Polygon {
+                points,
+                stroke,
+                fill,
+                dash,
+            } => {
+                if points.len() < 2 {
+                    continue;
+                }
+                let mut pts: Vec<(f32, f32)> =
+                    points.iter().map(|p| map(p[0], p[1])).collect();
+                if let Some(fill) = fill {
+                    fill_polygon_evenodd(surface, &pts, *fill);
+                }
+                // Close the loop for the outline.
+                pts.push(pts[0]);
+                stroke_polyline(surface, &pts, *stroke, *dash);
             }
         }
     }
@@ -731,6 +935,7 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             height: 0,
             grade_doc: None,
             mask_overlay: None,
+            overlay_scene: None,
             view: ViewportView::IDENTITY,
             proxies: Vec::new(),
             temporal_denoise: 0.0,
@@ -951,6 +1156,83 @@ pub(crate) fn viewport_set_mask_overlay(
     Ok(())
 }
 
+/// Largest accepted overlay scene: scenes are a handful of selection
+/// outlines; anything bigger through this path is a caller bug.
+const MAX_OVERLAY_SCENE_ITEMS: usize = 256;
+
+/// Largest accepted flattened polygon: committed paths flatten their bezier
+/// segments sender-side, so a loop is at most a few thousand vertices.
+const MAX_OVERLAY_POLYGON_POINTS: usize = 16384;
+
+/// Set (or clear) the vector overlay an image-edit viewport strokes over
+/// rendered frames — the mask editor's marquee marching ants, presented by
+/// the host at the view window's detail instead of a document-size canvas
+/// overlay (WGPU migration: interactive overlays on the live surface).
+#[tauri::command]
+pub(crate) fn viewport_set_overlay_scene(
+    viewport_id: String,
+    scene: Option<OverlayScene>,
+) -> Result<(), String> {
+    let parsed = match scene {
+        None => None,
+        Some(scene) => {
+            if scene.items.len() > MAX_OVERLAY_SCENE_ITEMS {
+                return Err(format!(
+                    "overlay scene has {} items (max {MAX_OVERLAY_SCENE_ITEMS})",
+                    scene.items.len()
+                ));
+            }
+            for item in &scene.items {
+                match item {
+                    OverlayItem::Marquee { region, .. } => {
+                        if region.iter().any(|v| !v.is_finite()) {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                    }
+                    OverlayItem::Polygon {
+                        points,
+                        stroke,
+                        fill,
+                        ..
+                    } => {
+                        if points.len() > MAX_OVERLAY_POLYGON_POINTS {
+                            return Err(format!(
+                                "overlay polygon has {} points (max {MAX_OVERLAY_POLYGON_POINTS})",
+                                points.len()
+                            ));
+                        }
+                        if points.iter().flatten().any(|v| !v.is_finite()) {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                        let colours = stroke.iter().chain(fill.iter().flatten());
+                        if colours.into_iter().any(|v| !(0.0..=1.0).contains(v)) {
+                            return Err(
+                                "overlay colours must be between 0 and 1".to_string()
+                            );
+                        }
+                    }
+                }
+            }
+            Some(Arc::new(scene))
+        }
+    };
+    let id = parse_id(&viewport_id)?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    if state.kind != "image_edit" {
+        return Err(format!(
+            "viewport {viewport_id} (kind={}) does not accept an overlay scene",
+            state.kind
+        ));
+    }
+    state.overlay_scene = parsed;
+    Ok(())
+}
+
 /// Set the viewport's presentation view (zoom/pan). Values must be finite and
 /// `zoom` positive; a zoom at or below 1 with zero pan is the identity view.
 #[tauri::command]
@@ -1026,7 +1308,7 @@ fn rgba_to_frame(rendered: RenderedRgba) -> Result<ViewportFrame, String> {
 /// presentation.
 fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
     let id = parse_id(viewport_id)?;
-    let (target, width, height, grade_doc, view, temporal_denoise, mask_overlay) = {
+    let (target, width, height, grade_doc, view, temporal_denoise, mask_overlay, overlay_scene) = {
         let map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
@@ -1041,6 +1323,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             state.view,
             state.temporal_denoise,
             state.mask_overlay.clone(),
+            state.overlay_scene.clone(),
         )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
@@ -1056,6 +1339,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 grade_doc,
                 view,
                 mask_overlay.as_deref(),
+                overlay_scene.as_deref(),
             )
         }
         ViewportTarget::ImageLayer { asset_id, layer_id } => {
@@ -1070,6 +1354,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 grade_doc,
                 view,
                 mask_overlay.as_deref(),
+                overlay_scene.as_deref(),
             )
         }
         #[cfg(feature = "native-ffmpeg")]
@@ -1103,7 +1388,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             // timeline playhead to clip-local source time.
             let clip = timeline_clip(&timeline_id, &clip_id)?;
             if clip.kind == "still" {
-                return render_image_path(id, &clip.path, width, height, grade_doc, view, None);
+                return render_image_path(id, &clip.path, width, height, grade_doc, view, None, None);
             }
             let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
             #[cfg(feature = "native-ffmpeg")]
@@ -1140,6 +1425,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 grade_doc,
                 view,
                 mask_overlay.as_deref(),
+                overlay_scene.as_deref(),
             )
         }
     }
@@ -1338,9 +1624,10 @@ fn render_image_path(
     grade_doc: Option<Value>,
     view: ViewportView,
     mask_overlay: Option<&MaskOverlay>,
+    overlay_scene: Option<&OverlayScene>,
 ) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
-    if grade_doc.is_some() || !view.is_identity() || mask_overlay.is_some() {
+    if grade_doc.is_some() || !view.is_identity() || mask_overlay.is_some() || overlay_scene.is_some() {
         // Graded and/or viewed frame: run the grading kernel (identity when
         // no doc is set) over the view window of the source's sRGB proxy.
         let doc = parse_grade_doc(grade_doc.as_ref())?;
@@ -1364,6 +1651,10 @@ fn render_image_path(
             // The overlay tints the *presented* frame: grade first, then
             // composite, so the tint colour is not pushed through the kernel.
             composite_mask_overlay(&mut surface, overlay, proxy.dimensions(), view);
+        }
+        if let Some(scene) = overlay_scene {
+            // Stroked last: the outline sits above the frame and the tint.
+            composite_overlay_scene(&mut surface, scene, proxy.dimensions(), view);
         }
         let image = crate::studio::surface_to_rgba(&surface)?;
         return Ok(RenderedRgba {
@@ -1449,6 +1740,131 @@ mod tests {
             let id = parse_id(&vp.viewport_id).expect("id");
             assert!(map.get(&id).expect("open").mask_overlay.is_none());
         }
+        viewport_destroy_inner(vp.viewport_id).expect("destroy");
+    }
+
+    #[test]
+    fn overlay_scene_only_on_image_edit_viewports_and_validates_coordinates() {
+        let scene = |region: [f32; 4]| OverlayScene {
+            items: vec![OverlayItem::Marquee {
+                region,
+                ellipse: false,
+            }],
+        };
+
+        let grade = viewport_create("grade_preview".to_string()).expect("create");
+        let err =
+            viewport_set_overlay_scene(grade.viewport_id.clone(), Some(scene([0.1, 0.1, 0.5, 0.5])))
+                .expect_err("grade_preview must reject an overlay scene");
+        assert!(err.contains("does not accept an overlay scene"));
+        viewport_destroy_inner(grade.viewport_id).expect("destroy");
+
+        let vp = viewport_create("image_edit".to_string()).expect("create");
+        viewport_set_overlay_scene(vp.viewport_id.clone(), Some(scene([0.1, 0.1, 0.5, 0.5])))
+            .expect("image_edit accepts an overlay scene");
+        {
+            let map = viewports().lock().expect("lock");
+            let id = parse_id(&vp.viewport_id).expect("id");
+            assert!(map.get(&id).expect("open").overlay_scene.is_some());
+        }
+        // Non-finite coordinates fail loudly.
+        let err =
+            viewport_set_overlay_scene(vp.viewport_id.clone(), Some(scene([0.1, f32::NAN, 0.5, 0.5])))
+                .expect_err("non-finite coordinates must be rejected");
+        assert!(err.contains("finite"));
+        // Clearing drops the scene.
+        viewport_set_overlay_scene(vp.viewport_id.clone(), None).expect("clear");
+        {
+            let map = viewports().lock().expect("lock");
+            let id = parse_id(&vp.viewport_id).expect("id");
+            assert!(map.get(&id).expect("open").overlay_scene.is_none());
+        }
+        viewport_destroy_inner(vp.viewport_id).expect("destroy");
+    }
+
+    #[test]
+    fn overlay_scene_strokes_a_dashed_marquee_inside_the_surface() {
+        let mut surface = hgripe_grade::GradeSurface {
+            w: 32,
+            h: 32,
+            data: vec![0.0; 32 * 32 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let scene = OverlayScene {
+            items: vec![OverlayItem::Marquee {
+                region: [0.25, 0.25, 0.75, 0.75],
+                ellipse: false,
+            }],
+        };
+        composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
+        let stroked = surface.data.chunks(4).filter(|px| px[2] > 0.5).count();
+        // A dashed outline touches some pixels (never zero, never a fill).
+        assert!(stroked > 8, "expected a stroked outline, got {stroked}");
+        assert!(stroked < 16 * 16, "outline must not fill the region: {stroked}");
+        // Interior stays untouched.
+        let mid = ((16 * 32 + 16) * 4) as usize;
+        assert_eq!(surface.data[mid], 0.0);
+    }
+
+    #[test]
+    fn overlay_polygon_fills_the_interior_and_strokes_the_outline() {
+        let mut surface = hgripe_grade::GradeSurface {
+            w: 32,
+            h: 32,
+            data: vec![0.0; 32 * 32 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let scene = OverlayScene {
+            items: vec![OverlayItem::Polygon {
+                points: vec![[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]],
+                stroke: [1.0, 0.0, 0.0, 1.0],
+                fill: Some([0.0, 1.0, 0.0, 0.5]),
+                dash: false,
+            }],
+        };
+        composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
+        // Interior carries the fill (green over black at 0.5 alpha).
+        let mid = ((16 * 32 + 16) * 4) as usize;
+        assert!(surface.data[mid + 1] > 0.4, "interior must be filled");
+        assert_eq!(surface.data[mid], 0.0, "fill must not add red");
+        // The outline carries the solid red stroke; the top edge maps to
+        // y = 0.25 * 32 - 0.5 = 7.5 -> row 8 (rounded).
+        let edge = ((8 * 32 + 16) * 4) as usize;
+        assert!(surface.data[edge] > 0.9, "outline must be stroked");
+        // Outside stays untouched.
+        let out = ((2 * 32 + 2) * 4) as usize;
+        assert_eq!(surface.data[out], 0.0);
+        assert_eq!(surface.data[out + 1], 0.0);
+    }
+
+    #[test]
+    fn overlay_polygon_validation_rejects_bad_points_and_colours() {
+        let vp = viewport_create("image_edit".to_string()).expect("create");
+        let poly = |points: Vec<[f32; 2]>, stroke: [f32; 4]| OverlayScene {
+            items: vec![OverlayItem::Polygon {
+                points,
+                stroke,
+                fill: None,
+                dash: false,
+            }],
+        };
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(poly(vec![[0.0, f32::INFINITY], [1.0, 1.0]], [0.0, 0.0, 0.0, 1.0])),
+        )
+        .expect_err("non-finite points must be rejected");
+        assert!(err.contains("finite"));
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(poly(vec![[0.0, 0.0], [1.0, 1.0]], [0.0, 0.0, 0.0, 1.5])),
+        )
+        .expect_err("out-of-range colours must be rejected");
+        assert!(err.contains("between 0 and 1"));
+        viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(poly(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], [0.3, 0.6, 1.0, 0.9])),
+        )
+        .expect("a valid polygon is accepted");
         viewport_destroy_inner(vp.viewport_id).expect("destroy");
     }
 

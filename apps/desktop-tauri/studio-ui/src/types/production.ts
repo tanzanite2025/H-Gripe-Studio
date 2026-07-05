@@ -233,6 +233,13 @@ export interface MaskOperation {
  */
 export interface EditOpBase {
   disabled?: boolean;
+  /**
+   * The marquee selection active when the step was recorded (PS selection
+   * semantics): replay confines the step's effect to this image-space
+   * `[x1, y1, x2, y2]` region (elliptical when `ellipse`), by both the proxy
+   * preview and the backend.
+   */
+  clip?: { region: [number, number, number, number]; ellipse?: boolean };
 }
 
 /** An `EditPath` entry on the ordered edit stack. */

@@ -6,6 +6,36 @@
 // rasteriser (frontend proxy and Rust backend) then replays it like any
 // other straight-segment path, so no new kernel op is needed.
 
+import type { EditPathPoint } from "../../types/production";
+
+/**
+ * Flatten a committed vector path to a closed polyline: bezier segments
+ * (where control handles are recorded) are subdivided into `steps` straight
+ * segments; plain segments pass through. This is the geometry the host-side
+ * overlay strokes, so it must trace the same curve the canvas painter draws.
+ */
+export function flattenEditPath(points: readonly EditPathPoint[], steps = 16): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < points.length; i++) {
+    const prev = points[i];
+    const next = points[(i + 1) % points.length];
+    out.push([prev.x, prev.y]);
+    if (prev.out || next.in) {
+      const [c1x, c1y] = prev.out ?? [prev.x, prev.y];
+      const [c2x, c2y] = next.in ?? [next.x, next.y];
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        const u = 1 - t;
+        out.push([
+          u * u * u * prev.x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * next.x,
+          u * u * u * prev.y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * next.y,
+        ]);
+      }
+    }
+  }
+  return out;
+}
+
 /** Even-odd point-in-polygon test against a closed loop. */
 export function pointInPolygon([px, py]: readonly [number, number], polygon: readonly [number, number][]): boolean {
   let inside = false;

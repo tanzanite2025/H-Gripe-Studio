@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
-import type { ViewportMaskOverlay } from "../bridge/viewport";
+import type { ViewportMaskOverlay, ViewportOverlayItem, ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -39,7 +39,7 @@ import type {
   MaskDocument,
 } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
-import { maskEditReducer, type FillDraft } from "./maskEditModal/actions";
+import { maskEditReducer, type FillDraft, type MaskEditAction } from "./maskEditModal/actions";
 import {
   paintAnchorDraft,
   paintCloneSource,
@@ -59,7 +59,7 @@ import {
   paintStroke,
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
-import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
+import { catmullRomClosed, flattenEditPath, pointInPolygon } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap, snapLoopToEdges, type EdgeMap } from "./maskEditModal/magneticSnap";
 import { hitTestPathOp, translateAnchors } from "./maskEditModal/pathEditTools";
 import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
@@ -111,6 +111,11 @@ interface MaskEditModalProps {
 
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
+
+// Ops an active marquee selection does NOT confine: whole-mask reshapes keep
+// their global meaning even while a selection is up (PS transforms / crops
+// the selection contents, which the mask model has no notion of).
+const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
 
 /** Image Size dialog draft: pixel size + linked aspect + resample filter. */
 interface ImageSizeDraft {
@@ -166,7 +171,7 @@ export function MaskEditModal({
   workspace = "mask",
 }: MaskEditModalProps) {
   const t = useT();
-  const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
+  const [state, rawDispatch] = useReducer(maskEditReducer, initial, initEditState);
   // Mirror the in-progress document out to the host so it survives remounts
   // (e.g. the image editor's document-tab switches).
   const onDocChangeRef = useRef(onDocChange);
@@ -248,6 +253,64 @@ export function MaskEditModal({
       ? { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [86, 168, 255], alpha: 0.55 }
       : { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [224, 32, 32], alpha: 0.5, invert: true };
   }, [previewing, preview, quickMask, quickProxy]);
+  // The active rect/ellipse marquee selection (PS-style): marching ants stay
+  // visible across tools, subsequent edit steps are confined to it (`clip`),
+  // and Ctrl+D / a plain marquee click deselects.
+  const [lastMarquee, setLastMarquee] = useState<{
+    region: [number, number, number, number];
+    ellipse: boolean;
+  } | null>(null);
+  const lastMarqueeRef = useRef(lastMarquee);
+  lastMarqueeRef.current = lastMarquee;
+  // Anchor re-editing (M2): index of the path op being re-edited plus a local
+  // draft of its anchors; committed as one undoable step on Done / Enter.
+  const [editingPath, setEditingPath] = useState<number | null>(null);
+  // The committed marquee's marching ants stroke host-side over rendered
+  // frames (WGPU migration: interactive overlays on the live surface), so
+  // the outline stays one screen pixel wide at any zoom instead of scaling
+  // with a document-size canvas. The live drag stays on the canvas for
+  // zero-latency feedback; only the committed selection goes to the host.
+  // `dims` is derived from the viewport hook below; the scene reads the
+  // previous render's value through this ref (a selection is only made after
+  // the frame — and so `dims` — has settled).
+  const frameDimsRef = useRef({ w: DEFAULT_W, h: DEFAULT_H });
+  const frameDims = frameDimsRef.current;
+  const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(() => {
+    if (frameDims.w <= 0 || frameDims.h <= 0) return null;
+    const items: ViewportOverlayItem[] = [];
+    // Committed pen / lasso paths: the same loops the canvas painter fills
+    // and outlines, flattened to straight segments and normalized. While a
+    // morphology preview runs, the proxy tint already folds the paths in, so
+    // the vector overlay drops them (mirrors the canvas skip).
+    if (!previewing) {
+      state.current.layers.forEach((layer, li) => {
+        if (!layer.visible) return;
+        layer.ops.forEach((op, i) => {
+          if (op.disabled || (li === state.current.active && i === editingPath)) return;
+          if (!isPathOp(op) || op.points.length < 2) return;
+          const [r, g, b] =
+            op.mode === "subtract" ? [244, 98, 98] : op.mode === "intersect" ? [190, 120, 255] : [86, 168, 255];
+          items.push({
+            kind: "polygon",
+            points: flattenEditPath(op.points).map(
+              ([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number],
+            ),
+            stroke: [r / 255, g / 255, b / 255, 0.9],
+            fill: [r / 255, g / 255, b / 255, 0.3],
+          });
+        });
+      });
+    }
+    if (lastMarquee) {
+      const [x0, y0, x1, y1] = lastMarquee.region;
+      items.push({
+        kind: "marquee",
+        region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
+        ...(lastMarquee.ellipse ? { ellipse: true } : null),
+      });
+    }
+    return items.length > 0 ? { items } : null;
+  }, [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath]);
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
@@ -276,11 +339,13 @@ export function MaskEditModal({
     viewportMaskOverlay,
     underlayAnchorRef,
     presentEnabled,
+    viewportOverlayScene,
   );
   const underlay = viewport.underlay;
   const presented = viewport.presented;
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
+  frameDimsRef.current = dims;
 
   // The graded copy of the underlay frame: decode → f32 surface → `applyDoc`
   // → re-encode. Recomputes when the frame or the adjustment stack changes;
@@ -328,14 +393,24 @@ export function MaskEditModal({
   const [fgColor, setFgColor] = useState("#ffffff");
   const [bgColor, setBgColor] = useState("#000000");
   const [colorPicker, setColorPicker] = useState<"fg" | "bg" | null>(null);
-  // Last committed rect/ellipse marquee: the marching ants stay visible after
-  // the drag lands so the selection reads (PS-style); cleared on tool switch.
-  const [lastMarquee, setLastMarquee] = useState<{
-    region: [number, number, number, number];
-    ellipse: boolean;
-  } | null>(null);
-  const lastMarqueeRef = useRef(lastMarquee);
-  lastMarqueeRef.current = lastMarquee;
+  // PS selection semantics: an active marquee is only a selection — it never
+  // lands on the edit stack itself. Instead, edit steps recorded while it is
+  // active carry it as their `clip`, so replay confines their effect to the
+  // selection. Whole-mask reshapes (transform / crop / select-all) stay global.
+  const dispatch = useCallback((action: MaskEditAction) => {
+    const lm = lastMarqueeRef.current;
+    if (lm) {
+      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
+      if (action.type === "stroke") {
+        action = { ...action, stroke: { ...action.stroke, clip } };
+      } else if (action.type === "path") {
+        action = { ...action, path: { ...action.path, clip } };
+      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
+        action = { ...action, op: { ...action.op, clip } };
+      }
+    }
+    rawDispatch(action);
+  }, []);
   // Floating size panel beside the selection: a local W×H draft, re-seeded
   // whenever the committed marquee changes.
   const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -391,9 +466,6 @@ export function MaskEditModal({
   const wholePathDrag = useRef<[number, number] | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
-  // Anchor re-editing (M2): index of the path op being re-edited plus a local
-  // draft of its anchors; committed as one undoable step on Done / Enter.
-  const [editingPath, setEditingPath] = useState<number | null>(null);
   const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
   const draggingAnchor = useRef<number | null>(null);
   const [, forceRedraw] = useState(0);
@@ -625,7 +697,11 @@ export function MaskEditModal({
     redo: () => dispatch({ type: "redo" }),
     redo_alt: () => dispatch({ type: "redo" }),
     step_backward: () => dispatch({ type: "undo" }),
-    clear: () => dispatch({ type: "clear" }),
+    clear: () => {
+      // PS Ctrl+D: with an active selection, deselect; otherwise clear edits.
+      if (lastMarqueeRef.current) setLastMarquee(null);
+      else dispatch({ type: "clear" });
+    },
     select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
     delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
     reselect: () => dispatch({ type: "reselect" }),
@@ -828,7 +904,9 @@ export function MaskEditModal({
         layer.ops.forEach((op, i) => {
           if (op.disabled || (li === state.current.active && i === editingPath)) return;
           if (isBrushOp(op)) paintStroke(ctx, op);
-          else if (isPathOp(op)) paintPath(ctx, op);
+          // Committed vector paths render host-side (the viewport overlay
+          // scene); the canvas draws them only for the fallback stage.
+          else if (isPathOp(op) && !underlay && !presented) paintPath(ctx, op);
         });
       });
     }
@@ -870,7 +948,9 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-    else if (lastMarquee) {
+    else if (lastMarquee && !underlay && !presented) {
+      // The committed ants stroke host-side over the presented frame; the
+      // canvas only draws them when no host frame presents (browser preview).
       const [x0, y0, x1, y1] = lastMarquee.region;
       paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse);
     }
@@ -1383,14 +1463,9 @@ export function MaskEditModal({
       const toMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
       dispatch({ type: toMatte ? "matte_stroke" : "stroke", stroke });
     } else if (marqueeMove.current) {
-      // Land the moved selection as a fresh rect / ellipse step (same shape a
-      // drag or the manual size inputs record).
-      const { from } = marqueeMove.current;
+      // The moved selection is already live in `lastMarquee`; nothing lands
+      // on the edit stack (the selection is not a mask edit).
       marqueeMove.current = null;
-      const lm = lastMarqueeRef.current;
-      if (lm && (Math.abs(lm.region[0] - from[0]) >= 1 || Math.abs(lm.region[1] - from[1]) >= 1)) {
-        dispatch({ type: "op", op: { type: lm.ellipse ? "ellipse" : "rect", region: lm.region } });
-      }
     } else if (moveDrag.current) {
       const { start, end } = moveDrag.current;
       moveDrag.current = null;
@@ -1424,18 +1499,22 @@ export function MaskEditModal({
             [region[2], region[3]],
             [region[0], region[3]],
           ]);
+        } else if (tool.id === "rect" || tool.id === "ellipse") {
+          // PS marquee: the drag only defines the selection — nothing lands
+          // on the edit stack until a subsequent operation uses it.
+          setLastMarquee({
+            region: region as [number, number, number, number],
+            ellipse: tool.id === "ellipse",
+          });
+          // Surface the selection's size readout / manual inputs: they live
+          // on the 选项 tab, which may be behind another tab in its group.
+          dock.onSelect("options");
         } else {
           dispatch({ type: "op", op: { type: tool.id, region } });
-          if (tool.id === "rect" || tool.id === "ellipse") {
-            setLastMarquee({
-              region: region as [number, number, number, number],
-              ellipse: tool.id === "ellipse",
-            });
-            // Surface the selection's size readout / manual inputs: they live
-            // on the 选项 tab, which may be behind another tab in its group.
-            dock.onSelect("options");
-          }
         }
+      } else if (tool.id === "rect" || tool.id === "ellipse") {
+        // A plain click with a marquee tool drops the selection (PS deselect).
+        setLastMarquee(null);
       }
       forceRedraw((n) => n + 1);
     } else if (shapeDrag.current) {
@@ -1469,7 +1548,6 @@ export function MaskEditModal({
       patchDrag.current = null;
     }
     if (t.id !== "perspective_crop") setQuadDraft(null);
-    if (t.kind !== "marquee") setLastMarquee(null);
     // Picking a marquee tool surfaces its 选项 tab (size readout + manual
     // width/height inputs) so the selection's numbers are in view.
     if (t.id === "rect" || t.id === "ellipse") dock.onSelect("options");
@@ -1534,7 +1612,6 @@ export function MaskEditModal({
     const x0 = Math.min(lastMarquee?.region[0] ?? 0, dims.w - cw);
     const y0 = Math.min(lastMarquee?.region[1] ?? 0, dims.h - ch);
     const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
-    dispatch({ type: "op", op: { type: ellipse ? "ellipse" : "rect", region } });
     setLastMarquee({ region, ellipse });
   };
 
@@ -1613,7 +1690,7 @@ export function MaskEditModal({
           {/* Floating selection-size panel: centred below the marquee's
               bottom edge, clamped to the window. Screen-space so the view
               transform never scales it. */}
-          {lastMarquee && !marquee.current && canvasRef.current
+          {lastMarquee && !marquee.current && tool.kind === "marquee" && canvasRef.current
             ? (() => {
                 const rect = canvasRef.current.getBoundingClientRect();
                 const [x0, y0, x1, y1] = lastMarquee.region;

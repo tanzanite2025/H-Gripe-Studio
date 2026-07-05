@@ -11,6 +11,7 @@ import type {
   ViewportBackend,
   ViewportKind,
   ViewportMaskOverlay,
+  ViewportOverlayScene,
   ViewportTarget,
 } from "../bridge/viewport";
 import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
@@ -97,6 +98,11 @@ export function useViewportUnderlay(
    * surface cannot represent (rotated view, transparency preview): the
    * surface hides and frames fall back to the PNG transport. */
   presentEnabled = true,
+  /** Vector overlay (selection outlines) the host strokes over frames
+   * (image_edit viewports): marching ants present at the view window's
+   * detail — one screen pixel wide at any zoom — instead of on a
+   * document-size canvas. */
+  overlayScene: ViewportOverlayScene | null = null,
 ): ViewportUnderlay {
   const [state, setState] = useState<Omit<ViewportUnderlay, "host">>({
     underlay: null,
@@ -118,6 +124,9 @@ export function useViewportUnderlay(
   const sentOverlayRef = useRef<ViewportMaskOverlay | null>(null);
   const overlayRef = useRef(maskOverlay);
   overlayRef.current = maskOverlay;
+  const sentSceneRef = useRef<ViewportOverlayScene | null>(null);
+  const sceneRef = useRef(overlayScene);
+  sceneRef.current = overlayScene;
   // One re-render in flight per host, with the latest request coalesced
   // behind it. A zoom/pan drag or a brush stroke changes state per input
   // event; issuing one overlapping `set_view`/`set_mask_overlay` +
@@ -209,12 +218,17 @@ export function useViewportUnderlay(
       if (initialOverlay) {
         await host.command({ kind: "set_mask_overlay", overlay: initialOverlay });
       }
+      const initialScene = sceneRef.current;
+      if (initialScene) {
+        await host.command({ kind: "set_overlay_scene", scene: initialScene });
+      }
       const frame = await host.renderFrame();
       if (cancelled) return;
       hostRef.current = host;
       setOpenHost(host);
       sentViewRef.current = initialView;
       sentOverlayRef.current = initialOverlay;
+      sentSceneRef.current = initialScene;
       sentPresentEnabledRef.current = presentEnabledRef.current;
       // A non-identity first frame is the view window; scale back to the
       // full-frame size so `dims` is view-independent.
@@ -318,6 +332,29 @@ export function useViewportUnderlay(
       cancelled = true;
     };
   }, [maskOverlay]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !host.isOpen) return;
+    if (overlayScene === sentSceneRef.current) return;
+    let cancelled = false;
+    sentSceneRef.current = overlayScene;
+    runCoalesced(host, async () => {
+      await host.command({ kind: "set_overlay_scene", scene: overlayScene });
+      const frame = await host.renderFrame();
+      if (cancelled || hostRef.current !== host) return;
+      setState((s) => ({
+        ...s,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
+        backend: frame.backend,
+        settled: true,
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [overlayScene]);
 
   return { ...state, host: openHost };
 }

@@ -745,6 +745,50 @@ fn blend_layer(dst: &mut GrayImage, src: &GrayImage, blend: &str, opacity: f64) 
     }
 }
 
+/// The marquee selection recorded on an edit step (`clip`): image-space
+/// `[x1, y1, x2, y2]`, elliptical when `ellipse`.
+fn parse_clip(op: &Value) -> Option<(Vec<f64>, bool)> {
+    let clip = op.get("clip")?;
+    let region: Vec<f64> = clip
+        .get("region")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_f64)
+        .collect();
+    if region.len() < 4 {
+        return None;
+    }
+    let ellipse = clip.get("ellipse").and_then(Value::as_bool) == Some(true);
+    Some((region, ellipse))
+}
+
+/// Confine a replayed step to its recorded marquee selection (PS selection
+/// semantics): pixels outside the clip region are restored from the pre-step
+/// mask. Mirrors the TS `restoreOutsideClip` in `maskMorphology.ts`.
+fn restore_outside_clip(mask: &mut GrayImage, before: &GrayImage, region: &[f64], ellipse: bool) {
+    let x1 = region[0].min(region[2]);
+    let y1 = region[1].min(region[3]);
+    let x2 = region[0].max(region[2]);
+    let y2 = region[1].max(region[3]);
+    let cx = (x1 + x2) / 2.0;
+    let cy = (y1 + y2) / 2.0;
+    let rx = ((x2 - x1) / 2.0).max(0.5);
+    let ry = ((y2 - y1) / 2.0).max(0.5);
+    for (x, y, p) in mask.enumerate_pixels_mut() {
+        let px = f64::from(x) + 0.5;
+        let py = f64::from(y) + 0.5;
+        let mut inside = px >= x1 && px <= x2 && py >= y1 && py <= y2;
+        if inside && ellipse {
+            let nx = (px - cx) / rx;
+            let ny = (py - cy) / ry;
+            inside = nx * nx + ny * ny <= 1.0;
+        }
+        if !inside {
+            p.0[0] = before.get_pixel(x, y).0[0];
+        }
+    }
+}
+
 /// Replay one layer's ordered `ops` stack (see M1): pen / lasso vector paths
 /// (rasterised and boolean-combined), brush / eraser strokes, and the queued
 /// magic-wand / marquee / morphology operations, in recorded order.
@@ -773,6 +817,10 @@ fn replay_ops(
         if op.get("disabled").and_then(Value::as_bool) == Some(true) {
             continue;
         }
+        // A step recorded while a marquee selection was active carries it as
+        // `clip`: the step's effect is confined to the selection.
+        let clip = parse_clip(op);
+        let before = clip.as_ref().map(|_| mask.clone());
         match op.get("type").and_then(Value::as_str) {
             Some("path") => {
                 let Some(path) = parse_mask_path(op) else {
@@ -874,6 +922,9 @@ fn replay_ops(
             }
             Some(_) => apply_queued_operation(image, mask, op, default_tolerance, operations),
             None => {}
+        }
+        if let (Some((region, ellipse)), Some(before)) = (clip, before) {
+            restore_outside_clip(mask, &before, &region, ellipse);
         }
     }
 }

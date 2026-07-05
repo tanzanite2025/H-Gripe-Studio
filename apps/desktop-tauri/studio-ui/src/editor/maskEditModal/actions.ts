@@ -37,6 +37,7 @@ import {
 import type {
   AdjustmentType,
   BrushStroke,
+  EditOpBase,
   EditPath,
   EditPathPoint,
   ImageCanvasSize,
@@ -47,11 +48,11 @@ import type {
 } from "../../types/production";
 
 export type MaskEditAction =
-  | { type: "stroke"; stroke: BrushStroke }
+  | { type: "stroke"; stroke: BrushStroke & EditOpBase }
   | { type: "matte_stroke"; stroke: BrushStroke }
-  | { type: "op"; op: MaskOperation }
+  | { type: "op"; op: MaskOperation & EditOpBase }
   | { type: "point"; point: PointPrompt }
-  | { type: "path"; path: EditPath }
+  | { type: "path"; path: EditPath & EditOpBase }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "clear" }
