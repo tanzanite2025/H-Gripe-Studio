@@ -522,6 +522,10 @@ export const messages = {
   "mask.panelChannels": { en: "Channels", zh: "通道" },
   "mask.panelPaths": { en: "Paths", zh: "路径" },
   "mask.adjPlanned": { en: "Planned — not wired to the mask engine yet", zh: "规划中——尚未接入蒙版引擎" },
+  "mask.adjPickHint": {
+    en: "Click an adjustment on the left — its controls appear here.",
+    zh: "点击左侧的调整项——其参数会出现在这里。",
+  },
   "mask.adjExposure": { en: "Exposure", zh: "曝光度" },
   "mask.adjVibrance": { en: "Vibrance", zh: "自然饱和度" },
   "mask.adjHueSaturation": { en: "Hue/Saturation", zh: "色相/饱和度" },
