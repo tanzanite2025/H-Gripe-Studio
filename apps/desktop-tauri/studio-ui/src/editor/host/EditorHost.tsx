@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import type { MaskDocument } from "../../types/production";
+import type { ImageDocument } from "../imageDocument";
 import type { CropCommit } from "../CropEditModal";
 import type { GradeCommit } from "../GradePanel";
 
@@ -80,10 +81,10 @@ export type EditorRequest =
       tabs?: EditorTab[];
       onSelectTab?: (id: string) => void;
       /** In-progress edit document restored when the tab re-activates. */
-      initial?: MaskDocument | null;
+      initial?: ImageDocument | null;
       /** Draft sink: called on every edit so tab switches keep the document. */
-      onDocChange?: (doc: MaskDocument) => void;
-      onCommitMask: (edits: MaskDocument) => void;
+      onDocChange?: (doc: ImageDocument) => void;
+      onCommitMask: (edits: ImageDocument) => void;
       onCommitCrop: (commit: CropCommit) => void;
     };
 
