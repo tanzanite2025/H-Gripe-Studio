@@ -265,6 +265,12 @@ export function MaskEditModal({
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // Last committed rect/ellipse marquee: the marching ants stay visible after
+  // the drag lands so the selection reads (PS-style); cleared on tool switch.
+  const [lastMarquee, setLastMarquee] = useState<{
+    region: [number, number, number, number];
+    ellipse: boolean;
+  } | null>(null);
   // In-progress shape drag (image-space bounding box); committed on release
   // as an ordinary vector path step built from the chosen shape's vertices.
   const shapeDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
@@ -742,6 +748,10 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
+    else if (lastMarquee) {
+      const [x0, y0, x1, y1] = lastMarquee.region;
+      paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse);
+    }
     const pl = patchLoop.current;
     if (pl) {
       const pd = patchDrag.current;
@@ -750,7 +760,7 @@ export function MaskEditModal({
       if (pd) paintDragArrow(ctx, pd.start, pd.end);
     }
     if (quadDraft) paintQuadDraft(ctx, quadDraft);
-  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft]);
+  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, lastMarquee]);
 
   useEffect(() => {
     redraw();
@@ -1253,6 +1263,12 @@ export function MaskEditModal({
           ]);
         } else {
           dispatch({ type: "op", op: { type: tool.id, region } });
+          if (tool.id === "rect" || tool.id === "ellipse") {
+            setLastMarquee({
+              region: region as [number, number, number, number],
+              ellipse: tool.id === "ellipse",
+            });
+          }
         }
       }
       forceRedraw((n) => n + 1);
@@ -1287,6 +1303,7 @@ export function MaskEditModal({
       patchDrag.current = null;
     }
     if (t.id !== "perspective_crop") setQuadDraft(null);
+    if (t.kind !== "marquee") setLastMarquee(null);
     if (t.kind === "global") {
       // Amount-taking morphology ops (grow/shrink/feather/smooth) enter a live
       // preview mode — the user tunes the amount and commits via Apply. The
@@ -1330,6 +1347,20 @@ export function MaskEditModal({
     () => tool.kind === "global" || ["grow", "shrink", "feather", "smooth"].includes(toolId),
     [tool.kind, toolId],
   );
+
+  // Manual marquee size (right rail): build / resize the selection numerically.
+  // Anchored at the last marquee's top-left (or the image origin), clamped to
+  // the canvas, and recorded as the same rect / ellipse op a drag would make.
+  const applyMarqueeSize = (w: number, h: number) => {
+    const ellipse = lastMarquee ? lastMarquee.ellipse : toolId === "ellipse";
+    const cw = Math.max(2, Math.min(Math.round(w), dims.w));
+    const ch = Math.max(2, Math.min(Math.round(h), dims.h));
+    const x0 = Math.min(lastMarquee?.region[0] ?? 0, dims.w - cw);
+    const y0 = Math.min(lastMarquee?.region[1] ?? 0, dims.h - ch);
+    const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
+    dispatch({ type: "op", op: { type: ellipse ? "ellipse" : "rect", region } });
+    setLastMarquee({ region, ellipse });
+  };
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
@@ -1453,6 +1484,9 @@ export function MaskEditModal({
               editingPath={editingPath}
               commitPathEdit={commitPathEdit}
               cancelPathEdit={cancelPathEdit}
+              marqueeRect={lastMarquee}
+              dims={dims}
+              applyMarqueeSize={applyMarqueeSize}
             />
                   ),
                 },
