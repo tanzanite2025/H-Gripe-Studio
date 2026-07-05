@@ -13,15 +13,13 @@ const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; name: string
   { key: "mask.adjCurve", glyph: "CV", type: "curve", name: "曲线" },
   { key: "mask.adjExposure", glyph: "EX", name: "曝光度" },
   { key: "mask.adjVibrance", glyph: "VB", name: "自然饱和度" },
-  { key: "mask.adjHueSaturation", glyph: "HS", name: "色相/饱和度" },
   { key: "mask.adjColorBalance", glyph: "CB", name: "色彩平衡" },
-  { key: "mask.adjBlackWhite", glyph: "BW", name: "黑白" },
   { key: "mask.adjPhotoFilter", glyph: "PF", name: "照片滤镜" },
   { key: "mask.adjChannelMixer", glyph: "CM", name: "通道混和器" },
   { key: "mask.adjColorLookup", glyph: "CL", name: "颜色查找" },
   { key: "mask.adjPosterize", glyph: "PS", name: "色调分离" },
   { key: "mask.adjThreshold", glyph: "TH", name: "阈值" },
-  { key: "mask.adjSelectiveColor", glyph: "SC", name: "可选颜色" },
+  { key: "mask.adjColorRanges", glyph: "CR", name: "颜色范围" },
   { key: "mask.adjGradientMap", glyph: "GM", name: "渐变映射" },
 ];
 
