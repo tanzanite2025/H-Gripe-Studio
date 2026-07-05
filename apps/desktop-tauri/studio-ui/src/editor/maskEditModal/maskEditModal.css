@@ -371,6 +371,30 @@
 }
 .mask-color-swap:hover { color: var(--text); }
 .mask-color-main .well { padding: 0; cursor: pointer; }
+/* Floating selection-size panel: pinned at the committed marquee's right
+   edge, vertically centred (`.flip` anchors it left of the selection). */
+.mask-marquee-float {
+  position: fixed;
+  z-index: 40;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--ps-dock-bg, #23262d);
+  border: 1px solid var(--ps-dock-border, #444);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.mask-marquee-float.flip { transform: translate(-100%, -50%); }
+.mask-marquee-float .muted { color: var(--text-muted, #999); }
+.mask-marquee-float-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mask-marquee-float-row input[type="number"] { width: 56px; }
 /* PS 拾色器 dialog: SV field + hue strip + linked HSB / RGB / hex fields. */
 .mask-color-picker-backdrop {
   position: fixed;
