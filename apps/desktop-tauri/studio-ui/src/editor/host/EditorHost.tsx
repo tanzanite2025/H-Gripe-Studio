@@ -74,7 +74,7 @@ export type EditorRequest =
   | {
       editor: "media";
       target: EditorTarget;
-      /** Blank-editor "open image" entry (shown when there is no image yet). */
+      /** "Open image" entry: lands the picked file on a new image card / tab. */
       onPickFile?: () => void;
       /** Open-document tabs (one per image card); clicking switches targets. */
       tabs?: EditorTab[];

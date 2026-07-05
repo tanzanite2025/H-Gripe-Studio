@@ -245,6 +245,27 @@ pub(super) fn execute_studio_subject_mask(
         operations.push(json!({ "type": "feather", "px": feather_px }));
     }
 
+    // PS Image Size (Ctrl+Alt+I): the document-level `canvas` on `edit_paths`
+    // requests an output pixel size; resample the working surface and the mask
+    // together so every product (mask / alpha / cutout) lands at that size.
+    let mut working = working;
+    let (mut width, mut height) = (width, height);
+    if let Some(canvas) = parse_canvas_size(inputs.get("edit_paths")) {
+        if (canvas.w, canvas.h) != (width, height) {
+            let filter = canvas.filter(width, height);
+            working = pixel_ops::resize_working(&working, canvas.w, canvas.h, filter);
+            mask = pixel_ops::resize_gray(&mask, canvas.w, canvas.h, filter);
+            operations.push(json!({
+                "type": "image_size",
+                "from": [width, height],
+                "to": [canvas.w, canvas.h],
+                "resample": canvas.resample,
+            }));
+            width = canvas.w;
+            height = canvas.h;
+        }
+    }
+
     let coverage = mask_coverage(&mask);
     let alpha_image = compose_alpha(&working, &mask);
     let cutout = cutout_to_bbox(&alpha_image, &mask);
@@ -953,8 +974,7 @@ fn apply_queued_operation(
                 return;
             }
             remove_region(image, mask, &points, radius);
-            operations
-                .push(json!({ "type": "remove", "radius": radius, "seeds": points.len() }));
+            operations.push(json!({ "type": "remove", "radius": radius, "seeds": points.len() }));
         }
         Some("red_eye") => {
             // Red eye (M15): region carries the `[x, y]` click; the
@@ -1779,8 +1799,18 @@ fn remove_region(image: &RgbaImage, mask: &mut GrayImage, points: &[(f32, f32)],
         return;
     }
     let pad = 4 * radius;
-    let x1 = prompts.iter().map(|p| p.x).min().unwrap_or(0).saturating_sub(pad);
-    let y1 = prompts.iter().map(|p| p.y).min().unwrap_or(0).saturating_sub(pad);
+    let x1 = prompts
+        .iter()
+        .map(|p| p.x)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(pad);
+    let y1 = prompts
+        .iter()
+        .map(|p| p.y)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(pad);
     let x2 = (prompts.iter().map(|p| p.x).max().unwrap_or(0) + pad).min(w.saturating_sub(1));
     let y2 = (prompts.iter().map(|p| p.y).max().unwrap_or(0) + pad).min(h.saturating_sub(1));
     let mut placeholder = GrayImage::new(w, h);
@@ -2312,13 +2342,17 @@ fn migrate_edit_paths(value: Value) -> Value {
             .and_then(Value::as_u64)
             .unwrap_or(0)
             .min(layers.len() as u64 - 1);
-        return json!({
+        let mut doc = json!({
             "version": 3,
             "layers": layers,
             "active": active,
             "matte_strokes": arr("matte_strokes"),
             "points": arr("points"),
         });
+        if let Some(canvas) = normalise_canvas(value.get("canvas")) {
+            doc["canvas"] = canvas;
+        }
+        return doc;
     }
     let ops: Vec<Value> = if version >= 2 {
         arr("ops")
@@ -2418,6 +2452,92 @@ fn normalise_layer(layer: Value) -> Value {
         out["adjustment"] = adjustment.clone();
     }
     out
+}
+
+/// The document-level PS Image Size request: the output pixel size plus the
+/// resampling filter choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CanvasSize {
+    w: u32,
+    h: u32,
+    resample: CanvasResample,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanvasResample {
+    Auto,
+    Nearest,
+    Bilinear,
+    Bicubic,
+}
+
+impl CanvasSize {
+    /// The `image` crate filter for this request. `Auto` picks bilinear for a
+    /// downscale and Lanczos for an upscale (the convention the enhance card
+    /// resamples with).
+    fn filter(&self, src_w: u32, src_h: u32) -> imageops::FilterType {
+        match self.resample {
+            CanvasResample::Nearest => imageops::FilterType::Nearest,
+            CanvasResample::Bilinear => imageops::FilterType::Triangle,
+            CanvasResample::Bicubic => imageops::FilterType::CatmullRom,
+            CanvasResample::Auto => {
+                if self.w <= src_w && self.h <= src_h {
+                    imageops::FilterType::Triangle
+                } else {
+                    imageops::FilterType::Lanczos3
+                }
+            }
+        }
+    }
+}
+
+impl CanvasResample {
+    fn as_str(self) -> &'static str {
+        match self {
+            CanvasResample::Auto => "auto",
+            CanvasResample::Nearest => "nearest",
+            CanvasResample::Bilinear => "bilinear",
+            CanvasResample::Bicubic => "bicubic",
+        }
+    }
+
+    fn from_str(value: &str) -> CanvasResample {
+        match value {
+            "nearest" => CanvasResample::Nearest,
+            "bilinear" => CanvasResample::Bilinear,
+            "bicubic" => CanvasResample::Bicubic,
+            _ => CanvasResample::Auto,
+        }
+    }
+}
+
+impl serde::Serialize for CanvasResample {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// The normalised `canvas` object echoed back onto the migrated document, or
+/// `None` when absent / malformed (a missing canvas means "keep source size").
+fn normalise_canvas(value: Option<&Value>) -> Option<Value> {
+    let canvas = parse_canvas_value(value?)?;
+    Some(json!({ "w": canvas.w, "h": canvas.h, "resample": canvas.resample }))
+}
+
+/// The document-level Image Size request on `edit_paths`, when present.
+fn parse_canvas_size(edit_paths: Option<&Value>) -> Option<CanvasSize> {
+    parse_canvas_value(parse_edit_paths(edit_paths)?.get("canvas")?)
+}
+
+fn parse_canvas_value(value: &Value) -> Option<CanvasSize> {
+    let w = json_u32(value.get("w")).filter(|&w| w >= 1)?;
+    let h = json_u32(value.get("h")).filter(|&h| h >= 1)?;
+    let resample = value
+        .get("resample")
+        .and_then(Value::as_str)
+        .map(CanvasResample::from_str)
+        .unwrap_or(CanvasResample::Auto);
+    Some(CanvasSize { w, h, resample })
 }
 
 /// Optional point prompts for the auto-subject segmenter, read from a top-level
@@ -3647,6 +3767,40 @@ mod tests {
         // Non-sequential fields survive unchanged.
         assert_eq!(migrated["matte_strokes"].as_array().unwrap().len(), 1);
         assert_eq!(migrated["points"], json!([[10, 20]]));
+    }
+
+    #[test]
+    fn migrate_edit_paths_preserves_canvas_size_request() {
+        let doc = json!({
+            "version": 3,
+            "layers": [],
+            "active": 0,
+            "canvas": { "w": 320.4, "h": 200, "resample": "bicubic" }
+        });
+        let migrated = migrate_edit_paths(doc);
+        assert_eq!(
+            migrated["canvas"],
+            json!({ "w": 320, "h": 200, "resample": "bicubic" })
+        );
+        // Malformed / absent canvas is dropped (keep the source size).
+        let migrated = migrate_edit_paths(json!({ "version": 3, "canvas": { "w": 0, "h": 10 } }));
+        assert!(migrated.get("canvas").is_none());
+    }
+
+    #[test]
+    fn parse_canvas_size_reads_document_request() {
+        let doc = json!({ "version": 3, "canvas": { "w": 64, "h": 32, "resample": "nearest" } });
+        let canvas = parse_canvas_size(Some(&doc)).unwrap();
+        assert_eq!((canvas.w, canvas.h), (64, 32));
+        assert_eq!(canvas.resample, CanvasResample::Nearest);
+        assert_eq!(canvas.filter(128, 64), imageops::FilterType::Nearest);
+        // Unknown resample names fall back to auto: bilinear on a downscale,
+        // Lanczos on an upscale.
+        let doc = json!({ "canvas": { "w": 64, "h": 32, "resample": "mystery" } });
+        let canvas = parse_canvas_size(Some(&doc)).unwrap();
+        assert_eq!(canvas.filter(128, 64), imageops::FilterType::Triangle);
+        assert_eq!(canvas.filter(32, 16), imageops::FilterType::Lanczos3);
+        assert_eq!(parse_canvas_size(Some(&json!({ "version": 3 }))), None);
     }
 
     #[test]

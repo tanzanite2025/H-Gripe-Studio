@@ -17,7 +17,7 @@ interface MediaEditModalProps {
   imagePath?: string | null;
   /** Node whose output backs the underlay, for a `node_output` target. */
   nodeId?: string | null;
-  /** Blank-editor "open image" entry (shown when there is no image yet). */
+  /** "Open image" entry: lands the picked file on a new image card / tab. */
   onPickFile?: () => void;
   /** Open-document tabs (PS-style top strip); clicking switches targets. */
   tabs?: EditorTab[];
@@ -66,14 +66,14 @@ export function MediaEditModal({
     ) : null;
   const headerExtra = (
     <>
-      {tabStrip}
-      {onPickFile && !imagePath ? (
+      {onPickFile ? (
         <div className="media-edit-groups">
           <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
             {t("mediaEdit.open")}
           </button>
         </div>
       ) : null}
+      {tabStrip}
     </>
   );
 
@@ -88,6 +88,7 @@ export function MediaEditModal({
       onClose={onClose}
       onDocChange={onDocChange}
       headerExtra={headerExtra}
+      hideTitle
       editorName={t("mediaEdit.editor")}
       workspace="image"
     />

@@ -1260,9 +1260,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                   imagePath,
                   nodeId: mediaEditSource?.id ?? null,
                 },
-                // Blank standalone editor: an in-editor "open image" entry
-                // replaces the up-front system picker.
-                onPickFile: imagePath ? undefined : () => void pickIntoImageEditor(),
+                // "Open image": lands the picked file on a new image card and
+                // retargets the editor to it (a new document tab).
+                onPickFile: () => void pickIntoImageEditor(),
                 tabs,
                 onSelectTab: (id: string) => {
                   setMediaEditBlank(false);
