@@ -74,9 +74,9 @@ export function MediaEditModal({
     setDirty(false);
   };
   const tabStrip =
-    tabs && tabs.length > 0 ? (
+    (tabs && tabs.length > 0) || onPickFile ? (
       <div className="media-edit-tabs" role="tablist">
-        {tabs.map((tab) => (
+        {(tabs ?? []).map((tab) => (
           <button
             key={tab.id}
             role="tab"
@@ -90,6 +90,11 @@ export function MediaEditModal({
             {tab.label}
           </button>
         ))}
+        {onPickFile ? (
+          <button className="media-edit-tab-add" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
+            +
+          </button>
+        ) : null}
       </div>
     ) : null;
   const saveLight = onDocChange ? (
@@ -106,13 +111,6 @@ export function MediaEditModal({
       </svg>
     </button>
   );
-  const headerExtra = onPickFile ? (
-    <div className="media-edit-groups">
-      <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
-        {t("mediaEdit.open")}
-      </button>
-    </div>
-  ) : null;
 
   return (
     <MaskEditModal
@@ -124,7 +122,6 @@ export function MediaEditModal({
       onCommit={(edits: MaskDocument) => onCommitMask(fromMaskDocument(edits))}
       onClose={onClose}
       onDocChange={handleDocChange}
-      headerExtra={headerExtra}
       headerLeft={saveLight}
       headerCenter={collapseArrow}
       headerTabs={tabStrip}
