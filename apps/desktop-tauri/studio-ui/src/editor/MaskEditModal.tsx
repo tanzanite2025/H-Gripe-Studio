@@ -1334,6 +1334,9 @@ export function MaskEditModal({
               region: region as [number, number, number, number],
               ellipse: tool.id === "ellipse",
             });
+            // Surface the selection's size readout / manual inputs: they live
+            // on the 选项 tab, which may be behind another tab in its group.
+            dock.onSelect("options");
           }
         }
       }
@@ -1370,6 +1373,9 @@ export function MaskEditModal({
     }
     if (t.id !== "perspective_crop") setQuadDraft(null);
     if (t.kind !== "marquee") setLastMarquee(null);
+    // Picking a marquee tool surfaces its 选项 tab (size readout + manual
+    // width/height inputs) so the selection's numbers are in view.
+    if (t.id === "rect" || t.id === "ellipse") dock.onSelect("options");
     if (t.kind === "global") {
       // Amount-taking morphology ops (grow/shrink/feather/smooth) enter a live
       // preview mode — the user tunes the amount and commits via Apply. The
