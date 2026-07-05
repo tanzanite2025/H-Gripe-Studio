@@ -271,6 +271,8 @@ export const messages = {
     zh: "打开统一编辑器（蒙版 + 裁剪），确定后生成一个绑定的编辑节点",
   },
   "mediaEdit.editor": { en: "image editor", zh: "图片编辑器" },
+  "preview.imageTitle": { en: "Image preview", zh: "图片预览" },
+  "node.thumbPreviewTitle": { en: "Double-click to preview", zh: "双击打开预览" },
   "preview.openImageEditor": { en: "Image editor", zh: "图片编辑器" },
   "preview.openImageEditorTitle": {
     en: "open this node's result in the standalone image editor",

@@ -135,15 +135,13 @@ function dropExtension(path: string): string {
   return dot >= 0 ? path.slice(dot + 1).toLowerCase() : "";
 }
 
-// Minimal pre-wired workflow: Prompt -> Generate -> Preview.
+// Minimal pre-wired workflow: Prompt -> Generate.
 const initialNodes: Node[] = [
   makeNode("prompt-1", "prompt", 40, 120, { text: "a watercolor fox" }),
   makeNode("generate-1", "generate", 360, 80),
-  makeNode("preview-1", "preview", 700, 120),
 ];
 const initialEdges: Edge[] = [
   { id: "e1", source: "prompt-1", sourceHandle: "text", target: "generate-1", targetHandle: "prompt" },
-  { id: "e2", source: "generate-1", sourceHandle: "image", target: "preview-1", targetHandle: "image" },
 ];
 
 function Studio({ onToggleLang }: { onToggleLang: () => void }) {
@@ -208,6 +206,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [modelsOpen, setModelsOpen] = useState(false);
   // Standalone image editor opened blank (no image card selected yet).
   const [mediaEditBlank, setMediaEditBlank] = useState(false);
+  // Standalone image preview popup: any thumbnail double-click opens the
+  // file here, off the canvas layer (no in-canvas preview cards).
+  const [imagePreviewPath, setImagePreviewPath] = useState<string | null>(null);
   const { fitView, screenToFlowPosition } = useReactFlow();
   const isDesktop = isTauri();
   const [message, setMessage] = useState<string>(
@@ -1124,6 +1125,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         setInspectorNodeId(nodeId);
       },
       openPreview,
+      openImagePreview: setImagePreviewPath,
       openMaskEdit,
       openCropEdit,
       openGradeEdit,
@@ -1622,6 +1624,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       </NodeEditingContext.Provider>
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />
+      )}
+
+      {imagePreviewPath && (
+        <PreviewModal
+          title={imagePreviewPath.split(/[\\/]/).pop() || t("preview.imageTitle")}
+          layers={[{ label: "Image", path: imagePreviewPath }]}
+          onClose={() => setImagePreviewPath(null)}
+        />
       )}
 
       {previewNode && (

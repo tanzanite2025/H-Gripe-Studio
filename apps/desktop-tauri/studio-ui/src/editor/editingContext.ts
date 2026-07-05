@@ -7,6 +7,9 @@ export interface NodeEditing {
   openInspector?: (nodeId: string) => void;
   /** Open the shared, reusable Preview (review-gate) modal for a node. */
   openPreview?: (nodeId: string) => void;
+  /** Open the standalone image preview popup over a file path (double-click
+   * on any image thumbnail). */
+  openImagePreview?: (path: string) => void;
   /** Open the on-demand Mask-Edit modal for a node (brush/wand/morphology). */
   openMaskEdit?: (nodeId: string) => void;
   /** Open the on-demand Crop-Edit modal for a crop node (manual box / auto). */

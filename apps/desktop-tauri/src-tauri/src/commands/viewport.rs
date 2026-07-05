@@ -313,7 +313,7 @@ fn composite_mask_overlay(
 /// coordinates (0..=1 over the full document, view-independent).
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum OverlayItem {
+pub(crate) enum OverlayItem {
     /// Dashed rect / ellipse outline — the marquee selection's marching ants.
     Marquee {
         /// `[x1, y1, x2, y2]` corners, normalized.
@@ -373,7 +373,7 @@ enum OverlayItem {
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
-enum MarkerShape {
+pub(crate) enum MarkerShape {
     /// A circle: filled when `fill` is set, ring-outlined by `stroke`.
     Disc,
     /// A `+` crosshair (SAM include points).
@@ -386,8 +386,8 @@ enum MarkerShape {
 /// the mask tint. Primitives are document-space geometry; stroking happens in
 /// surface pixels, so outlines stay one screen pixel wide at any zoom.
 #[derive(Deserialize)]
-struct OverlayScene {
-    items: Vec<OverlayItem>,
+pub(crate) struct OverlayScene {
+    pub(crate) items: Vec<OverlayItem>,
 }
 
 /// Marquee outline styling, matching the editor's canvas painter
