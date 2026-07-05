@@ -16,10 +16,10 @@
 //   (monotone spline) or `contrast` (pivot scale without the brightness
 //   shift), which would change the shape.
 //
-// The image-workspace colour adjustments (`color_ranges`, `channel_mixer`)
-// have no u8 counterpart — they lower straight to their grade ops
-// (`color_ranges`, `rgb_mixer`), converting UI units (degrees / percent)
-// to op units.
+// The image-workspace colour adjustments (`color_ranges`, `channel_mixer`,
+// `replace_color`) have no u8 counterpart — they lower straight to their
+// grade ops (`color_ranges`, `rgb_mixer`, `replace_color`), converting UI
+// units (hex colours / degrees / percent) to op units.
 //
 // `imageAdjustments.test.ts` asserts each tone-map lowering agrees with
 // `adjustmentLut` within u8 rounding at all 256 levels.
@@ -28,6 +28,16 @@ import type { GradeOp } from "./gradeKernel";
 import type { LayerAdjustment } from "../types/production";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+/** Parse `#rrggbb` to 0..1 RGB; null when malformed. */
+function hexToRgb01(hex: string | undefined): [number, number, number] | null {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ];
+}
 
 /** A 256-sample grayscale `lut1d` op from a per-level transfer function. */
 function lut1dOf(f: (v01: number) => number): GradeOp {
@@ -103,6 +113,21 @@ export function adjustmentToGradeOps(adj: LayerAdjustment): GradeOp[] {
       blue.join() === "0,0,1";
     if (identity) return [];
     return [{ type: "rgb_mixer", red, green, blue, monochrome: adj.monochrome ?? false }];
+  }
+  if (adj.type === "replace_color") {
+    const from = hexToRgb01(adj.from_color);
+    const to = hexToRgb01(adj.to_color);
+    const amount = clamp(adj.strength ?? 100, 0, 100) / 100;
+    if (!from || !to || amount === 0) return [];
+    return [
+      {
+        type: "replace_color",
+        from,
+        to,
+        fuzziness: clamp(adj.fuzziness ?? 40, 0, 100) / 100,
+        amount,
+      },
+    ];
   }
   // brightness_contrast: scale about the midpoint, then shift.
   const brightness = clamp(adj.brightness ?? 0, -100, 100) / 100;

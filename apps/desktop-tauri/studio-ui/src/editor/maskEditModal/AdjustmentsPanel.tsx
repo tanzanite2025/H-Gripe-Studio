@@ -2,12 +2,13 @@
 // not create layers until the user presses the explicit add button.
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useT, type MsgKey } from "../../i18n";
 import type { AdjustmentType, LayerAdjustment } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
 import { AdjustmentControls } from "./AdjustmentControls";
 
-const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?: boolean; name: string }[] = [
+const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?: boolean; popup?: boolean; name: string }[] = [
   { key: "mask.adjBrightnessContrast", glyph: "BC", type: "brightness_contrast", name: "亮度/对比度" },
   { key: "mask.adjLevels", glyph: "LV", type: "levels", name: "色阶" },
   { key: "mask.adjCurve", glyph: "CV", type: "curve", name: "曲线" },
@@ -21,6 +22,7 @@ const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?:
   { key: "mask.adjThreshold", glyph: "TH", name: "阈值" },
   { key: "mask.adjColorRanges", glyph: "CR", type: "color_ranges", image_only: true, name: "颜色范围" },
   { key: "mask.adjGradientMap", glyph: "GM", name: "渐变映射" },
+  { key: "mask.adjReplaceColor", glyph: "RC", type: "replace_color", image_only: true, popup: true, name: "替换颜色" },
 ];
 
 const defaultAdjustment = (type: AdjustmentType): LayerAdjustment => ({ type });
@@ -32,9 +34,11 @@ interface AdjustmentsPanelProps {
   patchAdjustment: (patch: Partial<LayerAdjustment>) => void;
   /** Colour adjustments only exist in the image workspace (grade kernel). */
   workspace: "mask" | "image";
+  /** Arms a one-shot canvas eyedropper (replace-color swatches). */
+  requestColorPick?: (cb: (hex: string) => void) => void;
 }
 
-export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, workspace }: AdjustmentsPanelProps) {
+export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, workspace, requestColorPick }: AdjustmentsPanelProps) {
   const t = useT();
   const [selectedType, setSelectedType] = useState<AdjustmentType>("brightness_contrast");
   const [drafts, setDrafts] = useState<Record<AdjustmentType, LayerAdjustment>>({
@@ -43,6 +47,7 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, worksp
     curve: { type: "curve" },
     color_ranges: { type: "color_ranges" },
     channel_mixer: { type: "channel_mixer" },
+    replace_color: { type: "replace_color" },
   });
 
   useEffect(() => {
@@ -93,7 +98,7 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, worksp
           })}
         </div>
         <div className="mask-adjustments-detail">
-          {selectedEntry ? (
+          {selectedEntry && !selectedEntry.popup ? (
             <>
               <button
                 className="mask-adjustment-add-btn"
@@ -112,6 +117,42 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, worksp
           )}
         </div>
       </div>
+      {selectedEntry?.popup
+        ? // A floating popover, deliberately without a backdrop: the live
+          // canvas stays visible (and clickable, for the eyedropper) while
+          // the tool is open.
+          createPortal(
+            <div className="replace-color-popup" role="dialog" aria-label={t(selectedEntry.key)}>
+              <div className="replace-color-popup-head">
+                <span>{t(selectedEntry.key)}</span>
+                <button
+                  type="button"
+                  className="replace-color-popup-close"
+                  aria-label="close"
+                  onClick={() => setSelectedType("brightness_contrast")}
+                >
+                  ×
+                </button>
+              </div>
+              <button
+                className="mask-adjustment-add-btn"
+                onClick={() => dispatch({
+                  type: "layer_add_adjustment",
+                  adjType: selectedType,
+                  name: selectedEntry.name,
+                })}
+              >
+                添加{selectedEntry.name}
+              </button>
+              <AdjustmentControls
+                adjustment={visibleAdjustment}
+                patchAdjustment={patchVisibleAdjustment}
+                requestColorPick={requestColorPick}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

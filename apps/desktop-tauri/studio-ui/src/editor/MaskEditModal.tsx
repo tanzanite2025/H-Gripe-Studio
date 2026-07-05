@@ -1030,6 +1030,13 @@ export function MaskEditModal({
     [dims.w, dims.h],
   );
 
+  // One-shot colour pick armed by the replace-color popup: the next canvas
+  // pointer-down samples the underlay into this callback instead of drawing.
+  const colorPickRequest = useRef<((hex: string) => void) | null>(null);
+  const requestColorPick = useCallback((cb: (hex: string) => void) => {
+    colorPickRequest.current = cb;
+  }, []);
+
   // Eyedropper: read the underlay pixel at an image-space point by drawing
   // the presented frame — a view window of the image — onto an offscreen
   // canvas at the window's document size. Async (the data URL decodes first);
@@ -1280,6 +1287,14 @@ export function MaskEditModal({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // An armed replace-color eyedropper consumes the next canvas click:
+    // sample the underlay into the requesting swatch, nothing else fires.
+    if (colorPickRequest.current) {
+      const cb = colorPickRequest.current;
+      colorPickRequest.current = null;
+      sampleUnderlay(toImage(e), cb);
+      return;
+    }
     // Canvas navigation (M8): hand tool / Space-hold pans; zoom tool clicks
     // in (Alt+click out) anchored at the cursor. Neither records anything.
     if (spacePan || tool.id === "hand") {
@@ -2227,7 +2242,7 @@ export function MaskEditModal({
                   id: "adjustments",
                   label: t("mask.panelAdjustments"),
                   content: (
-                    <AdjustmentsPanel dispatch={dispatch} adjustment={activeAdjustment} patchAdjustment={patchAdjustment} workspace={workspace} />
+                    <AdjustmentsPanel dispatch={dispatch} adjustment={activeAdjustment} patchAdjustment={patchAdjustment} workspace={workspace} requestColorPick={requestColorPick} />
                   ),
                 },
                 channels: {

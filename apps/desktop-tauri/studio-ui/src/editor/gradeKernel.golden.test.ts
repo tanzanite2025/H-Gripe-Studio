@@ -13,6 +13,7 @@ import opsHdr from "../../../../../crates/hgripe-grade/goldens/ops_hdr.json";
 import opsLut1d from "../../../../../crates/hgripe-grade/goldens/ops_lut1d.json";
 import opsMixer from "../../../../../crates/hgripe-grade/goldens/ops_mixer.json";
 import opsPro from "../../../../../crates/hgripe-grade/goldens/ops_pro.json";
+import opsReplaceColor from "../../../../../crates/hgripe-grade/goldens/ops_replace_color.json";
 import opsSpatial from "../../../../../crates/hgripe-grade/goldens/ops_spatial.json";
 import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json";
 import opsWarper from "../../../../../crates/hgripe-grade/goldens/ops_warper.json";
@@ -112,6 +113,7 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
     ["ops_hdr.json", opsHdr],
     ["ops_mixer.json", opsMixer],
     ["ops_color_ranges.json", opsColorRanges],
+    ["ops_replace_color.json", opsReplaceColor],
     ["ops_lut1d.json", opsLut1d],
     ["ops_warper.json", opsWarper],
     ["ops_spatial.json", opsSpatial],

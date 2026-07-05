@@ -204,6 +204,19 @@ fn all_ops() -> Vec<GradeOp> {
             ],
             monochrome: true,
         },
+        // Degenerate replace-color: non-finite params, zero fuzziness, extreme amount.
+        GradeOp::ReplaceColor {
+            from: [f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+            to: [0.5, 0.5, 0.5],
+            fuzziness: f32::NAN,
+            amount: f32::INFINITY,
+        },
+        GradeOp::ReplaceColor {
+            from: [10.0, -10.0, 0.5],
+            to: [-1.0, 2.0, f32::NAN],
+            fuzziness: 0.0,
+            amount: -1e6,
+        },
         // Degenerate 1D LUTs: minimal size, inverted/out-of-range entries.
         GradeOp::Lut1d {
             size: 2,

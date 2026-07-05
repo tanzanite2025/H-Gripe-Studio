@@ -332,7 +332,8 @@ export type AdjustmentType =
   | "curve"
   | "brightness_contrast"
   | "color_ranges"
-  | "channel_mixer";
+  | "channel_mixer"
+  | "replace_color";
 
 /** A named colour range of the `color_ranges` adjustment. */
 export type AdjustmentColorRange =
@@ -397,6 +398,15 @@ export interface LayerAdjustment {
   green?: [number, number, number];
   /** Output-blue weights in percent. Absent ⇒ [0, 0, 100]. */
   blue?: [number, number, number];
+  // --- replace_color (image workspace) --------------------------------------
+  /** The colour to replace, as `#rrggbb`. Absent ⇒ not yet picked (identity). */
+  from_color?: string;
+  /** The replacement colour, as `#rrggbb`. Absent ⇒ not yet picked (identity). */
+  to_color?: string;
+  /** Match tolerance in percent, 0..100. Absent ⇒ 40. */
+  fuzziness?: number;
+  /** Replacement strength in percent, 0..100. Absent ⇒ 100. */
+  strength?: number;
 }
 
 /**

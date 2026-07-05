@@ -96,6 +96,7 @@ export const MASK_ADJUSTMENTS: Record<AdjustmentType, OpMeta> = {
   // mask compositor ignores them).
   color_ranges: { kernel: "grade", adjustment: true },
   channel_mixer: { kernel: "grade", adjustment: true },
+  replace_color: { kernel: "grade", adjustment: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -126,6 +127,7 @@ export const GRADE_OPS: Record<GradeOp["type"], OpMeta> = {
   soft_clip: GRADE_ADJ,
   rgb_mixer: GRADE_ADJ,
   color_ranges: GRADE_ADJ,
+  replace_color: GRADE_ADJ,
   color_warper: GRADE_ADJ,
   sharpen: GRADE_ADJ,
   denoise: GRADE_ADJ,

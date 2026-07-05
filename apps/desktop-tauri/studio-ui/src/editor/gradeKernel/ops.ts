@@ -45,6 +45,7 @@ export type GradeOp =
     }
   | { type: "color_warper"; points: WarpPoint[] }
   | { type: "color_ranges"; ranges: RangeAdjust[]; monochrome?: boolean }
+  | { type: "replace_color"; from: Rgb; to: Rgb; fuzziness: number; amount: number }
   | { type: "sharpen"; amount: number; radius?: number }
   | { type: "denoise"; amount: number; radius?: number }
   | { type: "film_grain"; amount: number; seed: number }
@@ -378,6 +379,31 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
         }
         const outS = monochrome ? 0 : clamp01(s * Math.max(satFactor, 0));
         return [(((h + hueShift) % 360) + 360) % 360, outS, clamp01(l + lumShift)];
+      });
+      break;
+    }
+    case "replace_color": {
+      if (![...op.from, ...op.to, op.fuzziness, op.amount].every((v) => Number.isFinite(v))) break;
+      const [fh, fs, fl] = rgbToHsl([clamp01(op.from[0]), clamp01(op.from[1]), clamp01(op.from[2])]);
+      const [th, ts, tl] = rgbToHsl([clamp01(op.to[0]), clamp01(op.to[1]), clamp01(op.to[2])]);
+      const fuzz = Math.max(Math.min(op.fuzziness, 1), 1e-3);
+      const amount = clamp01(op.amount);
+      if (amount === 0) break;
+      const lumShift = tl - fl;
+      forEachHsl(surface, (h, s, l) => {
+        const dRaw = (((h - fh) % 360) + 360) % 360;
+        const dh = Math.min(dRaw, 360 - dRaw) / 180;
+        const ds = s - fs;
+        const dl = l - fl;
+        const d = Math.sqrt(dh * dh + ds * ds + dl * dl);
+        const w = (1 - smoothstep(d / fuzz)) * amount;
+        const tRaw = (((th - h) % 360) + 360) % 360;
+        const dt = tRaw > 180 ? tRaw - 360 : tRaw;
+        return [
+          (((h + w * dt) % 360) + 360) % 360,
+          clamp01(s + w * (ts - s)),
+          clamp01(l + w * lumShift),
+        ];
       });
       break;
     }

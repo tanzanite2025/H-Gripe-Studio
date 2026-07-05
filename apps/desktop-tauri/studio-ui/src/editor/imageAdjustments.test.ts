@@ -89,6 +89,35 @@ describe("adjustmentToGradeOps", () => {
     ]);
   });
 
+  it("replace_color lowers hex colors and percents to the grade op", () => {
+    expect(
+      adjustmentToGradeOps({
+        type: "replace_color",
+        from_color: "#ff0000",
+        to_color: "#0000ff",
+        fuzziness: 40,
+        strength: 50,
+      }),
+    ).toEqual([
+      {
+        type: "replace_color",
+        from: [1, 0, 0],
+        to: [0, 0, 1],
+        fuzziness: 0.4,
+        amount: 0.5,
+      },
+    ]);
+    // Identity until both colours are picked or when strength is zero.
+    expect(adjustmentToGradeOps({ type: "replace_color" })).toEqual([]);
+    expect(adjustmentToGradeOps({ type: "replace_color", from_color: "#ff0000" })).toEqual([]);
+    expect(
+      adjustmentToGradeOps({ type: "replace_color", from_color: "#ff0000", to_color: "#0000ff", strength: 0 }),
+    ).toEqual([]);
+    expect(
+      adjustmentToGradeOps({ type: "replace_color", from_color: "bogus", to_color: "#0000ff" }),
+    ).toEqual([]);
+  });
+
   it("channel_mixer lowers percent weights to the rgb_mixer op", () => {
     expect(
       adjustmentToGradeOps({ type: "channel_mixer", red: [50, 50, 0] }),

@@ -16,8 +16,8 @@
 use crate::blend::BlendMode;
 use crate::doc::{GradeDoc, GradeLayer};
 use crate::ops::{
-    gaussian_weights, planckian_gains, ColorRange, CurveChannel, GradeOp, MonotoneSpline,
-    MAX_RADIUS,
+    gaussian_weights, planckian_gains, rgb_to_hsl, ColorRange, CurveChannel, GradeOp,
+    MonotoneSpline, MAX_RADIUS,
 };
 use crate::qualifier::HslQualifier;
 use crate::surface::GradeSpace;
@@ -710,6 +710,47 @@ impl Builder {
                     "rgb = hsl_to_rgb(rem_euclid(hsl.x + hue_shift, 360.0), {out_s}, clamp01(hsl.z + lum_shift));"
                 ));
                 body
+            }
+            GradeOp::ReplaceColor {
+                from,
+                to,
+                fuzziness,
+                amount,
+            } => {
+                let finite = from
+                    .iter()
+                    .chain(to.iter())
+                    .chain([fuzziness, amount])
+                    .all(|v| v.is_finite());
+                let amount = amount.clamp(0.0, 1.0);
+                if !finite || amount == 0.0 {
+                    String::new()
+                } else {
+                    let clamp3 = |c: &[f32; 3]| c.map(|v| v.clamp(0.0, 1.0));
+                    let (fh, fs, fl) = rgb_to_hsl(clamp3(from));
+                    let (th, ts, tl) = rgb_to_hsl(clamp3(to));
+                    let fuzz = fuzziness.clamp(1e-3, 1.0);
+                    format!(
+                        "let hsl = rgb_to_hsl(clamp(rgb, vec3f(0.0), vec3f(1.0)));\n\
+                         let draw = rem_euclid(hsl.x - {fh}, 360.0);\n\
+                         let dh = min(draw, 360.0 - draw) / 180.0;\n\
+                         let ds = hsl.y - {fs};\n\
+                         let dl = hsl.z - {fl};\n\
+                         let d = sqrt(dh * dh + ds * ds + dl * dl);\n\
+                         let w = (1.0 - sstep(d / {fuzz})) * {amt};\n\
+                         let traw = rem_euclid({th} - hsl.x, 360.0);\n\
+                         let dt = select(traw, traw - 360.0, traw > 180.0);\n\
+                         rgb = hsl_to_rgb(rem_euclid(hsl.x + w * dt, 360.0), clamp01(hsl.y + w * ({ts} - hsl.y)), clamp01(hsl.z + w * {lshift}));",
+                        fh = lit(fh),
+                        fs = lit(fs),
+                        fl = lit(fl),
+                        th = lit(th),
+                        ts = lit(ts),
+                        fuzz = lit(fuzz),
+                        amt = lit(amount),
+                        lshift = lit(tl - fl),
+                    )
+                }
             }
             GradeOp::Lut1d { size, table } => {
                 assert!(*size >= 2 && table.len() == (*size as usize) * 3, "LUT");
