@@ -70,6 +70,24 @@ describe("compileImageAdjustments", () => {
     expect(compileImageAdjustments(docWith([{ ...emptyImageLayer(), mask: { path: "m.png" } }]))).toBeNull();
   });
 
+  it("lowers a pixel layer's invert steps to a negative grade layer", () => {
+    const base = emptyImageLayer();
+    base.layer = { kind: "pixel", edits: [{ type: "invert" }] };
+    const grade = compileImageAdjustments(docWith([base]));
+    expect(grade?.layers).toHaveLength(1);
+    expect(grade?.layers[0].ops[0].type).toBe("lut1d");
+    const surface = rampSurface();
+    applyDoc(grade!, surface);
+    for (let i = 0; i < 256; i++) {
+      expect(Math.abs(surface.data[i * 4] - (1 - i / 255)), `level ${i}`).toBeLessThanOrEqual(1e-3);
+    }
+    // An even number of inverts cancels; disabled steps are skipped.
+    base.layer = { kind: "pixel", edits: [{ type: "invert" }, { type: "invert" }] };
+    expect(compileImageAdjustments(docWith([base]))?.layers).toHaveLength(0);
+    base.layer = { kind: "pixel", edits: [{ type: "invert" }, { type: "invert", disabled: true }] };
+    expect(compileImageAdjustments(docWith([base]))?.layers).toHaveLength(1);
+  });
+
   it("hidden pixel layers above the stack do not block compilation", () => {
     const grade = compileImageAdjustments(
       docWith([
