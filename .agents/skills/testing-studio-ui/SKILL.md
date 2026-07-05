@@ -41,10 +41,17 @@ description: Test the H-Gripe Studio desktop UI (apps/desktop-tauri/studio-ui) e
 - Annotated-DOM ordering trick: the tab `<button>`s appear right before their group's `<section>` content, so you can assert which panel is active purely from the DOM without pixel-peeping.
 - Drawing strokes with the computer tool: `left_mouse_down` takes **no coordinate** — do `mouse_move` to the start point first, then `left_mouse_down`, `mouse_move`s, `left_mouse_up`.
 
+## Crop tool (image editor) testing
+- Crop UX lives in `MaskEditModal.tsx` (crop draft state, size panel) + `stagePainter.ts` (`paintCropDraft`/`paintCropDim`, blue `#2f7cf6` edges). The image editor entry (`MediaEditModal`) is a separate code path — features added in one modal may be missing from the other; check both entry points when a user reports "no effect".
+- Flow to exercise: crop tool (C) → drag → release should leave a **solid blue frame + corner handles** and a floating W×H panel below (aspect presets, lock-ratio, save-template, Apply, ✕). Custom templates persist in localStorage `hgripe.studio.cropSizeTemplates.v1`.
+- A white **dashed** box with no panel is the pre-#495 rendering — if a user reports that while the code on main looks correct, suspect a **stale desktop build / cache** on their side before hunting for bugs; verify on a fresh dev server against the exact main commit first.
+- Known soft spots to re-check: lock-ratio per-keystroke rounding drift in `onCropSizeInput` (ratio recomputed from already-rounded values), and stale aspect label when drawing a new free-form box after apply/cancel.
+- A plain white test image is handy (crop frame contrast); generate one with a small `.ps1` script (System.Drawing) rather than inline PowerShell (quoting pitfalls).
+
 ## Environment quirks (Windows test box)
 - **Typing a URL with `:` in the Chrome omnibox**: the `type` action may drop the colon (e.g. `localhost:5173` → `localhost5173`, which then triggers a Google search). Type the host, then send the colon as a key (`shift+semicolon`), then the port — e.g. `type "localhost"`, `key shift+semicolon`, `type "5173"`.
 - **`upload_attachment` only accepts platform-rooted POSIX paths, where `/tmp` maps to the Windows `C:\tmp`** — it rejects drive paths (`C:\...`/`C:/...` → "must be absolute") and cannot find shell-style `/c/...` paths (the Git-Bash mount is a different view). Reliable recipe: the recording tool returns its mp4 under `/tmp/devin-recordings/<rec-id>/...edited.mp4` and that uploads as-is. For screenshots (saved by the screenshot tool under `C:\Users\...\screenshots\`), **copy them into `C:\tmp\` first** (`cp /c/Users/.../ss_*.png /c/tmp/ssup/`) then upload via the `/tmp/ssup/ss_*.png` path — that succeeds and returns `app.devin.ai/attachments/...` URLs.
-- **PR-comment image auto-upload also chokes on `/c/...` / `C:\...` markdown paths** (posts with broken-image warnings). Cleanest flow: `upload_attachment` the screenshots via the `/tmp/...` recipe above to get URLs, post the comment with `git_comment_on_pr`, then `git_edit_comment` to swap in the returned `app.devin.ai/attachments/...` URLs (or just include the URLs from the start).
+- **PR-comment image auto-upload with `C:\...` markdown paths has been flaky**: it has worked (uploads reported in the tool result) but has also posted broken-image warnings in the past. Check the `git_comment_on_pr` result for an "Uploaded media" list; if paths weren't uploaded, `upload_attachment` the screenshots via the `/tmp/...` recipe above and `git_edit_comment` the URLs in.
 
 ## i18n specifics
 - Strings live in `src/i18n.ts` (`messages` dict, `translate`, `loadLang/saveLang`, `LangContext`, `useT`). The toolbar `中文/EN` button toggles language.
