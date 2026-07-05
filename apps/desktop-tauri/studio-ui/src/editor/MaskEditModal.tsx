@@ -592,13 +592,20 @@ export function MaskEditModal({
   const [cropAspect, setCropAspect] = useState("");
   const [cropLock, setCropLock] = useState(false);
   const cropDragRatio = useRef<number | null>(null);
+  // The ratio the lock holds. Captured when the box changes by any means
+  // other than the size inputs (drag, preset, template) — not re-derived
+  // from the rounded W×H on every keystroke, which would drift.
+  const cropLockRatio = useRef<number | null>(null);
+  const cropSizeFromInput = useRef(false);
   const [cropTemplates, setCropTemplates] = useState<{ w: number; h: number }[]>(loadCropTemplates);
   useEffect(() => {
-    if (cropDraft)
-      setCropSizeDraft({
-        w: Math.round(Math.abs(cropDraft[2] - cropDraft[0])),
-        h: Math.round(Math.abs(cropDraft[3] - cropDraft[1])),
-      });
+    if (cropDraft) {
+      const w = Math.round(Math.abs(cropDraft[2] - cropDraft[0]));
+      const h = Math.round(Math.abs(cropDraft[3] - cropDraft[1]));
+      setCropSizeDraft({ w, h });
+      if (!cropSizeFromInput.current) cropLockRatio.current = w >= 2 && h >= 2 ? w / h : null;
+      cropSizeFromInput.current = false;
+    }
   }, [cropDraft]);
   const confirmCropDraft = (draft: [number, number, number, number]) => {
     setCropDraft(null);
@@ -645,18 +652,23 @@ export function MaskEditModal({
     setCropAspect(label);
     const preset = CROP_ASPECTS.find(([l]) => l === label);
     if (preset) {
+      cropLockRatio.current = preset[1];
       const { w, h } = cropSizeForRatio(preset[1]);
+      cropSizeFromInput.current = true;
       resizeCropDraft(w, h);
     }
   };
   const applyCropSize = (w: number, h: number) => {
     setCropSizeDraft({ w, h });
-    if (w >= 2 && h >= 2) resizeCropDraft(w, h);
+    if (w >= 2 && h >= 2) {
+      cropSizeFromInput.current = true;
+      resizeCropDraft(w, h);
+    }
   };
   const onCropSizeInput = (axis: "w" | "h", value: number) => {
     const other = axis === "w" ? cropSizeDraft.h : cropSizeDraft.w;
-    if (cropLock && cropSizeDraft.w >= 2 && cropSizeDraft.h >= 2 && value >= 2) {
-      const ratio = cropSizeDraft.w / cropSizeDraft.h;
+    const ratio = cropLockRatio.current;
+    if (cropLock && ratio && value >= 2) {
       if (axis === "w") applyCropSize(value, Math.max(2, Math.round(value / ratio)));
       else applyCropSize(Math.max(2, Math.round(value * ratio)), value);
       return;
@@ -1793,7 +1805,8 @@ export function MaskEditModal({
       if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
         if (tool.id === "crop" && workspace === "image") {
           // The box becomes an adjustable rect; the commit happens on the
-          // click inside it.
+          // click inside it. A fresh free-form box carries no preset.
+          setCropAspect("");
           setCropDraft(region as [number, number, number, number]);
         } else if (tool.id === "perspective_crop") {
           // The box becomes an adjustable quad; the commit happens on the
@@ -2068,7 +2081,10 @@ export function MaskEditModal({
                           if (v.startsWith("tpl:")) {
                             const tpl = cropTemplates[Number(v.slice(4))];
                             setCropAspect(v);
-                            if (tpl) applyCropSize(tpl.w, tpl.h);
+                            if (tpl) {
+                              cropLockRatio.current = tpl.w / tpl.h;
+                              applyCropSize(tpl.w, tpl.h);
+                            }
                           } else {
                             applyCropAspect(v);
                           }
