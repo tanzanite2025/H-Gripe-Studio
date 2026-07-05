@@ -1978,9 +1978,11 @@ export function MaskEditModal({
             <button className="primary" onClick={() => { onCommit(state.current); onClose(); }} title={t("mask.applyTitle")}>
               {t("mask.apply")}
             </button>
-            <button onClick={onClose} title={t("mask.closeTitle")}>
-              ✕
-            </button>
+            {workspace === "mask" ? (
+              <button onClick={onClose} title={t("mask.closeTitle")}>
+                ✕
+              </button>
+            ) : null}
           </div>
         </div>
         {headerTabs ? <div className="media-viewer-tabs-row">{headerTabs}</div> : null}
