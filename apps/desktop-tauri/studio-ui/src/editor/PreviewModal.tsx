@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { probeImageDims } from "../bridge/files";
 import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
@@ -51,6 +52,16 @@ function PreviewImage({ path, view }: { path: string; view: ViewportViewState })
   // null in browser preview, where we degrade to a path-only card.
   const viewport = useViewportUnderlay("image_edit", path, 1280, view);
 
+  // A zoomed frame is the `1/zoom` window of the source, so its natural size
+  // shrinks with each zoom tick. Present it in the identity frame's box
+  // (`dims`, stable across zoom) so the window magnifies instead of the
+  // element shrinking in step — otherwise the on-screen scale never changes.
+  const dims = viewport.dims;
+  const zoomedStyle =
+    view.zoom > 1 && dims
+      ? { width: dims.w, height: dims.h, objectFit: "contain" as const }
+      : undefined;
+
   if (viewport.underlay)
     return (
       <>
@@ -59,6 +70,7 @@ function PreviewImage({ path, view }: { path: string; view: ViewportViewState })
           src={viewport.underlay}
           alt={basename(path)}
           draggable={false}
+          style={zoomedStyle}
         />
         <ViewportBackendBadge backend={viewport.backend} />
       </>
@@ -83,6 +95,24 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
   const layer = layers[active];
   const path = layer?.path ?? null;
   const isImage = path ? IMAGE_RE.test(path) : false;
+  // Source pixel dimensions for the details row, from the file header only
+  // (no decode); null in browser preview where the backend is mocked.
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    setDims(null);
+    if (!path || !isImage) return;
+    let cancelled = false;
+    probeImageDims(path)
+      .then((d) => {
+        if (!cancelled && d && d.width && d.height) setDims({ w: d.width, h: d.height });
+      })
+      .catch(() => {
+        /* leave the details row without dimensions */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, isImage]);
   // Zoom/pan is viewport state shared across layer flips, so flipping
   // image / mask / cutout compares the same region.
   const { view, stageProps } = useViewControls(isImage);
@@ -133,7 +163,19 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
             <PreviewImage path={path} view={view} />
           )}
         </div>
-        {path ? <code className="media-viewer-path">{path}</code> : null}
+        {path ? (
+          <div className="media-viewer-details">
+            <span className="media-viewer-detail-name" title={path}>
+              {basename(path)}
+            </span>
+            {dims ? (
+              <span className="media-viewer-detail-dims">
+                {dims.w}×{dims.h}
+              </span>
+            ) : null}
+            <code className="media-viewer-path">{path}</code>
+          </div>
+        ) : null}
       </div>
     </div>
   );

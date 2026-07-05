@@ -29,7 +29,7 @@ export interface HgripeNodeData extends Record<string, unknown> {
   durationMs?: number;
   /** Last run's error message, when `status === "failed"` / `cancelled`. */
   error?: string | null;
-  /** Path of the most recent output image, if any (for the preview node). */
+  /** Path of the most recent output image, if any. */
   imagePath?: string | null;
   /** Backend-generated thumbnail data URL / path for display. */
   thumbnail?: string | null;

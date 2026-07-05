@@ -106,17 +106,17 @@ describe("reroute", () => {
       nodes: [
         { id: "prompt-1", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "reroute-1", kind: "reroute", position: { x: 0, y: 0 }, params: {} },
-        { id: "preview-1", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+        { id: "save-1", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
         { id: "e1", source: "prompt-1", sourcePort: "text", target: "reroute-1", targetPort: "in" },
-        { id: "e2", source: "reroute-1", sourcePort: "out", target: "preview-1", targetPort: "image" },
+        { id: "e2", source: "reroute-1", sourcePort: "out", target: "save-1", targetPort: "image" },
       ],
     };
     // `any` ports keep the chain type-valid in both directions.
     expect(validateGraph(g)).toEqual([]);
     const { outputs } = await runGraph(g, defaultExecutors);
-    expect(outputs.get("preview-1")).toEqual({ image: "hi" });
+    expect(outputs.get("save-1")).toMatchObject({ image: "hi" });
   });
 });
 

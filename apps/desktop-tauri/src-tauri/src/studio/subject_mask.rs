@@ -317,7 +317,7 @@ pub(super) fn execute_studio_subject_mask(
 
     // For each image output, skip the PNG encode+write when graph analysis
     // proved every consumer resolves it from the in-process buffer (another
-    // compute card, or a leaf preview) — publishing a *deferred* surface that is
+    // compute card) — publishing a *deferred* surface that is
     // materialised only if evicted. Otherwise write the file and publish a
     // file-backed buffer as before (a `refineMaskEdge`/`psdExport` consumer, an
     // exported artifact, or the returned result all read the PNG). The

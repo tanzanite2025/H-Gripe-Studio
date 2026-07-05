@@ -2,9 +2,8 @@
 //
 // The `generate` node composes an ApiTask and runs it through the existing
 // H-Gripe broker (`run_task_json`). Source nodes (`prompt`, `imageSource`,
-// `psdTemplate`, `number`) are pure value providers; `preview` / `save` are
-// sinks. This wires the renderer-agnostic DAG runtime to real backend
-// capability.
+// `psdTemplate`, `number`) are pure value providers; `save` is a sink. This
+// wires the renderer-agnostic DAG runtime to real backend capability.
 
 import { analyzePsdContext, composePsd, compositeRepaint, detectQualityIssues, enhanceImage, getOutputDir, localRepaintRegions, matchLightColor, prepareRepaintRegions, refineMaskEdge, runTaskJson } from "../bridge/tauri";
 import type { RepaintedCrop } from "../bridge/tauri";
@@ -300,8 +299,6 @@ export const defaultExecutors: ExecutorRegistry = {
     if (!image) throw new Error("Crop needs a connected image input");
     return { image, crop_report: null };
   },
-
-  preview: async (ctx) => ({ image: ctx.inputs.image ?? null }),
 
   save: async (ctx) => ({
     image: ctx.inputs.image ?? null,

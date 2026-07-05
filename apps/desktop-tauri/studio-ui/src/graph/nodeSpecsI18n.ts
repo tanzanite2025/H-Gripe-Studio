@@ -150,11 +150,6 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
     description: "直通中继：原样转发输入。用它整理过长的连线、在画布上绕线。",
     ports: { in: "输入", out: "输出" },
   },
-  preview: {
-    title: "预览",
-    description: "显示图像缩略图。原始路径会保留以供导出。",
-    ports: { image: "图像" },
-  },
   save: {
     title: "导出",
     description: "汇聚节点：收集结果图像路径（及可选的 PSD 模板）以供导出。",

@@ -722,6 +722,17 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 6px 12px;
   border-top: 1px solid var(--border);
 }
+.media-viewer-details {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+}
+.media-viewer-details .media-viewer-path { padding: 0; border-top: none; flex-basis: 100%; }
+.media-viewer-detail-name { font-size: 12px; font-weight: 600; word-break: break-all; }
+.media-viewer-detail-dims { font-size: 11px; color: var(--muted); }
 
 /* nodes */
 :root {

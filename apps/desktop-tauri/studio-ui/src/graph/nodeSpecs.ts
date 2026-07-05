@@ -549,23 +549,6 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     outputs: [port("out", "out", "any")],
     params: [],
   },
-  preview: {
-    kind: "preview",
-    family: "image",
-    executor: "graph",
-    // Retired from the palette: thumbnails preview via the double-click image
-    // popup instead of a canvas card. The kind stays registered so existing
-    // saved workflows containing preview nodes still load and run (pass-through
-    // sink).
-    palette: "internal",
-    title: "Preview",
-    description:
-      "Display a thumbnail of an image. The original path is preserved for export.",
-    category: "review",
-    inputs: [port("image", "image", "image")],
-    outputs: [],
-    params: [],
-  },
   save: {
     kind: "save",
     family: "export",
