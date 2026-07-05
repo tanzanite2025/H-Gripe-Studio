@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
+import type { LayerBlend, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
 import { buildLayerThumb } from "../maskMorphology";
 import type { MaskEditDispatch } from "./actions";
@@ -363,22 +363,6 @@ export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask
         >
           {t("mask.layerActionLink")}
         </button>
-        <select
-          className="mask-layer-adjustment-add"
-          value=""
-          title={t("mask.adjustmentAddTitle")}
-          onChange={(e) => {
-            const adjType = e.target.value as AdjustmentType | "";
-            if (adjType) dispatch({ type: "layer_add_adjustment", adjType });
-          }}
-        >
-          <option value="" disabled>
-            {t("mask.layerActionAdj")}
-          </option>
-          <option value="levels">{t("mask.adjLevels")}</option>
-          <option value="curve">{t("mask.adjCurve")}</option>
-          <option value="brightness_contrast">{t("mask.adjBrightnessContrast")}</option>
-        </select>
         <button
           className="mask-layer-action"
           title={t("mask.layerDuplicate")}
