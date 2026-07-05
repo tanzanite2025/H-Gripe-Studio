@@ -523,26 +523,12 @@
   justify-content: flex-end;
   margin-top: auto;
 }
-/* Adjustments panel (PS 调整): two columns — the adjustment list on the
-   left, the clicked adjustment's controls on the right. */
-.mask-adjustments-split {
-  display: grid;
-  grid-template-columns: minmax(132px, 0.95fr) minmax(160px, 1.05fr);
-  gap: 8px;
-  align-items: start;
-}
+/* Adjustments panel (PS 调整): a full-width list; the clicked adjustment's
+   controls open in the floating popup (`.adjustment-popup`). */
 .mask-adjustments-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
-}
-.mask-adjustments-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 0 4px 8px;
-  border-left: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.08));
-  min-width: 0;
 }
 .mask-adjustment-add-btn {
   width: 100%;
@@ -555,26 +541,6 @@
   font-weight: 700;
 }
 .mask-adjustment-add-btn:hover { filter: brightness(1.08); }
-.mask-adjustments-detail .slider-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 8px;
-  align-items: center;
-}
-.mask-adjustments-detail .slider-row > span {
-  grid-column: 1 / -1;
-  white-space: normal;
-  line-height: 1.35;
-}
-.mask-adjustments-detail .slider-row input[type="range"] {
-  grid-column: 1;
-  min-width: 0;
-  width: 100%;
-}
-.mask-adjustments-detail .slider-row output {
-  grid-column: 2;
-  min-width: 34px;
-}
 .mask-adjustment-row.active {
   background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1));
 }
@@ -600,9 +566,9 @@
   opacity: 0.45;
   cursor: default;
 }
-/* Replace-color: a floating popover without a backdrop, so the live canvas
-   below stays visible and clickable (the eyedropper samples from it). */
-.replace-color-popup {
+/* Adjustment controls: a floating popover without a backdrop, so the live
+   canvas below stays visible and clickable (the eyedropper samples from it). */
+.adjustment-popup {
   position: fixed;
   top: 96px;
   right: 348px;
@@ -617,29 +583,29 @@
   border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.12));
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
-.replace-color-popup .slider-row {
+.adjustment-popup .slider-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 8px;
   align-items: center;
 }
-.replace-color-popup .slider-row > span { grid-column: 1 / -1; }
-.replace-color-popup .slider-row input[type="range"] {
+.adjustment-popup .slider-row > span { grid-column: 1 / -1; }
+.adjustment-popup .slider-row input[type="range"] {
   grid-column: 1;
   min-width: 0;
   width: 100%;
 }
-.replace-color-popup .slider-row output {
+.adjustment-popup .slider-row output {
   grid-column: 2;
   min-width: 40px;
 }
-.replace-color-popup-head {
+.adjustment-popup-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-weight: 700;
 }
-.replace-color-popup-close {
+.adjustment-popup-close {
   background: none;
   border: none;
   color: var(--text-dim);
@@ -649,7 +615,7 @@
   cursor: pointer;
   border-radius: 4px;
 }
-.replace-color-popup-close:hover {
+.adjustment-popup-close:hover {
   background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1));
   color: var(--text);
 }
