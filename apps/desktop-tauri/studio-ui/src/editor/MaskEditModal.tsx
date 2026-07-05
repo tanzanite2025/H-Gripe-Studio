@@ -45,6 +45,7 @@ import {
   paintCloneSource,
   paintColorSamples,
   paintCropDim,
+  paintCropDraft,
   paintDragArrow,
   paintLassoLoop,
   paintMarquee,
@@ -117,6 +118,36 @@ const cropCorners = (r: readonly [number, number, number, number]): [number, num
   [r[2], r[3]],
   [r[0], r[3]],
 ];
+
+/** Preset crop aspect ratios (label -> width/height). */
+const CROP_ASPECTS: [string, number][] = [
+  ["1:1", 1],
+  ["4:3", 4 / 3],
+  ["3:4", 3 / 4],
+  ["3:2", 3 / 2],
+  ["2:3", 2 / 3],
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+];
+
+/** User-saved crop size templates (width × height in image px). */
+const CROP_TEMPLATES_KEY = "hgripe.studio.cropSizeTemplates.v1";
+
+function loadCropTemplates(): { w: number; h: number }[] {
+  try {
+    const raw = localStorage.getItem(CROP_TEMPLATES_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (x): x is { w: number; h: number } =>
+        typeof x === "object" && x !== null &&
+        typeof (x as { w?: unknown }).w === "number" &&
+        typeof (x as { h?: unknown }).h === "number",
+    );
+  } catch {
+    return [];
+  }
+}
 
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
@@ -554,6 +585,101 @@ export function MaskEditModal({
   // being dragged (TL / TR / BR / BL).
   const [cropDraft, setCropDraft] = useState<[number, number, number, number] | null>(null);
   const cropCorner = useRef<number | null>(null);
+  // Crop panel state: local W×H draft (re-seeded from the box), the selected
+  // aspect preset ("" = free; manual sizing clears it), the ratio lock, and
+  // the user's saved size templates.
+  const [cropSizeDraft, setCropSizeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [cropAspect, setCropAspect] = useState("");
+  const [cropLock, setCropLock] = useState(false);
+  const cropDragRatio = useRef<number | null>(null);
+  const [cropTemplates, setCropTemplates] = useState<{ w: number; h: number }[]>(loadCropTemplates);
+  useEffect(() => {
+    if (cropDraft)
+      setCropSizeDraft({
+        w: Math.round(Math.abs(cropDraft[2] - cropDraft[0])),
+        h: Math.round(Math.abs(cropDraft[3] - cropDraft[1])),
+      });
+  }, [cropDraft]);
+  const confirmCropDraft = (draft: [number, number, number, number]) => {
+    setCropDraft(null);
+    dispatch({
+      type: "op",
+      op: {
+        type: "crop",
+        region: [
+          Math.round(draft[0]),
+          Math.round(draft[1]),
+          Math.round(draft[2]),
+          Math.round(draft[3]),
+        ],
+      },
+    });
+  };
+  // Resize the box from the panel: anchored at its top-left, clamped to the
+  // image (the anchor shifts back in when the size would overflow).
+  const resizeCropDraft = (w: number, h: number) => {
+    setCropDraft((prev) => {
+      if (!prev) return prev;
+      const bw = Math.max(2, Math.min(Math.round(w), dims.w));
+      const bh = Math.max(2, Math.min(Math.round(h), dims.h));
+      const x0 = Math.min(prev[0], dims.w - bw);
+      const y0 = Math.min(prev[1], dims.h - bh);
+      return [x0, y0, x0 + bw, y0 + bh];
+    });
+  };
+  const cropSizeForRatio = (ratio: number): { w: number; h: number } => {
+    const base = cropDraft ?? [0, 0, dims.w, dims.h];
+    let w = Math.abs(base[2] - base[0]);
+    let h = w / ratio;
+    if (h > dims.h) {
+      h = dims.h;
+      w = h * ratio;
+    }
+    if (w > dims.w) {
+      w = dims.w;
+      h = w / ratio;
+    }
+    return { w: Math.max(2, Math.round(w)), h: Math.max(2, Math.round(h)) };
+  };
+  const applyCropAspect = (label: string) => {
+    setCropAspect(label);
+    const preset = CROP_ASPECTS.find(([l]) => l === label);
+    if (preset) {
+      const { w, h } = cropSizeForRatio(preset[1]);
+      resizeCropDraft(w, h);
+    }
+  };
+  const applyCropSize = (w: number, h: number) => {
+    setCropSizeDraft({ w, h });
+    if (w >= 2 && h >= 2) resizeCropDraft(w, h);
+  };
+  const onCropSizeInput = (axis: "w" | "h", value: number) => {
+    const other = axis === "w" ? cropSizeDraft.h : cropSizeDraft.w;
+    if (cropLock && cropSizeDraft.w >= 2 && cropSizeDraft.h >= 2 && value >= 2) {
+      const ratio = cropSizeDraft.w / cropSizeDraft.h;
+      if (axis === "w") applyCropSize(value, Math.max(2, Math.round(value / ratio)));
+      else applyCropSize(Math.max(2, Math.round(value * ratio)), value);
+      return;
+    }
+    // Manual pixel sizing leaves any picked preset behind.
+    setCropAspect("");
+    if (axis === "w") applyCropSize(value, other);
+    else applyCropSize(other, value);
+  };
+  const saveCropTemplate = () => {
+    const { w, h } = cropSizeDraft;
+    if (w < 2 || h < 2) return;
+    setCropTemplates((prev) => {
+      if (prev.some((t2) => t2.w === w && t2.h === h)) return prev;
+      const next = [...prev, { w, h }];
+      try {
+        localStorage.setItem(CROP_TEMPLATES_KEY, JSON.stringify(next));
+      } catch {
+        // Storage may be unavailable (private mode); templates stay in-memory.
+      }
+      return next;
+    });
+  };
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
@@ -1064,8 +1190,8 @@ export function MaskEditModal({
       if (pd) paintDragArrow(ctx, pd.start, pd.end);
     }
     if (quadDraft) paintQuadDraft(ctx, quadDraft);
-    if (cropDraft) paintQuadDraft(ctx, cropCorners(cropDraft));
-    if (cropRegion) paintCropDim(ctx, cropRegion, dims.w, dims.h);
+    if (cropDraft) paintCropDraft(ctx, cropDraft, dims.w, dims.h);
+    else if (cropRegion) paintCropDim(ctx, cropRegion, dims.w, dims.h);
   }, [dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee]);
 
   useEffect(() => {
@@ -1235,24 +1361,19 @@ export function MaskEditModal({
         );
         if (idx >= 0) {
           cropCorner.current = idx;
+          // Ratio lock holds the box's proportions through the corner drag;
+          // a free drag drops any picked preset.
+          const bw = Math.abs(draft[2] - draft[0]);
+          const bh = Math.abs(draft[3] - draft[1]);
+          cropDragRatio.current = cropLock && bh >= 1 ? bw / bh : null;
+          if (!cropLock) setCropAspect("");
+          return;
+        }
+        if (pt[0] >= draft[0] && pt[0] <= draft[2] && pt[1] >= draft[1] && pt[1] <= draft[3]) {
+          confirmCropDraft(draft);
           return;
         }
         setCropDraft(null);
-        if (pt[0] >= draft[0] && pt[0] <= draft[2] && pt[1] >= draft[1] && pt[1] <= draft[3]) {
-          dispatch({
-            type: "op",
-            op: {
-              type: "crop",
-              region: [
-                Math.round(draft[0]),
-                Math.round(draft[1]),
-                Math.round(draft[2]),
-                Math.round(draft[3]),
-              ],
-            },
-          });
-          return;
-        }
       }
       marquee.current = { start: pt, end: pt };
       forceRedraw((n) => n + 1);
@@ -1404,10 +1525,23 @@ export function MaskEditModal({
       setCropDraft((prev) => {
         if (!prev) return prev;
         const [x0, y0, x1, y1] = prev;
-        if (idx === 0) return [p[0], p[1], x1, y1];
-        if (idx === 1) return [x0, p[1], p[0], y1];
-        if (idx === 2) return [x0, y0, p[0], p[1]];
-        return [p[0], y0, x1, p[1]];
+        const next: [number, number, number, number] =
+          idx === 0
+            ? [p[0], p[1], x1, y1]
+            : idx === 1
+              ? [x0, p[1], p[0], y1]
+              : idx === 2
+                ? [x0, y0, p[0], p[1]]
+                : [p[0], y0, x1, p[1]];
+        const ratio = cropDragRatio.current;
+        if (ratio) {
+          // Locked ratio: the dragged corner's vertical edge follows the
+          // width, growing away from the fixed edge.
+          const h = Math.abs(next[2] - next[0]) / ratio;
+          if (idx === 0 || idx === 1) next[1] = y1 - h;
+          else next[3] = y0 + h;
+        }
+        return next;
       });
       return;
     }
@@ -1484,6 +1618,7 @@ export function MaskEditModal({
     }
     if (cropCorner.current != null) {
       cropCorner.current = null;
+      cropDragRatio.current = null;
       setCropDraft((prev) =>
         prev
           ? [
@@ -1900,6 +2035,95 @@ export function MaskEditModal({
                         onClick={() => applyMarqueeSize(marqueeDraft.w, marqueeDraft.h)}
                       >
                         {t("mask.marqueeApply")}
+                      </button>
+                    </span>
+                  </div>
+                );
+              })()
+            : null}
+
+          {/* Floating crop panel: below the pending crop box — pixel W×H
+              inputs, aspect presets / saved size templates, and the ratio
+              lock. Manual pixel sizing clears a picked preset. */}
+          {cropDraft && tool.id === "crop" && workspace === "image" && canvasRef.current
+            ? (() => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const [cx0, , cx1, cy1] = cropDraft;
+                const midX = rect.left + (((cx0 + cx1) / 2) / dims.w) * rect.width;
+                const belowY = rect.top + (cy1 / dims.h) * rect.height + 10;
+                const left = Math.max(210, Math.min(midX, window.innerWidth - 210));
+                const top = Math.max(10, Math.min(belowY, window.innerHeight - 110));
+                return (
+                  <div
+                    className="mask-marquee-float"
+                    style={{ left, top }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="mask-marquee-float-row">
+                      <select
+                        aria-label={t("crop.aspect")}
+                        value={cropAspect}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v.startsWith("tpl:")) {
+                            const tpl = cropTemplates[Number(v.slice(4))];
+                            setCropAspect(v);
+                            if (tpl) applyCropSize(tpl.w, tpl.h);
+                          } else {
+                            applyCropAspect(v);
+                          }
+                        }}
+                      >
+                        <option value="">{t("crop.aspectFree")}</option>
+                        {CROP_ASPECTS.map(([label]) => (
+                          <option key={label} value={label}>
+                            {label}
+                          </option>
+                        ))}
+                        {cropTemplates.map((tpl, i) => (
+                          <option key={`tpl-${tpl.w}x${tpl.h}`} value={`tpl:${i}`}>
+                            {tpl.w}×{tpl.h}px
+                          </option>
+                        ))}
+                      </select>
+                      <label className="mask-crop-lock" title={t("crop.lockRatioTitle")}>
+                        <input
+                          type="checkbox"
+                          checked={cropLock}
+                          onChange={(e) => setCropLock(e.target.checked)}
+                        />
+                        {t("crop.lockRatio")}
+                      </label>
+                    </span>
+                    <span className="mask-marquee-float-row">
+                      <input
+                        type="number"
+                        min={2}
+                        max={dims.w}
+                        value={cropSizeDraft.w}
+                        onChange={(e) => onCropSizeInput("w", Number(e.target.value) || 0)}
+                      />
+                      ×
+                      <input
+                        type="number"
+                        min={2}
+                        max={dims.h}
+                        value={cropSizeDraft.h}
+                        onChange={(e) => onCropSizeInput("h", Number(e.target.value) || 0)}
+                      />
+                      <span className="muted">px</span>
+                      <button title={t("crop.saveTemplateTitle")} onClick={saveCropTemplate}>
+                        {t("crop.saveTemplate")}
+                      </button>
+                      <button
+                        className="primary"
+                        title={t("crop.applyTitle2")}
+                        onClick={() => confirmCropDraft(cropDraft)}
+                      >
+                        {t("crop.apply")}
+                      </button>
+                      <button title={t("crop.cancel")} onClick={() => setCropDraft(null)}>
+                        ✕
                       </button>
                     </span>
                   </div>
