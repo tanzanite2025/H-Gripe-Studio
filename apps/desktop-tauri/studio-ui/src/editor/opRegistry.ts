@@ -92,6 +92,10 @@ export const MASK_ADJUSTMENTS: Record<AdjustmentType, OpMeta> = {
   levels: { kernel: "mask", adjustment: true },
   curve: { kernel: "mask", adjustment: true },
   brightness_contrast: { kernel: "mask", adjustment: true },
+  // Image-workspace colour adjustments: grade-kernel only (the greyscale
+  // mask compositor ignores them).
+  color_ranges: { kernel: "grade", adjustment: true },
+  channel_mixer: { kernel: "grade", adjustment: true },
 };
 
 // ---------------------------------------------------------------------------

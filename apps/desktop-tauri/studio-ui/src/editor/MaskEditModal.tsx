@@ -2227,7 +2227,7 @@ export function MaskEditModal({
                   id: "adjustments",
                   label: t("mask.panelAdjustments"),
                   content: (
-                    <AdjustmentsPanel dispatch={dispatch} adjustment={activeAdjustment} patchAdjustment={patchAdjustment} />
+                    <AdjustmentsPanel dispatch={dispatch} adjustment={activeAdjustment} patchAdjustment={patchAdjustment} workspace={workspace} />
                   ),
                 },
                 channels: {

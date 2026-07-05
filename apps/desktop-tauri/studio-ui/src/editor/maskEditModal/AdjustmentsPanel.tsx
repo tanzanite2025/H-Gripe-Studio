@@ -7,7 +7,7 @@ import type { AdjustmentType, LayerAdjustment } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
 import { AdjustmentControls } from "./AdjustmentControls";
 
-const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; name: string }[] = [
+const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?: boolean; name: string }[] = [
   { key: "mask.adjBrightnessContrast", glyph: "BC", type: "brightness_contrast", name: "亮度/对比度" },
   { key: "mask.adjLevels", glyph: "LV", type: "levels", name: "色阶" },
   { key: "mask.adjCurve", glyph: "CV", type: "curve", name: "曲线" },
@@ -15,11 +15,11 @@ const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; name: string
   { key: "mask.adjVibrance", glyph: "VB", name: "自然饱和度" },
   { key: "mask.adjColorBalance", glyph: "CB", name: "色彩平衡" },
   { key: "mask.adjPhotoFilter", glyph: "PF", name: "照片滤镜" },
-  { key: "mask.adjChannelMixer", glyph: "CM", name: "通道混和器" },
+  { key: "mask.adjChannelMixer", glyph: "CM", type: "channel_mixer", image_only: true, name: "通道混和器" },
   { key: "mask.adjColorLookup", glyph: "CL", name: "颜色查找" },
   { key: "mask.adjPosterize", glyph: "PS", name: "色调分离" },
   { key: "mask.adjThreshold", glyph: "TH", name: "阈值" },
-  { key: "mask.adjColorRanges", glyph: "CR", name: "颜色范围" },
+  { key: "mask.adjColorRanges", glyph: "CR", type: "color_ranges", image_only: true, name: "颜色范围" },
   { key: "mask.adjGradientMap", glyph: "GM", name: "渐变映射" },
 ];
 
@@ -30,15 +30,19 @@ interface AdjustmentsPanelProps {
   /** The active layer's adjustment (edited in the right column), if any. */
   adjustment: LayerAdjustment | null;
   patchAdjustment: (patch: Partial<LayerAdjustment>) => void;
+  /** Colour adjustments only exist in the image workspace (grade kernel). */
+  workspace: "mask" | "image";
 }
 
-export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment }: AdjustmentsPanelProps) {
+export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, workspace }: AdjustmentsPanelProps) {
   const t = useT();
   const [selectedType, setSelectedType] = useState<AdjustmentType>("brightness_contrast");
   const [drafts, setDrafts] = useState<Record<AdjustmentType, LayerAdjustment>>({
     brightness_contrast: { type: "brightness_contrast" },
     levels: { type: "levels" },
     curve: { type: "curve" },
+    color_ranges: { type: "color_ranges" },
+    channel_mixer: { type: "channel_mixer" },
   });
 
   useEffect(() => {
@@ -70,7 +74,9 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment }: Adju
     <div className="mask-panel-body">
       <div className="mask-adjustments-split">
         <div className="mask-adjustments-list">
-          {ENTRIES.map(({ key, glyph, type }) => (
+          {ENTRIES.map(({ key, glyph, type: entryType, image_only }) => {
+            const type = image_only && workspace !== "image" ? undefined : entryType;
+            return (
             <button
               key={key}
               className={`mask-adjustment-row${type ? "" : " planned"}${type === selectedType ? " active" : ""}`}
@@ -83,7 +89,8 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment }: Adju
               <span className="glyph" aria-hidden="true">{glyph}</span>
               <span className="label">{t(key)}</span>
             </button>
-          ))}
+            );
+          })}
         </div>
         <div className="mask-adjustments-detail">
           {selectedEntry ? (
