@@ -26,6 +26,11 @@ function opLabel(op: EditOp): string {
   if (op.type === "patch") return `patch Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)} (${op.points?.length ?? 0})`;
   if (op.type === "perspective_crop") return "perspective crop";
   if (op.type === "red_eye") return `red eye @${Math.round(op.region?.[0] ?? 0)},${Math.round(op.region?.[1] ?? 0)}`;
+  if (op.type === "object_select") return "object select";
+  if (op.type === "remove") return `remove r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "content_aware_move") return `ca move Δ${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)} (${op.points?.length ?? 0})`;
+  if (op.type === "pattern_stamp") return `pattern r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "art_history_brush") return `art history r${op.amount ?? 8} (${op.points?.length ?? 0})`;
   return op.type;
 }
 

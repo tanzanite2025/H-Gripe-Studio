@@ -226,6 +226,13 @@ export function healStroke(mask: ProxyMask, op: MaskOperation, scale: number): v
   const radius = Math.max(1, op.amount ?? 8);
   const coverage = createProxyMask(mask.w, mask.h);
   stampStroke(coverage, { id: "heal", mode: "add", radius, points }, scale);
+  diffuseCoverage(mask, coverage);
+}
+
+// The heal diffusion itself: rebuild the mask inside `coverage` from its
+// surroundings by iterative 4-neighbour averaging with the boundary held
+// fixed (shared by the heal stroke and the content-aware move's hole fill).
+function diffuseCoverage(mask: ProxyMask, coverage: ProxyMask): void {
   // Coverage bounding box (also counts the region's pixels for the budget).
   let x0 = mask.w, y0 = mask.h, x1 = -1, y1 = -1, area = 0;
   for (let y = 0; y < mask.h; y++) {
@@ -664,6 +671,92 @@ export function patchRegion(mask: ProxyMask, op: MaskOperation, scale: number): 
 }
 
 /**
+ * Content-aware move (PS J flyout, on a mask): the lassoed polygon moves by
+ * `dx`/`dy` — its values blend into the destination through a feathered
+ * coverage — and the hole behind it is healed from its surroundings by the
+ * same diffusion the heal tool uses. Mirrors the Rust
+ * `content_aware_move_region`.
+ */
+export function contentAwareMove(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length < 3) return;
+  const dx = Math.round((op.dx ?? 0) * scale);
+  const dy = Math.round((op.dy ?? 0) * scale);
+  const coverage = createProxyMask(mask.w, mask.h);
+  fillPath(
+    coverage,
+    { id: "content_aware_move", mode: "add", tool: "content_aware_move", closed: true, points: points.map(([x, y]) => ({ x, y })) },
+    scale,
+  );
+  const soft = boxBlur(coverage, Math.max(1, Math.round(PATCH_FEATHER * scale)));
+  const base = Uint8Array.from(mask.data);
+  diffuseCoverage(mask, coverage);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const sx = x - dx;
+      const sy = y - dy;
+      if (sx < 0 || sx >= mask.w || sy < 0 || sy >= mask.h) continue;
+      const i = sy * mask.w + sx;
+      const w = soft.data[i] / 255;
+      if (w === 0) continue;
+      const o = y * mask.w + x;
+      mask.data[o] = Math.round(mask.data[o] * (1 - w) + base[i] * w);
+    }
+  }
+}
+
+// Cell size (image px) of the pattern stamp's checkerboard.
+const PATTERN_CELL = 8;
+
+/**
+ * Pattern stamp (PS S flyout, on a mask): paint the repeating checker
+ * pattern into the stroke coverage — covered pixels read the pattern value
+ * at their image-space cell. Mirrors the Rust `pattern_stamp_region`.
+ */
+export function patternStampStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "pattern_stamp", mode: "add", radius, points }, scale);
+  const cell = Math.max(1, PATTERN_CELL * scale);
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const i = y * mask.w + x;
+      if (coverage.data[i] === 0) continue;
+      mask.data[i] = (Math.floor(x / cell) + Math.floor(y / cell)) % 2 === 0 ? 255 : 0;
+    }
+  }
+}
+
+/**
+ * Art history brush (PS Y flyout, on a mask): restore the stroke coverage to
+ * the layer's initial state through a deterministic per-pixel jitter — each
+ * covered pixel reads `base` at a hashed offset within half the brush
+ * radius, giving the stylised smeared look. Mirrors the Rust
+ * `art_history_region`.
+ */
+export function artHistoryStroke(mask: ProxyMask, base: Uint8Array, op: MaskOperation, scale: number): void {
+  const points = op.points;
+  if (!points || points.length === 0) return;
+  const radius = Math.max(1, op.amount ?? 8);
+  const coverage = createProxyMask(mask.w, mask.h);
+  stampStroke(coverage, { id: "art_history_brush", mode: "add", radius, points }, scale);
+  const amp = Math.max(1, Math.round((radius * scale) / 2));
+  const span = 2 * amp + 1;
+  for (let y = 0; y < mask.h; y++) {
+    for (let x = 0; x < mask.w; x++) {
+      const i = y * mask.w + x;
+      if (coverage.data[i] === 0) continue;
+      const h = (x * 374761393 + y * 668265263) % 4294967296;
+      const sx = clamp(x + (((h / 8) | 0) % span) - amp, 0, mask.w - 1);
+      const sy = clamp(y + (((h / 131072) | 0) % span) - amp, 0, mask.h - 1);
+      mask.data[i] = base[sy * mask.w + sx];
+    }
+  }
+}
+
+/**
  * Homography coefficients mapping the unit square onto the quad
  * `[p00, p10, p11, p01]` (TL, TR, BR, BL):
  * `X = (a·u + b·v + c) / (g·u + h·v + 1)`, same for `Y` with `d, e, f`.
@@ -770,7 +863,9 @@ function fillPath(mask: ProxyMask, path: EditPath, scale: number): void {
 function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
   // The layer's pre-edit state, the history brush's restore source (only
   // snapshotted when the stack contains a `history_brush` step).
-  const base = ops.some((op) => !isPathOp(op) && !isBrushOp(op) && op.type === "history_brush")
+  const base = ops.some(
+    (op) => !isPathOp(op) && !isBrushOp(op) && (op.type === "history_brush" || op.type === "art_history_brush"),
+  )
     ? Uint8Array.from(mask.data)
     : null;
   for (const op of ops) {
@@ -793,6 +888,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       cloneStroke(mask, op, scale);
     } else if (op.type === "history_brush") {
       if (base) historyStroke(mask, base, op, scale);
+    } else if (op.type === "art_history_brush") {
+      if (base) artHistoryStroke(mask, base, op, scale);
     } else if (op.type === "dodge_burn") {
       dodgeBurnStroke(mask, op, scale);
     } else if (op.type === "sponge") {
@@ -801,13 +898,17 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       healingBrushStroke(mask, op, scale);
     } else if (op.type === "patch") {
       patchRegion(mask, op, scale);
+    } else if (op.type === "content_aware_move") {
+      contentAwareMove(mask, op, scale);
+    } else if (op.type === "pattern_stamp") {
+      patternStampStroke(mask, op, scale);
     } else if (op.type === "crop") {
       cropMask(mask, op, scale);
     } else if (op.type === "perspective_crop") {
       mask = perspectiveCrop(mask, op, scale);
     } else if (op.type === "transform") {
       mask = transformMask(mask, (op.dx ?? 0) * scale, (op.dy ?? 0) * scale, op.scale ?? 1, op.rotate ?? 0);
-    } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser" || op.type === "red_eye") {
+    } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser" || op.type === "red_eye" || op.type === "object_select" || op.type === "remove") {
       // Need the real image; not previewable on the proxy.
     } else {
       const radius = op.amount != null ? Math.round(op.amount * scale) : 0;

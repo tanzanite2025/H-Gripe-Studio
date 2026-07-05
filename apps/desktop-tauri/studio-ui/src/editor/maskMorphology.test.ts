@@ -4,7 +4,9 @@ import {
   applyOp,
   buildLayerThumb,
   buildProxyMask,
+  artHistoryStroke,
   cloneStroke,
+  contentAwareMove,
   createProxyMask,
   dilate,
   dodgeBurnStroke,
@@ -17,6 +19,7 @@ import {
   invert,
   isPreviewableOp,
   patchRegion,
+  patternStampStroke,
   perspectiveCrop,
   quadHomography,
   PREVIEWABLE_OP_IDS,
@@ -166,6 +169,48 @@ describe("maskMorphology preview primitives", () => {
     // A degenerate loop is a no-op.
     const before = new Uint8Array(mask.data);
     patchRegion(mask, { type: "patch", points: [[1, 1], [2, 2]], dx: 5, dy: 5 }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("contentAwareMove moves the loop and heals the hole behind it", () => {
+    // An on-square inside the lassoed loop, everything else off: moving it
+    // carries the values to the drop offset and heals the source hole from
+    // its (off) surroundings.
+    const mask = createProxyMask(41, 41);
+    for (let y = 6; y <= 18; y++) for (let x = 6; x <= 18; x++) mask.data[y * 41 + x] = 255;
+    contentAwareMove(mask, { type: "content_aware_move", points: [[6, 6], [18, 6], [18, 18], [6, 18]], dx: 20, dy: 20 }, 1);
+    expect(mask.data[32 * 41 + 32]).toBeGreaterThan(200); // moved to the drop site
+    expect(mask.data[12 * 41 + 12]).toBeLessThan(200); // source hole healed toward off
+    expect(mask.data[39 * 41 + 2]).toBe(0); // far from both untouched
+    // A degenerate loop is a no-op.
+    const before = new Uint8Array(mask.data);
+    contentAwareMove(mask, { type: "content_aware_move", points: [[1, 1], [2, 2]], dx: 5, dy: 5 }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("patternStampStroke paints the repeating checker under the stroke", () => {
+    const mask = createProxyMask(21, 21);
+    patternStampStroke(mask, { type: "pattern_stamp", amount: 5, points: [[10, 10]] }, 1);
+    expect(mask.data[8 * 21 + 8]).toBe(255); // even checker cell
+    expect(mask.data[7 * 21 + 8]).toBe(0); // odd checker cell
+    expect(mask.data[0]).toBe(0); // outside the stroke untouched
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    patternStampStroke(mask, { type: "pattern_stamp", amount: 5, points: [] }, 1);
+    expect(mask.data).toEqual(before);
+  });
+
+  it("artHistoryStroke restores the base state through a deterministic jitter", () => {
+    // Base fully on, mask empty: brushing restores the covered pixels to on
+    // (the jitter reads a uniform base), outside stays off.
+    const mask = createProxyMask(21, 21);
+    const base = new Uint8Array(21 * 21).fill(255);
+    artHistoryStroke(mask, base, { type: "art_history_brush", amount: 4, points: [[10, 10]] }, 1);
+    expect(mask.data[10 * 21 + 10]).toBe(255); // restored
+    expect(mask.data[0]).toBe(0); // outside the stroke untouched
+    // An empty stroke is a no-op.
+    const before = new Uint8Array(mask.data);
+    artHistoryStroke(mask, base, { type: "art_history_brush", amount: 4, points: [] }, 1);
     expect(mask.data).toEqual(before);
   });
 

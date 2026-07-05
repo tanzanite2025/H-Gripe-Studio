@@ -653,7 +653,7 @@ export function MaskEditModal({
     state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
     const live = drawing.current;
     if (live) {
-      if (tool.kind === "path" || tool.id === "patch") {
+      if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {
         paintLassoLoop(ctx, live.points);
       } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
         paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, dodgeBurnMode.current));
@@ -840,9 +840,9 @@ export function MaskEditModal({
       setPenAnchors((prev) => [...prev, pt]);
       return;
     }
-    if (tool.id === "patch") {
-      // Patch: a drag from inside the pending loop drops it; anywhere else
-      // starts a fresh lasso.
+    if (tool.id === "patch" || tool.id === "content_aware_move") {
+      // Patch / content-aware move: a drag from inside the pending loop
+      // drops it; anywhere else starts a fresh lasso.
       const loop = patchLoop.current;
       if (loop && pointInPolygon(pt, loop)) {
         patchDrag.current = { start: pt, end: pt };
@@ -871,6 +871,12 @@ export function MaskEditModal({
         }
       }
       marquee.current = { start: pt, end: pt };
+      forceRedraw((n) => n + 1);
+      return;
+    }
+    if (tool.id === "pattern_stamp") {
+      // Pattern stamp paints the fixed checker — no source point needed.
+      drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
       return;
     }
@@ -1032,8 +1038,9 @@ export function MaskEditModal({
       const loop = patchLoop.current;
       if (loop && Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1) {
         // Patch: covered pixel `p` refills from `p + [dx, dy]` — the drop
-        // site is the clean-texture source.
-        dispatch({ type: "op", op: { type: "patch", points: loop, dx: end[0] - start[0], dy: end[1] - start[1] } });
+        // site is the clean-texture source. Content-aware move instead
+        // moves the loop by `[dx, dy]` and heals the hole behind it.
+        dispatch({ type: "op", op: { type: tool.id === "content_aware_move" ? "content_aware_move" : "patch", points: loop, dx: end[0] - start[0], dy: end[1] - start[1] } });
         patchLoop.current = null;
       }
       forceRedraw((n) => n + 1);
@@ -1081,10 +1088,31 @@ export function MaskEditModal({
         forceRedraw((n) => n + 1);
         return;
       }
-      if (tool.id === "patch") {
+      if (tool.id === "patch" || tool.id === "content_aware_move") {
         // The released lasso becomes the pending loop; the next drag from
-        // inside it records the patch op.
+        // inside it records the op.
         patchLoop.current = pts.length >= 3 ? pts : null;
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "remove") {
+        // Remove (M16): the stroke seeds the segmenter; the segmented
+        // object is subtracted from the mask on run.
+        dispatch({ type: "op", op: { type: "remove", amount: brushSize, points: pts } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "pattern_stamp") {
+        // Pattern stamp (M16): covered pixels take the repeating checker
+        // pattern on replay.
+        dispatch({ type: "op", op: { type: "pattern_stamp", amount: brushSize, points: pts } });
+        forceRedraw((n) => n + 1);
+        return;
+      }
+      if (tool.id === "art_history_brush") {
+        // Art history brush (M16): the stroke restores the layer's initial
+        // state through a deterministic jitter on replay.
+        dispatch({ type: "op", op: { type: "art_history_brush", amount: brushSize, points: pts } });
         forceRedraw((n) => n + 1);
         return;
       }
@@ -1200,7 +1228,7 @@ export function MaskEditModal({
     if (t.status !== "ready") return;
     if (!ANCHOR_PATH_TOOLS.includes(t.id)) setPenAnchors([]);
     cancelPathEdit();
-    if (t.id !== "patch") {
+    if (t.id !== "patch" && t.id !== "content_aware_move") {
       patchLoop.current = null;
       patchDrag.current = null;
     }

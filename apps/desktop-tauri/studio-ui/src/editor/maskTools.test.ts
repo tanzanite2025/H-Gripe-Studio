@@ -192,6 +192,25 @@ describe("mask tool registry", () => {
     expect(shape?.kind).toBe("shape");
     expect(shape?.lane).toBe("interactive");
   });
+
+  it("ships the batch-4 kernel-aligned tools as ready (M16)", () => {
+    const expected: Record<string, string> = {
+      object_select: "marquee",
+      remove: "heal",
+      content_aware_move: "heal",
+      pattern_stamp: "clone",
+      art_history_brush: "history",
+    };
+    for (const [id, kind] of Object.entries(expected)) {
+      expect(maskTool(id)?.status, id).toBe("ready");
+      expect(maskTool(id)?.kind, id).toBe(kind);
+    }
+    // The tools with no kernel alignment (font rendering, colour semantics
+    // on a grayscale mask) stay planned.
+    for (const id of ["type_horizontal", "type_vertical", "color_replacement", "mixer_brush"]) {
+      expect(maskTool(id)?.status, id).toBe("planned");
+    }
+  });
 });
 
 describe("shapeVertices", () => {
