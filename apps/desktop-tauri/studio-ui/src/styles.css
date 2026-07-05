@@ -1564,12 +1564,54 @@ button:disabled { opacity: 0.6; cursor: default; }
 .media-edit-groups button:hover { background: #2a2f3d; }
 .media-edit-groups button.active { border-color: var(--accent); color: var(--accent); }
 
-/* Unified image editor: PS-style open-document tabs in the bar */
+/* Unified image editor: save light (far left) + centred collapse arrow */
+.media-edit-light {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  background: #46a758; /* saved: green */
+  cursor: pointer;
+}
+.media-edit-light.unsaved { background: #e5484d; } /* unsaved: red */
+.media-viewer-bar { position: relative; }
+/* With a centred slot the bar packs left (the centre is absolute), so the
+   in-flow items don't fight the space-between distribution. */
+.media-viewer-bar:has(.media-viewer-bar-center) { justify-content: flex-start; }
+.media-viewer-bar:has(.media-viewer-bar-center) .media-viewer-actions { margin-left: auto; }
+.media-viewer-bar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.media-edit-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 24px;
+  cursor: pointer;
+}
+.media-edit-collapse:hover { color: var(--text); background: #2a2f3d; }
+
+/* Unified image editor: PS-style open-document tabs on their own row */
+.media-viewer-tabs-row {
+  display: flex;
+  align-items: flex-end;
+  padding: 4px 12px 0;
+  background: #191c26;
+  border-bottom: 1px solid var(--border);
+}
 .media-edit-tabs {
   display: inline-flex;
   align-items: stretch;
   gap: 2px;
-  margin-left: 12px;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;

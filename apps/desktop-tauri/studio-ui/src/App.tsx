@@ -1417,7 +1417,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setGradeEditNodeId(null);
     setMediaEditSourceId(null);
     setMediaEditBlank(false);
-    mediaEditDrafts.current.clear();
+    // Saved drafts survive the close (the editor unmount frees the heavy
+    // canvas/underlay memory); unsaved edits are dropped by design.
   };
 
   return (

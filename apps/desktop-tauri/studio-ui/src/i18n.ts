@@ -284,6 +284,15 @@ export const messages = {
     en: "pick an image file to edit (it lands on a new image card)",
     zh: "选择要编辑的图片文件（会生成一个新的图片卡片）",
   },
+  "mediaEdit.unsaved": {
+    en: "Unsaved edits — click to save",
+    zh: "编辑未保存——点击保存",
+  },
+  "mediaEdit.saved": { en: "Edits saved", zh: "编辑已保存" },
+  "mediaEdit.collapse": {
+    en: "Close the editor and free its memory (saved edits restore on reopen)",
+    zh: "关闭编辑器并释放内存（已保存的编辑下次打开恢复）",
+  },
   "mediaEdit.mask": { en: "Mask", zh: "蒙版" },
   "mediaEdit.crop": { en: "Crop", zh: "裁剪" },
   "node.maskAuto": { en: "Subject mask [Auto]", zh: "主体蒙版【自动】" },
