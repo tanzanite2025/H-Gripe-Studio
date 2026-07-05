@@ -1887,6 +1887,8 @@ export function MaskEditModal({
                       dims={dims}
                       quickMask={quickMask}
                       setQuickMask={setQuickMask}
+                      workspace={workspace}
+                      imagePath={imagePath}
                     />
                   ),
                 },

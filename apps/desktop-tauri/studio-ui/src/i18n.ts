@@ -546,6 +546,14 @@ export const messages = {
   "mask.adjThreshold": { en: "Threshold", zh: "阈值" },
   "mask.adjSelectiveColor": { en: "Selective color", zh: "可选颜色" },
   "mask.adjGradientMap": { en: "Gradient map", zh: "渐变映射" },
+  "mask.channelRgb": { en: "RGB", zh: "RGB" },
+  "mask.channelRed": { en: "Red", zh: "红" },
+  "mask.channelGreen": { en: "Green", zh: "绿" },
+  "mask.channelBlue": { en: "Blue", zh: "蓝" },
+  "mask.channelsHintImage": {
+    en: "The image's composite and red / green / blue colour channels.",
+    zh: "图像的复合通道与红 / 绿 / 蓝颜色通道。",
+  },
   "mask.channelMask": { en: "Mask", zh: "蒙版" },
   "mask.channelQuick": { en: "Quick mask", zh: "快速蒙版" },
   "mask.channelsHint": {
