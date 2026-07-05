@@ -1921,6 +1921,7 @@ export function MaskEditModal({
               active={state.current.active}
               dims={dims}
               imagePath={imagePath}
+              workspace={workspace}
               dispatch={dispatch}
               onBeforeLayerChange={() => {
                 if (editingPath != null) cancelPathEdit();
