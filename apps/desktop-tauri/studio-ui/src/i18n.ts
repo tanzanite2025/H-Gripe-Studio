@@ -627,6 +627,8 @@ export const messages = {
   "mask.layerDelete": { en: "Delete this layer", zh: "删除该图层" },
   "mask.layerMerge": { en: "Merge layers", zh: "合并图层" },
   "mask.layerMergeDown": { en: "Merge down", zh: "向下合并" },
+  "mask.layerActionInvert": { en: "inv", zh: "反相" },
+  "mask.layerInvertTitle": { en: "Invert the active layer", zh: "反相当前图层" },
   "mask.layerActionLink": { en: "link", zh: "链接" },
   "mask.layerActionAdj": { en: "adj", zh: "调整" },
   "mask.layerActionDup": { en: "dup", zh: "复制" },
