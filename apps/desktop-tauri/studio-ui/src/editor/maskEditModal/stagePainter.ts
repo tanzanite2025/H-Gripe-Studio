@@ -188,23 +188,29 @@ export function paintPenAnchors(ctx: CanvasRenderingContext2D, anchors: [number,
 /** SAM 2 point prompts: numbered crosshair markers. Positive (include) points
  *  are green and draw a `+`; negative (exclude) points are red and draw a `−`,
  *  mirroring SAM 2's point_labels. */
-export function paintSamPoints(ctx: CanvasRenderingContext2D, points: { x: number; y: number; label: number }[]) {
+export function paintSamPoints(
+  ctx: CanvasRenderingContext2D,
+  points: { x: number; y: number; label: number }[],
+  labelsOnly = false,
+) {
   points.forEach(({ x, y, label }, i) => {
     const colour = label === 0 ? "rgba(244,98,98,0.95)" : "rgba(120,230,140,0.95)";
     ctx.strokeStyle = colour;
     ctx.fillStyle = colour;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x - 9, y);
-    ctx.lineTo(x + 9, y);
-    if (label !== 0) {
-      ctx.moveTo(x, y - 9);
-      ctx.lineTo(x, y + 9);
+    if (!labelsOnly) {
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - 9, y);
+      ctx.lineTo(x + 9, y);
+      if (label !== 0) {
+        ctx.moveTo(x, y - 9);
+        ctx.lineTo(x, y + 9);
+      }
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fill();
     ctx.font = "600 13px system-ui, sans-serif";
     ctx.fillText(String(i + 1), x + 11, y - 6);
   });
@@ -224,15 +230,21 @@ export interface RulerLine {
 }
 
 /** Colour-sampler pins: numbered circle markers filled with the sampled colour. */
-export function paintColorSamples(ctx: CanvasRenderingContext2D, samples: readonly ColorSample[]) {
+export function paintColorSamples(
+  ctx: CanvasRenderingContext2D,
+  samples: readonly ColorSample[],
+  labelsOnly = false,
+) {
   samples.forEach(({ x, y, hex }, i) => {
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    if (!labelsOnly) {
+      ctx.fillStyle = hex;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
     ctx.fillStyle = "rgba(255,255,255,0.95)";
     ctx.font = "600 12px system-ui, sans-serif";
     ctx.fillText(String(i + 1), x + 9, y - 7);
@@ -240,19 +252,21 @@ export function paintColorSamples(ctx: CanvasRenderingContext2D, samples: readon
 }
 
 /** Ruler line: endpoint ticks plus a distance / angle readout at the midpoint. */
-export function paintRuler(ctx: CanvasRenderingContext2D, { start, end }: RulerLine) {
+export function paintRuler(ctx: CanvasRenderingContext2D, { start, end }: RulerLine, labelsOnly = false) {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
-  ctx.strokeStyle = "rgba(255,214,90,0.95)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(start[0], start[1]);
-  ctx.lineTo(end[0], end[1]);
-  ctx.stroke();
-  for (const [x, y] of [start, end]) {
+  if (!labelsOnly) {
+    ctx.strokeStyle = "rgba(255,214,90,0.95)";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.moveTo(start[0], start[1]);
+    ctx.lineTo(end[0], end[1]);
     ctx.stroke();
+    for (const [x, y] of [start, end]) {
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
   const dist = Math.hypot(dx, dy);
   const angle = (Math.atan2(-dy, dx) * 180) / Math.PI;

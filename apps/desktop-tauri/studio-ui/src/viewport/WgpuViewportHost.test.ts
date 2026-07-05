@@ -114,6 +114,40 @@ describe("WgpuViewportHost", () => {
         },
       }),
     ).rejects.toThrow(/between 0 and 1/);
+    // Polylines and fixed screen-size markers (ruler / sampler pins / SAM
+    // points) validate the same way.
+    await host.command({
+      kind: "set_overlay_scene",
+      scene: {
+        items: [
+          {
+            kind: "polyline",
+            points: [
+              [0.1, 0.5],
+              [0.9, 0.5],
+            ],
+            stroke: [1, 214 / 255, 90 / 255, 0.95],
+          },
+          { kind: "marker", center: [0.5, 0.5], shape: "disc", size: 6, stroke: [1, 1, 1, 0.9], fill: [0, 0, 0, 1] },
+        ],
+      },
+    });
+    await expect(
+      host.command({
+        kind: "set_overlay_scene",
+        scene: {
+          items: [{ kind: "marker", center: [0.5, Number.NaN], shape: "cross", size: 9, stroke: [1, 1, 1, 1] }],
+        },
+      }),
+    ).rejects.toThrow(/finite/);
+    await expect(
+      host.command({
+        kind: "set_overlay_scene",
+        scene: {
+          items: [{ kind: "marker", center: [0.5, 0.5], shape: "minus", size: 9, stroke: [1, 1, 1, 2] }],
+        },
+      }),
+    ).rejects.toThrow(/between 0 and 1/);
     // Clearing is accepted.
     await host.command({ kind: "set_overlay_scene", scene: null });
     await host.close();
