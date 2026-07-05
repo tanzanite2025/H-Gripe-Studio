@@ -266,12 +266,12 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
               )}
               {layer.linked ? (
                 <span className="mask-layer-linked" title={t("mask.layerLinked")} aria-hidden="true">
-                  link
+                  {t("mask.layerBadgeLink")}
                 </span>
               ) : null}
               {layer.locked ? (
                 <span className="mask-layer-locked" title={t("mask.layerLocked")} aria-hidden="true">
-                  lock
+                  {t("mask.layerBadgeLock")}
                 </span>
               ) : null}
               <button
@@ -344,7 +344,7 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
           disabled={!activeLayer}
           onClick={() => dispatch({ type: "layer_link", index: active })}
         >
-          link
+          {t("mask.layerActionLink")}
         </button>
         <select
           className="mask-layer-adjustment-add"
@@ -356,7 +356,7 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
           }}
         >
           <option value="" disabled>
-            adj
+            {t("mask.layerActionAdj")}
           </option>
           <option value="levels">{t("mask.adjLevels")}</option>
           <option value="curve">{t("mask.adjCurve")}</option>
@@ -367,7 +367,7 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
           title={t("mask.layerDuplicate")}
           onClick={() => dispatch({ type: "layer_duplicate" })}
         >
-          dup
+          {t("mask.layerActionDup")}
         </button>
         <button className="mask-layer-action" title={t("mask.layerAddTitle")} onClick={() => dispatch({ type: "layer_add" })}>
           +
@@ -381,7 +381,7 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
             dispatch({ type: "layer_remove", index: active });
           }}
         >
-          del
+          {t("mask.layerActionDel")}
         </button>
       </div>
     </div>

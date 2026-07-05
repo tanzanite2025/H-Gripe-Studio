@@ -48,6 +48,35 @@ pub(super) fn resize_gray(
     }
 }
 
+/// Resize a 16-bit working surface to `width`x`height` with an explicit
+/// `filter`, carrying the space tag and ICC through (pure geometry — samples
+/// are resampled in the surface's own encoding, no colour conversion). Clones
+/// at identity size like the other geometry ops.
+pub(super) fn resize_working(
+    image: &WorkingImage,
+    width: u32,
+    height: u32,
+    filter: FilterType,
+) -> WorkingImage {
+    if (image.width, image.height) == (width, height) {
+        return image.clone();
+    }
+    let buffer = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::from_raw(
+        image.width,
+        image.height,
+        image.pixels.clone(),
+    )
+    .expect("working image pixel buffer matches its dimensions");
+    let resized = imageops::resize(&buffer, width, height, filter);
+    WorkingImage {
+        width,
+        height,
+        pixels: resized.into_raw(),
+        space: image.space,
+        icc: image.icc.clone(),
+    }
+}
+
 /// Crop the `(x, y, width, height)` window out of a 16-bit working surface
 /// into an owned [`WorkingImage`], carrying the space tag and ICC through — a
 /// pure geometry operation, so no colour conversion happens. The window must

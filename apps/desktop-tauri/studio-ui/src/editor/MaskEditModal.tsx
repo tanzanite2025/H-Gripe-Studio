@@ -99,6 +99,8 @@ interface MaskEditModalProps {
   headerExtra?: ReactNode;
   /** Editor name shown after the title (defaults to "mask editor"). */
   editorName?: string;
+  /** Hide the title span (a host whose header carries document tabs). */
+  hideTitle?: boolean;
   /** Product surface using this heavy pixel editor. */
   workspace?: "image" | "mask";
 }
@@ -154,6 +156,7 @@ export function MaskEditModal({
   onDocChange,
   headerExtra,
   editorName,
+  hideTitle,
   workspace = "mask",
 }: MaskEditModalProps) {
   const t = useT();
@@ -1332,9 +1335,11 @@ export function MaskEditModal({
     <div className="media-viewer-backdrop" onClick={onClose}>
       <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="media-viewer-bar">
-          <span className="media-viewer-name" title={title}>
-            {title} <span className="muted">· {editorName ?? t("mask.editor")}</span>
-          </span>
+          {hideTitle ? null : (
+            <span className="media-viewer-name" title={title}>
+              {title} <span className="muted">· {editorName ?? t("mask.editor")}</span>
+            </span>
+          )}
           {headerExtra}
           <div className="media-viewer-actions">
             <button disabled={!canUndo(state)} onClick={() => dispatch({ type: "undo" })} title={t("mask.undoTitle")}>
