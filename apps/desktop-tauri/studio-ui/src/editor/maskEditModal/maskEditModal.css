@@ -320,11 +320,29 @@
   cursor: pointer;
 }
 .mask-color-swap:hover { color: var(--text); }
-/* Adjustments panel (PS 调整): one full-width row per adjustment type. */
+/* Adjustments panel (PS 调整): two columns — the adjustment list on the
+   left, the clicked adjustment's controls on the right. */
+.mask-adjustments-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
 .mask-adjustments-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+.mask-adjustments-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 4px 8px;
+  border-left: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.08));
+  min-width: 0;
+}
+.mask-adjustment-row.active {
+  background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1));
 }
 .mask-adjustment-row {
   display: flex;
