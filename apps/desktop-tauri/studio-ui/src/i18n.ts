@@ -286,7 +286,6 @@ export const messages = {
   },
   "mediaEdit.mask": { en: "Mask", zh: "蒙版" },
   "mediaEdit.crop": { en: "Crop", zh: "裁剪" },
-  "node.cropAuto": { en: "Crop to subject [Auto]", zh: "裁剪到主体【自动】" },
   "node.maskAuto": { en: "Subject mask [Auto]", zh: "主体蒙版【自动】" },
   "node.enhanceAuto": { en: "Enhance quality [Auto]", zh: "画质增强【自动】" },
   "node.watchdogAuto": { en: "Detect defects [Auto]", zh: "瑕疵检测【自动】" },
