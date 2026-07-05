@@ -1627,6 +1627,16 @@ button:disabled { opacity: 0.6; cursor: default; }
   pointer-events: none;
 }
 .crop-edit-img.placeholder { background: #11131a; }
+/* Placement anchor for the native surface (surface swap): sized to the
+   stage, painted by nothing — the surface below shows through. */
+.crop-edit-underlay-anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* Frame on the native surface window below the webview: drop the stage
+   checkerboard so the hole stays see-through. */
+.crop-edit-stage.presented { background: transparent; }
 .crop-box {
   position: absolute;
   border: 1px solid var(--accent);

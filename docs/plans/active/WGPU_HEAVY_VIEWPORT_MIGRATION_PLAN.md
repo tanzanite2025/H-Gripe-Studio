@@ -95,12 +95,17 @@ Remaining work (next stage), roughly in priority order:
    happens only when needed (export, scopes, colour picking). The host
    command protocol already isolates callers from this change; the PNG/blob
    transport stays as the browser-preview and fallback path.
-2. Interactive overlays on the live surface: the brush/path/marquee overlays
-   still paint in the 2D canvas at document resolution; move them to the
-   viewport once it presents live surfaces (they are input-latency bound, so
-   they depend on item 1, not on the PNG transport).
-3. Scopes and overlays: safe area, crop box, and scopes surfaces on top of
-   the viewport presentation (listed under "future overlays").
+2. ✅ Interactive overlays on the live surface: the mask editor's committed
+   overlays render host-side through `viewport_set_overlay_scene` — marquee
+   marching ants, vector paths, brush/matte stroke bands, the ruler line,
+   colour-sampler pins, and SAM point markers all stroke over the presented
+   frame at the view window's detail. Text labels and in-drag feedback stay
+   on the 2D canvas (DOM above the hole), and the canvas paints the full
+   overlays as the browser-preview fallback.
+3. Scopes and overlays: safe area and scopes surfaces on top of the viewport
+   presentation (listed under "future overlays"). The crop editor's underlay
+   presents on the native surface (the crop box and its dim are DOM above
+   the hole); safe-area guides and scopes await their features.
 4. ✅ Shared `DeviceReport` wiring: the viewport-presented surfaces report
    through the shared vocabulary from `GPU_DEVICE_STRATEGY_PLAN.md` — the
    program monitor and grade preview render normalized badges, and the

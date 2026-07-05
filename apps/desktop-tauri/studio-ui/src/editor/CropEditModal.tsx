@@ -95,8 +95,13 @@ export function CropEditModal({
   // Phase 2) by reference — a `node_output` target when a node id is given;
   // null in browser preview, where the fallback dims + box stay.
   const source = useNodeOutputSource(nodeId, imagePath);
-  const viewport = useViewportUnderlay("image_edit", source, 1280, view);
+  // Native surface presentation (surface swap): the underlay presents on a
+  // surface window placed at the stage's rect; the crop box and its dim are
+  // DOM, compositing above the webview hole. PNG transport is the fallback.
+  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  const viewport = useViewportUnderlay("image_edit", source, 1280, view, null, underlayAnchorRef);
   const underlay = viewport.underlay;
+  const presented = viewport.presented;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
   const [mode, setMode] = useState<"manual" | "auto_subject">(initialMode);
   const [aspect, setAspect] = useState<string>(initialAspect);
@@ -295,7 +300,7 @@ export function CropEditModal({
           <div className="crop-edit-stage-wrap">
             <div
               ref={stageRef}
-              className={`crop-edit-stage${mode === "auto_subject" ? " auto" : ""}`}
+              className={`crop-edit-stage${mode === "auto_subject" ? " auto" : ""}${presented ? " presented" : ""}`}
               style={{
                 aspectRatio: `${dims.w} / ${dims.h}`,
                 cursor: panning && view.zoom > 1 ? (panDrag.current ? "grabbing" : "grab") : undefined,
@@ -307,9 +312,10 @@ export function CropEditModal({
               onPointerUp={onPointerUp}
               onPointerLeave={onPointerUp}
             >
+              <div ref={underlayAnchorRef} className="crop-edit-underlay-anchor" />
               {underlay ? (
                 <img className="crop-edit-img" src={underlay} alt="preview" draggable={false} />
-              ) : (
+              ) : presented ? null : (
                 <div className="crop-edit-img placeholder" />
               )}
               {mode === "manual" ? (
