@@ -20,6 +20,9 @@ import { useT, type MsgKey } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
 import { FIT_VIEW, WHEEL_ZOOM_STEP, ZOOM_STEP, panBy, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { applyDoc } from "./gradeKernel";
+import { compileImageAdjustments } from "./imageCompile";
+import { fromMaskDocument } from "./imageDocument";
 import {
   activeOps,
   canRedo,
@@ -252,7 +255,19 @@ export function MaskEditModal({
   // it and frames fall back to the PNG transport. The brush/path/marquee
   // canvas is DOM, so it keeps compositing above the hole.
   const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
-  const presentEnabled = !overlayOnly && !view.rotate;
+  // Image-workspace adjustment preview (image-kernel K2): the adjustment
+  // stack compiles to a grade document and grades the displayed frame on the
+  // f32 kernel — the same maths the video grade dialog runs. Null in the
+  // mask workspace (adjustments there tone-map the mask, not the image) and
+  // for stacks the grade kernel cannot express yet.
+  const gradePreview = useMemo(() => {
+    if (workspace !== "image") return null;
+    const compiled = compileImageAdjustments(fromMaskDocument(state.current));
+    return compiled && compiled.layers.some((l) => l.visible && l.ops.length > 0) ? compiled : null;
+  }, [workspace, state]);
+  // Grading needs frame pixels, so it forces the PNG transport (a natively
+  // presented surface frame has no readable data URL).
+  const presentEnabled = !overlayOnly && !view.rotate && !gradePreview;
   const viewport = useViewportUnderlay(
     "image_edit",
     source,
@@ -266,6 +281,41 @@ export function MaskEditModal({
   const presented = viewport.presented;
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
+
+  // The graded copy of the underlay frame: decode → f32 surface → `applyDoc`
+  // → re-encode. Recomputes when the frame or the adjustment stack changes;
+  // the ungraded frame keeps showing until the graded one lands.
+  const [gradedUnderlay, setGradedUnderlay] = useState<string | null>(null);
+  useEffect(() => {
+    if (!gradePreview || !underlay) {
+      setGradedUnderlay(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const id = ctx.getImageData(0, 0, c.width, c.height);
+      const data = new Float32Array(id.data.length);
+      for (let i = 0; i < id.data.length; i++) data[i] = id.data[i] / 255;
+      applyDoc(gradePreview, { w: c.width, h: c.height, data, space: "srgb" });
+      for (let i = 0; i < id.data.length; i++) {
+        id.data[i] = Math.round(Math.min(Math.max(data[i], 0), 1) * 255);
+      }
+      ctx.putImageData(id, 0, 0);
+      if (!cancelled) setGradedUnderlay(c.toDataURL());
+    };
+    img.src = underlay;
+    return () => {
+      cancelled = true;
+    };
+  }, [gradePreview, underlay]);
 
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
@@ -1545,7 +1595,7 @@ export function MaskEditModal({
             canvasRef={canvasRef}
             dims={dims}
             view={view}
-            underlay={underlay}
+            underlay={gradedUnderlay ?? underlay}
             presented={presented}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
