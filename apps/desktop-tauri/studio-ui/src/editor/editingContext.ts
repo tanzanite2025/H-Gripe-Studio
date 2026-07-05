@@ -1,5 +1,7 @@
 import { createContext, useContext } from "react";
 
+import type { ModelCapability } from "../models/backendRegistry";
+
 export interface NodeEditing {
   /** Update a single param of a node (used by inline node-card controls). */
   onParamChange: (nodeId: string, key: string, value: unknown) => void;
@@ -22,6 +24,10 @@ export interface NodeEditing {
    * edit node of the chosen kind (see docs/cards/generic-media-card.md, Phase 4).
    */
   openMediaEdit?: (sourceId: string) => void;
+  /** Open the application-level system "Models / APIs" manager, optionally
+   * preselecting entries for one capability (card "Manage…" entry point).
+   * A single app-level surface: card and toolbar share the same modal. */
+  openModels?: (capability?: ModelCapability | null) => void;
   /**
    * Spawn a bound edit node of `editKind` from a media source card: create the
    * node to the right, wire a `binding` edge from the source's `image` output

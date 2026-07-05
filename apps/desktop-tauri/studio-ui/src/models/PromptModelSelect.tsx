@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useNodeEditing } from "../editor/editingContext";
 import { useT } from "../i18n";
-import { apiProfilesFor, loadRegistry, localModelsFor } from "./backendRegistry";
+import { REGISTRY_EVENT, apiProfilesFor, loadRegistry, localModelsFor } from "./backendRegistry";
 import { ModelManagerModal } from "./ModelManagerModal";
 
 interface PromptModelSelectProps {
@@ -19,9 +21,15 @@ interface PromptModelSelectProps {
 // keep working unchanged.
 export function PromptModelSelect({ params, setParam, compact }: PromptModelSelectProps) {
   const t = useT();
+  const editing = useNodeEditing();
   const [managerOpen, setManagerOpen] = useState(false);
-  // Reloaded when the manager modal closes so edits show up without a re-mount.
+  // Reloaded on every registry save so manager edits show up live.
   const [registry, setRegistry] = useState(() => loadRegistry());
+  useEffect(() => {
+    const reload = () => setRegistry(loadRegistry());
+    window.addEventListener(REGISTRY_EVENT, reload);
+    return () => window.removeEventListener(REGISTRY_EVENT, reload);
+  }, []);
   const cls = compact ? "nodrag nowheel" : undefined;
 
   const apiOptions = apiProfilesFor(registry, "prompt.rewrite");
@@ -91,19 +99,28 @@ export function PromptModelSelect({ params, setParam, compact }: PromptModelSele
       <button
         type="button"
         className={compact ? "nodrag" : undefined}
-        onClick={() => setManagerOpen(true)}
+        onClick={() => {
+          // The manager is an application-level surface: route through the
+          // app's single modal so it never renders inside the node card (a
+          // transformed React Flow ancestor breaks position:fixed) and the
+          // toolbar entry cannot open a second copy over it.
+          if (editing?.openModels) editing.openModels("prompt.rewrite");
+          else setManagerOpen(true);
+        }}
       >
         {t("models.selector.manage")}
       </button>
-      {managerOpen && (
-        <ModelManagerModal
-          capability="prompt.rewrite"
-          onClose={() => {
-            setManagerOpen(false);
-            setRegistry(loadRegistry());
-          }}
-        />
-      )}
+      {managerOpen &&
+        createPortal(
+          <ModelManagerModal
+            capability="prompt.rewrite"
+            onClose={() => {
+              setManagerOpen(false);
+              setRegistry(loadRegistry());
+            }}
+          />,
+          document.body,
+        )}
     </span>
   );
 }
