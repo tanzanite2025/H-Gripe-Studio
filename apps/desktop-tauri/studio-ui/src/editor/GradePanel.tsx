@@ -189,6 +189,10 @@ export function GradePanel({
   const [addKind, setAddKind] = useState<AddableOp>("exposure");
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  // The graded frame is on the viewport's native surface window (WGPU surface
+  // swap): `preview`/`underlay` stay null and the stage lets the surface show
+  // through instead of mounting an `<img>`.
+  const [presented, setPresented] = useState(false);
   const [backend, setBackend] = useState<DeviceReport | "mirror" | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   // Preview zoom/pan is viewport state (Phase 3): the host crops its cached
@@ -206,8 +210,14 @@ export function GradePanel({
   // Graded frames render through a grade_preview viewport (WGPU migration
   // Phase 3): the target (still image, or one decoded video frame) is a
   // reference; doc changes flow as viewport state. Null outside Tauri — the
-  // mirror fallback stays.
-  const renderGraded = useGradeViewport({ imagePath, videoPath, videoTimestampSec, nodeId });
+  // mirror fallback stays. The stage anchors the native surface window
+  // (surface swap): slider ticks then present with no PNG hop.
+  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  const renderGraded = useGradeViewport(
+    { imagePath, videoPath, videoTimestampSec, nodeId },
+    1280,
+    underlayAnchorRef,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -219,7 +229,8 @@ export function GradePanel({
       const frame = await renderGraded(EMPTY_DOC).catch(() => null);
       if (cancelled) return;
       if (frame) {
-        setUnderlay(frame.data_url);
+        setPresented(frame.presented);
+        setUnderlay(frame.presented ? null : frame.data_url);
         return;
       }
       // Browser preview (no viewport transport): the thumbnail bridge keeps
@@ -251,7 +262,8 @@ export function GradePanel({
           const result = await renderGraded(doc, view, videoPath ? temporalDenoise : 0);
           if (previewSeq.current !== seq) return;
           if (result) {
-            setPreview(result.data_url);
+            setPresented(result.presented);
+            setPreview(result.presented ? null : result.data_url);
             setBackend(deviceReportFromViewportBackend(result.backend));
             return;
           }
@@ -529,10 +541,11 @@ export function GradePanel({
   return (
     <div className="mask-edit-body grade-panel">
       <div className="crop-edit-stage-wrap">
-        <div className="crop-edit-stage" {...stageProps}>
+        <div className={`crop-edit-stage${presented ? " presented" : ""}`} {...stageProps}>
+          <div ref={underlayAnchorRef} className="crop-edit-underlay-anchor" />
           {preview || underlay ? (
             <img className="crop-edit-img" src={preview ?? underlay ?? undefined} alt="preview" draggable={false} />
-          ) : (
+          ) : presented ? null : (
             <div className="crop-edit-img placeholder" />
           )}
         </div>
