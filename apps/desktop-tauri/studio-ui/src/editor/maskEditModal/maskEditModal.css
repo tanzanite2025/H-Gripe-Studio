@@ -526,9 +526,9 @@
 /* Adjustments panel (PS 调整): a full-width list; the clicked adjustment's
    controls open in the floating popup (`.adjustment-popup`). */
 .mask-adjustments-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 8px;
 }
 .mask-adjustment-add-btn {
   width: 100%;
@@ -548,6 +548,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 4px 6px;
   background: none;
   border: none;
@@ -558,9 +559,15 @@
 }
 .mask-adjustment-row:hover { background: var(--ps-dock-hover, rgba(255, 255, 255, 0.06)); }
 .mask-adjustment-row .glyph {
+  flex: none;
   width: 18px;
   text-align: center;
   color: var(--text-dim);
+}
+.mask-adjustment-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mask-adjustment-row.planned {
   opacity: 0.45;
@@ -580,8 +587,8 @@
   gap: 8px;
   padding: 10px;
   border-radius: 8px;
-  background: var(--ps-dock-bg, #2a2a2a);
-  border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.12));
+  background: var(--panel, #181a21);
+  border: 1px solid var(--border, #2a2d37);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 .adjustment-popup .slider-row {
@@ -605,6 +612,9 @@
   align-items: center;
   justify-content: space-between;
   font-weight: 700;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
 }
 .adjustment-popup-close {
   background: none;
