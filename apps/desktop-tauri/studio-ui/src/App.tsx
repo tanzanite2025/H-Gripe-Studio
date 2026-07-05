@@ -17,7 +17,7 @@ import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
 import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
-import type { MaskDocument } from "./types/production";
+import { toMaskDocument, type ImageDocument } from "./editor/imageDocument";
 import type { CropCommit } from "./editor/CropEditModal";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
@@ -225,7 +225,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const pendingRunNode = useRef<string | null>(null);
   // Per-image in-progress edit documents for the unified image editor's
   // document tabs: switching tabs remounts the editor, so drafts live here.
-  const mediaEditDrafts = useRef(new Map<string, MaskDocument>());
+  const mediaEditDrafts = useRef(new Map<string, ImageDocument>());
 
   const history = useHistory({ nodes, edges, setNodes, setEdges, scopeId: canvas.documentId });
   const { takeSnapshot, undo, redo } = history;
@@ -1275,17 +1275,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                   setMediaEditSourceId(id);
                 },
                 initial: mediaEditSource ? (mediaEditDrafts.current.get(mediaEditSource.id) ?? null) : null,
-                onDocChange: (doc: MaskDocument) => {
+                onDocChange: (doc: ImageDocument) => {
                   if (mediaEditSource) mediaEditDrafts.current.set(mediaEditSource.id, doc);
                 },
                 // Apply spawns exactly one bound edit node of the chosen kind from
                 // the source (never mutating it) and runs it — same pipeline as the
                 // right-click auto entries, but seeded with the manual edits.
-                onCommitMask: (edits: MaskDocument) => {
-                  if (mediaEditSource) {
+                onCommitMask: (edits: ImageDocument) => {
+                  // Pre-K2 the mask kernel executes commits, so the image
+                  // document lowers to the edit_paths v3 envelope (always
+                  // bridgeable until grade-kernel-only features land).
+                  const lowered = toMaskDocument(edits);
+                  if (mediaEditSource && lowered) {
                     mediaEditDrafts.current.delete(mediaEditSource.id);
                     addBoundEdit(mediaEditSource.id, "subjectMask", {
-                      params: { edit_paths: edits },
+                      params: { edit_paths: lowered },
                       openEditor: false,
                       run: true,
                     });

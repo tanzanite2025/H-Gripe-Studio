@@ -1,8 +1,10 @@
+import { useMemo } from "react";
 import { MaskEditModal } from "./MaskEditModal";
 import type { CropCommit } from "./CropEditModal";
 import type { EditorTab } from "./host/EditorHost";
 import { useT } from "../i18n";
 import type { MaskDocument } from "../types/production";
+import { fromMaskDocument, toMaskDocument, type ImageDocument } from "./imageDocument";
 
 /**
  * The image card's single Edit entry.
@@ -23,10 +25,10 @@ interface MediaEditModalProps {
   tabs?: EditorTab[];
   onSelectTab?: (id: string) => void;
   /** In-progress edit document restored when the tab re-activates. */
-  initial?: MaskDocument | null;
+  initial?: ImageDocument | null;
   /** Draft sink: called on every edit so tab switches keep the document. */
-  onDocChange?: (doc: MaskDocument) => void;
-  onCommitMask: (edits: MaskDocument) => void;
+  onDocChange?: (doc: ImageDocument) => void;
+  onCommitMask: (edits: ImageDocument) => void;
   // Kept for EditorHost request compatibility; crop opens through editor:"crop".
   onCommitCrop: (commit: CropCommit) => void;
   onClose: () => void;
@@ -45,6 +47,10 @@ export function MediaEditModal({
   onClose,
 }: MediaEditModalProps) {
   const t = useT();
+  // The image editor's contract is ImageDocument (image-kernel K1). Until the
+  // grade-kernel render path lands (K2), the mask editor remains the canvas,
+  // so documents bridge losslessly at this boundary in both directions.
+  const maskInitial = useMemo(() => (initial ? toMaskDocument(initial) : null), [initial]);
   const tabStrip =
     tabs && tabs.length > 0 ? (
       <div className="media-edit-tabs" role="tablist">
@@ -82,11 +88,11 @@ export function MediaEditModal({
       title={title}
       imagePath={imagePath}
       nodeId={nodeId}
-      initial={initial ?? null}
+      initial={maskInitial}
       wandTolerance={24}
-      onCommit={onCommitMask}
+      onCommit={(edits: MaskDocument) => onCommitMask(fromMaskDocument(edits))}
       onClose={onClose}
-      onDocChange={onDocChange}
+      onDocChange={onDocChange ? (doc: MaskDocument) => onDocChange(fromMaskDocument(doc)) : undefined}
       headerExtra={headerExtra}
       hideTitle
       editorName={t("mediaEdit.editor")}
