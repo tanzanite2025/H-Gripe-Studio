@@ -1,7 +1,7 @@
 // Right rail "Adjustments" panel: the list selects a tool to inspect. It does
 // not create layers until the user presses the explicit add button.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT, type MsgKey } from "../../i18n";
 import type { AdjustmentType, LayerAdjustment } from "../../types/production";
@@ -41,6 +41,34 @@ interface AdjustmentsPanelProps {
 export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, workspace, requestColorPick }: AdjustmentsPanelProps) {
   const t = useT();
   const [selectedType, setSelectedType] = useState<AdjustmentType | null>(null);
+  // Popup position once the user drags it by the title bar; null keeps the
+  // CSS default (docked left of the right rail).
+  const [popupPos, setPopupPos] = useState<{ x: number; y: number } | null>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+
+  const startPopupDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const el = popupRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const offX = e.clientX - rect.left;
+    const offY = e.clientY - rect.top;
+    const onMove = (ev: PointerEvent) => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      setPopupPos({
+        x: Math.min(Math.max(ev.clientX - offX, 0), window.innerWidth - w),
+        y: Math.min(Math.max(ev.clientY - offY, 0), window.innerHeight - h),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    e.preventDefault();
+  };
   const [drafts, setDrafts] = useState<Record<AdjustmentType, LayerAdjustment>>({
     brightness_contrast: { type: "brightness_contrast" },
     levels: { type: "levels" },
@@ -105,8 +133,14 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, worksp
           // canvas stays visible (and clickable, for the eyedropper) while
           // the tool is open.
           createPortal(
-            <div className="adjustment-popup" role="dialog" aria-label={t(selectedEntry.key)}>
-              <div className="adjustment-popup-head">
+            <div
+              ref={popupRef}
+              className="adjustment-popup"
+              role="dialog"
+              aria-label={t(selectedEntry.key)}
+              style={popupPos ? { left: popupPos.x, top: popupPos.y, right: "auto" } : undefined}
+            >
+              <div className="adjustment-popup-head" onPointerDown={startPopupDrag}>
                 <span>{t(selectedEntry.key)}</span>
                 <button
                   type="button"
