@@ -73,6 +73,7 @@ import { InfoPanel } from "./maskEditModal/InfoPanel";
 import { AdjustmentsPanel } from "./maskEditModal/AdjustmentsPanel";
 import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
+import { ColorPicker, hexToRgb } from "./maskEditModal/ColorPicker";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -267,6 +268,12 @@ export function MaskEditModal({
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
+  // PS colour wells: foreground / background colours plus the open picker.
+  // The mask itself is grayscale, so a picked colour maps to paint polarity
+  // by luminance — a light foreground paints the mask in, a dark one erases.
+  const [fgColor, setFgColor] = useState("#ffffff");
+  const [bgColor, setBgColor] = useState("#000000");
+  const [colorPicker, setColorPicker] = useState<"fg" | "bg" | null>(null);
   // Last committed rect/ellipse marquee: the marching ants stay visible after
   // the drag lands so the selection reads (PS-style); cleared on tool switch.
   const [lastMarquee, setLastMarquee] = useState<{
@@ -495,19 +502,41 @@ export function MaskEditModal({
     setEditingTransform(null);
     setTransformDraft({ dx: 0, dy: 0, scale: 1, rotate: 0 });
   };
-  // PS `D` (default colours): back to the default brush / add semantics.
+  // PS `D` (default colours): back to the default brush / add semantics and
+  // the default white-over-black wells.
   const resetColors = () => {
     selectTool(DEFAULT_TOOL_ID);
     setPathMode("add");
     setPaintTarget("layer");
+    setFgColor("#ffffff");
+    setBgColor("#000000");
   };
 
-  // PS `X` (swap colours): flip paint polarity — brush↔eraser, or a path
-  // tool's boolean mode.
+  // PS `X` (swap colours): swap the wells and flip paint polarity —
+  // brush↔eraser, or a path tool's boolean mode.
   const swapColors = () => {
+    setFgColor(bgColor);
+    setBgColor(fgColor);
     if (toolId === "brush") setToolId("eraser");
     else if (toolId === "eraser") setToolId("brush");
     else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
+  };
+
+  // A picked well colour: in the grayscale mask the foreground's luminance
+  // sets the paint polarity (light paints in, dark erases — PS painting on a
+  // mask with white/black).
+  const commitPickedColor = (hex: string) => {
+    if (colorPicker === "bg") setBgColor(hex);
+    else {
+      setFgColor(hex);
+      const rgb = hexToRgb(hex);
+      if (rgb) {
+        const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+        if (toolId === "brush" && lum < 0.5) setToolId("eraser");
+        else if (toolId === "eraser" && lum >= 0.5) setToolId("brush");
+      }
+    }
+    setColorPicker(null);
   };
 
   const shortcutHandlers: ShortcutHandlers = {
@@ -1448,6 +1477,9 @@ export function MaskEditModal({
             faces={slotFaces}
             onPickFace={(slotId, id) => setSlotFaces((f) => ({ ...f, [slotId]: id }))}
             paintMode={tool.mode === "subtract" || (tool.kind === "path" && pathMode === "subtract") ? "subtract" : "add"}
+            fgColor={fgColor}
+            bgColor={bgColor}
+            onPickColor={setColorPicker}
             onSwapColors={swapColors}
             onResetColors={resetColors}
           />
@@ -1626,6 +1658,15 @@ export function MaskEditModal({
             })()}
           </div>
         </div>
+
+        {colorPicker ? (
+          <ColorPicker
+            title={t(colorPicker === "fg" ? "mask.pickerTitleFg" : "mask.pickerTitleBg")}
+            initial={colorPicker === "fg" ? fgColor : bgColor}
+            onConfirm={commitPickedColor}
+            onCancel={() => setColorPicker(null)}
+          />
+        ) : null}
 
         {imageSizeDraft ? (
           <div className="mask-dialog-backdrop" onClick={() => setImageSizeDraft(null)}>
