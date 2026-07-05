@@ -222,6 +222,18 @@
 /* Frame on the native surface window below the webview: drop the stage
    checkerboard so the hole stays see-through. */
 .mask-edit-stage.presented { background: transparent; }
+/* PS-style brush cursor: a ring of the brush tip's true diameter, centred on
+   the pointer (left/top set imperatively). The dark outline keeps the white
+   ring readable over light imagery. */
+.mask-brush-cursor {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  outline: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 3;
+}
 .mask-edit-canvas {
   position: absolute;
   inset: 0;
