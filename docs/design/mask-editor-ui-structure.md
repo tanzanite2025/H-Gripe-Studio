@@ -63,6 +63,30 @@ src/editor/
 5. **Panels receive props, not the whole state.** If a panel needs six new
    props, consider whether the logic belongs in the reducer or a hook instead.
 
+## Workspaces & the node-result → image-editor pipeline
+
+The same modal serves two product surfaces via the `workspace` prop:
+
+- **`workspace="mask"`** — the node-bound mask popup. Opened from a mask node
+  (or the Preview gate's `Edit`); commits write `edit_paths` back onto the
+  node and re-run it. Mask-only chrome (mask-only view, quick mask, the
+  channels / paths / mask-ops docks) exists **only** here.
+- **`workspace="image"`** — the standalone image editor (`MediaEditModal`).
+  No mask chrome; its right rail is adjustments/options + layers/history.
+
+**Pipeline rule:** any node result — subject mask today, future local-LLM /
+API / algorithm cards — enters the image editor through one route:
+
+```
+node result → PreviewModal (review gate) → "Image editor" entry
+           → openMediaEdit(nodeId) → EditorRequest{ editor:"media",
+               target:{ imagePath: cutout ?? last output ?? source path, nodeId } }
+```
+
+New result-producing cards get this for free by populating the node's result
+fields (`cutoutImagePath` / `imagePath`); never add a bespoke editor entry
+per card.
+
 ## PS design tokens
 
 The right rail follows PS's dark dock language. The canonical values live in
