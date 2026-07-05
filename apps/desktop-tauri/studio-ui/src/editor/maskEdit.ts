@@ -289,8 +289,8 @@ export function addLayer(state: EditState, name?: string): EditState {
 }
 
 /** Append an identity adjustment layer above the stack, active (undoable; M6). */
-export function addAdjustmentLayer(state: EditState, type: AdjustmentType): EditState {
-  const layers = [...state.current.layers, emptyAdjustmentLayer(type)];
+export function addAdjustmentLayer(state: EditState, type: AdjustmentType, name?: string): EditState {
+  const layers = [...state.current.layers, emptyAdjustmentLayer(type, name)];
   return commit(state, { ...state.current, layers, active: layers.length - 1 });
 }
 

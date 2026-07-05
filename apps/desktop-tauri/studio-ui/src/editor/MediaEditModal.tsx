@@ -1,28 +1,25 @@
-import { useState } from "react";
 import { MaskEditModal } from "./MaskEditModal";
-import { CropEditModal, type CropCommit } from "./CropEditModal";
+import type { CropCommit } from "./CropEditModal";
 import { useT } from "../i18n";
 import type { MaskDocument } from "../types/production";
 
 /**
- * The image card's single "Edit" entry. It hosts the manual (human-spatial)
- * editors behind one unified UI: a tool-group switcher in the bar flips between
- * the mask brush editor and the crop box editor on the *source* image. Nothing
- * is mutated until the user applies — at which point exactly one bound edit node
- * of the matching kind is spawned and run (see generic-media-card.md, Phase 4,
- * option A: "one editor, one result node per apply").
+ * The image card's single Edit entry.
+ *
+ * This component is the image editor surface. It is intentionally not a tab
+ * container for crop, mask, model preview, or template preview. Those tools
+ * should open as their own modal requests and may offer a manual-edit action
+ * that returns to this editor.
  */
-export type MediaEditGroup = "mask" | "crop";
-
 interface MediaEditModalProps {
   title: string;
   imagePath?: string | null;
   /** Node whose output backs the underlay, for a `node_output` target. */
   nodeId?: string | null;
-  initialGroup?: MediaEditGroup;
   /** Blank-editor "open image" entry (shown when there is no image yet). */
   onPickFile?: () => void;
   onCommitMask: (edits: MaskDocument) => void;
+  // Kept for EditorHost request compatibility; crop opens through editor:"crop".
   onCommitCrop: (commit: CropCommit) => void;
   onClose: () => void;
 }
@@ -31,69 +28,32 @@ export function MediaEditModal({
   title,
   imagePath,
   nodeId,
-  initialGroup = "mask",
   onPickFile,
   onCommitMask,
-  onCommitCrop,
   onClose,
 }: MediaEditModalProps) {
   const t = useT();
-  const [group, setGroup] = useState<MediaEditGroup>(initialGroup);
-
-  const switcher = (
-    <div className="media-edit-groups" role="tablist">
-      <button
-        role="tab"
-        aria-selected={group === "mask"}
-        className={group === "mask" ? "active" : ""}
-        onClick={() => setGroup("mask")}
-      >
-        {t("mediaEdit.mask")}
-      </button>
-      <button
-        role="tab"
-        aria-selected={group === "crop"}
-        className={group === "crop" ? "active" : ""}
-        onClick={() => setGroup("crop")}
-      >
-        {t("mediaEdit.crop")}
-      </button>
-      {onPickFile && !imagePath ? (
+  const headerExtra =
+    onPickFile && !imagePath ? (
+      <div className="media-edit-groups">
         <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
           {t("mediaEdit.open")}
         </button>
-      ) : null}
-    </div>
-  );
+      </div>
+    ) : null;
 
-  if (group === "mask") {
-    return (
-      <MaskEditModal
-        title={title}
-        imagePath={imagePath}
-        nodeId={nodeId}
-        initial={null}
-        wandTolerance={24}
-        onCommit={onCommitMask}
-        onClose={onClose}
-        headerExtra={switcher}
-        editorName={t("mediaEdit.editor")}
-      />
-    );
-  }
   return (
-    <CropEditModal
+    <MaskEditModal
       title={title}
       imagePath={imagePath}
       nodeId={nodeId}
-      initialMode="manual"
-      initialBox={null}
-      initialAspect="free"
-      initialMargin={6}
-      onCommit={onCommitCrop}
+      initial={null}
+      wandTolerance={24}
+      onCommit={onCommitMask}
       onClose={onClose}
-      headerExtra={switcher}
+      headerExtra={headerExtra}
       editorName={t("mediaEdit.editor")}
+      workspace="image"
     />
   );
 }

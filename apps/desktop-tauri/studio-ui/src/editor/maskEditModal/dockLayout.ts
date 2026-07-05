@@ -18,7 +18,7 @@ export interface DockLayoutState {
   railWidth: number;
 }
 
-export const RAIL_MIN = 200;
+export const RAIL_MIN = 280;
 export const RAIL_MAX = 480;
 
 const clampRail = (w: number) => Math.min(RAIL_MAX, Math.max(RAIL_MIN, Math.round(w)));

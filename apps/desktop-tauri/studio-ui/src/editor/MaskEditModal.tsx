@@ -69,7 +69,6 @@ import { ToolOptionsPanel } from "./maskEditModal/ToolOptionsPanel";
 import { LayersPanel } from "./maskEditModal/LayersPanel";
 import { HistoryPanel } from "./maskEditModal/HistoryPanel";
 import { InfoPanel } from "./maskEditModal/InfoPanel";
-import { PropertiesPanel } from "./maskEditModal/PropertiesPanel";
 import { AdjustmentsPanel } from "./maskEditModal/AdjustmentsPanel";
 import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
@@ -96,6 +95,8 @@ interface MaskEditModalProps {
   headerExtra?: ReactNode;
   /** Editor name shown after the title (defaults to "mask editor"). */
   editorName?: string;
+  /** Product surface using this heavy pixel editor. */
+  workspace?: "image" | "mask";
 }
 
 let strokeSeq = 0;
@@ -108,10 +109,18 @@ const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
 const DOCK_STORAGE_KEY = "hgripe.studio.maskDock.v2";
 const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
   groups: [
-    { tabs: ["adjustments", "properties", "options", "mask_ops", "info"], active: "options" },
+    { tabs: ["adjustments", "options", "mask_ops", "info"], active: "options" },
     { tabs: ["layers", "channels", "paths", "history"], active: "layers" },
   ],
-  railWidth: 240,
+  railWidth: 320,
+};
+const IMAGE_DOCK_STORAGE_KEY = "hgripe.studio.imageDock.v2";
+const IMAGE_DOCK_LAYOUT: DockLayoutState = {
+  groups: [
+    { tabs: ["adjustments", "options"], active: "adjustments" },
+    { tabs: ["layers", "channels", "paths", "history"], active: "layers" },
+  ],
+  railWidth: 360,
 };
 
 export function MaskEditModal({
@@ -124,6 +133,7 @@ export function MaskEditModal({
   onClose,
   headerExtra,
   editorName,
+  workspace = "mask",
 }: MaskEditModalProps) {
   const t = useT();
   const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
@@ -161,7 +171,10 @@ export function MaskEditModal({
   const [fillDraft, setFillDraft] = useState<FillDraft | null>(null);
   // PS-style right rail: tabbed dock groups driven by a persisted layout
   // (drag a tab to re-dock it; drag the rail edge to resize).
-  const dock = useDockLayout(DOCK_STORAGE_KEY, DEFAULT_DOCK_LAYOUT);
+  const dock = useDockLayout(
+    workspace === "image" ? IMAGE_DOCK_STORAGE_KEY : DOCK_STORAGE_KEY,
+    workspace === "image" ? IMAGE_DOCK_LAYOUT : DEFAULT_DOCK_LAYOUT,
+  );
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
@@ -1400,11 +1413,6 @@ export function MaskEditModal({
             />
                   ),
                 },
-                properties: {
-                  id: "properties",
-                  label: t("mask.panelProperties"),
-                  content: <PropertiesPanel adjustment={activeAdjustment} patchAdjustment={patchAdjustment} />,
-                },
                 adjustments: {
                   id: "adjustments",
                   label: t("mask.panelAdjustments"),
@@ -1455,6 +1463,7 @@ export function MaskEditModal({
               layers={layers}
               active={state.current.active}
               dims={dims}
+              imagePath={imagePath}
               dispatch={dispatch}
               onBeforeLayerChange={() => {
                 if (editingPath != null) cancelPathEdit();

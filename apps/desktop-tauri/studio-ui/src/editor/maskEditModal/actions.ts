@@ -60,7 +60,7 @@ export type MaskEditAction =
   | { type: "op_transform"; index: number; params: TransformParams }
   | { type: "path_anchors"; index: number; points: EditPathPoint[] }
   | { type: "layer_add" }
-  | { type: "layer_add_adjustment"; adjType: AdjustmentType }
+  | { type: "layer_add_adjustment"; adjType: AdjustmentType; name?: string }
   | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
   | { type: "layer_remove"; index: number }
   | { type: "layer_rename"; index: number; name: string }
@@ -115,7 +115,7 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
     case "layer_add":
       return addLayer(state);
     case "layer_add_adjustment":
-      return addAdjustmentLayer(state, action.adjType);
+      return addAdjustmentLayer(state, action.adjType, action.name);
     case "layer_adjustment":
       return updateLayerAdjustment(state, action.index, action.adjustment);
     case "layer_remove":

@@ -1,7 +1,8 @@
-// Right rail — "Layers" panel block (M3): the layer stack (top first).
+// Right rail "Layers" panel block: the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
 import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
@@ -15,16 +16,19 @@ interface LayersPanelProps {
   active: number;
   /** Image size (px); the thumbnail replay space. */
   dims: { w: number; h: number };
+  /** Backing source image for the base image layer thumbnail. */
+  imagePath?: string | null;
   dispatch: MaskEditDispatch;
   /** Called before any layer switch/removal to drop an in-flight anchor edit. */
   onBeforeLayerChange: () => void;
 }
 
-// A real mask thumbnail (PS layer panel): the layer's own ops replayed into a
-// tiny grayscale surface, redrawn only when the layer's ops change.
+// A real mask thumbnail: the layer's own ops replayed into a tiny grayscale
+// surface. It is used for actual edit/mask layers, not for the base image.
 function LayerThumb({ layer, dims }: { layer: MaskLayer; dims: { w: number; h: number } }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const thumb = useMemo(() => buildLayerThumb(layer, dims), [layer.ops, dims]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -41,13 +45,43 @@ function LayerThumb({ layer, dims }: { layer: MaskLayer; dims: { w: number; h: n
     }
     ctx.putImageData(img, 0, 0);
   }, [thumb]);
+
   return <canvas ref={canvasRef} className="mask-layer-thumb-canvas" aria-hidden="true" />;
 }
 
-export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChange }: LayersPanelProps) {
+function BaseImageThumb({ imagePath }: { imagePath: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setSrc(null);
+    generateThumbnail({ path: imagePath, size: 96 })
+      .then((thumb) => {
+        if (alive) setSrc(thumb.data_url || null);
+      })
+      .catch(() => {
+        if (alive) setSrc(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [imagePath]);
+
+  return src ? (
+    <img className="mask-layer-thumb-img" src={src} alt="" draggable={false} />
+  ) : (
+    <span className="mask-layer-thumb-fallback">IMG</span>
+  );
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
-  // PS double-click rename: the stack index being renamed + the draft text.
   const [renaming, setRenaming] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -55,9 +89,11 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
     if (renaming != null) dispatch({ type: "layer_rename", index: renaming, name: draft });
     setRenaming(null);
   };
+
   const allowLayerDrop = (e: DragEvent) => {
     if (e.dataTransfer.types.includes(LAYER_MIME)) e.preventDefault();
   };
+
   const dropOn = (e: DragEvent, to: number) => {
     const from = Number(e.dataTransfer.getData(LAYER_MIME));
     if (!Number.isInteger(from)) return;
@@ -67,7 +103,6 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
 
   return (
     <div className="mask-panel-body">
-      {/* PS-style panel head: blend mode + opacity act on the active layer. */}
       <div className="mask-layer-head">
         <select
           className="mask-layer-blend"
@@ -88,7 +123,7 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
           disabled={!activeLayer}
           onClick={() => dispatch({ type: "layer_lock", index: active })}
         >
-          🔒
+          L
         </button>
         <label className="mask-layer-opacity-label">
           <span className="muted">{t("mask.layerOpacity")}</span>
@@ -104,9 +139,12 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
           />
         </label>
       </div>
+
       <div className="mask-layer-list">
         {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
           const layer = layers[i];
+          const showBaseImage = Boolean(imagePath && i === 0 && layer.ops.length === 0 && layer.kind !== "adjustment");
+          const displayName = showBaseImage && imagePath ? basename(imagePath) : layer.name;
           return (
             <div
               key={layer.id}
@@ -131,10 +169,16 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
                   dispatch({ type: "layer_visible", index: i });
                 }}
               >
-                {layer.visible ? "👁" : ""}
+                {layer.visible ? "V" : ""}
               </button>
               <span className="mask-layer-thumb" aria-hidden="true">
-                {layer.kind === "adjustment" ? "◐" : <LayerThumb layer={layer} dims={dims} />}
+                {showBaseImage && imagePath ? (
+                  <BaseImageThumb imagePath={imagePath} />
+                ) : layer.kind === "adjustment" ? (
+                  "ADJ"
+                ) : (
+                  <LayerThumb layer={layer} dims={dims} />
+                )}
               </span>
               {renaming === i ? (
                 <input
@@ -152,7 +196,7 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
               ) : (
                 <span
                   className="mask-layer-name"
-                  title={layer.name}
+                  title={showBaseImage && imagePath ? imagePath : layer.name}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     if (layer.locked) return;
@@ -160,17 +204,17 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
                     setRenaming(i);
                   }}
                 >
-                  {layer.name}
+                  {displayName}
                 </span>
               )}
               {layer.linked ? (
                 <span className="mask-layer-linked" title={t("mask.layerLinked")} aria-hidden="true">
-                  🔗
+                  link
                 </span>
               ) : null}
               {layer.locked ? (
                 <span className="mask-layer-locked" title={t("mask.layerLocked")} aria-hidden="true">
-                  🔒
+                  lock
                 </span>
               ) : null}
               <button
@@ -183,13 +227,13 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
                   dispatch({ type: "layer_remove", index: i });
                 }}
               >
-                ×
+                x
               </button>
             </div>
           );
         })}
       </div>
-      {/* PS bottom action bar: icon buttons on the right edge of the panel. */}
+
       <div className="mask-layer-actions">
         <button
           className={`mask-layer-action${activeLayer?.linked ? " on" : ""}`}
@@ -197,7 +241,7 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
           disabled={!activeLayer}
           onClick={() => dispatch({ type: "layer_link", index: active })}
         >
-          🔗
+          link
         </button>
         <select
           className="mask-layer-adjustment-add"
@@ -209,7 +253,7 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
           }}
         >
           <option value="" disabled>
-            ◐
+            adj
           </option>
           <option value="levels">{t("mask.adjLevels")}</option>
           <option value="curve">{t("mask.adjCurve")}</option>
@@ -220,10 +264,10 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
           title={t("mask.layerDuplicate")}
           onClick={() => dispatch({ type: "layer_duplicate" })}
         >
-          ⧉
+          dup
         </button>
         <button className="mask-layer-action" title={t("mask.layerAddTitle")} onClick={() => dispatch({ type: "layer_add" })}>
-          ⊞
+          +
         </button>
         <button
           className="mask-layer-action"
@@ -234,7 +278,7 @@ export function LayersPanel({ layers, active, dims, dispatch, onBeforeLayerChang
             dispatch({ type: "layer_remove", index: active });
           }}
         >
-          🗑
+          del
         </button>
       </div>
     </div>
