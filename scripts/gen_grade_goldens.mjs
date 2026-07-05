@@ -372,6 +372,31 @@ function applyOp(surface, op) {
       });
       break;
     }
+    case "replace_color": {
+      if (![...op.from, ...op.to, op.fuzziness, op.amount].every((v) => Number.isFinite(v))) break;
+      const [fh, fs, fl] = rgbToHsl(op.from.map(clamp01));
+      const [th, ts, tl] = rgbToHsl(op.to.map(clamp01));
+      const fuzz = Math.max(Math.min(op.fuzziness, 1), 1e-3);
+      const amount = clamp01(op.amount);
+      if (amount === 0) break;
+      const lumShift = tl - fl;
+      forEachHsl(surface, (h, s, l) => {
+        const dRaw = (((h - fh) % 360) + 360) % 360;
+        const dh = Math.min(dRaw, 360 - dRaw) / 180;
+        const ds = s - fs;
+        const dl = l - fl;
+        const d = Math.sqrt(dh * dh + ds * ds + dl * dl);
+        const w = (1 - smoothstep(d / fuzz)) * amount;
+        const tRaw = (((th - h) % 360) + 360) % 360;
+        const dt = tRaw > 180 ? tRaw - 360 : tRaw;
+        return [
+          (((h + w * dt) % 360) + 360) % 360,
+          clamp01(s + w * (ts - s)),
+          clamp01(l + w * lumShift),
+        ];
+      });
+      break;
+    }
   }
 }
 
@@ -1136,6 +1161,44 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: colorRangeCases }, null, 2) + "\n",
 );
 console.log(`wrote ${colorRangeCases.length} color-range cases`);
+
+// ---- Replace-color cases: picked source → target remap ----
+
+const replaceColorCases = [
+  docCase("replace_color: zero amount is a no-op", {
+    layers: [layer([{ type: "replace_color", from: [1, 0, 0], to: [0, 0, 1], fuzziness: 0.4, amount: 0 }])],
+  }, opsInput),
+  docCase("replace_color: red toward blue, full strength", {
+    layers: [layer([{ type: "replace_color", from: [1, 0.75, 0.2], to: [0.2, 0.4, 1], fuzziness: 0.4, amount: 1 }])],
+  }, opsInput),
+  docCase("replace_color: half strength blends", {
+    layers: [layer([{ type: "replace_color", from: [1, 0.75, 0.2], to: [0.2, 0.4, 1], fuzziness: 0.4, amount: 0.5 }])],
+  }, opsInput),
+  docCase("replace_color: tight fuzziness only touches near matches", {
+    layers: [layer([{ type: "replace_color", from: [0.5, 0.5, 0.5], to: [0.9, 0.1, 0.1], fuzziness: 0.05, amount: 1 }])],
+  }, opsInput),
+  docCase("replace_color: wide fuzziness sweeps broadly", {
+    layers: [layer([{ type: "replace_color", from: [0.0, 0.25, 0.5], to: [0.5, 0.25, 0.0], fuzziness: 1, amount: 1 }])],
+  }, opsInput),
+  docCase("replace_color: lightness shift preserves shading", {
+    layers: [layer([{ type: "replace_color", from: [0.3, 0.7, 0.15], to: [0.9, 0.9, 0.9], fuzziness: 0.5, amount: 1 }])],
+  }, opsInput),
+  docCase("replace_color: pro_photo space", {
+    layers: [layer([{ type: "replace_color", from: [0.6, 0.4, 0.0], to: [0.0, 0.4, 0.6], fuzziness: 0.35, amount: 0.8 }])],
+  }, opsInputPro),
+  docCase("replace_color: stacked with exposure under opacity and mask", {
+    layers: [layer([
+      { type: "exposure", ev: 0.3 },
+      { type: "replace_color", from: [1, 0.75, 0.2], to: [0.2, 0.4, 1], fuzziness: 0.4, amount: 1 },
+    ], { opacity: 0.7, mask: [1, 0.5, 0, 1, 0.25, 0.75] })],
+  }, opsInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_replace_color.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: replaceColorCases }, null, 2) + "\n",
+);
+console.log(`wrote ${replaceColorCases.length} replace-color cases`);
 
 // ---- 1D LUT cases (wave 3) ----
 

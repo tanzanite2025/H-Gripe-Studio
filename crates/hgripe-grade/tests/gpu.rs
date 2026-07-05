@@ -291,6 +291,26 @@ fn curve_ops_match_cpu_within_lut_tolerance() {
             },
             2e-3,
         ),
+        (
+            "replace_color",
+            GradeOp::ReplaceColor {
+                from: [1.0, 0.75, 0.2],
+                to: [0.2, 0.4, 1.0],
+                fuzziness: 0.4,
+                amount: 1.0,
+            },
+            2e-3,
+        ),
+        (
+            "replace_color_partial",
+            GradeOp::ReplaceColor {
+                from: [0.5, 0.5, 0.5],
+                to: [0.9, 0.1, 0.1],
+                fuzziness: 0.2,
+                amount: 0.5,
+            },
+            2e-3,
+        ),
     ];
     for (name, op, tol) in cases {
         let doc = GradeDoc {

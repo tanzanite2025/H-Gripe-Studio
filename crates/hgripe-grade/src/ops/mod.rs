@@ -186,6 +186,20 @@ pub enum GradeOp {
         #[serde(default)]
         monochrome: bool,
     },
+    /// Replace one picked colour with another on encoded values: each
+    /// pixel's HSL distance to `from` (hue normalised by 180°, plus
+    /// saturation and lightness deltas) gates a smoothstep weight inside
+    /// `fuzziness` (`0..=1`), scaled by `amount` (`0..=1`). The weighted
+    /// pixel moves its hue toward `to`'s hue (shortest arc), its
+    /// saturation toward `to`'s, and shifts lightness by `to − from`'s
+    /// lightness delta — shading is preserved rather than flattened.
+    /// Neutral is `amount = 0`; non-finite parameters read as identity.
+    ReplaceColor {
+        from: [f32; 3],
+        to: [f32; 3],
+        fuzziness: f32,
+        amount: f32,
+    },
     /// Unsharp mask on encoded values: `v + amount × (v − blur(v))`,
     /// clamped; `blur` is the (2×`radius`+1)² box mean (`radius` clamps to
     /// `1..=3`, i.e. 3×3 / 5×5 / 7×7; absent reads as 1). Spatial — see
@@ -579,6 +593,42 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                     (h + hue_shift).rem_euclid(360.0),
                     out_s,
                     (l + lum_shift).clamp(0.0, 1.0),
+                )
+            });
+        }
+        GradeOp::ReplaceColor {
+            from,
+            to,
+            fuzziness,
+            amount,
+        } => {
+            let finite = from
+                .iter()
+                .chain(to.iter())
+                .chain([fuzziness, amount])
+                .all(|v| v.is_finite());
+            let amount = amount.clamp(0.0, 1.0);
+            if !finite || amount == 0.0 {
+                return;
+            }
+            let clamp3 = |c: &[f32; 3]| c.map(|v| v.clamp(0.0, 1.0));
+            let (fh, fs, fl) = rgb_to_hsl(clamp3(from));
+            let (th, ts, tl) = rgb_to_hsl(clamp3(to));
+            let fuzz = fuzziness.clamp(1e-3, 1.0);
+            let lum_shift = tl - fl;
+            for_each_hsl(surface, n, |h, s, l| {
+                let d_raw = (h - fh).rem_euclid(360.0);
+                let dh = d_raw.min(360.0 - d_raw) / 180.0;
+                let ds = s - fs;
+                let dl = l - fl;
+                let d = (dh * dh + ds * ds + dl * dl).sqrt();
+                let w = (1.0 - smoothstep(d / fuzz)) * amount;
+                let t_raw = (th - h).rem_euclid(360.0);
+                let dt = if t_raw > 180.0 { t_raw - 360.0 } else { t_raw };
+                (
+                    (h + w * dt).rem_euclid(360.0),
+                    (s + w * (ts - s)).clamp(0.0, 1.0),
+                    (l + w * lum_shift).clamp(0.0, 1.0),
                 )
             });
         }

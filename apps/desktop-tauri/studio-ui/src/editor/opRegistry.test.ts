@@ -28,7 +28,10 @@ describe("opRegistry", () => {
 
   it("adjustment layers are parameter-only; tone maps on the mask kernel, colour on grade", () => {
     for (const [type, meta] of Object.entries(MASK_ADJUSTMENTS)) {
-      const kernel = type === "color_ranges" || type === "channel_mixer" ? "grade" : "mask";
+      const kernel =
+        type === "color_ranges" || type === "channel_mixer" || type === "replace_color"
+          ? "grade"
+          : "mask";
       expect(meta, type).toEqual({ kernel, adjustment: true });
     }
   });
@@ -44,6 +47,6 @@ describe("opRegistry", () => {
     const overlap = MASK_OP_TYPES.filter((t) => t in GRADE_OPS);
     expect(overlap).toEqual([]);
     const adjOverlap = Object.keys(MASK_ADJUSTMENTS).filter((t) => t in GRADE_OPS);
-    expect(adjOverlap).toEqual(["levels", "color_ranges"]);
+    expect(adjOverlap).toEqual(["levels", "color_ranges", "replace_color"]);
   });
 });

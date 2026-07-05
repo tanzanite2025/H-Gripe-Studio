@@ -600,6 +600,108 @@
   opacity: 0.45;
   cursor: default;
 }
+/* Replace-color: a floating popover without a backdrop, so the live canvas
+   below stays visible and clickable (the eyedropper samples from it). */
+.replace-color-popup {
+  position: fixed;
+  top: 96px;
+  right: 348px;
+  width: 264px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--ps-dock-bg, #2a2a2a);
+  border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.replace-color-popup .slider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+.replace-color-popup .slider-row > span { grid-column: 1 / -1; }
+.replace-color-popup .slider-row input[type="range"] {
+  grid-column: 1;
+  min-width: 0;
+  width: 100%;
+}
+.replace-color-popup .slider-row output {
+  grid-column: 2;
+  min-width: 40px;
+}
+.replace-color-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+}
+.replace-color-popup-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.replace-color-popup-close:hover {
+  background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1));
+  color: var(--text);
+}
+/* Dashed colour-coded frames: red = the colour being replaced, green = the
+   requested replacement. */
+.replace-color-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1.5px dashed transparent;
+}
+.replace-color-slot.from { border-color: #e5534b; }
+.replace-color-slot.to { border-color: #46a758; }
+.replace-color-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.replace-color-slot-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.replace-color-slot-body small { white-space: nowrap; }
+.replace-color-swatch {
+  width: 46px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.2));
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  flex: none;
+}
+.replace-color-pick {
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.2));
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.replace-color-pick:hover { background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1)); }
+.replace-color-pick.picking {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .mask-channel-quick,
 .mask-path-thumb {
   display: inline-flex;

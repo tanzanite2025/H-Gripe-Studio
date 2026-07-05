@@ -25,14 +25,47 @@ const MIXER_ROWS = [
 ] as const;
 const MIXER_SOURCES: MsgKey[] = ["mask.channelRed", "mask.channelGreen", "mask.channelBlue"];
 
+// RGB + HSL readout values of a `#rrggbb` colour, for the swatch labels.
+function colorReadout(hex: string | undefined): string | null {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const l = (max + min) / 2;
+  const d = max - min;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  let h = 0;
+  if (d !== 0) {
+    const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+    if (max === rn) h = 60 * (((gn - bn) / d) % 6);
+    else if (max === gn) h = 60 * ((bn - rn) / d + 2);
+    else h = 60 * ((rn - gn) / d + 4);
+    h = (h + 360) % 360;
+  }
+  return `RGB ${r},${g},${b} · HSL ${Math.round(h)}°,${Math.round(s * 100)}%,${Math.round(l * 100)}%`;
+}
+
 interface AdjustmentControlsProps {
   adjustment: LayerAdjustment;
   patchAdjustment: (patch: Partial<LayerAdjustment>) => void;
+  /** Arms a one-shot canvas eyedropper; the next canvas click samples into `cb`. */
+  requestColorPick?: (cb: (hex: string) => void) => void;
 }
 
-export function AdjustmentControls({ adjustment, patchAdjustment }: AdjustmentControlsProps) {
+export function AdjustmentControls({ adjustment, patchAdjustment, requestColorPick }: AdjustmentControlsProps) {
   const t = useT();
   const [activeRange, setActiveRange] = useState<AdjustmentColorRange>("reds");
+  const [picking, setPicking] = useState<"from_color" | "to_color" | null>(null);
+  const pickFromImage = (slot: "from_color" | "to_color") => {
+    if (!requestColorPick) return;
+    setPicking(slot);
+    requestColorPick((hex) => {
+      setPicking(null);
+      patchAdjustment({ [slot]: hex });
+    });
+  };
   const rangeValues = adjustment.ranges?.find((r) => r.range === activeRange);
   const patchRange = (patch: { hue?: number; saturation?: number; lightness?: number }) => {
     const others = (adjustment.ranges ?? []).filter((r) => r.range !== activeRange);
@@ -108,6 +141,58 @@ export function AdjustmentControls({ adjustment, patchAdjustment }: AdjustmentCo
               onChange={(e) => patchAdjustment({ monochrome: e.target.checked })}
             />
           </label>
+        </>
+      ) : adjustment.type === "replace_color" ? (
+        <>
+          {(
+            [
+              ["from_color", "mask.adjFromColor", "from"],
+              ["to_color", "mask.adjToColor", "to"],
+            ] as const
+          ).map(([slot, label, kind]) => (
+            <div key={slot} className={`replace-color-slot ${kind}`}>
+              <div className="replace-color-slot-head">
+                <span>{t(label)}</span>
+                <button
+                  type="button"
+                  className={`replace-color-pick${picking === slot ? " picking" : ""}`}
+                  title={t("mask.adjPickFromImage")}
+                  disabled={!requestColorPick}
+                  onClick={() => pickFromImage(slot)}
+                >
+                  {picking === slot ? t("mask.adjPicking") : t("mask.adjEyedropper")}
+                </button>
+              </div>
+              <div className="replace-color-slot-body">
+                <input
+                  type="color"
+                  className="replace-color-swatch"
+                  value={adjustment[slot] ?? "#808080"}
+                  onChange={(e) => patchAdjustment({ [slot]: e.target.value })}
+                />
+                <small className="muted">{colorReadout(adjustment[slot]) ?? "\u2014"}</small>
+              </div>
+            </div>
+          ))}
+          {(
+            [
+              ["fuzziness", "mask.adjFuzziness", 40],
+              ["strength", "mask.adjStrength", 100],
+            ] as const
+          ).map(([key, label, dflt]) => (
+            <label key={key} className="slider-row">
+              <span>{t(label)}</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={adjustment[key] ?? dflt}
+                onChange={(e) => patchAdjustment({ [key]: Number(e.target.value) })}
+              />
+              <output>{adjustment[key] ?? dflt}%</output>
+            </label>
+          ))}
+          <small className="muted">{t("mask.replaceColorHint")}</small>
         </>
       ) : adjustment.type === "channel_mixer" ? (
         <>
