@@ -8,7 +8,7 @@ import type { AdjustmentType, LayerAdjustment } from "../../types/production";
 import type { MaskEditDispatch } from "./actions";
 import { AdjustmentControls } from "./AdjustmentControls";
 
-const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?: boolean; popup?: boolean; name: string }[] = [
+const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?: boolean; name: string }[] = [
   { key: "mask.adjBrightnessContrast", glyph: "BC", type: "brightness_contrast", name: "亮度/对比度" },
   { key: "mask.adjLevels", glyph: "LV", type: "levels", name: "色阶" },
   { key: "mask.adjCurve", glyph: "CV", type: "curve", name: "曲线" },
@@ -22,7 +22,7 @@ const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?:
   { key: "mask.adjThreshold", glyph: "TH", name: "阈值" },
   { key: "mask.adjColorRanges", glyph: "CR", type: "color_ranges", image_only: true, name: "颜色范围" },
   { key: "mask.adjGradientMap", glyph: "GM", name: "渐变映射" },
-  { key: "mask.adjReplaceColor", glyph: "RC", type: "replace_color", image_only: true, popup: true, name: "替换颜色" },
+  { key: "mask.adjReplaceColor", glyph: "RC", type: "replace_color", image_only: true, name: "替换颜色" },
 ];
 
 const defaultAdjustment = (type: AdjustmentType): LayerAdjustment => ({ type });
@@ -40,7 +40,7 @@ interface AdjustmentsPanelProps {
 
 export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, workspace, requestColorPick }: AdjustmentsPanelProps) {
   const t = useT();
-  const [selectedType, setSelectedType] = useState<AdjustmentType>("brightness_contrast");
+  const [selectedType, setSelectedType] = useState<AdjustmentType | null>(null);
   const [drafts, setDrafts] = useState<Record<AdjustmentType, LayerAdjustment>>({
     brightness_contrast: { type: "brightness_contrast" },
     levels: { type: "levels" },
@@ -58,13 +58,16 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, worksp
   }, [adjustment]);
 
   const selectedEntry = useMemo(
-    () => ENTRIES.find((entry) => entry.type === selectedType),
+    () => (selectedType ? ENTRIES.find((entry) => entry.type === selectedType) : undefined),
     [selectedType],
   );
-  const visibleAdjustment = adjustment?.type === selectedType
-    ? adjustment
-    : drafts[selectedType] ?? defaultAdjustment(selectedType);
+  const visibleAdjustment = selectedType
+    ? adjustment?.type === selectedType
+      ? adjustment
+      : drafts[selectedType] ?? defaultAdjustment(selectedType)
+    : null;
   const patchVisibleAdjustment = (patch: Partial<LayerAdjustment>) => {
+    if (!selectedType) return;
     if (adjustment?.type === selectedType) {
       patchAdjustment(patch);
       return;
@@ -77,59 +80,39 @@ export function AdjustmentsPanel({ dispatch, adjustment, patchAdjustment, worksp
 
   return (
     <div className="mask-panel-body">
-      <div className="mask-adjustments-split">
-        <div className="mask-adjustments-list">
-          {ENTRIES.map(({ key, glyph, type: entryType, image_only }) => {
-            const type = image_only && workspace !== "image" ? undefined : entryType;
-            return (
-            <button
-              key={key}
-              className={`mask-adjustment-row${type ? "" : " planned"}${type === selectedType ? " active" : ""}`}
-              title={type ? t(key) : t("mask.adjPlanned")}
-              aria-disabled={!type || undefined}
-              onClick={() => {
-                if (type) setSelectedType(type);
-              }}
-            >
-              <span className="glyph" aria-hidden="true">{glyph}</span>
-              <span className="label">{t(key)}</span>
-            </button>
-            );
-          })}
-        </div>
-        <div className="mask-adjustments-detail">
-          {selectedEntry && !selectedEntry.popup ? (
-            <>
-              <button
-                className="mask-adjustment-add-btn"
-                onClick={() => dispatch({
-                  type: "layer_add_adjustment",
-                  adjType: selectedType,
-                  name: selectedEntry.name,
-                })}
-              >
-                添加{selectedEntry.name}
-              </button>
-              <AdjustmentControls adjustment={visibleAdjustment} patchAdjustment={patchVisibleAdjustment} />
-            </>
-          ) : (
-            <small className="muted">{t("mask.adjPickHint")}</small>
-          )}
-        </div>
+      <div className="mask-adjustments-list">
+        {ENTRIES.map(({ key, glyph, type: entryType, image_only }) => {
+          const type = image_only && workspace !== "image" ? undefined : entryType;
+          return (
+          <button
+            key={key}
+            className={`mask-adjustment-row${type ? "" : " planned"}${type != null && type === selectedType ? " active" : ""}`}
+            title={type ? t(key) : t("mask.adjPlanned")}
+            aria-disabled={!type || undefined}
+            onClick={() => {
+              if (type) setSelectedType(type === selectedType ? null : type);
+            }}
+          >
+            <span className="glyph" aria-hidden="true">{glyph}</span>
+            <span className="label">{t(key)}</span>
+          </button>
+          );
+        })}
       </div>
-      {selectedEntry?.popup
+      <small className="muted">{t("mask.adjPickHint")}</small>
+      {selectedType && selectedEntry && visibleAdjustment
         ? // A floating popover, deliberately without a backdrop: the live
           // canvas stays visible (and clickable, for the eyedropper) while
           // the tool is open.
           createPortal(
-            <div className="replace-color-popup" role="dialog" aria-label={t(selectedEntry.key)}>
-              <div className="replace-color-popup-head">
+            <div className="adjustment-popup" role="dialog" aria-label={t(selectedEntry.key)}>
+              <div className="adjustment-popup-head">
                 <span>{t(selectedEntry.key)}</span>
                 <button
                   type="button"
-                  className="replace-color-popup-close"
+                  className="adjustment-popup-close"
                   aria-label="close"
-                  onClick={() => setSelectedType("brightness_contrast")}
+                  onClick={() => setSelectedType(null)}
                 >
                   ×
                 </button>

@@ -562,8 +562,8 @@ export const messages = {
   "mask.panelPaths": { en: "Paths", zh: "路径" },
   "mask.adjPlanned": { en: "Planned — not wired to the mask engine yet", zh: "规划中——尚未接入蒙版引擎" },
   "mask.adjPickHint": {
-    en: "Click an adjustment on the left — its controls appear here.",
-    zh: "点击左侧的调整项——其参数会出现在这里。",
+    en: "Click an adjustment — its controls open in a floating popup.",
+    zh: "点击调整项——其参数会以小弹窗打开。",
   },
   "mask.adjExposure": { en: "Exposure", zh: "曝光度" },
   "mask.adjVibrance": { en: "Vibrance", zh: "自然饱和度" },
