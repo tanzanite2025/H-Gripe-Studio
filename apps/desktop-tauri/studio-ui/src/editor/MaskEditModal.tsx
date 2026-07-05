@@ -280,6 +280,17 @@ export function MaskEditModal({
     region: [number, number, number, number];
     ellipse: boolean;
   } | null>(null);
+  const lastMarqueeRef = useRef(lastMarquee);
+  lastMarqueeRef.current = lastMarquee;
+  // Floating size panel beside the selection: a local W×H draft, re-seeded
+  // whenever the committed marquee changes.
+  const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    if (lastMarquee) {
+      const [x0, y0, x1, y1] = lastMarquee.region;
+      setMarqueeDraft({ w: Math.round(x1 - x0), h: Math.round(y1 - y0) });
+    }
+  }, [lastMarquee]);
   // In-progress shape drag (image-space bounding box); committed on release
   // as an ordinary vector path step built from the chosen shape's vertices.
   const shapeDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
@@ -287,6 +298,9 @@ export function MaskEditModal({
   const [shapeSides, setShapeSides] = useState(5);
   // In-progress move-tool drag (image-space): committed as a `transform` op.
   const moveDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // Move tool over a committed marquee: drag the selection region itself
+  // (PS moves the marching ants) instead of transforming the mask.
+  const marqueeMove = useRef<{ last: [number, number]; from: [number, number, number, number] } | null>(null);
   // In-progress gradient drag (M10): the start → end ramp vector; Alt at
   // pointer-down records a subtract ramp.
   const gradientDrag = useRef<{ start: [number, number]; end: [number, number]; subtract: boolean } | null>(null);
@@ -1014,7 +1028,12 @@ export function MaskEditModal({
       drawing.current = { points: [pt] };
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "transform") {
-      moveDrag.current = { start: pt, end: pt };
+      const r = lastMarquee?.region;
+      if (r && pt[0] >= r[0] && pt[0] <= r[2] && pt[1] >= r[1] && pt[1] <= r[3]) {
+        marqueeMove.current = { last: pt, from: r };
+      } else {
+        moveDrag.current = { start: pt, end: pt };
+      }
       forceRedraw((n) => n + 1);
     } else if (tool.kind === "gradient") {
       gradientDrag.current = { start: pt, end: pt, subtract: e.altKey };
@@ -1114,6 +1133,21 @@ export function MaskEditModal({
     if (drawing.current) {
       drawing.current.points.push(toImage(e));
       redraw();
+    } else if (marqueeMove.current) {
+      const pt = toImage(e);
+      const { last } = marqueeMove.current;
+      const dx = pt[0] - last[0];
+      const dy = pt[1] - last[1];
+      marqueeMove.current.last = pt;
+      setLastMarquee((prev) => {
+        if (!prev) return prev;
+        const [x0, y0, x1, y1] = prev.region;
+        const w = x1 - x0;
+        const h = y1 - y0;
+        const nx = Math.max(0, Math.min(x0 + dx, dims.w - w));
+        const ny = Math.max(0, Math.min(y0 + dy, dims.h - h));
+        return { ...prev, region: [nx, ny, nx + w, ny + h] };
+      });
     } else if (moveDrag.current) {
       moveDrag.current.end = toImage(e);
       redraw();
@@ -1294,6 +1328,15 @@ export function MaskEditModal({
       };
       const toMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
       dispatch({ type: toMatte ? "matte_stroke" : "stroke", stroke });
+    } else if (marqueeMove.current) {
+      // Land the moved selection as a fresh rect / ellipse step (same shape a
+      // drag or the manual size inputs record).
+      const { from } = marqueeMove.current;
+      marqueeMove.current = null;
+      const lm = lastMarqueeRef.current;
+      if (lm && (Math.abs(lm.region[0] - from[0]) >= 1 || Math.abs(lm.region[1] - from[1]) >= 1)) {
+        dispatch({ type: "op", op: { type: lm.ellipse ? "ellipse" : "rect", region: lm.region } });
+      }
     } else if (moveDrag.current) {
       const { start, end } = moveDrag.current;
       moveDrag.current = null;
@@ -1508,6 +1551,55 @@ export function MaskEditModal({
             brushCursor={usesBrushCursor && !spacePan ? { diameter: brushSize * 2 } : null}
             brushCursorRef={brushCursorEl}
           />
+
+          {/* Floating selection-size panel: pinned at the marquee's right
+              edge, vertically centred (flips to the left near the window
+              edge). Screen-space so the view transform never scales it. */}
+          {lastMarquee && !marquee.current && canvasRef.current
+            ? (() => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const [x0, y0, x1, y1] = lastMarquee.region;
+                const midY = rect.top + (((y0 + y1) / 2) / dims.h) * rect.height;
+                const rightX = rect.left + (x1 / dims.w) * rect.width + 10;
+                const flip = rightX + 230 > window.innerWidth;
+                const left = flip ? rect.left + (x0 / dims.w) * rect.width - 10 : rightX;
+                return (
+                  <div
+                    className={`mask-marquee-float${flip ? " flip" : ""}`}
+                    style={{ left, top: Math.max(60, Math.min(midY, window.innerHeight - 60)) }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="muted">
+                      {Math.round(x1 - x0)} × {Math.round(y1 - y0)} px
+                    </span>
+                    <span className="mask-marquee-float-row">
+                      <input
+                        type="number"
+                        min={2}
+                        max={dims.w}
+                        value={marqueeDraft.w}
+                        onChange={(e) => setMarqueeDraft((d) => ({ ...d, w: Number(e.target.value) || 0 }))}
+                      />
+                      ×
+                      <input
+                        type="number"
+                        min={2}
+                        max={dims.h}
+                        value={marqueeDraft.h}
+                        onChange={(e) => setMarqueeDraft((d) => ({ ...d, h: Number(e.target.value) || 0 }))}
+                      />
+                      <button
+                        className="primary"
+                        disabled={marqueeDraft.w < 2 || marqueeDraft.h < 2}
+                        onClick={() => applyMarqueeSize(marqueeDraft.w, marqueeDraft.h)}
+                      >
+                        {t("mask.marqueeApply")}
+                      </button>
+                    </span>
+                  </div>
+                );
+              })()
+            : null}
 
           <div
             className="mask-rail-resize"
