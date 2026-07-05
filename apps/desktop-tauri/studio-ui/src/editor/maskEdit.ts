@@ -15,6 +15,8 @@ import type {
   EditOp,
   EditPath,
   EditPathPoint,
+  ImageCanvasSize,
+  ImageResample,
   LayerAdjustment,
   LayerBlend,
   MaskDocument,
@@ -60,6 +62,7 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
   const v = value as {
     layers?: unknown;
     active?: unknown;
+    canvas?: unknown;
     ops?: unknown;
     paths?: unknown;
     brush_strokes?: unknown;
@@ -71,11 +74,12 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
   const points = Array.isArray(v.points)
     ? v.points.map(normalizePoint).filter((p): p is PointPrompt => p !== null)
     : [];
+  const canvas = normalizeCanvas(v.canvas);
   if (Array.isArray(v.layers)) {
     const layers = v.layers.map(normalizeLayer).filter((l): l is MaskLayer => l !== null);
     if (layers.length === 0) layers.push(emptyMaskLayer());
     const active = typeof v.active === "number" ? Math.min(Math.max(Math.trunc(v.active), 0), layers.length - 1) : 0;
-    return { version: 3, layers, active, matte_strokes, points };
+    return { version: 3, layers, active, matte_strokes, points, ...(canvas ? { canvas } : {}) };
   }
   const ops: EditOp[] = Array.isArray(v.ops)
     ? v.ops.filter(isEditOp)
@@ -158,6 +162,29 @@ function normalizePoint(value: unknown): PointPrompt | null {
     }
   }
   return null;
+}
+
+const RESAMPLES: readonly ImageResample[] = ["auto", "nearest", "bilinear", "bicubic"];
+
+function normalizeCanvas(value: unknown): ImageCanvasSize | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as { w?: unknown; h?: unknown; resample?: unknown };
+  if (typeof v.w !== "number" || typeof v.h !== "number" || v.w < 1 || v.h < 1) return null;
+  return {
+    w: Math.round(v.w),
+    h: Math.round(v.h),
+    resample: RESAMPLES.includes(v.resample as ImageResample) ? (v.resample as ImageResample) : "auto",
+  };
+}
+
+/**
+ * PS Image Size (Ctrl+Alt+I): record the requested output pixel size on the
+ * document (undoable). The backend resamples the node's result on run.
+ */
+export function setCanvasSize(state: EditState, canvas: ImageCanvasSize): EditState {
+  const next = normalizeCanvas(canvas);
+  if (!next) return state;
+  return commit(state, { ...state.current, canvas: next });
 }
 
 // Commit a new `current`, pushing the previous onto the undo stack and clearing
@@ -374,6 +401,28 @@ export function moveLayer(state: EditState, from: number, to: number): EditState
   next.splice(to, 0, moved);
   const activeId = layers[state.current.active]?.id;
   const active = Math.max(next.findIndex((l) => l.id === activeId), 0);
+  return commit(state, { ...state.current, layers: next, active });
+}
+
+/**
+ * PS merge (合并图层 / 向下合并): collapse two or more mask layers into the
+ * lowest one by replaying their edit stacks bottom-up onto it (undoable).
+ * Adjustment layers and locked layers cannot merge; the merged layer keeps
+ * the bottom layer's identity, blend and opacity and becomes active.
+ */
+export function mergeLayers(state: EditState, indices: number[]): EditState {
+  const { layers } = state.current;
+  const sorted = [...new Set(indices)].filter((i) => i >= 0 && i < layers.length).sort((a, b) => a - b);
+  if (sorted.length < 2) return state;
+  if (sorted.some((i) => layers[i].kind !== "mask" || layers[i].locked)) return state;
+  const [target, ...rest] = sorted;
+  const merged: MaskLayer = {
+    ...layers[target],
+    ops: sorted.flatMap((i) => layers[i].ops.map((op) => ({ ...op }))),
+  };
+  const removed = new Set(rest);
+  const next = layers.map((l, i) => (i === target ? merged : l)).filter((_, i) => !removed.has(i));
+  const active = next.findIndex((l) => l.id === merged.id);
   return commit(state, { ...state.current, layers: next, active });
 }
 

@@ -1,5 +1,6 @@
 import { MaskEditModal } from "./MaskEditModal";
 import type { CropCommit } from "./CropEditModal";
+import type { EditorTab } from "./host/EditorHost";
 import { useT } from "../i18n";
 import type { MaskDocument } from "../types/production";
 
@@ -18,6 +19,13 @@ interface MediaEditModalProps {
   nodeId?: string | null;
   /** Blank-editor "open image" entry (shown when there is no image yet). */
   onPickFile?: () => void;
+  /** Open-document tabs (PS-style top strip); clicking switches targets. */
+  tabs?: EditorTab[];
+  onSelectTab?: (id: string) => void;
+  /** In-progress edit document restored when the tab re-activates. */
+  initial?: MaskDocument | null;
+  /** Draft sink: called on every edit so tab switches keep the document. */
+  onDocChange?: (doc: MaskDocument) => void;
   onCommitMask: (edits: MaskDocument) => void;
   // Kept for EditorHost request compatibility; crop opens through editor:"crop".
   onCommitCrop: (commit: CropCommit) => void;
@@ -29,28 +37,56 @@ export function MediaEditModal({
   imagePath,
   nodeId,
   onPickFile,
+  tabs,
+  onSelectTab,
+  initial,
+  onDocChange,
   onCommitMask,
   onClose,
 }: MediaEditModalProps) {
   const t = useT();
-  const headerExtra =
-    onPickFile && !imagePath ? (
-      <div className="media-edit-groups">
-        <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
-          {t("mediaEdit.open")}
-        </button>
+  const tabStrip =
+    tabs && tabs.length > 0 ? (
+      <div className="media-edit-tabs" role="tablist">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={tab.active}
+            className={`media-edit-tab${tab.active ? " active" : ""}`}
+            title={tab.label}
+            onClick={() => {
+              if (!tab.active) onSelectTab?.(tab.id);
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
     ) : null;
+  const headerExtra = (
+    <>
+      {tabStrip}
+      {onPickFile && !imagePath ? (
+        <div className="media-edit-groups">
+          <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
+            {t("mediaEdit.open")}
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
 
   return (
     <MaskEditModal
       title={title}
       imagePath={imagePath}
       nodeId={nodeId}
-      initial={null}
+      initial={initial ?? null}
       wandTolerance={24}
       onCommit={onCommitMask}
       onClose={onClose}
+      onDocChange={onDocChange}
       headerExtra={headerExtra}
       editorName={t("mediaEdit.editor")}
       workspace="image"

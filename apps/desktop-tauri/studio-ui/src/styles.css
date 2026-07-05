@@ -1553,6 +1553,37 @@ button:disabled { opacity: 0.6; cursor: default; }
 .media-edit-groups button:hover { background: #2a2f3d; }
 .media-edit-groups button.active { border-color: var(--accent); color: var(--accent); }
 
+/* Unified image editor: PS-style open-document tabs in the bar */
+.media-edit-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  margin-left: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.media-edit-tab {
+  background: #11131a;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.media-edit-tab:hover { background: #2a2f3d; }
+.media-edit-tab.active {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 /* Mask-Edit modal styles live in src/editor/maskEditModal/maskEditModal.css
    (imported by MaskEditModal.tsx). The crop editor below reuses that shell. */
 
