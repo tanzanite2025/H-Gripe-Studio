@@ -321,6 +321,20 @@ enum OverlayItem {
         #[serde(default)]
         ellipse: bool,
     },
+    /// A closed polygon — a committed pen / lasso path's outline, flattened
+    /// to straight segments by the sender (beziers are subdivided up front).
+    Polygon {
+        /// `[x, y]` vertices, normalized; the loop closes implicitly.
+        points: Vec<[f32; 2]>,
+        /// Outline colour, premul-free `[r, g, b, a]` in 0..=1.
+        stroke: [f32; 4],
+        /// Even-odd interior fill colour, when the shape reads as a region.
+        #[serde(default)]
+        fill: Option<[f32; 4]>,
+        /// Dash the outline (6-on/4-off) instead of a solid stroke.
+        #[serde(default)]
+        dash: bool,
+    },
 }
 
 /// A vector overlay the host strokes over rendered frames after grading and
@@ -337,12 +351,17 @@ const OVERLAY_DASH_ON: f32 = 6.0;
 const OVERLAY_DASH_PERIOD: f32 = 10.0;
 const OVERLAY_RGBA: [f32; 4] = [86.0 / 255.0, 168.0 / 255.0, 255.0 / 255.0, 0.9];
 
-/// Stroke a dashed polyline over a graded surface, in surface pixel
-/// coordinates. The dash phase runs along the whole polyline so corners do
-/// not restart the pattern.
-fn stroke_dashed_polyline(surface: &mut hgripe_grade::GradeSurface, pts: &[(f32, f32)]) {
+/// Stroke a polyline over a graded surface, in surface pixel coordinates,
+/// optionally dashed. The dash phase runs along the whole polyline so
+/// corners do not restart the pattern.
+fn stroke_polyline(
+    surface: &mut hgripe_grade::GradeSurface,
+    pts: &[(f32, f32)],
+    rgba: [f32; 4],
+    dash: bool,
+) {
     let (sw, sh) = (surface.w as i64, surface.h as i64);
-    let alpha = OVERLAY_RGBA[3];
+    let alpha = rgba[3];
     let mut travelled = 0.0f32;
     for seg in pts.windows(2) {
         let (ax, ay) = seg[0];
@@ -355,7 +374,7 @@ fn stroke_dashed_polyline(surface: &mut hgripe_grade::GradeSurface, pts: &[(f32,
         for i in 0..steps {
             let t = i as f32 / steps as f32;
             let d = travelled + len * t;
-            if d.rem_euclid(OVERLAY_DASH_PERIOD) >= OVERLAY_DASH_ON {
+            if dash && d.rem_euclid(OVERLAY_DASH_PERIOD) >= OVERLAY_DASH_ON {
                 continue;
             }
             let xi = (ax + (bx - ax) * t).round() as i64;
@@ -366,10 +385,51 @@ fn stroke_dashed_polyline(surface: &mut hgripe_grade::GradeSurface, pts: &[(f32,
             let base = ((yi * sw + xi) * 4) as usize;
             for ch in 0..3 {
                 surface.data[base + ch] =
-                    OVERLAY_RGBA[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
+                    rgba[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
             }
         }
         travelled += len;
+    }
+}
+
+/// Even-odd scanline fill of a closed polygon over a graded surface, in
+/// surface pixel coordinates — the same rule the canvas painter's
+/// `fill("evenodd")` applies to committed paths.
+fn fill_polygon_evenodd(
+    surface: &mut hgripe_grade::GradeSurface,
+    pts: &[(f32, f32)],
+    rgba: [f32; 4],
+) {
+    if pts.len() < 3 {
+        return;
+    }
+    let (sw, sh) = (surface.w, surface.h);
+    let alpha = rgba[3];
+    let mut xs: Vec<f32> = Vec::new();
+    for py in 0..sh {
+        let y = py as f32 + 0.5;
+        xs.clear();
+        for i in 0..pts.len() {
+            let (x0, y0) = pts[i];
+            let (x1, y1) = pts[(i + 1) % pts.len()];
+            if (y0 <= y) == (y1 <= y) {
+                continue;
+            }
+            xs.push(x0 + (y - y0) / (y1 - y0) * (x1 - x0));
+        }
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        for pair in xs.chunks(2) {
+            let [a, b] = *pair else { continue };
+            let from = (a.round().max(0.0)) as u32;
+            let to = (b.round().min(sw as f32)) as u32;
+            for px in from..to.min(sw) {
+                let base = ((py * sw + px) * 4) as usize;
+                for ch in 0..3 {
+                    surface.data[base + ch] =
+                        rgba[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
+                }
+            }
+        }
     }
 }
 
@@ -425,7 +485,25 @@ fn composite_overlay_scene(
                     let (x2, y2) = (region[0].max(region[2]), region[1].max(region[3]));
                     vec![map(x1, y1), map(x2, y1), map(x2, y2), map(x1, y2), map(x1, y1)]
                 };
-                stroke_dashed_polyline(surface, &pts);
+                stroke_polyline(surface, &pts, OVERLAY_RGBA, true);
+            }
+            OverlayItem::Polygon {
+                points,
+                stroke,
+                fill,
+                dash,
+            } => {
+                if points.len() < 2 {
+                    continue;
+                }
+                let mut pts: Vec<(f32, f32)> =
+                    points.iter().map(|p| map(p[0], p[1])).collect();
+                if let Some(fill) = fill {
+                    fill_polygon_evenodd(surface, &pts, *fill);
+                }
+                // Close the loop for the outline.
+                pts.push(pts[0]);
+                stroke_polyline(surface, &pts, *stroke, *dash);
             }
         }
     }
@@ -1082,6 +1160,10 @@ pub(crate) fn viewport_set_mask_overlay(
 /// outlines; anything bigger through this path is a caller bug.
 const MAX_OVERLAY_SCENE_ITEMS: usize = 256;
 
+/// Largest accepted flattened polygon: committed paths flatten their bezier
+/// segments sender-side, so a loop is at most a few thousand vertices.
+const MAX_OVERLAY_POLYGON_POINTS: usize = 16384;
+
 /// Set (or clear) the vector overlay an image-edit viewport strokes over
 /// rendered frames — the mask editor's marquee marching ants, presented by
 /// the host at the view window's detail instead of a document-size canvas
@@ -1101,9 +1183,34 @@ pub(crate) fn viewport_set_overlay_scene(
                 ));
             }
             for item in &scene.items {
-                let OverlayItem::Marquee { region, .. } = item;
-                if region.iter().any(|v| !v.is_finite()) {
-                    return Err("overlay scene coordinates must be finite".to_string());
+                match item {
+                    OverlayItem::Marquee { region, .. } => {
+                        if region.iter().any(|v| !v.is_finite()) {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                    }
+                    OverlayItem::Polygon {
+                        points,
+                        stroke,
+                        fill,
+                        ..
+                    } => {
+                        if points.len() > MAX_OVERLAY_POLYGON_POINTS {
+                            return Err(format!(
+                                "overlay polygon has {} points (max {MAX_OVERLAY_POLYGON_POINTS})",
+                                points.len()
+                            ));
+                        }
+                        if points.iter().flatten().any(|v| !v.is_finite()) {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                        let colours = stroke.iter().chain(fill.iter().flatten());
+                        if colours.into_iter().any(|v| !(0.0..=1.0).contains(v)) {
+                            return Err(
+                                "overlay colours must be between 0 and 1".to_string()
+                            );
+                        }
+                    }
                 }
             }
             Some(Arc::new(scene))
@@ -1697,6 +1804,68 @@ mod tests {
         // Interior stays untouched.
         let mid = ((16 * 32 + 16) * 4) as usize;
         assert_eq!(surface.data[mid], 0.0);
+    }
+
+    #[test]
+    fn overlay_polygon_fills_the_interior_and_strokes_the_outline() {
+        let mut surface = hgripe_grade::GradeSurface {
+            w: 32,
+            h: 32,
+            data: vec![0.0; 32 * 32 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let scene = OverlayScene {
+            items: vec![OverlayItem::Polygon {
+                points: vec![[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]],
+                stroke: [1.0, 0.0, 0.0, 1.0],
+                fill: Some([0.0, 1.0, 0.0, 0.5]),
+                dash: false,
+            }],
+        };
+        composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
+        // Interior carries the fill (green over black at 0.5 alpha).
+        let mid = ((16 * 32 + 16) * 4) as usize;
+        assert!(surface.data[mid + 1] > 0.4, "interior must be filled");
+        assert_eq!(surface.data[mid], 0.0, "fill must not add red");
+        // The outline carries the solid red stroke; the top edge maps to
+        // y = 0.25 * 32 - 0.5 = 7.5 -> row 8 (rounded).
+        let edge = ((8 * 32 + 16) * 4) as usize;
+        assert!(surface.data[edge] > 0.9, "outline must be stroked");
+        // Outside stays untouched.
+        let out = ((2 * 32 + 2) * 4) as usize;
+        assert_eq!(surface.data[out], 0.0);
+        assert_eq!(surface.data[out + 1], 0.0);
+    }
+
+    #[test]
+    fn overlay_polygon_validation_rejects_bad_points_and_colours() {
+        let vp = viewport_create("image_edit".to_string()).expect("create");
+        let poly = |points: Vec<[f32; 2]>, stroke: [f32; 4]| OverlayScene {
+            items: vec![OverlayItem::Polygon {
+                points,
+                stroke,
+                fill: None,
+                dash: false,
+            }],
+        };
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(poly(vec![[0.0, f32::INFINITY], [1.0, 1.0]], [0.0, 0.0, 0.0, 1.0])),
+        )
+        .expect_err("non-finite points must be rejected");
+        assert!(err.contains("finite"));
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(poly(vec![[0.0, 0.0], [1.0, 1.0]], [0.0, 0.0, 0.0, 1.5])),
+        )
+        .expect_err("out-of-range colours must be rejected");
+        assert!(err.contains("between 0 and 1"));
+        viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(poly(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], [0.3, 0.6, 1.0, 0.9])),
+        )
+        .expect("a valid polygon is accepted");
+        viewport_destroy_inner(vp.viewport_id).expect("destroy");
     }
 
     #[test]

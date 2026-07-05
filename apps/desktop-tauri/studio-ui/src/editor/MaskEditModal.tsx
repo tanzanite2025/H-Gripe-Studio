@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
-import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
+import type { ViewportMaskOverlay, ViewportOverlayItem, ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -59,7 +59,7 @@ import {
   paintStroke,
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
-import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
+import { catmullRomClosed, flattenEditPath, pointInPolygon } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap, snapLoopToEdges, type EdgeMap } from "./maskEditModal/magneticSnap";
 import { hitTestPathOp, translateAnchors } from "./maskEditModal/pathEditTools";
 import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
@@ -262,6 +262,9 @@ export function MaskEditModal({
   } | null>(null);
   const lastMarqueeRef = useRef(lastMarquee);
   lastMarqueeRef.current = lastMarquee;
+  // Anchor re-editing (M2): index of the path op being re-edited plus a local
+  // draft of its anchors; committed as one undoable step on Done / Enter.
+  const [editingPath, setEditingPath] = useState<number | null>(null);
   // The committed marquee's marching ants stroke host-side over rendered
   // frames (WGPU migration: interactive overlays on the live surface), so
   // the outline stays one screen pixel wide at any zoom instead of scaling
@@ -273,18 +276,41 @@ export function MaskEditModal({
   const frameDimsRef = useRef({ w: DEFAULT_W, h: DEFAULT_H });
   const frameDims = frameDimsRef.current;
   const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(() => {
-    if (!lastMarquee || frameDims.w <= 0 || frameDims.h <= 0) return null;
-    const [x0, y0, x1, y1] = lastMarquee.region;
-    return {
-      items: [
-        {
-          kind: "marquee",
-          region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
-          ...(lastMarquee.ellipse ? { ellipse: true } : null),
-        },
-      ],
-    };
-  }, [lastMarquee, frameDims.w, frameDims.h]);
+    if (frameDims.w <= 0 || frameDims.h <= 0) return null;
+    const items: ViewportOverlayItem[] = [];
+    // Committed pen / lasso paths: the same loops the canvas painter fills
+    // and outlines, flattened to straight segments and normalized. While a
+    // morphology preview runs, the proxy tint already folds the paths in, so
+    // the vector overlay drops them (mirrors the canvas skip).
+    if (!previewing) {
+      state.current.layers.forEach((layer, li) => {
+        if (!layer.visible) return;
+        layer.ops.forEach((op, i) => {
+          if (op.disabled || (li === state.current.active && i === editingPath)) return;
+          if (!isPathOp(op) || op.points.length < 2) return;
+          const [r, g, b] =
+            op.mode === "subtract" ? [244, 98, 98] : op.mode === "intersect" ? [190, 120, 255] : [86, 168, 255];
+          items.push({
+            kind: "polygon",
+            points: flattenEditPath(op.points).map(
+              ([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number],
+            ),
+            stroke: [r / 255, g / 255, b / 255, 0.9],
+            fill: [r / 255, g / 255, b / 255, 0.3],
+          });
+        });
+      });
+    }
+    if (lastMarquee) {
+      const [x0, y0, x1, y1] = lastMarquee.region;
+      items.push({
+        kind: "marquee",
+        region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
+        ...(lastMarquee.ellipse ? { ellipse: true } : null),
+      });
+    }
+    return items.length > 0 ? { items } : null;
+  }, [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath]);
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
@@ -440,9 +466,6 @@ export function MaskEditModal({
   const wholePathDrag = useRef<[number, number] | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
-  // Anchor re-editing (M2): index of the path op being re-edited plus a local
-  // draft of its anchors; committed as one undoable step on Done / Enter.
-  const [editingPath, setEditingPath] = useState<number | null>(null);
   const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
   const draggingAnchor = useRef<number | null>(null);
   const [, forceRedraw] = useState(0);
@@ -881,7 +904,9 @@ export function MaskEditModal({
         layer.ops.forEach((op, i) => {
           if (op.disabled || (li === state.current.active && i === editingPath)) return;
           if (isBrushOp(op)) paintStroke(ctx, op);
-          else if (isPathOp(op)) paintPath(ctx, op);
+          // Committed vector paths render host-side (the viewport overlay
+          // scene); the canvas draws them only for the fallback stage.
+          else if (isPathOp(op) && !underlay && !presented) paintPath(ctx, op);
         });
       });
     }

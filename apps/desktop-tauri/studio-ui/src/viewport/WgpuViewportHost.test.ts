@@ -88,6 +88,32 @@ describe("WgpuViewportHost", () => {
         scene: { items: [{ kind: "marquee", region: [0, NaN, 1, 1] }] },
       }),
     ).rejects.toThrow(/finite/);
+    // Polygons (committed vector paths) carry their own colours, 0..=1.
+    await host.command({
+      kind: "set_overlay_scene",
+      scene: {
+        items: [
+          {
+            kind: "polygon",
+            points: [
+              [0.1, 0.1],
+              [0.9, 0.1],
+              [0.5, 0.9],
+            ],
+            stroke: [86 / 255, 168 / 255, 1, 0.9],
+            fill: [86 / 255, 168 / 255, 1, 0.3],
+          },
+        ],
+      },
+    });
+    await expect(
+      host.command({
+        kind: "set_overlay_scene",
+        scene: {
+          items: [{ kind: "polygon", points: [[0, 0]], stroke: [2, 0, 0, 1] }],
+        },
+      }),
+    ).rejects.toThrow(/between 0 and 1/);
     // Clearing is accepted.
     await host.command({ kind: "set_overlay_scene", scene: null });
     await host.close();

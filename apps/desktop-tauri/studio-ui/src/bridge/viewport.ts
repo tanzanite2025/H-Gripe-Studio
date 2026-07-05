@@ -403,12 +403,25 @@ export async function setViewportMaskOverlay(
 
 /** One primitive of a vector overlay scene, in normalized document
  * coordinates (0..=1 over the full document, view-independent). */
-export type ViewportOverlayItem = {
-  kind: "marquee";
-  /** `[x1, y1, x2, y2]` corners, normalized. */
-  region: [number, number, number, number];
-  ellipse?: boolean;
-};
+export type ViewportOverlayItem =
+  | {
+      kind: "marquee";
+      /** `[x1, y1, x2, y2]` corners, normalized. */
+      region: [number, number, number, number];
+      ellipse?: boolean;
+    }
+  | {
+      kind: "polygon";
+      /** `[x, y]` vertices, normalized; the loop closes implicitly.
+       * Beziers are flattened to straight segments by the sender. */
+      points: [number, number][];
+      /** Outline colour `[r, g, b, a]` in 0..=1. */
+      stroke: [number, number, number, number];
+      /** Even-odd interior fill colour, when the shape reads as a region. */
+      fill?: [number, number, number, number];
+      /** Dash the outline (6-on/4-off) instead of a solid stroke. */
+      dash?: boolean;
+    };
 
 /** A vector overlay the host strokes over rendered frames (image_edit
  * viewports): the mask editor's marquee marching ants, drawn host-side at
@@ -437,8 +450,15 @@ export async function setViewportOverlayScene(
   }
   if (scene) {
     for (const item of scene.items) {
-      if (item.region.some((v) => !Number.isFinite(v))) {
+      const coords = item.kind === "marquee" ? item.region : item.points.flat();
+      if (coords.some((v) => !Number.isFinite(v))) {
         throw new Error("overlay scene coordinates must be finite");
+      }
+      if (item.kind === "polygon") {
+        const colours = [...item.stroke, ...(item.fill ?? [])];
+        if (colours.some((v) => !(v >= 0 && v <= 1))) {
+          throw new Error("overlay colours must be between 0 and 1");
+        }
       }
     }
   }
