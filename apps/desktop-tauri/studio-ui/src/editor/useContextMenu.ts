@@ -87,7 +87,6 @@ export function useContextMenu({
         const auto = (editKind: string, params?: Record<string, unknown>) =>
           addBoundEdit(id, editKind, { params, openEditor: false, run: true });
         items.push(
-          { label: t("node.cropAuto"), onClick: () => auto("crop", { mode: "auto_subject" }) },
           { label: t("node.maskAuto"), onClick: () => auto("subjectMask", { mode: "auto_subject" }) },
           { label: t("node.enhanceAuto"), onClick: () => auto("imageEnhance") },
           { label: t("node.watchdogAuto"), onClick: () => auto("detailWatchdog") },
