@@ -208,12 +208,16 @@ export function loadRegistry(): BackendRegistry {
   }
 }
 
+/** Fired on `window` after every registry save, so open selectors reload. */
+export const REGISTRY_EVENT = "hgripe:model-registry";
+
 export function saveRegistry(registry: BackendRegistry): void {
   try {
     localStorage.setItem(REGISTRY_KEY, JSON.stringify(registry));
   } catch {
     /* persistence is best-effort */
   }
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(REGISTRY_EVENT));
 }
 
 /** A ref that does not collide with existing entries. */

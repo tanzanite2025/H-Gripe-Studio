@@ -109,6 +109,7 @@ import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
 import { ModelManagerModal } from "./models/ModelManagerModal";
+import type { ModelCapability } from "./models/backendRegistry";
 import { useT } from "./i18n";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
@@ -201,9 +202,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [layerVisibility, setLayerVisibility] = useState<Record<string, boolean>>({});
   // On-demand export dialog (plan step 9): opened by the drawer's export command.
   const [exportOpen, setExportOpen] = useState(false);
-  // System "Models / APIs" manager (system model manager surface plan):
-  // opened from the global toolbar entry, never automatically.
-  const [modelsOpen, setModelsOpen] = useState(false);
+  // System "Models / APIs" manager (system model manager surface plan): one
+  // application-level surface, opened from the global toolbar entry or a
+  // card's "Manage…" entry (which preselects that card's capability).
+  const [modelsRequest, setModelsRequest] = useState<{ capability: ModelCapability | null } | null>(null);
   // Standalone image editor opened blank (no image card selected yet).
   const [mediaEditBlank, setMediaEditBlank] = useState(false);
   // Standalone image preview popup: any thumbnail double-click opens the
@@ -1130,6 +1132,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       openCropEdit,
       openGradeEdit,
       openMediaEdit,
+      openModels: (capability?: ModelCapability | null) =>
+        setModelsRequest({ capability: capability ?? null }),
       addBoundEdit,
       runUpToNode,
       runCardRow,
@@ -1422,7 +1426,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         issues={issues}
         isDesktop={isDesktop}
         onToggleLang={onToggleLang}
-        onOpenModels={() => setModelsOpen(true)}
+        onOpenModels={() => setModelsRequest({ capability: null })}
         onOpenImageEdit={openImageEditor}
         showProject={showProject}
         setShowProject={setShowProject}
@@ -1691,7 +1695,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
       <EditorHost request={editorRequest} onClose={closeEditor} />
 
-      {modelsOpen && <ModelManagerModal onClose={() => setModelsOpen(false)} />}
+      {modelsRequest && (
+        <ModelManagerModal
+          capability={modelsRequest.capability}
+          onClose={() => setModelsRequest(null)}
+        />
+      )}
 
       {exportOpen && (
         <ExportDialog
