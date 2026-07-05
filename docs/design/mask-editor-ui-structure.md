@@ -70,9 +70,10 @@ The same modal serves two product surfaces via the `workspace` prop:
 - **`workspace="mask"`** — the node-bound mask popup. Opened from a mask node
   (or the Preview gate's `Edit`); commits write `edit_paths` back onto the
   node and re-run it. Mask-only chrome (mask-only view, quick mask, the
-  channels / paths / mask-ops docks) exists **only** here.
+  paths / mask-ops docks) exists **only** here.
 - **`workspace="image"`** — the standalone image editor (`MediaEditModal`).
-  No mask chrome; its right rail is adjustments/options + layers/history.
+  No mask chrome; its right rail is adjustments/options +
+  layers/channels/history.
 
 **Pipeline rule:** any node result — subject mask today, future local-LLM /
 API / algorithm cards — enters the image editor through one route:
