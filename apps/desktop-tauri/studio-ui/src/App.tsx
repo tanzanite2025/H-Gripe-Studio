@@ -1317,14 +1317,32 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             })()
           : null;
 
-  // Toolbar entry for the unified image editor — a standalone surface: with an
-  // image card selected it auto-imports that card's image; otherwise the editor
-  // opens blank and offers an in-editor "open image" entry.
+  // The image card most recently viewed in the editor, so reopening lands on
+  // it (PS-style: the last-looked-at document tab is the active one).
+  const lastMediaEditId = useRef<string | null>(null);
+  useEffect(() => {
+    if (mediaEditSource) lastMediaEditId.current = mediaEditSource.id;
+  }, [mediaEditSource]);
+
+  // Toolbar entry for the unified image editor — a standalone surface: a
+  // selected image card wins, then the last-viewed card, then the most recent
+  // image card on the canvas; with no image cards at all the editor opens
+  // blank and offers an in-editor "open image" entry.
   const openImageEditor = () => {
     const isImage = (n: Node) => (n.data as HgripeNodeData).kind === "imageSource";
     const selected = nodes.find((n) => selectedNodeIds.includes(n.id) && isImage(n));
     if (selected) {
       openMediaEdit(selected.id);
+      return;
+    }
+    const last = lastMediaEditId.current;
+    if (last && nodes.some((n) => n.id === last && isImage(n))) {
+      openMediaEdit(last);
+      return;
+    }
+    const cards = nodes.filter(isImage);
+    if (cards.length > 0) {
+      openMediaEdit(cards[cards.length - 1].id);
       return;
     }
     setMediaEditBlank(true);

@@ -1,8 +1,11 @@
 # WGPU Surface Swap Plan (Native Texture Presentation Endgame)
 
-> Status: active planning document. This is item 1 of the "remaining work" list
-> in `WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`: replace the PNG hop with a real
-> WGPU surface/texture swap on desktop. The host command protocol is already
+> Status: implemented. This is item 1 of the "remaining work" list in
+> `WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`: replace the PNG hop with a real
+> WGPU surface/texture swap on desktop. All viewport consumers now present
+> natively — the mask editor underlay (S5), the crop editor underlay, the
+> program monitor, and the grade panel preview — with PNG/blob staying as
+> the browser-preview and no-adapter fallback. The host command protocol is
 > the stable boundary, so this plan changes the presentation transport only —
 > no product-layer rework.
 

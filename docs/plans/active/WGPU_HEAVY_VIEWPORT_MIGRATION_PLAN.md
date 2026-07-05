@@ -89,12 +89,14 @@ Implemented (PRs #329-400):
 
 Remaining work (next stage), roughly in priority order:
 
-1. WGPU surface swap (native texture presentation endgame): replace the PNG
-   hop with a real WGPU surface/texture swap on desktop — the host renders
-   into a native surface positioned at the viewport's rect, and readback
-   happens only when needed (export, scopes, colour picking). The host
-   command protocol already isolates callers from this change; the PNG/blob
-   transport stays as the browser-preview and fallback path.
+1. ✅ WGPU surface swap (native texture presentation endgame): the host
+   renders into a native surface window positioned at the viewport's rect
+   (`set_placement` / `presented` frames), and readback happens only when
+   needed (export, scopes, colour picking). All viewport consumers present
+   natively on desktop — the mask editor underlay, the crop editor underlay,
+   the program monitor, and the grade preview (grade panel slider ticks
+   re-run only the grade pass + blit, zero pixel IPC). The PNG/blob
+   transport stays as the browser-preview and no-adapter fallback path.
 2. ✅ Interactive overlays on the live surface: the mask editor's committed
    overlays render host-side through `viewport_set_overlay_scene` — marquee
    marching ants, vector paths, brush/matte stroke bands, the ruler line,
