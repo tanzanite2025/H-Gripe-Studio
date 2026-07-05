@@ -5,11 +5,12 @@
 // untouched per slider change — and the viewport is destroyed on unmount or
 // when the target path changes.
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { tauriInvoke } from "../bridge/core";
 import { registerResource } from "../bridge/files";
 import { registerNodeOutput, type ViewportFrame } from "../bridge/viewport";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
+import { useViewportPlacement } from "./useViewportPlacement";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 /** What the grading dialog points its viewport at: a still image, or one
@@ -47,6 +48,10 @@ interface OpenGradeViewport {
 export function useGradeViewport(
   target: GradeViewportTarget,
   size = 1280,
+  /** Element the native surface window sits under (surface swap): when given,
+   * placement is tracked for the host's lifetime and rendered frames present
+   * on the surface — callers skip their `<img>` when `frame.presented`. */
+  placementRef: RefObject<HTMLElement | null> | null = null,
 ): (
   doc: unknown,
   view?: ViewportViewState,
@@ -57,14 +62,22 @@ export function useGradeViewport(
   const isVideo = Boolean(videoPath);
   const nodeRef = isVideo ? undefined : (nodeId ?? undefined);
   const hostRef = useRef<Promise<OpenGradeViewport | null> | null>(null);
+  const [openHost, setOpenHost] = useState<WgpuViewportHost | null>(null);
   const timeRef = useRef(videoTimestampSec);
   timeRef.current = videoTimestampSec;
 
+  // Placement tracking (surface swap): inert without a placement ref — the
+  // hook then never sends placement and frames stay on the PNG transport.
+  const noPlacementRef = useRef<HTMLElement | null>(null);
+  useViewportPlacement(openHost, placementRef ?? noPlacementRef);
+
   useEffect(() => {
     hostRef.current = null;
+    setOpenHost(null);
     return () => {
       const pending = hostRef.current;
       hostRef.current = null;
+      setOpenHost(null);
       void pending?.then((open) => open?.host.close());
     };
   }, [path, isVideo, nodeRef, size]);
@@ -92,6 +105,7 @@ export function useGradeViewport(
           }
           const host = await WgpuViewportHost.open("grade_preview");
           await host.command({ kind: "resize", width: size, height: size });
+          setOpenHost(host);
           return { host, ref, view: IDENTITY_VIEW };
         })();
       }
