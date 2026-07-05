@@ -16,7 +16,8 @@
 use crate::blend::BlendMode;
 use crate::doc::{GradeDoc, GradeLayer};
 use crate::ops::{
-    gaussian_weights, planckian_gains, CurveChannel, GradeOp, MonotoneSpline, MAX_RADIUS,
+    gaussian_weights, planckian_gains, ColorRange, CurveChannel, GradeOp, MonotoneSpline,
+    MAX_RADIUS,
 };
 use crate::qualifier::HslQualifier;
 use crate::surface::GradeSpace;
@@ -641,6 +642,73 @@ impl Builder {
                 body.push_str(
                     "rgb = hsl_to_rgb(rem_euclid(hsl.x + hue_shift, 360.0), clamp01(hsl.y * max(sat_factor, 0.0)), hsl.z);",
                 );
+                body
+            }
+            GradeOp::ColorRanges { ranges, monochrome } => {
+                let mut body = String::from(
+                    "let hsl = rgb_to_hsl(clamp(rgb, vec3f(0.0), vec3f(1.0)));\n\
+                     var hue_shift = 0.0;\nvar sat_factor = 1.0;\nvar lum_shift = 0.0;\n",
+                );
+                for r in ranges {
+                    if ![r.hue, r.saturation, r.lightness]
+                        .iter()
+                        .all(|v| v.is_finite())
+                    {
+                        continue;
+                    }
+                    // Mirrors `ColorRange::weight`.
+                    let weight = match r.range {
+                        ColorRange::Reds
+                        | ColorRange::Yellows
+                        | ColorRange::Greens
+                        | ColorRange::Cyans
+                        | ColorRange::Blues
+                        | ColorRange::Magentas => {
+                            let center = match r.range {
+                                ColorRange::Reds => 0.0,
+                                ColorRange::Yellows => 60.0,
+                                ColorRange::Greens => 120.0,
+                                ColorRange::Cyans => 180.0,
+                                ColorRange::Blues => 240.0,
+                                ColorRange::Magentas => 300.0,
+                                _ => unreachable!(),
+                            };
+                            format!(
+                                "let d = rem_euclid(hsl.x - {c}, 360.0);\n\
+                                 let dh = min(d, 360.0 - d);\n\
+                                 let w = max(1.0 - dh / 60.0, 0.0) * hsl.y;",
+                                c = lit(center),
+                            )
+                        }
+                        ColorRange::Whites => {
+                            "let w = sstep(2.0 * hsl.z - 1.0) * (1.0 - hsl.y);".to_string()
+                        }
+                        ColorRange::Neutrals => {
+                            "let w = (1.0 - sstep(abs(2.0 * hsl.z - 1.0))) * (1.0 - hsl.y);"
+                                .to_string()
+                        }
+                        ColorRange::Blacks => {
+                            "let w = sstep(1.0 - 2.0 * hsl.z) * (1.0 - hsl.y);".to_string()
+                        }
+                    };
+                    body.push_str(&format!(
+                        "{{\n{weight}\n\
+                         hue_shift += w * {hue};\n\
+                         sat_factor *= 1.0 + w * {sat};\n\
+                         lum_shift += w * {lum};\n}}\n",
+                        hue = lit(r.hue),
+                        sat = lit(r.saturation),
+                        lum = lit(r.lightness),
+                    ));
+                }
+                let out_s = if *monochrome {
+                    "0.0".to_string()
+                } else {
+                    "clamp01(hsl.y * max(sat_factor, 0.0))".to_string()
+                };
+                body.push_str(&format!(
+                    "rgb = hsl_to_rgb(rem_euclid(hsl.x + hue_shift, 360.0), {out_s}, clamp01(hsl.z + lum_shift));"
+                ));
                 body
             }
             GradeOp::Lut1d { size, table } => {

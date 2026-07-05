@@ -44,6 +44,7 @@ export type GradeOp =
       monochrome: boolean;
     }
   | { type: "color_warper"; points: WarpPoint[] }
+  | { type: "color_ranges"; ranges: RangeAdjust[]; monochrome?: boolean }
   | { type: "sharpen"; amount: number; radius?: number }
   | { type: "denoise"; amount: number; radius?: number }
   | { type: "film_grain"; amount: number; seed: number }
@@ -58,6 +59,49 @@ export interface WarpPoint {
   sat_scale: number;
   hue_radius: number;
   sat_radius: number;
+}
+
+/** The nine PS-style colour ranges (mirrors Rust `ColorRange`). */
+export type ColorRange =
+  | "reds"
+  | "yellows"
+  | "greens"
+  | "cyans"
+  | "blues"
+  | "magentas"
+  | "whites"
+  | "neutrals"
+  | "blacks";
+
+/** One range's HSL deltas (mirrors Rust `RangeAdjust`). */
+export interface RangeAdjust {
+  range: ColorRange;
+  hue: number;
+  saturation: number;
+  lightness: number;
+}
+
+const RANGE_HUE_CENTERS: Partial<Record<ColorRange, number>> = {
+  reds: 0,
+  yellows: 60,
+  greens: 120,
+  cyans: 180,
+  blues: 240,
+  magentas: 300,
+};
+
+// The pixel's membership weight in a range, from its HSL (mirrors Rust
+// `ColorRange::weight`).
+function rangeWeight(range: ColorRange, h: number, s: number, l: number): number {
+  const center = RANGE_HUE_CENTERS[range];
+  if (center !== undefined) {
+    const d = (((h - center) % 360) + 360) % 360;
+    const dh = Math.min(d, 360 - d);
+    return Math.max(1 - dh / 60, 0) * s;
+  }
+  if (range === "whites") return smoothstep(2 * l - 1) * (1 - s);
+  if (range === "neutrals") return (1 - smoothstep(Math.abs(2 * l - 1))) * (1 - s);
+  return smoothstep(1 - 2 * l) * (1 - s);
 }
 
 /**
@@ -314,6 +358,26 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
           satFactor *= 1 + w * (p.sat_scale - 1);
         }
         return [(((h + hueShift) % 360) + 360) % 360, clamp01(s * Math.max(satFactor, 0)), l];
+      });
+      break;
+    }
+    case "color_ranges": {
+      const ranges = op.ranges.filter((r) =>
+        [r.hue, r.saturation, r.lightness].every((v) => Number.isFinite(v)),
+      );
+      const monochrome = op.monochrome ?? false;
+      forEachHsl(surface, (h, s, l) => {
+        let hueShift = 0;
+        let satFactor = 1;
+        let lumShift = 0;
+        for (const r of ranges) {
+          const w = rangeWeight(r.range, h, s, l);
+          hueShift += w * r.hue;
+          satFactor *= 1 + w * r.saturation;
+          lumShift += w * r.lightness;
+        }
+        const outS = monochrome ? 0 : clamp01(s * Math.max(satFactor, 0));
+        return [(((h + hueShift) % 360) + 360) % 360, outS, clamp01(l + lumShift)];
       });
       break;
     }

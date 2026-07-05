@@ -19,7 +19,15 @@ export {
   type HslQualifier,
 } from "./doc";
 export { parseCube } from "./lut";
-export { applyOp, isSpatialOp, type CurveChannel, type GradeOp, type WarpPoint } from "./ops";
+export {
+  applyOp,
+  isSpatialOp,
+  type ColorRange,
+  type CurveChannel,
+  type GradeOp,
+  type RangeAdjust,
+  type WarpPoint,
+} from "./ops";
 export {
   histogramScope,
   vectorscopeScope,

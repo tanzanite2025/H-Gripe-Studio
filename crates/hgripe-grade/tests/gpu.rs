@@ -251,6 +251,46 @@ fn curve_ops_match_cpu_within_lut_tolerance() {
             },
             2e-3,
         ),
+        (
+            "color_ranges",
+            GradeOp::ColorRanges {
+                ranges: vec![
+                    hgripe_grade::RangeAdjust {
+                        range: hgripe_grade::ColorRange::Reds,
+                        hue: 20.0,
+                        saturation: 0.3,
+                        lightness: 0.05,
+                    },
+                    hgripe_grade::RangeAdjust {
+                        range: hgripe_grade::ColorRange::Blues,
+                        hue: -15.0,
+                        saturation: -0.4,
+                        lightness: 0.0,
+                    },
+                    hgripe_grade::RangeAdjust {
+                        range: hgripe_grade::ColorRange::Neutrals,
+                        hue: 0.0,
+                        saturation: 0.2,
+                        lightness: -0.05,
+                    },
+                ],
+                monochrome: false,
+            },
+            2e-3,
+        ),
+        (
+            "color_ranges_monochrome",
+            GradeOp::ColorRanges {
+                ranges: vec![hgripe_grade::RangeAdjust {
+                    range: hgripe_grade::ColorRange::Greens,
+                    hue: 0.0,
+                    saturation: 0.0,
+                    lightness: -0.2,
+                }],
+                monochrome: true,
+            },
+            2e-3,
+        ),
     ];
     for (name, op, tol) in cases {
         let doc = GradeDoc {

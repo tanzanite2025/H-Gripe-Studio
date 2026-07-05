@@ -1,0 +1,925 @@
+{
+  "kind": "doc",
+  "cases": [
+    {
+      "name": "color_ranges: all-zero deltas are a no-op",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "reds",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "yellows",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "greens",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "cyans",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "blues",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "magentas",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "whites",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "neutrals",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "blacks",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.25,
+        0.5,
+        1,
+        1,
+        0.75,
+        0.19999999999999996,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.02000000000000042,
+        0.0010000000000000009,
+        0.98,
+        0.96,
+        0.5999999999999999,
+        0.39999999999999997,
+        0,
+        0.4375,
+        0.30000000000000016,
+        0.7,
+        0.15000000000000002,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: shift reds toward orange",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "reds",
+                    "hue": 30,
+                    "saturation": 0,
+                    "lightness": 0
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.25,
+        0.5,
+        1,
+        1,
+        0.875,
+        0.19999999999999996,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.02000000000000042,
+        0.0010000000000000009,
+        0.98,
+        0.96,
+        0.5999999999999999,
+        0.45714285714285724,
+        0,
+        0.4375,
+        0.30000000000000016,
+        0.7,
+        0.15000000000000002,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: desaturate greens, boost blues",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "greens",
+                    "hue": 0,
+                    "saturation": -0.8,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "blues",
+                    "hue": 0,
+                    "saturation": 0.5,
+                    "lightness": 0
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.25,
+        0.5,
+        1,
+        1,
+        0.75,
+        0.19999999999999996,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.019199012597889423,
+        0.00016666666666666666,
+        0.9808333333333333,
+        0.96,
+        0.5999999999999999,
+        0.39999999999999997,
+        0,
+        0.4375,
+        0.34705882352941186,
+        0.5964705882352941,
+        0.2535294117647059,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: lift yellows, darken cyans and magentas",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "yellows",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0.2
+                  },
+                  {
+                    "range": "cyans",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": -0.15
+                  },
+                  {
+                    "range": "magentas",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": -0.1
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.175,
+        0.35,
+        1,
+        1,
+        0.8359375,
+        0.4750000000000001,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.019934189630156512,
+        0.000996709481507781,
+        0.9767752918776497,
+        0.96,
+        0.7523809523809524,
+        0.5015873015873016,
+        0,
+        0.4375,
+        0.32491349480968873,
+        0.7581314878892733,
+        0.16245674740484434,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: whites / neutrals / blacks lightness zones",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "whites",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": -0.1
+                  },
+                  {
+                    "range": "neutrals",
+                    "hue": 0,
+                    "saturation": 0.3,
+                    "lightness": 0.05
+                  },
+                  {
+                    "range": "blacks",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0.12
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.25,
+        0.5,
+        1,
+        1,
+        0.75,
+        0.19999999999999996,
+        1,
+        0.5333333333333333,
+        0.5333333333333333,
+        0.5333333333333333,
+        0.75,
+        0.019763869131004683,
+        0.0007508980322158871,
+        0.9804192509645222,
+        0.96,
+        0.5999999999999999,
+        0.39999999999999997,
+        0,
+        0.4375,
+        0.30052486649221466,
+        0.7601187054818339,
+        0.1281771768711073,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: monochrome with per-range lightness mix",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "reds",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0.2
+                  },
+                  {
+                    "range": "greens",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": -0.1
+                  },
+                  {
+                    "range": "blues",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": -0.3
+                  }
+                ],
+                "monochrome": true
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0.1,
+        0.1,
+        0.1,
+        1,
+        0.6625,
+        0.6625,
+        0.6625,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.16743501529052,
+        0.1642683486238533,
+        0.32743501529051994,
+        0.96,
+        0.4666666666666667,
+        0.380952380952381,
+        0.20952380952380953,
+        0.4375,
+        0.3779411764705882,
+        0.3779411764705882,
+        0.3779411764705882,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: every range adjusted at once",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "reds",
+                    "hue": 15,
+                    "saturation": 0.2,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "yellows",
+                    "hue": -10,
+                    "saturation": 0,
+                    "lightness": 0.1
+                  },
+                  {
+                    "range": "greens",
+                    "hue": 0,
+                    "saturation": -0.4,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "cyans",
+                    "hue": 20,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "blues",
+                    "hue": 0,
+                    "saturation": 0.3,
+                    "lightness": -0.05
+                  },
+                  {
+                    "range": "magentas",
+                    "hue": -25,
+                    "saturation": 0,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "whites",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": -0.05
+                  },
+                  {
+                    "range": "neutrals",
+                    "hue": 0,
+                    "saturation": 0.15,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "blacks",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0.08
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        2.7755575615628914e-17,
+        0.15000000000000008,
+        0.44999999999999996,
+        1,
+        1,
+        0.7688151041666665,
+        0.3374999999999999,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.011677221835717668,
+        0.00016666666666666666,
+        0.8992841846502211,
+        0.96,
+        0.6761904761904762,
+        0.43915343915343935,
+        0,
+        0.4375,
+        0.3474058729319906,
+        0.6893739983697944,
+        0.19935070751255854,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: pro_photo space",
+      "doc": {
+        "layers": [
+          {
+            "blend": "normal",
+            "opacity": 1,
+            "visible": true,
+            "mask": null,
+            "ops": [
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "reds",
+                    "hue": 20,
+                    "saturation": 0.25,
+                    "lightness": 0
+                  },
+                  {
+                    "range": "blues",
+                    "hue": 0,
+                    "saturation": 0,
+                    "lightness": 0.1
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "pro_photo",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.3,
+        0.6,
+        1,
+        1,
+        0.8333333333333333,
+        0.19999999999999996,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.75,
+        0.16458598956109022,
+        0.14813156757183632,
+        0.9959673111233728,
+        0.96,
+        0.5999999999999999,
+        0.4380952380952382,
+        0,
+        0.4375,
+        0.30000000000000016,
+        0.7,
+        0.15000000000000002,
+        1
+      ],
+      "tolerance": 0.00002
+    },
+    {
+      "name": "color_ranges: stacked with exposure under soft_light and mask",
+      "doc": {
+        "layers": [
+          {
+            "blend": "soft_light",
+            "opacity": 0.8,
+            "visible": true,
+            "mask": [
+              1,
+              0.5,
+              0,
+              1,
+              0.25,
+              0.75
+            ],
+            "ops": [
+              {
+                "type": "exposure",
+                "ev": 0.3
+              },
+              {
+                "type": "color_ranges",
+                "ranges": [
+                  {
+                    "range": "reds",
+                    "hue": 25,
+                    "saturation": 0.2,
+                    "lightness": 0
+                  }
+                ],
+                "monochrome": false
+              }
+            ]
+          }
+        ]
+      },
+      "input": {
+        "w": 3,
+        "h": 2,
+        "space": "srgb",
+        "data": [
+          0,
+          0.25,
+          0.5,
+          1,
+          1,
+          0.75,
+          0.2,
+          1,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.02,
+          0.001,
+          0.98,
+          0.8,
+          0.6,
+          0.4,
+          0,
+          0.25,
+          0.3,
+          0.7,
+          0.15,
+          1
+        ]
+      },
+      "expected": [
+        0,
+        0.18328145753887096,
+        0.5166453514840972,
+        1,
+        1,
+        0.7868188137886141,
+        0.16455417239419398,
+        1,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.010356380296158407,
+        0.00048206671993052786,
+        0.9882479965027126,
+        0.928,
+        0.6101507871863177,
+        0.41787276023672276,
+        0,
+        0.2875,
+        0.257696821764234,
+        0.7440045293358793,
+        0.0992887750350458,
+        1
+      ],
+      "tolerance": 0.00002
+    }
+  ]
+}

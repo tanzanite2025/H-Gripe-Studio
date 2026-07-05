@@ -128,6 +128,8 @@ pub enum GradeOp {
     Levels { /* per-channel in/out black/white + gamma */ },
     Curves { /* per-channel control points → monotone spline */ },
     HslAdjust { /* hue/sat/lum deltas, 8 hue ranges */ },
+    ColorRanges { /* per-range HSL deltas over 9 named ranges + monochrome; the
+                     unified selective-colour / B&W / hue-sat tool */ },
     Saturation { amount: f32 },                 // linear-light, Rec.709 luma weights
     Lut3d { title: String, size: u32, data: Vec<f32> },  // parsed .cube
 }
