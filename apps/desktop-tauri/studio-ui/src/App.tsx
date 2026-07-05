@@ -1232,8 +1232,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         : mediaEditSource || mediaEditBlank
           ? (() => {
               const data = mediaEditSource ? (mediaEditSource.data as HgripeNodeData) : null;
+              // Node-result → image-editor pipeline: any node result opens here
+              // through the same target shape. The underlay is the node's best
+              // result image — cutout, then last output, then the source path —
+              // so model / API nodes (subject mask today, future LLM or
+              // algorithm cards) all enter the editor the same way.
               const imagePath = data
-                ? (data.imagePath ??
+                ? (data.cutoutImagePath ??
+                  data.imagePath ??
                   (typeof data.params?.path === "string" ? (data.params.path as string) : null))
                 : null;
               // Title: the image's filename, so the bar reads
@@ -1608,6 +1614,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             const id = previewNode.id;
             setPreviewNodeId(null);
             setMaskEditNodeId(id);
+          }}
+          onOpenImageEditor={() => {
+            const id = previewNode.id;
+            setPreviewNodeId(null);
+            openMediaEdit(id);
           }}
           onClose={() => setPreviewNodeId(null)}
         />

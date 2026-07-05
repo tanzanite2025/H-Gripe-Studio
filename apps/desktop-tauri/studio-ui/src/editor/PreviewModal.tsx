@@ -3,6 +3,7 @@ import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../viewport/view";
+import { useT } from "../i18n";
 
 // Shared "review gate" modal.
 //
@@ -39,6 +40,9 @@ interface PreviewModalProps {
   caption?: string;
   /** When set, an `Edit` button is shown that opens the heavier editor. */
   onEdit?: () => void;
+  /** When set, an entry that opens the standalone image editor over this
+   * node's result (the node-result → image-editor pipeline). */
+  onOpenImageEditor?: () => void;
   onClose: () => void;
 }
 
@@ -63,7 +67,8 @@ function PreviewImage({ path, view }: { path: string; view: ViewportViewState })
   return <p className="muted">loading…</p>;
 }
 
-export function PreviewModal({ title, layers, caption, onEdit, onClose }: PreviewModalProps) {
+export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor, onClose }: PreviewModalProps) {
+  const t = useT();
   // Default to the first layer that actually has a path, else the first layer.
   const firstReady = Math.max(0, layers.findIndex((l) => !!l.path));
   const [active, setActive] = useState(firstReady === -1 ? 0 : firstReady);
@@ -104,6 +109,11 @@ export function PreviewModal({ title, layers, caption, onEdit, onClose }: Previe
                   {l.label}
                 </button>
               ))}
+            {onOpenImageEditor ? (
+              <button onClick={onOpenImageEditor} title={t("preview.openImageEditorTitle")}>
+                {t("preview.openImageEditor")}
+              </button>
+            ) : null}
             {onEdit ? (
               <button className="primary" onClick={onEdit} title="Open the mask editor">
                 Edit

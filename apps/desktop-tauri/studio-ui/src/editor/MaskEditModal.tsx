@@ -137,11 +137,13 @@ const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
   ],
   railWidth: 320,
 };
-const IMAGE_DOCK_STORAGE_KEY = "hgripe.studio.imageDock.v2";
+const IMAGE_DOCK_STORAGE_KEY = "hgripe.studio.imageDock.v3";
+// The image workspace is its own product surface: no mask-only docks
+// (channels / paths are mask concepts — the mask workspace keeps them).
 const IMAGE_DOCK_LAYOUT: DockLayoutState = {
   groups: [
     { tabs: ["adjustments", "options"], active: "adjustments" },
-    { tabs: ["layers", "channels", "paths", "history"], active: "layers" },
+    { tabs: ["layers", "history"], active: "layers" },
   ],
   railWidth: 360,
 };
@@ -1506,12 +1508,16 @@ export function MaskEditModal({
             <button disabled={count === 0} onClick={() => dispatch({ type: "clear" })} title={t("mask.clearTitle")}>
               {t("mask.clear")}
             </button>
-            <button className={overlayOnly ? "active" : ""} onClick={() => setOverlayOnly((v) => !v)} title={t("mask.togglePreviewTitle")}>
-              {overlayOnly ? t("mask.showImage") : t("mask.maskOnly")}
-            </button>
-            <button className={quickMask ? "active" : ""} onClick={() => setQuickMask((v) => !v)} title={t("mask.quickMaskTitle")}>
-              {t("mask.quickMask")}
-            </button>
+            {workspace === "mask" ? (
+              <>
+                <button className={overlayOnly ? "active" : ""} onClick={() => setOverlayOnly((v) => !v)} title={t("mask.togglePreviewTitle")}>
+                  {overlayOnly ? t("mask.showImage") : t("mask.maskOnly")}
+                </button>
+                <button className={quickMask ? "active" : ""} onClick={() => setQuickMask((v) => !v)} title={t("mask.quickMaskTitle")}>
+                  {t("mask.quickMask")}
+                </button>
+              </>
+            ) : null}
             <button className="primary" onClick={() => { onCommit(state.current); onClose(); }} title={t("mask.applyTitle")}>
               {t("mask.apply")}
             </button>
