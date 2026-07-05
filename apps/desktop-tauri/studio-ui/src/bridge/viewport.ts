@@ -431,6 +431,15 @@ export type ViewportOverlayItem =
       dash?: boolean;
     }
   | {
+      kind: "band";
+      /** `[x, y]` centreline vertices, normalized; a single point is a dot. */
+      points: [number, number][];
+      /** Band radius as a fraction of the document width. */
+      radius: number;
+      /** Band colour `[r, g, b, a]` in 0..=1, blended once over the band. */
+      color: [number, number, number, number];
+    }
+  | {
       kind: "marker";
       /** `[x, y]` anchor, normalized. */
       center: [number, number];
@@ -474,15 +483,20 @@ export async function setViewportOverlayScene(
           ? item.region
           : item.kind === "marker"
             ? [...item.center, item.size]
-            : item.points.flat();
+            : item.kind === "band"
+              ? [...item.points.flat(), item.radius]
+              : item.points.flat();
       if (coords.some((v) => !Number.isFinite(v))) {
         throw new Error("overlay scene coordinates must be finite");
       }
+      if (item.kind === "band" && !(item.radius >= 0 && item.radius <= 1)) {
+        throw new Error(`overlay band radius must be between 0 and 1, got ${item.radius}`);
+      }
       if (item.kind !== "marquee") {
-        const colours = [
-          ...item.stroke,
-          ...(item.kind !== "polyline" ? (item.fill ?? []) : []),
-        ];
+        const colours =
+          item.kind === "band"
+            ? item.color
+            : [...item.stroke, ...(item.kind !== "polyline" ? (item.fill ?? []) : [])];
         if (colours.some((v) => !(v >= 0 && v <= 1))) {
           throw new Error("overlay colours must be between 0 and 1");
         }
