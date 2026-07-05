@@ -25,6 +25,11 @@ interface MaskToolbarProps {
   onPickFace: (slotId: string, toolId: string) => void;
   /** Paint polarity for the colour wells: add paints mask in (white front). */
   paintMode: "add" | "subtract";
+  /** Foreground / background well colours (`#rrggbb`). */
+  fgColor: string;
+  bgColor: string;
+  /** A well was clicked: open the colour picker for it. */
+  onPickColor: (which: "fg" | "bg") => void;
   /** Swap paint polarity (PS X). */
   onSwapColors: () => void;
   /** Back to default polarity / target (PS D). */
@@ -43,7 +48,7 @@ function isActive(mt: MaskTool, toolId: string): boolean {
   return toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id));
 }
 
-export function MaskToolbar({ toolId, onToolClick, faces, onPickFace, paintMode, onSwapColors, onResetColors }: MaskToolbarProps) {
+export function MaskToolbar({ toolId, onToolClick, faces, onPickFace, paintMode, fgColor, bgColor, onPickColor, onSwapColors, onResetColors }: MaskToolbarProps) {
   const t = useT();
   const lang = useContext(LangContext);
   // Which slot's flyout card is open ("si-gi" key) and where it anchors.
@@ -195,8 +200,20 @@ export function MaskToolbar({ toolId, onToolClick, faces, onPickFace, paintMode,
           ⇄
         </button>
         <div className="mask-color-main" title={paintMode === "add" ? t("mask.colorAdd") : t("mask.colorSubtract")}>
-          <span className={`well back ${paintMode === "add" ? "dark" : "light"}`} />
-          <span className={`well front ${paintMode === "add" ? "light" : "dark"}`} />
+          <button
+            className="well back"
+            style={{ background: bgColor }}
+            title={t("mask.colorBackWell")}
+            aria-label={t("mask.colorBackWell")}
+            onClick={() => onPickColor("bg")}
+          />
+          <button
+            className="well front"
+            style={{ background: fgColor }}
+            title={t("mask.colorFrontWell")}
+            aria-label={t("mask.colorFrontWell")}
+            onClick={() => onPickColor("fg")}
+          />
         </div>
       </div>
     </div>
