@@ -19,7 +19,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEd
 import { useT, type MsgKey } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, ZOOM_STEP, panBy, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, WHEEL_ZOOM_STEP, ZOOM_STEP, panBy, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
 import {
   activeOps,
   canRedo,
@@ -349,6 +349,29 @@ export function MaskEditModal({
     if (!canvas) return [1, 1];
     return [canvas.offsetWidth || 1, canvas.offsetHeight || 1];
   }, []);
+
+  // Alt+wheel / Ctrl+wheel zooms about the cursor with any tool in hand (PS
+  // Alt+scroll). A native non-passive listener: React's synthetic `onWheel`
+  // is passive at the root, so `preventDefault` (needed to stop page scroll /
+  // browser pinch-zoom) would be ignored there.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.altKey && !e.ctrlKey) return;
+      e.preventDefault();
+      if (e.deltaY === 0 && e.deltaX === 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - (rect.left + rect.width / 2);
+      const cy = e.clientY - (rect.top + rect.height / 2);
+      // Alt+wheel on some platforms reports the delta on the X axis.
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      const factor = delta < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
+      setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [viewBase]);
 
   // The pointer's angle (degrees) about the canvas centre on screen.
   const pointerAngle = (e: React.PointerEvent): number => {

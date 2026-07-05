@@ -34,6 +34,8 @@ export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 16;
 /** Multiplicative zoom step per Ctrl+= / Ctrl+- / zoom-tool click. */
 export const ZOOM_STEP = 1.5;
+/** Multiplicative zoom step per Alt/Ctrl+wheel notch (finer than a click). */
+export const WHEEL_ZOOM_STEP = 1.2;
 
 const EPS = 1e-9;
 
