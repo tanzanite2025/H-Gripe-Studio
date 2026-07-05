@@ -223,6 +223,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // Node id queued for a "run up to this node" once the committing param edit
   // has landed in `nodes` state (setNodes is async, so we defer to an effect).
   const pendingRunNode = useRef<string | null>(null);
+  // Per-image in-progress edit documents for the unified image editor's
+  // document tabs: switching tabs remounts the editor, so drafts live here.
+  const mediaEditDrafts = useRef(new Map<string, MaskDocument>());
 
   const history = useHistory({ nodes, edges, setNodes, setEdges, scopeId: canvas.documentId });
   const { takeSnapshot, undo, redo } = history;
@@ -1236,6 +1239,20 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               // Title: the image's filename, so the bar reads
               // "photo.png · image editor".
               const base = imagePath?.split(/[\\/]/).pop();
+              // PS-style document tabs: one per image card on the canvas;
+              // clicking a tab retargets the editor to that card.
+              const tabs = nodes
+                .filter((n) => (n.data as HgripeNodeData).kind === "imageSource")
+                .map((n) => {
+                  const d = n.data as HgripeNodeData;
+                  const p =
+                    d.imagePath ?? (typeof d.params?.path === "string" ? (d.params.path as string) : null);
+                  return {
+                    id: n.id,
+                    label: p?.split(/[\\/]/).pop() || t("mediaEdit.title"),
+                    active: n.id === mediaEditSource?.id,
+                  };
+                });
               return {
                 editor: "media" as const,
                 target: {
@@ -1246,11 +1263,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 // Blank standalone editor: an in-editor "open image" entry
                 // replaces the up-front system picker.
                 onPickFile: imagePath ? undefined : () => void pickIntoImageEditor(),
+                tabs,
+                onSelectTab: (id: string) => {
+                  setMediaEditBlank(false);
+                  setMediaEditSourceId(id);
+                },
+                initial: mediaEditSource ? (mediaEditDrafts.current.get(mediaEditSource.id) ?? null) : null,
+                onDocChange: (doc: MaskDocument) => {
+                  if (mediaEditSource) mediaEditDrafts.current.set(mediaEditSource.id, doc);
+                },
                 // Apply spawns exactly one bound edit node of the chosen kind from
                 // the source (never mutating it) and runs it — same pipeline as the
                 // right-click auto entries, but seeded with the manual edits.
                 onCommitMask: (edits: MaskDocument) => {
                   if (mediaEditSource) {
+                    mediaEditDrafts.current.delete(mediaEditSource.id);
                     addBoundEdit(mediaEditSource.id, "subjectMask", {
                       params: { edit_paths: edits },
                       openEditor: false,
@@ -1328,6 +1355,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setGradeEditNodeId(null);
     setMediaEditSourceId(null);
     setMediaEditBlank(false);
+    mediaEditDrafts.current.clear();
   };
 
   return (

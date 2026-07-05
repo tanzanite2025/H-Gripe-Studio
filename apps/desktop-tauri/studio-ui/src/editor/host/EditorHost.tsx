@@ -38,6 +38,15 @@ export interface EditorTarget {
   nodeId?: string | null;
 }
 
+/** One open-document tab in the unified image editor's top strip (PS-style). */
+export interface EditorTab {
+  /** Image-source node id backing the tab. */
+  id: string;
+  /** Tab label (the image's filename). */
+  label: string;
+  active: boolean;
+}
+
 /** A request to open one editor over a target, with its commit sink. */
 export type EditorRequest =
   | {
@@ -67,6 +76,13 @@ export type EditorRequest =
       target: EditorTarget;
       /** Blank-editor "open image" entry (shown when there is no image yet). */
       onPickFile?: () => void;
+      /** Open-document tabs (one per image card); clicking switches targets. */
+      tabs?: EditorTab[];
+      onSelectTab?: (id: string) => void;
+      /** In-progress edit document restored when the tab re-activates. */
+      initial?: MaskDocument | null;
+      /** Draft sink: called on every edit so tab switches keep the document. */
+      onDocChange?: (doc: MaskDocument) => void;
       onCommitMask: (edits: MaskDocument) => void;
       onCommitCrop: (commit: CropCommit) => void;
     };
@@ -116,10 +132,15 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
       )}
       {request.editor === "media" && (
         <MediaEditModal
+          key={request.target.nodeId ?? "blank"}
           title={request.target.title}
           imagePath={request.target.imagePath}
           nodeId={request.target.nodeId}
           onPickFile={request.onPickFile}
+          tabs={request.tabs}
+          onSelectTab={request.onSelectTab}
+          initial={request.initial}
+          onDocChange={request.onDocChange}
           onCommitMask={request.onCommitMask}
           onCommitCrop={request.onCommitCrop}
           onClose={onClose}

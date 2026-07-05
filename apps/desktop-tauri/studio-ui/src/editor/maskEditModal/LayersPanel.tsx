@@ -1,7 +1,7 @@
 // Right rail "Layers" panel block: the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
 import type { AdjustmentType, LayerBlend, MaskLayer } from "../../types/production";
@@ -84,6 +84,65 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
   const activeLayer = layers[active];
   const [renaming, setRenaming] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  // PS multi-select: extra selected layers (by id, so reorders keep them)
+  // beyond the active one; Ctrl/Alt+click toggles, Shift+click ranges.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const selectedIndices = useMemo(() => {
+    const set = new Set<number>();
+    layers.forEach((l, i) => {
+      if (i === active || selectedIds.has(l.id)) set.add(i);
+    });
+    return [...set].sort((a, b) => a - b);
+  }, [layers, active, selectedIds]);
+
+  const selectRow = (e: MouseEvent, i: number) => {
+    const layer = layers[i];
+    if (e.ctrlKey || e.altKey || e.metaKey) {
+      const next = new Set(selectedIds);
+      const activeId = layers[active]?.id;
+      if (activeId) next.add(activeId);
+      if (next.has(layer.id) && i !== active) {
+        next.delete(layer.id);
+      } else {
+        next.add(layer.id);
+        onBeforeLayerChange();
+        dispatch({ type: "layer_active", index: i });
+      }
+      setSelectedIds(next);
+      return;
+    }
+    if (e.shiftKey) {
+      const lo = Math.min(active, i);
+      const hi = Math.max(active, i);
+      setSelectedIds(new Set(layers.slice(lo, hi + 1).map((l) => l.id)));
+      return;
+    }
+    setSelectedIds(new Set());
+    onBeforeLayerChange();
+    dispatch({ type: "layer_active", index: i });
+  };
+
+  const openMenu = (e: MouseEvent, i: number) => {
+    e.preventDefault();
+    if (!selectedIndices.includes(i)) {
+      setSelectedIds(new Set());
+      onBeforeLayerChange();
+      dispatch({ type: "layer_active", index: i });
+    }
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const mergeable = (indices: number[]) =>
+    indices.length >= 2 && indices.every((i) => layers[i]?.kind === "mask" && !layers[i]?.locked);
+  const mergeDownIndices = active > 0 ? [active - 1, active] : [];
+  const merge = (indices: number[]) => {
+    onBeforeLayerChange();
+    dispatch({ type: "layer_merge", indices });
+    setSelectedIds(new Set());
+    setMenu(null);
+  };
 
   const commitRename = () => {
     if (renaming != null) dispatch({ type: "layer_rename", index: renaming, name: draft });
@@ -148,7 +207,7 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
           return (
             <div
               key={layer.id}
-              className={`mask-layer-row${i === active ? " active" : ""}${layer.visible ? "" : " hidden"}`}
+              className={`mask-layer-row${i === active ? " active" : selectedIndices.includes(i) ? " selected" : ""}${layer.visible ? "" : " hidden"}`}
               draggable={renaming !== i && !layer.locked}
               onDragStart={(e) => {
                 e.dataTransfer.setData(LAYER_MIME, String(i));
@@ -156,10 +215,8 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
               }}
               onDragOver={allowLayerDrop}
               onDrop={(e) => dropOn(e, i)}
-              onClick={() => {
-                onBeforeLayerChange();
-                dispatch({ type: "layer_active", index: i });
-              }}
+              onClick={(e) => selectRow(e, i)}
+              onContextMenu={(e) => openMenu(e, i)}
             >
               <button
                 className="mask-layer-visible"
@@ -233,6 +290,52 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
           );
         })}
       </div>
+
+      {menu ? (
+        <>
+          <div className="mask-flyout-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div className="mask-flyout" style={{ left: menu.x, top: menu.y }} role="menu">
+            {selectedIndices.length >= 2 ? (
+              <button
+                className="mask-flyout-item"
+                disabled={!mergeable(selectedIndices)}
+                onClick={() => merge(selectedIndices)}
+              >
+                <span className="label">{t("mask.layerMerge")}</span>
+              </button>
+            ) : (
+              <button
+                className="mask-flyout-item"
+                disabled={!mergeable(mergeDownIndices)}
+                onClick={() => merge(mergeDownIndices)}
+              >
+                <span className="label">{t("mask.layerMergeDown")}</span>
+              </button>
+            )}
+            <button
+              className="mask-flyout-item"
+              onClick={() => {
+                dispatch({ type: "layer_duplicate" });
+                setMenu(null);
+              }}
+            >
+              <span className="label">{t("mask.layerDuplicate")}</span>
+            </button>
+            <button
+              className="mask-flyout-item"
+              disabled={layers.length <= 1 || activeLayer?.locked}
+              onClick={() => {
+                onBeforeLayerChange();
+                dispatch({ type: "layer_remove", index: active });
+                setSelectedIds(new Set());
+                setMenu(null);
+              }}
+            >
+              <span className="label">{t("mask.layerDelete")}</span>
+            </button>
+          </div>
+        </>
+      ) : null}
 
       <div className="mask-layer-actions">
         <button

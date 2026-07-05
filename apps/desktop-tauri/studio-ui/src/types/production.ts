@@ -379,6 +379,16 @@ export interface MaskLayer {
   adjustment?: LayerAdjustment;
 }
 
+/** Resampling filter for the document-level image-size request. */
+export type ImageResample = "auto" | "nearest" | "bilinear" | "bicubic";
+
+/** PS Image Size (Ctrl+Alt+I): the requested output pixel size. */
+export interface ImageCanvasSize {
+  w: number;
+  h: number;
+  resample: ImageResample;
+}
+
 /**
  * Version-3 `edit_paths` envelope: the mask document. `matte_strokes` and
  * `points` stay document-level — they parameterise the matting pass / SAM 2
@@ -391,6 +401,8 @@ export interface MaskDocument {
   active: number;
   matte_strokes: BrushStroke[];
   points: PointPrompt[];
+  /** Requested output size (PS Image Size); absent ⇒ keep the source size. */
+  canvas?: ImageCanvasSize;
 }
 
 export function emptyMaskLayer(name = "Background"): MaskLayer {

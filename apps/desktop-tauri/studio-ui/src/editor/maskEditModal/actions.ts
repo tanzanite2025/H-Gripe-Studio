@@ -11,6 +11,7 @@ import {
   addLayer,
   clearEdits,
   duplicateLayer,
+  mergeLayers,
   moveLayer,
   redo,
   renameLayer,
@@ -18,6 +19,7 @@ import {
   removeLayer,
   removeOp,
   setActiveLayer,
+  setCanvasSize,
   setLayerBlend,
   setLayerOpacity,
   toggleLayerLink,
@@ -37,6 +39,7 @@ import type {
   BrushStroke,
   EditPath,
   EditPathPoint,
+  ImageCanvasSize,
   LayerAdjustment,
   LayerBlend,
   MaskOperation,
@@ -65,12 +68,14 @@ export type MaskEditAction =
   | { type: "layer_remove"; index: number }
   | { type: "layer_rename"; index: number; name: string }
   | { type: "layer_move"; from: number; to: number }
+  | { type: "layer_merge"; indices: number[] }
   | { type: "layer_active"; index: number }
   | { type: "layer_visible"; index: number }
   | { type: "layer_lock"; index: number }
   | { type: "layer_link"; index: number }
   | { type: "layer_opacity"; index: number; opacity: number }
-  | { type: "layer_blend"; index: number; blend: LayerBlend };
+  | { type: "layer_blend"; index: number; blend: LayerBlend }
+  | { type: "canvas_size"; canvas: ImageCanvasSize };
 
 export type MaskEditDispatch = (action: MaskEditAction) => void;
 
@@ -124,6 +129,8 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return renameLayer(state, action.index, action.name);
     case "layer_move":
       return moveLayer(state, action.from, action.to);
+    case "layer_merge":
+      return mergeLayers(state, action.indices);
     case "layer_active":
       return setActiveLayer(state, action.index);
     case "layer_visible":
@@ -136,5 +143,7 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return setLayerOpacity(state, action.index, action.opacity);
     case "layer_blend":
       return setLayerBlend(state, action.index, action.blend);
+    case "canvas_size":
+      return setCanvasSize(state, action.canvas);
   }
 }

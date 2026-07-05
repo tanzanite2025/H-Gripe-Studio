@@ -16,7 +16,7 @@ import {
 } from "./maskTools";
 import { useShortcutScope, type ShortcutHandlers } from "../shortcuts";
 import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEdit";
-import { useT } from "../i18n";
+import { useT, type MsgKey } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
 import { FIT_VIEW, ZOOM_STEP, panBy, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
@@ -31,6 +31,7 @@ import {
 import type {
   BrushStroke,
   EditPathPoint,
+  ImageResample,
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
@@ -91,6 +92,9 @@ interface MaskEditModalProps {
   wandTolerance: number;
   onCommit: (edits: MaskDocument) => void;
   onClose: () => void;
+  /** Draft sink: called on every edit so a host can keep the in-progress
+   * document across editor remounts (e.g. the image editor's tab switches). */
+  onDocChange?: (doc: MaskDocument) => void;
   /** Optional bar content (e.g. the unified editor's tool-group switcher). */
   headerExtra?: ReactNode;
   /** Editor name shown after the title (defaults to "mask editor"). */
@@ -101,6 +105,22 @@ interface MaskEditModalProps {
 
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
+
+/** Image Size dialog draft: pixel size + linked aspect + resample filter. */
+interface ImageSizeDraft {
+  w: number;
+  h: number;
+  linked: boolean;
+  resample: ImageResample;
+}
+
+const RESAMPLE_OPTIONS: readonly ImageResample[] = ["auto", "nearest", "bilinear", "bicubic"];
+const RESAMPLE_KEYS = {
+  auto: "mask.imageSizeResampleAuto",
+  nearest: "mask.imageSizeResampleNearest",
+  bilinear: "mask.imageSizeResampleBilinear",
+  bicubic: "mask.imageSizeResampleBicubic",
+} as const satisfies Record<ImageResample, MsgKey>;
 
 // Default right-rail dock layout, mirroring PS: a 调整/属性 top group (plus
 // the mask-specific tool options / mask ops / info tabs) over a growing
@@ -131,12 +151,20 @@ export function MaskEditModal({
   wandTolerance,
   onCommit,
   onClose,
+  onDocChange,
   headerExtra,
   editorName,
   workspace = "mask",
 }: MaskEditModalProps) {
   const t = useT();
   const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
+  // Mirror the in-progress document out to the host so it survives remounts
+  // (e.g. the image editor's document-tab switches).
+  const onDocChangeRef = useRef(onDocChange);
+  onDocChangeRef.current = onDocChange;
+  useEffect(() => {
+    onDocChangeRef.current?.(state.current);
+  }, [state]);
   const [toolId, setToolId] = useState<string>(DEFAULT_TOOL_ID);
   // Last-used variant per multi-tool PS slot: the slot button's visible face,
   // and what the slot's shortcut letter re-selects.
@@ -169,6 +197,9 @@ export function MaskEditModal({
   // Fill dialog (M11, Shift+F5): a draft of mode + opacity; Apply records a
   // revisable `fill` op.
   const [fillDraft, setFillDraft] = useState<FillDraft | null>(null);
+  // Image Size dialog (PS Ctrl+Alt+I): a draft of the output pixel size;
+  // 确定 records it on the document as an undoable step.
+  const [imageSizeDraft, setImageSizeDraft] = useState<ImageSizeDraft | null>(null);
   // PS-style right rail: tabbed dock groups driven by a persisted layout
   // (drag a tab to re-dock it; drag the rail edge to resize).
   const dock = useDockLayout(
@@ -344,6 +375,8 @@ export function MaskEditModal({
   transformDraftRef.current = transformDraft;
   const fillDraftRef = useRef<FillDraft | null>(null);
   fillDraftRef.current = fillDraft;
+  const imageSizeDraftRef = useRef<ImageSizeDraft | null>(null);
+  imageSizeDraftRef.current = imageSizeDraft;
 
   const startPathEdit = (index: number) => {
     const op = activeOps(state.current)[index];
@@ -491,6 +524,10 @@ export function MaskEditModal({
     adjust_levels: () => dispatch({ type: "layer_add_adjustment", adjType: "levels" }),
     adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
     fill_dialog: () => setFillDraft({ mode: "add", opacity: 100 }),
+    image_size: () => {
+      const canvas = stateRef.current.current.canvas;
+      setImageSizeDraft({ w: canvas?.w ?? dims.w, h: canvas?.h ?? dims.h, linked: true, resample: canvas?.resample ?? "auto" });
+    },
     feather_dialog: () => {
       // The feather "dialog" is the existing preview lane: pick the radius
       // with the amount slider, then Apply commits a revisable `feather` op.
@@ -511,6 +548,7 @@ export function MaskEditModal({
       if (editingPathRef.current != null) cancelPathEdit();
       else if (transformDraftRef.current) closeTransformPanel();
       else if (fillDraftRef.current) setFillDraft(null);
+      else if (imageSizeDraftRef.current) setImageSizeDraft(null);
       else if (penPendingRef.current) setPenAnchors([]);
       else if (toolId === "rotate_view" && viewRef.current.rotate) setView((v) => rotateTo(v, 0));
       else onClose();
@@ -1503,6 +1541,84 @@ export function MaskEditModal({
             })()}
           </div>
         </div>
+
+        {imageSizeDraft ? (
+          <div className="mask-dialog-backdrop" onClick={() => setImageSizeDraft(null)}>
+            <div className="mask-dialog" role="dialog" aria-label={t("mask.imageSize")} onClick={(e) => e.stopPropagation()}>
+              <div className="mask-dialog-title">{t("mask.imageSize")}</div>
+              <div className="mask-dialog-body">
+                <div className="field">
+                  <span>{t("mask.imageSizeCurrent")}</span>
+                  <small className="muted">{dims.w} × {dims.h} px</small>
+                </div>
+                <label className="field">
+                  <span>{t("mask.imageSizeWidth")}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={imageSizeDraft.w}
+                    onChange={(e) => {
+                      const w = Math.max(1, Math.round(Number(e.target.value) || 0));
+                      setImageSizeDraft((d) =>
+                        d ? { ...d, w, h: d.linked ? Math.max(1, Math.round((w * dims.h) / dims.w)) : d.h } : d,
+                      );
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>{t("mask.imageSizeHeight")}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={imageSizeDraft.h}
+                    onChange={(e) => {
+                      const h = Math.max(1, Math.round(Number(e.target.value) || 0));
+                      setImageSizeDraft((d) =>
+                        d ? { ...d, h, w: d.linked ? Math.max(1, Math.round((h * dims.w) / dims.h)) : d.w } : d,
+                      );
+                    }}
+                  />
+                </label>
+                <label className="field mask-dialog-check">
+                  <input
+                    type="checkbox"
+                    checked={imageSizeDraft.linked}
+                    onChange={(e) => setImageSizeDraft((d) => (d ? { ...d, linked: e.target.checked } : d))}
+                  />
+                  <span>{t("mask.imageSizeLink")}</span>
+                </label>
+                <label className="field">
+                  <span>{t("mask.imageSizeResample")}</span>
+                  <select
+                    value={imageSizeDraft.resample}
+                    onChange={(e) => setImageSizeDraft((d) => (d ? { ...d, resample: e.target.value as ImageResample } : d))}
+                  >
+                    {RESAMPLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {t(RESAMPLE_KEYS[r])}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="mask-dialog-actions">
+                <button
+                  className="primary"
+                  onClick={() => {
+                    dispatch({
+                      type: "canvas_size",
+                      canvas: { w: imageSizeDraft.w, h: imageSizeDraft.h, resample: imageSizeDraft.resample },
+                    });
+                    setImageSizeDraft(null);
+                  }}
+                >
+                  {t("mask.imageSizeApply")}
+                </button>
+                <button onClick={() => setImageSizeDraft(null)}>{t("mask.imageSizeCancel")}</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

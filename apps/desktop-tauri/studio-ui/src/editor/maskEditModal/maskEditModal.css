@@ -17,6 +17,7 @@
   max-width: 100%;
   height: 95vh;
   max-height: 95vh;
+  position: relative; /* anchors the in-editor dialog backdrop */
 }
 /* The image-editor shells span the full viewport width, so the backdrop's
    framing padding goes. */
@@ -144,7 +145,8 @@
   text-align: left;
   white-space: nowrap;
 }
-.mask-flyout-item:hover { background: var(--ps-hover); }
+.mask-flyout-item:hover:not(:disabled) { background: var(--ps-hover); }
+.mask-flyout-item:disabled { opacity: 0.4; cursor: default; }
 .mask-flyout-item.active { border-color: var(--accent); color: var(--accent); }
 .mask-flyout-item .label { flex: 1; }
 .mask-flyout-item .combo {
@@ -153,6 +155,38 @@
   text-transform: uppercase;
   color: var(--muted);
   opacity: 0.8;
+}
+/* PS-style modal dialog inside the editor (Image Size, Ctrl+Alt+I). */
+.mask-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.mask-dialog {
+  min-width: 300px;
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.mask-dialog-title {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--ps-dock-border);
+  background: var(--ps-tab-strip);
+}
+.mask-dialog-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.mask-dialog-check { flex-direction: row; align-items: center; gap: 6px; }
+.mask-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--ps-dock-border);
 }
 .mask-edit-stage {
   position: relative;
@@ -537,6 +571,8 @@
   cursor: pointer;
 }
 .mask-layer-row.active { background: var(--ps-active-overlay); }
+/* Multi-selected (but not active) rows: a lighter wash of the same highlight. */
+.mask-layer-row.selected { background: rgba(255, 255, 255, 0.07); }
 .mask-layer-row.hidden .mask-layer-name,
 .mask-layer-row.hidden .mask-layer-thumb { opacity: 0.45; }
 .mask-layer-visible {
