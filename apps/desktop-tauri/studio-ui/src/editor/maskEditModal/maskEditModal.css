@@ -394,6 +394,13 @@
   gap: 4px;
 }
 .mask-marquee-float-row input[type="number"] { width: 56px; }
+.mask-crop-lock {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
 /* PS 拾色器 dialog: SV field + hue strip + linked HSB / RGB / hex fields. */
 .mask-color-picker-backdrop {
   position: fixed;

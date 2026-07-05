@@ -299,6 +299,18 @@ export const messages = {
   },
   "crop.aspect": { en: "Aspect", zh: "宽高比" },
   "crop.aspectFree": { en: "Free", zh: "自由" },
+  "crop.lockRatio": { en: "Lock ratio", zh: "锁定比例" },
+  "crop.lockRatioTitle": {
+    en: "Keep the box's width/height ratio while resizing",
+    zh: "调整大小时保持裁剪框的宽高比",
+  },
+  "crop.saveTemplate": { en: "Save template", zh: "存为模板" },
+  "crop.saveTemplateTitle": {
+    en: "Save the current width × height as a reusable size template",
+    zh: "把当前宽×高像素保存为可复用的尺寸模板",
+  },
+  "crop.applyTitle2": { en: "Apply the crop to the document", zh: "将裁剪应用到文档" },
+  "crop.cancel": { en: "Cancel crop", zh: "取消裁剪" },
   "crop.margin": { en: "Subject margin %", zh: "主体边距 %" },
   "crop.reset": { en: "Reset box", zh: "重置框" },
   "crop.autoHint": {
