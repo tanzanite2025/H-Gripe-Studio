@@ -371,12 +371,12 @@
 }
 .mask-color-swap:hover { color: var(--text); }
 .mask-color-main .well { padding: 0; cursor: pointer; }
-/* Floating selection-size panel: pinned at the committed marquee's right
-   edge, vertically centred (`.flip` anchors it left of the selection). */
+/* Floating selection-size panel: centred below the committed marquee. */
 .mask-marquee-float {
   position: fixed;
   z-index: 40;
-  transform: translateY(-50%);
+  transform: translateX(-50%);
+  align-items: center;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -387,7 +387,6 @@
   border-radius: 6px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
-.mask-marquee-float.flip { transform: translate(-100%, -50%); }
 .mask-marquee-float .muted { color: var(--text-muted, #999); }
 .mask-marquee-float-row {
   display: flex;

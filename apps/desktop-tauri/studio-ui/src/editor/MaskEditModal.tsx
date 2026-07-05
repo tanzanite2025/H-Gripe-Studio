@@ -1610,21 +1610,21 @@ export function MaskEditModal({
             brushCursorRef={brushCursorEl}
           />
 
-          {/* Floating selection-size panel: pinned at the marquee's right
-              edge, vertically centred (flips to the left near the window
-              edge). Screen-space so the view transform never scales it. */}
+          {/* Floating selection-size panel: centred below the marquee's
+              bottom edge, clamped to the window. Screen-space so the view
+              transform never scales it. */}
           {lastMarquee && !marquee.current && canvasRef.current
             ? (() => {
                 const rect = canvasRef.current.getBoundingClientRect();
                 const [x0, y0, x1, y1] = lastMarquee.region;
-                const midY = rect.top + (((y0 + y1) / 2) / dims.h) * rect.height;
-                const rightX = rect.left + (x1 / dims.w) * rect.width + 10;
-                const flip = rightX + 230 > window.innerWidth;
-                const left = flip ? rect.left + (x0 / dims.w) * rect.width - 10 : rightX;
+                const midX = rect.left + (((x0 + x1) / 2) / dims.w) * rect.width;
+                const belowY = rect.top + (y1 / dims.h) * rect.height + 10;
+                const left = Math.max(130, Math.min(midX, window.innerWidth - 130));
+                const top = Math.max(10, Math.min(belowY, window.innerHeight - 90));
                 return (
                   <div
-                    className={`mask-marquee-float${flip ? " flip" : ""}`}
-                    style={{ left, top: Math.max(60, Math.min(midY, window.innerHeight - 60)) }}
+                    className="mask-marquee-float"
+                    style={{ left, top }}
                     onPointerDown={(e) => e.stopPropagation()}
                   >
                     <span className="muted">
@@ -1718,9 +1718,6 @@ export function MaskEditModal({
               editingPath={editingPath}
               commitPathEdit={commitPathEdit}
               cancelPathEdit={cancelPathEdit}
-              marqueeRect={lastMarquee}
-              dims={dims}
-              applyMarqueeSize={applyMarqueeSize}
             />
                   ),
                 },
