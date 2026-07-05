@@ -319,10 +319,43 @@ export type LayerBlend = (typeof LAYER_BLENDS)[number];
  * Tone-mapping kinds an adjustment layer can carry (M6). The document is
  * grayscale (mask surfaces), so the PS set maps to the greyscale tone curve:
  * `levels` (input / gamma / output), a free `curve` (control points → LUT),
- * and `brightness_contrast`. Hue/saturation has no greyscale meaning and is
- * deliberately absent.
+ * and `brightness_contrast`.
+ *
+ * The image workspace (image-kernel K2) additionally records colour
+ * adjustments — `color_ranges` (the unified selective-colour / B&W /
+ * hue-sat tool) and `channel_mixer`. These render through the grade
+ * kernel only; the greyscale mask compositor ignores them (its LUT
+ * builder returns identity for unknown kinds).
  */
-export type AdjustmentType = "levels" | "curve" | "brightness_contrast";
+export type AdjustmentType =
+  | "levels"
+  | "curve"
+  | "brightness_contrast"
+  | "color_ranges"
+  | "channel_mixer";
+
+/** A named colour range of the `color_ranges` adjustment. */
+export type AdjustmentColorRange =
+  | "reds"
+  | "yellows"
+  | "greens"
+  | "cyans"
+  | "blues"
+  | "magentas"
+  | "whites"
+  | "neutrals"
+  | "blacks";
+
+/** Per-range deltas of the `color_ranges` adjustment (UI units). */
+export interface AdjustmentRange {
+  range: AdjustmentColorRange;
+  /** Hue shift in degrees, −180..180. Absent ⇒ 0. */
+  hue?: number;
+  /** Saturation delta in percent, −100..100. Absent ⇒ 0. */
+  saturation?: number;
+  /** Lightness delta in percent, −100..100. Absent ⇒ 0. */
+  lightness?: number;
+}
 
 /**
  * The revisable parameters of an adjustment layer (M6). Each field defaults
@@ -352,6 +385,18 @@ export interface LayerAdjustment {
   brightness?: number;
   /** −100..100; scales values about the midpoint (127.5). Absent ⇒ 0. */
   contrast?: number;
+  // --- color_ranges (image workspace) --------------------------------------
+  /** Per-range deltas; absent ranges are identity. */
+  ranges?: AdjustmentRange[];
+  /** Desaturate after the range deltas (B&W mix). Absent ⇒ false. */
+  monochrome?: boolean;
+  // --- channel_mixer (image workspace) --------------------------------------
+  /** Output-red weights `[from R, from G, from B]` in percent. Absent ⇒ [100, 0, 0]. */
+  red?: [number, number, number];
+  /** Output-green weights in percent. Absent ⇒ [0, 100, 0]. */
+  green?: [number, number, number];
+  /** Output-blue weights in percent. Absent ⇒ [0, 0, 100]. */
+  blue?: [number, number, number];
 }
 
 /**

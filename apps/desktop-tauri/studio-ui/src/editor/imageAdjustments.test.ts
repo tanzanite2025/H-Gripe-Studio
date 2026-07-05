@@ -56,5 +56,50 @@ describe("adjustmentToGradeOps", () => {
   it("identity adjustments lower to no ops", () => {
     expect(adjustmentToGradeOps({ type: "curve" })).toEqual([]);
     expect(adjustmentToGradeOps({ type: "brightness_contrast" })).toEqual([]);
+    expect(adjustmentToGradeOps({ type: "color_ranges" })).toEqual([]);
+    expect(adjustmentToGradeOps({ type: "color_ranges", ranges: [{ range: "reds" }] })).toEqual([]);
+    expect(adjustmentToGradeOps({ type: "channel_mixer" })).toEqual([]);
+    expect(
+      adjustmentToGradeOps({ type: "channel_mixer", red: [100, 0, 0], green: [0, 100, 0], blue: [0, 0, 100] }),
+    ).toEqual([]);
+  });
+
+  it("color_ranges lowers UI units (degrees / percent) to the grade op", () => {
+    expect(
+      adjustmentToGradeOps({
+        type: "color_ranges",
+        ranges: [
+          { range: "reds", hue: 30, saturation: -50 },
+          { range: "blues", lightness: 20 },
+        ],
+        monochrome: false,
+      }),
+    ).toEqual([
+      {
+        type: "color_ranges",
+        ranges: [
+          { range: "reds", hue: 30, saturation: -0.5, lightness: 0 },
+          { range: "blues", hue: 0, saturation: 0, lightness: 0.2 },
+        ],
+        monochrome: false,
+      },
+    ]);
+    expect(adjustmentToGradeOps({ type: "color_ranges", monochrome: true })).toEqual([
+      { type: "color_ranges", ranges: [], monochrome: true },
+    ]);
+  });
+
+  it("channel_mixer lowers percent weights to the rgb_mixer op", () => {
+    expect(
+      adjustmentToGradeOps({ type: "channel_mixer", red: [50, 50, 0] }),
+    ).toEqual([
+      {
+        type: "rgb_mixer",
+        red: [0.5, 0.5, 0],
+        green: [0, 1, 0],
+        blue: [0, 0, 1],
+        monochrome: false,
+      },
+    ]);
   });
 });

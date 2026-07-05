@@ -16,7 +16,12 @@
 //   (monotone spline) or `contrast` (pivot scale without the brightness
 //   shift), which would change the shape.
 //
-// `imageAdjustments.test.ts` asserts each lowering agrees with
+// The image-workspace colour adjustments (`color_ranges`, `channel_mixer`)
+// have no u8 counterpart — they lower straight to their grade ops
+// (`color_ranges`, `rgb_mixer`), converting UI units (degrees / percent)
+// to op units.
+//
+// `imageAdjustments.test.ts` asserts each tone-map lowering agrees with
 // `adjustmentLut` within u8 rounding at all 256 levels.
 
 import type { GradeOp } from "./gradeKernel";
@@ -72,6 +77,32 @@ export function adjustmentToGradeOps(adj: LayerAdjustment): GradeOp[] {
         return clamp(y0 + t * (y1 - y0), 0, 255) / 255;
       }),
     ];
+  }
+  if (adj.type === "color_ranges") {
+    const ranges = (adj.ranges ?? [])
+      .map((r) => ({
+        range: r.range,
+        hue: r.hue ?? 0,
+        saturation: (r.saturation ?? 0) / 100,
+        lightness: (r.lightness ?? 0) / 100,
+      }))
+      .filter((r) => r.hue !== 0 || r.saturation !== 0 || r.lightness !== 0);
+    if (ranges.length === 0 && !adj.monochrome) return [];
+    return [{ type: "color_ranges", ranges, monochrome: adj.monochrome ?? false }];
+  }
+  if (adj.type === "channel_mixer") {
+    const row = (w: [number, number, number] | undefined, dflt: [number, number, number]) =>
+      (w ?? dflt).map((v) => v / 100) as [number, number, number];
+    const red = row(adj.red, [100, 0, 0]);
+    const green = row(adj.green, [0, 100, 0]);
+    const blue = row(adj.blue, [0, 0, 100]);
+    const identity =
+      !adj.monochrome &&
+      red.join() === "1,0,0" &&
+      green.join() === "0,1,0" &&
+      blue.join() === "0,0,1";
+    if (identity) return [];
+    return [{ type: "rgb_mixer", red, green, blue, monochrome: adj.monochrome ?? false }];
   }
   // brightness_contrast: scale about the midpoint, then shift.
   const brightness = clamp(adj.brightness ?? 0, -100, 100) / 100;

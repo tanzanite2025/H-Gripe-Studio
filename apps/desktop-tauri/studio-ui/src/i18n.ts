@@ -576,6 +576,7 @@ export const messages = {
   "mask.adjPosterize": { en: "Posterize", zh: "色调分离" },
   "mask.adjThreshold": { en: "Threshold", zh: "阈值" },
   "mask.adjColorRanges": { en: "Color ranges", zh: "颜色范围" },
+  "mask.adjColorRange": { en: "Range", zh: "范围" },
   "mask.adjGradientMap": { en: "Gradient map", zh: "渐变映射" },
   "mask.channelRgb": { en: "RGB", zh: "RGB" },
   "mask.channelRed": { en: "Red", zh: "红" },
