@@ -11,6 +11,7 @@ import {
   resizeViewport,
   setViewportGrade,
   setViewportMaskOverlay,
+  setViewportOverlayScene,
   setViewportPlacement,
   setViewportPresented,
   setViewportTarget,
@@ -19,6 +20,7 @@ import {
   type ViewportFrame,
   type ViewportKind,
   type ViewportMaskOverlay,
+  type ViewportOverlayScene,
   type ViewportPlacement,
   type ViewportPlacementReport,
   type ViewportPixels,
@@ -37,6 +39,9 @@ export type ViewportCommand =
    * the mask editor's selection tint, presented by the host at the view
    * window's detail. */
   | { kind: "set_mask_overlay"; overlay: ViewportMaskOverlay | null }
+  /** Vector overlay stroked over rendered frames (image_edit viewports):
+   * selection outlines drawn host-side at the view window's detail. */
+  | { kind: "set_overlay_scene"; scene: ViewportOverlayScene | null }
   /** Native surface presentation (surface swap Phase S1): the element rect
    * the host's surface window sits under, and whether it is shown at all. */
   | { kind: "set_placement"; placement: ViewportPlacement }
@@ -88,6 +93,9 @@ export class WgpuViewportHost {
         return;
       case "set_mask_overlay":
         await setViewportMaskOverlay(this.id(), cmd.overlay);
+        return;
+      case "set_overlay_scene":
+        await setViewportOverlayScene(this.id(), cmd.scene);
         return;
       case "set_placement":
         await setViewportPlacement(this.id(), cmd.placement);

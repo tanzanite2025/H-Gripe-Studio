@@ -119,6 +119,7 @@ interface MockViewport {
   height: number;
   gradeDoc: unknown | null;
   maskOverlay: ViewportMaskOverlay | null;
+  overlayScene: ViewportOverlayScene | null;
   view: { zoom: number; panX: number; panY: number };
   placement: ViewportPlacement | null;
   presented: boolean;
@@ -159,6 +160,7 @@ export async function createViewport(kind: ViewportKind): Promise<ViewportDescri
     height: 0,
     gradeDoc: null,
     maskOverlay: null,
+    overlayScene: null,
     view: { zoom: 1, panX: 0, panY: 0 },
     placement: null,
     presented: false,
@@ -397,6 +399,50 @@ export async function setViewportMaskOverlay(
     }
   }
   vp.maskOverlay = overlay;
+}
+
+/** One primitive of a vector overlay scene, in normalized document
+ * coordinates (0..=1 over the full document, view-independent). */
+export type ViewportOverlayItem = {
+  kind: "marquee";
+  /** `[x1, y1, x2, y2]` corners, normalized. */
+  region: [number, number, number, number];
+  ellipse?: boolean;
+};
+
+/** A vector overlay the host strokes over rendered frames (image_edit
+ * viewports): the mask editor's marquee marching ants, drawn host-side at
+ * the view window's detail instead of on a document-size canvas. */
+export interface ViewportOverlayScene {
+  items: ViewportOverlayItem[];
+}
+
+/**
+ * Set (or clear) the vector overlay an image-edit viewport strokes over
+ * rendered frames — selection outlines present host-side at the view
+ * window's detail, one screen pixel wide at any zoom.
+ */
+export async function setViewportOverlayScene(
+  viewportId: string,
+  scene: ViewportOverlayScene | null,
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_set_overlay_scene", { viewportId, scene });
+    return;
+  }
+  const vp = mockGet(viewportId);
+  if (vp.kind !== "image_edit") {
+    throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept an overlay scene`);
+  }
+  if (scene) {
+    for (const item of scene.items) {
+      if (item.region.some((v) => !Number.isFinite(v))) {
+        throw new Error("overlay scene coordinates must be finite");
+      }
+    }
+  }
+  vp.overlayScene = scene;
 }
 
 /**

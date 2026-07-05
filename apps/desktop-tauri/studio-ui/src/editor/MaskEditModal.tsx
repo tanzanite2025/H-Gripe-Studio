@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
-import type { ViewportMaskOverlay } from "../bridge/viewport";
+import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -253,6 +253,38 @@ export function MaskEditModal({
       ? { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [86, 168, 255], alpha: 0.55 }
       : { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [224, 32, 32], alpha: 0.5, invert: true };
   }, [previewing, preview, quickMask, quickProxy]);
+  // The active rect/ellipse marquee selection (PS-style): marching ants stay
+  // visible across tools, subsequent edit steps are confined to it (`clip`),
+  // and Ctrl+D / a plain marquee click deselects.
+  const [lastMarquee, setLastMarquee] = useState<{
+    region: [number, number, number, number];
+    ellipse: boolean;
+  } | null>(null);
+  const lastMarqueeRef = useRef(lastMarquee);
+  lastMarqueeRef.current = lastMarquee;
+  // The committed marquee's marching ants stroke host-side over rendered
+  // frames (WGPU migration: interactive overlays on the live surface), so
+  // the outline stays one screen pixel wide at any zoom instead of scaling
+  // with a document-size canvas. The live drag stays on the canvas for
+  // zero-latency feedback; only the committed selection goes to the host.
+  // `dims` is derived from the viewport hook below; the scene reads the
+  // previous render's value through this ref (a selection is only made after
+  // the frame — and so `dims` — has settled).
+  const frameDimsRef = useRef({ w: DEFAULT_W, h: DEFAULT_H });
+  const frameDims = frameDimsRef.current;
+  const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(() => {
+    if (!lastMarquee || frameDims.w <= 0 || frameDims.h <= 0) return null;
+    const [x0, y0, x1, y1] = lastMarquee.region;
+    return {
+      items: [
+        {
+          kind: "marquee",
+          region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
+          ...(lastMarquee.ellipse ? { ellipse: true } : null),
+        },
+      ],
+    };
+  }, [lastMarquee, frameDims.w, frameDims.h]);
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
@@ -281,11 +313,13 @@ export function MaskEditModal({
     viewportMaskOverlay,
     underlayAnchorRef,
     presentEnabled,
+    viewportOverlayScene,
   );
   const underlay = viewport.underlay;
   const presented = viewport.presented;
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
+  frameDimsRef.current = dims;
 
   // The graded copy of the underlay frame: decode → f32 surface → `applyDoc`
   // → re-encode. Recomputes when the frame or the adjustment stack changes;
@@ -333,15 +367,6 @@ export function MaskEditModal({
   const [fgColor, setFgColor] = useState("#ffffff");
   const [bgColor, setBgColor] = useState("#000000");
   const [colorPicker, setColorPicker] = useState<"fg" | "bg" | null>(null);
-  // The active rect/ellipse marquee selection (PS-style): marching ants stay
-  // visible across tools, subsequent edit steps are confined to it (`clip`),
-  // and Ctrl+D / a plain marquee click deselects.
-  const [lastMarquee, setLastMarquee] = useState<{
-    region: [number, number, number, number];
-    ellipse: boolean;
-  } | null>(null);
-  const lastMarqueeRef = useRef(lastMarquee);
-  lastMarqueeRef.current = lastMarquee;
   // PS selection semantics: an active marquee is only a selection — it never
   // lands on the edit stack itself. Instead, edit steps recorded while it is
   // active carry it as their `clip`, so replay confines their effect to the
@@ -898,7 +923,9 @@ export function MaskEditModal({
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
     const mq = marquee.current;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-    else if (lastMarquee) {
+    else if (lastMarquee && !underlay && !presented) {
+      // The committed ants stroke host-side over the presented frame; the
+      // canvas only draws them when no host frame presents (browser preview).
       const [x0, y0, x1, y1] = lastMarquee.region;
       paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse);
     }

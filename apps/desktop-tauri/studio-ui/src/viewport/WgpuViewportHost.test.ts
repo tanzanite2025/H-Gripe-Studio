@@ -68,6 +68,31 @@ describe("WgpuViewportHost", () => {
     await host.close();
   });
 
+  it("accepts an overlay scene on image_edit viewports only, and validates it", async () => {
+    const scene = {
+      items: [{ kind: "marquee" as const, region: [0.1, 0.1, 0.5, 0.5] as [number, number, number, number] }],
+    };
+
+    const grade = await WgpuViewportHost.open("grade_preview");
+    await expect(
+      grade.command({ kind: "set_overlay_scene", scene }),
+    ).rejects.toThrow(/does not accept an overlay scene/);
+    await grade.close();
+
+    const host = await WgpuViewportHost.open("image_edit");
+    await host.command({ kind: "set_overlay_scene", scene });
+    // Non-finite coordinates fail loudly.
+    await expect(
+      host.command({
+        kind: "set_overlay_scene",
+        scene: { items: [{ kind: "marquee", region: [0, NaN, 1, 1] }] },
+      }),
+    ).rejects.toThrow(/finite/);
+    // Clearing is accepted.
+    await host.command({ kind: "set_overlay_scene", scene: null });
+    await host.close();
+  });
+
   it("resolves node_output targets through the node output registry", async () => {
     const host = await WgpuViewportHost.open("image_edit");
     // Unregistered node outputs fail at set time, not at first render.
