@@ -335,6 +335,38 @@ enum OverlayItem {
         #[serde(default)]
         dash: bool,
     },
+    /// An open polyline — the ruler measurement line.
+    Polyline {
+        /// `[x, y]` vertices, normalized; the loop does not close.
+        points: Vec<[f32; 2]>,
+        /// Stroke colour `[r, g, b, a]` in 0..=1.
+        stroke: [f32; 4],
+        #[serde(default)]
+        dash: bool,
+    },
+    /// A fixed screen-size marker anchored to a document point — ruler end
+    /// ticks, colour-sampler pins, SAM point prompts. `size` is in surface
+    /// pixels (a radius / half-extent), so markers read the same at any zoom.
+    Marker {
+        /// `[x, y]` anchor, normalized.
+        center: [f32; 2],
+        shape: MarkerShape,
+        size: f32,
+        stroke: [f32; 4],
+        #[serde(default)]
+        fill: Option<[f32; 4]>,
+    },
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+enum MarkerShape {
+    /// A circle: filled when `fill` is set, ring-outlined by `stroke`.
+    Disc,
+    /// A `+` crosshair (SAM include points).
+    Cross,
+    /// A `−` horizontal bar (SAM exclude points).
+    Minus,
 }
 
 /// A vector overlay the host strokes over rendered frames after grading and
@@ -504,6 +536,76 @@ fn composite_overlay_scene(
                 // Close the loop for the outline.
                 pts.push(pts[0]);
                 stroke_polyline(surface, &pts, *stroke, *dash);
+            }
+            OverlayItem::Polyline {
+                points,
+                stroke,
+                dash,
+            } => {
+                if points.len() < 2 {
+                    continue;
+                }
+                let pts: Vec<(f32, f32)> = points.iter().map(|p| map(p[0], p[1])).collect();
+                stroke_polyline(surface, &pts, *stroke, *dash);
+            }
+            OverlayItem::Marker {
+                center,
+                shape,
+                size,
+                stroke,
+                fill,
+            } => {
+                let (cx, cy) = map(center[0], center[1]);
+                let r = size.clamp(1.0, 64.0);
+                match shape {
+                    MarkerShape::Disc => {
+                        if let Some(fill) = fill {
+                            fill_disc(surface, (cx, cy), r, *fill);
+                        }
+                        let n = ((std::f32::consts::TAU * r) as u32).clamp(16, 512);
+                        let ring: Vec<(f32, f32)> = (0..=n)
+                            .map(|i| {
+                                let t = i as f32 / n as f32 * std::f32::consts::TAU;
+                                (cx + r * t.cos(), cy + r * t.sin())
+                            })
+                            .collect();
+                        stroke_polyline(surface, &ring, *stroke, false);
+                    }
+                    MarkerShape::Cross => {
+                        stroke_polyline(surface, &[(cx - r, cy), (cx + r, cy)], *stroke, false);
+                        stroke_polyline(surface, &[(cx, cy - r), (cx, cy + r)], *stroke, false);
+                    }
+                    MarkerShape::Minus => {
+                        stroke_polyline(surface, &[(cx - r, cy), (cx + r, cy)], *stroke, false);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Fill a disc over a graded surface, in surface pixel coordinates.
+fn fill_disc(
+    surface: &mut hgripe_grade::GradeSurface,
+    (cx, cy): (f32, f32),
+    r: f32,
+    rgba: [f32; 4],
+) {
+    let (sw, sh) = (surface.w as i64, surface.h as i64);
+    let alpha = rgba[3];
+    let (x0, x1) = (((cx - r).floor() as i64).max(0), ((cx + r).ceil() as i64).min(sw - 1));
+    let (y0, y1) = (((cy - r).floor() as i64).max(0), ((cy + r).ceil() as i64).min(sh - 1));
+    for yi in y0..=y1 {
+        for xi in x0..=x1 {
+            let dx = xi as f32 - cx;
+            let dy = yi as f32 - cy;
+            if dx * dx + dy * dy > r * r {
+                continue;
+            }
+            let base = ((yi * sw + xi) * 4) as usize;
+            for ch in 0..3 {
+                surface.data[base + ch] =
+                    rgba[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
             }
         }
     }
@@ -1211,6 +1313,39 @@ pub(crate) fn viewport_set_overlay_scene(
                             );
                         }
                     }
+                    OverlayItem::Polyline { points, stroke, .. } => {
+                        if points.len() > MAX_OVERLAY_POLYGON_POINTS {
+                            return Err(format!(
+                                "overlay polyline has {} points (max {MAX_OVERLAY_POLYGON_POINTS})",
+                                points.len()
+                            ));
+                        }
+                        if points.iter().flatten().any(|v| !v.is_finite()) {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                        if stroke.iter().any(|v| !(0.0..=1.0).contains(v)) {
+                            return Err(
+                                "overlay colours must be between 0 and 1".to_string()
+                            );
+                        }
+                    }
+                    OverlayItem::Marker {
+                        center,
+                        size,
+                        stroke,
+                        fill,
+                        ..
+                    } => {
+                        if center.iter().any(|v| !v.is_finite()) || !size.is_finite() {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                        let colours = stroke.iter().chain(fill.iter().flatten());
+                        if colours.into_iter().any(|v| !(0.0..=1.0).contains(v)) {
+                            return Err(
+                                "overlay colours must be between 0 and 1".to_string()
+                            );
+                        }
+                    }
                 }
             }
             Some(Arc::new(scene))
@@ -1835,6 +1970,87 @@ mod tests {
         let out = ((2 * 32 + 2) * 4) as usize;
         assert_eq!(surface.data[out], 0.0);
         assert_eq!(surface.data[out + 1], 0.0);
+    }
+
+    #[test]
+    fn overlay_polyline_and_markers_composite_on_the_surface() {
+        let mut surface = hgripe_grade::GradeSurface {
+            w: 32,
+            h: 32,
+            data: vec![0.0; 32 * 32 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let scene = OverlayScene {
+            items: vec![
+                // A horizontal ruler line across row y = 0.5.
+                OverlayItem::Polyline {
+                    points: vec![[0.1, 0.5], [0.9, 0.5]],
+                    stroke: [1.0, 0.0, 0.0, 1.0],
+                    dash: false,
+                },
+                // A filled disc pin at the centre.
+                OverlayItem::Marker {
+                    center: [0.5, 0.25],
+                    shape: MarkerShape::Disc,
+                    size: 3.0,
+                    stroke: [0.0, 0.0, 1.0, 1.0],
+                    fill: Some([0.0, 1.0, 0.0, 1.0]),
+                },
+                // A cross prompt.
+                OverlayItem::Marker {
+                    center: [0.25, 0.75],
+                    shape: MarkerShape::Cross,
+                    size: 5.0,
+                    stroke: [1.0, 1.0, 1.0, 1.0],
+                    fill: None,
+                },
+            ],
+        };
+        composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
+        // Ruler line: y = 0.5 * 32 - 0.5 = 15.5 -> row 16; x mid is red.
+        let line = ((16 * 32 + 16) * 4) as usize;
+        assert!(surface.data[line] > 0.9, "polyline must be stroked");
+        // Disc pin: centre (15.5, 7.5) -> the interior is green-filled.
+        let pin = ((7 * 32 + 15) * 4) as usize;
+        assert!(surface.data[pin + 1] > 0.9, "disc must be filled");
+        // Cross: horizontal arm through (7.5, 23.5) is white.
+        let arm = ((23 * 32 + 5) * 4) as usize;
+        assert!(surface.data[arm] > 0.9 && surface.data[arm + 2] > 0.9, "cross arm must be stroked");
+        // A far corner stays untouched.
+        let out = ((30 * 32 + 30) * 4) as usize;
+        assert_eq!(surface.data[out], 0.0);
+    }
+
+    #[test]
+    fn overlay_marker_validation_rejects_bad_values() {
+        let vp = viewport_create("image_edit".to_string()).expect("create");
+        let marker = |center: [f32; 2], size: f32, stroke: [f32; 4]| OverlayScene {
+            items: vec![OverlayItem::Marker {
+                center,
+                shape: MarkerShape::Disc,
+                size,
+                stroke,
+                fill: None,
+            }],
+        };
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(marker([0.5, f32::NAN], 3.0, [1.0, 1.0, 1.0, 1.0])),
+        )
+        .expect_err("non-finite centre must be rejected");
+        assert!(err.contains("finite"));
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(marker([0.5, 0.5], 3.0, [1.0, 1.0, 1.0, 2.0])),
+        )
+        .expect_err("out-of-range colours must be rejected");
+        assert!(err.contains("between 0 and 1"));
+        viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(marker([0.5, 0.5], 6.0, [1.0, 1.0, 1.0, 0.9])),
+        )
+        .expect("a valid marker is accepted");
+        viewport_destroy_inner(vp.viewport_id).expect("destroy");
     }
 
     #[test]

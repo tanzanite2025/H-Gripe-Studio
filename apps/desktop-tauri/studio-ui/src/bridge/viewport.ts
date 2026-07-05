@@ -421,6 +421,25 @@ export type ViewportOverlayItem =
       fill?: [number, number, number, number];
       /** Dash the outline (6-on/4-off) instead of a solid stroke. */
       dash?: boolean;
+    }
+  | {
+      kind: "polyline";
+      /** `[x, y]` vertices, normalized; the loop does not close. */
+      points: [number, number][];
+      /** Stroke colour `[r, g, b, a]` in 0..=1. */
+      stroke: [number, number, number, number];
+      dash?: boolean;
+    }
+  | {
+      kind: "marker";
+      /** `[x, y]` anchor, normalized. */
+      center: [number, number];
+      /** Fixed screen-size glyph anchored to the document point. */
+      shape: "disc" | "cross" | "minus";
+      /** Radius / half-extent in surface pixels. */
+      size: number;
+      stroke: [number, number, number, number];
+      fill?: [number, number, number, number];
     };
 
 /** A vector overlay the host strokes over rendered frames (image_edit
@@ -450,12 +469,20 @@ export async function setViewportOverlayScene(
   }
   if (scene) {
     for (const item of scene.items) {
-      const coords = item.kind === "marquee" ? item.region : item.points.flat();
+      const coords =
+        item.kind === "marquee"
+          ? item.region
+          : item.kind === "marker"
+            ? [...item.center, item.size]
+            : item.points.flat();
       if (coords.some((v) => !Number.isFinite(v))) {
         throw new Error("overlay scene coordinates must be finite");
       }
-      if (item.kind === "polygon") {
-        const colours = [...item.stroke, ...(item.fill ?? [])];
+      if (item.kind !== "marquee") {
+        const colours = [
+          ...item.stroke,
+          ...(item.kind !== "polyline" ? (item.fill ?? []) : []),
+        ];
         if (colours.some((v) => !(v >= 0 && v <= 1))) {
           throw new Error("overlay colours must be between 0 and 1");
         }

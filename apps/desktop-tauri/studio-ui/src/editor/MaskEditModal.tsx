@@ -265,6 +265,11 @@ export function MaskEditModal({
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
   // draft of its anchors; committed as one undoable step on Done / Enter.
   const [editingPath, setEditingPath] = useState<number | null>(null);
+  // Color sampler pins (up to four persistent readouts, PS I flyout) — a
+  // pure view read, session-local, never recorded on the document.
+  const [colorSamples, setColorSamples] = useState<ColorSample[]>([]);
+  // Ruler measurement: the last committed drag (session-local view read).
+  const [rulerLine, setRulerLine] = useState<RulerLine | null>(null);
   // The committed marquee's marching ants stroke host-side over rendered
   // frames (WGPU migration: interactive overlays on the live surface), so
   // the outline stays one screen pixel wide at any zoom instead of scaling
@@ -309,8 +314,50 @@ export function MaskEditModal({
         ...(lastMarquee.ellipse ? { ellipse: true } : null),
       });
     }
+    const norm = (x: number, y: number): [number, number] => [x / frameDims.w, y / frameDims.h];
+    // The committed ruler line (shown while the ruler tool is in hand):
+    // endpoint ticks plus the measurement line; the readout text stays on the
+    // canvas (the host strokes geometry only).
+    if (toolId === "ruler" && rulerLine) {
+      const amber: [number, number, number, number] = [1, 214 / 255, 90 / 255, 0.95];
+      items.push({
+        kind: "polyline",
+        points: [norm(...rulerLine.start), norm(...rulerLine.end)],
+        stroke: amber,
+      });
+      for (const [x, y] of [rulerLine.start, rulerLine.end]) {
+        items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3.5, stroke: amber });
+      }
+    }
+    // Colour-sampler pins: a disc filled with the sampled colour; the
+    // numbered label stays on the canvas.
+    for (const { x, y, hex } of colorSamples) {
+      const [r, g, b] = hexToRgb(hex) ?? [0, 0, 0];
+      items.push({
+        kind: "marker",
+        center: norm(x, y),
+        shape: "disc",
+        size: 6,
+        stroke: [1, 1, 1, 0.9],
+        fill: [r / 255, g / 255, b / 255, 1],
+      });
+    }
+    // SAM point prompts: `+` include / `−` exclude crosshairs with a centre
+    // dot; the numbered label stays on the canvas.
+    for (const { x, y, label } of state.current.points) {
+      const colour: [number, number, number, number] =
+        label === 0 ? [244 / 255, 98 / 255, 98 / 255, 0.95] : [120 / 255, 230 / 255, 140 / 255, 0.95];
+      items.push({
+        kind: "marker",
+        center: norm(x, y),
+        shape: label === 0 ? "minus" : "cross",
+        size: 9,
+        stroke: colour,
+      });
+      items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3, stroke: colour, fill: colour });
+    }
     return items.length > 0 ? { items } : null;
-  }, [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath]);
+  }, [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples]);
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
@@ -456,11 +503,6 @@ export function MaskEditModal({
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
-  // Color sampler pins (up to four persistent readouts, PS I flyout) — a
-  // pure view read, session-local, never recorded on the document.
-  const [colorSamples, setColorSamples] = useState<ColorSample[]>([]);
-  // Ruler measurement: the last committed drag (session-local view read).
-  const [rulerLine, setRulerLine] = useState<RulerLine | null>(null);
   const rulerDrag = useRef<RulerLine | null>(null);
   // Path-selection whole-path drag: the last pointer position (image px).
   const wholePathDrag = useRef<[number, number] | null>(null);
@@ -930,10 +972,14 @@ export function MaskEditModal({
     if ((tool.kind === "clone" || tool.id === "healing_brush") && cloneSource.current) paintCloneSource(ctx, cloneSource.current);
     if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
     if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
-    if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples);
+    // With a host frame, sampler pins / ruler / SAM markers stroke host-side
+    // (the viewport overlay scene) — the canvas keeps only the text labels.
+    // The live ruler drag stays fully on the canvas for zero-latency feedback.
+    const hostFrame = Boolean(underlay || presented);
+    if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples, hostFrame);
     const rl = rulerDrag.current ?? (tool.id === "ruler" ? rulerLine : null);
-    if (rl) paintRuler(ctx, rl);
-    paintSamPoints(ctx, state.current.points);
+    if (rl) paintRuler(ctx, rl, hostFrame && rulerDrag.current == null);
+    paintSamPoints(ctx, state.current.points, hostFrame);
     // With a host frame — a PNG underlay or a natively presented surface —
     // the selection tint is composited host-side (the viewport mask
     // overlay); paint it locally only for the fallback stage.
