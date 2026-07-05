@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { MaskEditModal } from "./MaskEditModal";
 import type { CropCommit } from "./CropEditModal";
 import type { EditorTab } from "./host/EditorHost";
@@ -26,7 +26,8 @@ interface MediaEditModalProps {
   onSelectTab?: (id: string) => void;
   /** In-progress edit document restored when the tab re-activates. */
   initial?: ImageDocument | null;
-  /** Draft sink: called on every edit so tab switches keep the document. */
+  /** Draft sink: called on the explicit save (the header light), never
+   * automatically — closing with unsaved edits drops them. */
   onDocChange?: (doc: ImageDocument) => void;
   onCommitMask: (edits: ImageDocument) => void;
   // Kept for EditorHost request compatibility; the crop tool records a
@@ -52,6 +53,26 @@ export function MediaEditModal({
   // grade-kernel render path lands (K2), the mask editor remains the canvas,
   // so documents bridge losslessly at this boundary in both directions.
   const maskInitial = useMemo(() => (initial ? toMaskDocument(initial) : null), [initial]);
+  // Explicit-save model: the editor mirrors every edit here, but the host
+  // draft only updates when the user clicks the save light. Red = unsaved
+  // edits (lost on close), green = saved (restored on reopen).
+  const latestDoc = useRef<MaskDocument | null>(null);
+  const seeded = useRef(false);
+  const [dirty, setDirty] = useState(false);
+  const handleDocChange = (doc: MaskDocument) => {
+    latestDoc.current = doc;
+    // The editor mirrors its initial document on mount; only later edits dirty.
+    if (!seeded.current) {
+      seeded.current = true;
+      return;
+    }
+    setDirty(true);
+  };
+  const saveDraft = () => {
+    if (!dirty || !latestDoc.current) return;
+    onDocChange?.(fromMaskDocument(latestDoc.current));
+    setDirty(false);
+  };
   const tabStrip =
     tabs && tabs.length > 0 ? (
       <div className="media-edit-tabs" role="tablist">
@@ -71,18 +92,27 @@ export function MediaEditModal({
         ))}
       </div>
     ) : null;
-  const headerExtra = (
-    <>
-      {onPickFile ? (
-        <div className="media-edit-groups">
-          <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
-            {t("mediaEdit.open")}
-          </button>
-        </div>
-      ) : null}
-      {tabStrip}
-    </>
+  const saveLight = onDocChange ? (
+    <button
+      className={`media-edit-light${dirty ? " unsaved" : ""}`}
+      title={dirty ? t("mediaEdit.unsaved") : t("mediaEdit.saved")}
+      onClick={saveDraft}
+    />
+  ) : null;
+  const collapseArrow = (
+    <button className="media-edit-collapse" title={t("mediaEdit.collapse")} onClick={onClose}>
+      <svg viewBox="0 0 48 8" width="48" height="8" aria-hidden="true">
+        <path d="M2 1.5 L24 6.5 L46 1.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    </button>
   );
+  const headerExtra = onPickFile ? (
+    <div className="media-edit-groups">
+      <button className="media-edit-open" onClick={onPickFile} title={t("mediaEdit.openTitle")}>
+        {t("mediaEdit.open")}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <MaskEditModal
@@ -93,8 +123,11 @@ export function MediaEditModal({
       wandTolerance={24}
       onCommit={(edits: MaskDocument) => onCommitMask(fromMaskDocument(edits))}
       onClose={onClose}
-      onDocChange={onDocChange ? (doc: MaskDocument) => onDocChange(fromMaskDocument(doc)) : undefined}
+      onDocChange={handleDocChange}
       headerExtra={headerExtra}
+      headerLeft={saveLight}
+      headerCenter={collapseArrow}
+      headerTabs={tabStrip}
       hideTitle
       editorName={t("mediaEdit.editor")}
       workspace="image"

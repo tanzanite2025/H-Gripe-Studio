@@ -103,6 +103,12 @@ interface MaskEditModalProps {
   onDocChange?: (doc: MaskDocument) => void;
   /** Optional bar content (e.g. the unified editor's tool-group switcher). */
   headerExtra?: ReactNode;
+  /** Leftmost bar slot (e.g. the image editor's save light). */
+  headerLeft?: ReactNode;
+  /** Bar content centred over the whole bar (e.g. the collapse arrow). */
+  headerCenter?: ReactNode;
+  /** A full-width row under the bar (e.g. the open-document tab strip). */
+  headerTabs?: ReactNode;
   /** Editor name shown after the title (defaults to "mask editor"). */
   editorName?: string;
   /** Hide the title span (a host whose header carries document tabs). */
@@ -206,6 +212,9 @@ export function MaskEditModal({
   onClose,
   onDocChange,
   headerExtra,
+  headerLeft,
+  headerCenter,
+  headerTabs,
   editorName,
   hideTitle,
   workspace = "mask",
@@ -1938,12 +1947,14 @@ export function MaskEditModal({
     <div className="media-viewer-backdrop" onClick={onClose}>
       <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="media-viewer-bar">
+          {headerLeft}
           {hideTitle ? null : (
             <span className="media-viewer-name" title={title}>
               {title} <span className="muted">· {editorName ?? t("mask.editor")}</span>
             </span>
           )}
           {headerExtra}
+          {headerCenter ? <div className="media-viewer-bar-center">{headerCenter}</div> : null}
           <div className="media-viewer-actions">
             <button disabled={!canUndo(state)} onClick={() => dispatch({ type: "undo" })} title={t("mask.undoTitle")}>
               ↶ {t("mask.undo")}
@@ -1972,6 +1983,7 @@ export function MaskEditModal({
             </button>
           </div>
         </div>
+        {headerTabs ? <div className="media-viewer-tabs-row">{headerTabs}</div> : null}
 
         <div className="mask-edit-body" style={{ "--mask-rail-w": `${dock.layout.railWidth}px` } as CSSProperties}>
           <MaskToolbar

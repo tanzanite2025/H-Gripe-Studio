@@ -15,8 +15,9 @@
 .media-viewer.mask-edit {
   width: 100%;
   max-width: 100%;
-  height: 95vh;
-  max-height: 95vh;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
   position: relative; /* anchors the in-editor dialog backdrop */
 }
 /* The image-editor shells span the full viewport width, so the backdrop's
