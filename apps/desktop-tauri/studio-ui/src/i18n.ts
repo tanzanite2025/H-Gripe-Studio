@@ -279,7 +279,6 @@ export const messages = {
     zh: "在独立的图片编辑器中打开该节点的结果",
   },
   "mediaEdit.title": { en: "Image editor", zh: "图片编辑器" },
-  "mediaEdit.open": { en: "Open image…", zh: "打开图片…" },
   "mediaEdit.openTitle": {
     en: "pick an image file to edit (it lands on a new image card)",
     zh: "选择要编辑的图片文件（会生成一个新的图片卡片）",

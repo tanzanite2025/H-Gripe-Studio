@@ -1604,7 +1604,8 @@ button:disabled { opacity: 0.6; cursor: default; }
 .media-viewer-tabs-row {
   display: flex;
   align-items: flex-end;
-  padding: 4px 12px 0;
+  min-height: 36px;
+  padding: 8px 12px 0;
   background: #191c26;
   border-bottom: 1px solid var(--border);
 }
@@ -1622,9 +1623,10 @@ button:disabled { opacity: 0.6; cursor: default; }
   border: 1px solid var(--border);
   border-bottom: none;
   border-radius: 6px 6px 0 0;
-  padding: 4px 12px;
+  padding: 6px 14px;
   cursor: pointer;
   font-size: 12px;
+  line-height: 16px;
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1636,6 +1638,23 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: var(--text);
   border-color: var(--accent);
 }
+/* "+" at the end of the strip: opens an image as a new document tab. */
+.media-edit-tab-add {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.media-edit-tab-add:hover { background: #2a2f3d; color: var(--text); }
 
 /* Mask-Edit modal styles live in src/editor/maskEditModal/maskEditModal.css
    (imported by MaskEditModal.tsx). The crop editor below reuses that shell. */
