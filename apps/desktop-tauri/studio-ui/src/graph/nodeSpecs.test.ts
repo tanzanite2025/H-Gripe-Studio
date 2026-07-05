@@ -97,7 +97,6 @@ describe("nodeSpecs executor tagging", () => {
       imageEnhance: "process",
       detailRepaint: "process",
       matchLightColor: "process",
-      preview: "review",
       detailWatchdog: "review",
       batch: "workflow",
       save: "output",

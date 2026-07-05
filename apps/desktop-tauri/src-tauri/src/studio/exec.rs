@@ -363,10 +363,6 @@ fn execute_studio_graph_node(
                 inputs.get("value").cloned().unwrap_or(Value::Null),
             )]))
         }
-        "preview" => Ok(studio_output_map([(
-            "image",
-            inputs.get("image").cloned().unwrap_or(Value::Null),
-        )])),
         "save" => Ok(studio_output_map([
             ("image", inputs.get("image").cloned().unwrap_or(Value::Null)),
             (
@@ -710,7 +706,6 @@ mod tests {
             "logic",
             "if",
             "switch",
-            "preview",
             "save",
         ] {
             assert_eq!(studio_executor_for_kind(kind), Some(Graph), "{kind}");

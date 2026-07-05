@@ -31,7 +31,7 @@ describe("lowerWorkflowGraph", () => {
           position: pos,
           params: { "grade.format": "tiff", "crop.mode": "manual" },
         },
-        { id: "prev", kind: "preview", position: pos, params: {} },
+        { id: "prev", kind: "save", position: pos, params: {} },
       ],
       edges: [
         { id: "e1", source: "src", sourcePort: "image", target: "proc", targetPort: "grade.in" },
@@ -44,7 +44,7 @@ describe("lowerWorkflowGraph", () => {
     expect(lowered.nodes.map((n) => n.kind).sort()).toEqual([
       "imageGrade",
       "imageSource",
-      "preview",
+      "save",
     ]);
     const gradeNode = lowered.nodes.find((n) => n.kind === "imageGrade");
     expect(gradeNode).toBeDefined();

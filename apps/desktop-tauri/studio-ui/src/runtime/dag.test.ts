@@ -18,17 +18,17 @@ const chain = graph({
   nodes: [
     { id: "prompt-1", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
     { id: "generate-1", kind: "generate", position: { x: 0, y: 0 }, params: { provider: "mock", operation: "echo" } },
-    { id: "preview-1", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+    { id: "save-1", kind: "save", position: { x: 0, y: 0 }, params: {} },
   ],
   edges: [
     { id: "e1", source: "prompt-1", sourcePort: "text", target: "generate-1", targetPort: "prompt" },
-    { id: "e2", source: "generate-1", sourcePort: "image", target: "preview-1", targetPort: "image" },
+    { id: "e2", source: "generate-1", sourcePort: "image", target: "save-1", targetPort: "image" },
   ],
 });
 
 describe("topoLevels", () => {
   it("orders a linear chain into single-node levels", () => {
-    expect(topoLevels(chain)).toEqual([["prompt-1"], ["generate-1"], ["preview-1"]]);
+    expect(topoLevels(chain)).toEqual([["prompt-1"], ["generate-1"], ["save-1"]]);
   });
 
   it("groups independent nodes into the same level", () => {
@@ -65,10 +65,10 @@ describe("topoLevels", () => {
 
 describe("wouldCreateCycle", () => {
   it("detects a back-edge", () => {
-    expect(wouldCreateCycle(chain, "preview-1", "prompt-1")).toBe(true);
+    expect(wouldCreateCycle(chain, "save-1", "prompt-1")).toBe(true);
   });
   it("allows a forward edge", () => {
-    expect(wouldCreateCycle(chain, "prompt-1", "preview-1")).toBe(false);
+    expect(wouldCreateCycle(chain, "prompt-1", "save-1")).toBe(false);
   });
 });
 
@@ -102,15 +102,15 @@ describe("runGraph", () => {
         seen.push(ctx.nodeId);
         return { image: `img:${String(ctx.inputs.prompt ?? "")}` };
       },
-      preview: async (ctx) => {
+      save: async (ctx) => {
         seen.push(ctx.nodeId);
         return { image: ctx.inputs.image ?? null };
       },
     };
     const { outputs, statuses } = await runGraph(chain, registry);
-    expect(seen).toEqual(["prompt-1", "generate-1", "preview-1"]);
-    expect(outputs.get("preview-1")).toEqual({ image: "img:hi" });
-    expect(statuses.get("preview-1")).toBe("succeeded");
+    expect(seen).toEqual(["prompt-1", "generate-1", "save-1"]);
+    expect(outputs.get("save-1")).toEqual({ image: "img:hi" });
+    expect(statuses.get("save-1")).toBe("succeeded");
   });
 
   it("emits per-node run telemetry (duration on success, error on failure)", async () => {
@@ -120,7 +120,7 @@ describe("runGraph", () => {
       generate: async () => {
         throw new Error("boom");
       },
-      preview: async (ctx) => ({ image: ctx.inputs.image ?? null }),
+      save: async (ctx) => ({ image: ctx.inputs.image ?? null }),
     };
     await expect(
       runGraph(chain, registry, { onNodeRun: (id, info) => events.set(id, info) }),
@@ -129,8 +129,8 @@ describe("runGraph", () => {
     expect(events.get("prompt-1")?.status).toBe("succeeded");
     expect(typeof events.get("prompt-1")?.durationMs).toBe("number");
     expect(events.get("generate-1")).toMatchObject({ status: "failed", error: "boom" });
-    // preview never ran (its level was reached after the failure threw).
-    expect(events.has("preview-1")).toBe(false);
+    // save never ran (its level was reached after the failure threw).
+    expect(events.has("save-1")).toBe(false);
   });
 
   it("aborts cooperatively when shouldCancel becomes true", async () => {
@@ -144,7 +144,7 @@ describe("runGraph", () => {
         ran.push(ctx.nodeId);
         return { image: "y" };
       },
-      preview: async (ctx) => {
+      save: async (ctx) => {
         ran.push(ctx.nodeId);
         return { image: ctx.inputs.image ?? null };
       },
@@ -179,8 +179,8 @@ describe("conditional branch execution", () => {
       nodes: [
         { id: "p", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond } },
-        { id: "t", kind: "preview", position: { x: 0, y: 0 }, params: {} },
-        { id: "f", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+        { id: "t", kind: "save", position: { x: 0, y: 0 }, params: {} },
+        { id: "f", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
         { id: "e0", source: "p", sourcePort: "text", target: "if", targetPort: "value" },
@@ -192,7 +192,7 @@ describe("conditional branch execution", () => {
   // Tracks which nodes actually executed.
   const tracker = (ran: string[]): ExecutorRegistry => ({
     prompt: async (c) => ({ text: String(c.params.text ?? "") }),
-    preview: async (c) => {
+    save: async (c) => {
       ran.push(c.nodeId);
       return { image: c.inputs.image ?? null };
     },
@@ -225,7 +225,7 @@ describe("conditional branch execution", () => {
         { id: "p", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond: "true" } },
         { id: "r", kind: "reroute", position: { x: 0, y: 0 }, params: {} },
-        { id: "f", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+        { id: "f", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
         { id: "e0", source: "p", sourcePort: "text", target: "if", targetPort: "value" },
@@ -256,8 +256,8 @@ describe("conditional branch execution", () => {
         { id: "v", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "go" } },
         { id: "cmp", kind: "compare", position: { x: 0, y: 0 }, params: { op: ">" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond: "false" } },
-        { id: "t", kind: "preview", position: { x: 0, y: 0 }, params: {} },
-        { id: "f", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+        { id: "t", kind: "save", position: { x: 0, y: 0 }, params: {} },
+        { id: "f", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
         { id: "e0", source: "a", sourcePort: "value", target: "cmp", targetPort: "a" },
@@ -282,7 +282,7 @@ describe("conditional branch execution", () => {
       nodes: [
         { id: "p", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond: "true" } },
-        { id: "m", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+        { id: "m", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
         { id: "e0", source: "p", sourcePort: "text", target: "if", targetPort: "value" },
@@ -311,7 +311,7 @@ describe("ancestorSubgraph", () => {
         { id: "a", kind: "prompt", position: { x: 0, y: 0 }, params: {} },
         { id: "b", kind: "prompt", position: { x: 0, y: 0 }, params: {} },
         { id: "gen", kind: "generate", position: { x: 0, y: 0 }, params: {} },
-        { id: "other", kind: "preview", position: { x: 0, y: 0 }, params: {} },
+        { id: "other", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
         { id: "e1", source: "a", sourcePort: "text", target: "gen", targetPort: "prompt" },

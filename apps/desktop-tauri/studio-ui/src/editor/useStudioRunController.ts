@@ -407,8 +407,8 @@ export function useStudioRunController({
     [pushLog, mapRunNodeId],
   );
 
-  // Surface output paths into preview nodes. The thumbnail itself is fetched
-  // lazily by the node when it scrolls into view (see HgripeNode).
+  // Surface output paths onto result-bearing cards. The thumbnail itself is
+  // fetched lazily by the node when it scrolls into view (see HgripeNode).
   const applyPreviews = useCallback(
     (graph: ReturnType<typeof toWorkflowGraph>, result: { outputs: Map<string, Record<string, unknown>> }) => {
       const paths: string[] = [];
@@ -417,7 +417,7 @@ export function useStudioRunController({
         // Lowered row nodes have no visible card of their own kind to patch.
         if (loweredOrigin.current.has(node.id)) continue;
         const out = result.outputs.get(node.id);
-        if (node.kind === "preview" || node.kind === "crop") {
+        if (node.kind === "crop") {
           // Surface the result image onto the card so confirming an edit (or a
           // run-up-to-node) shows the cropped result immediately.
           const imagePath = str(out?.image);

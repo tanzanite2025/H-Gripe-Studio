@@ -1350,6 +1350,34 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setMediaEditBlank(true);
   };
 
+  // The preview popup's "image editor" entry: open the unified editor on the
+  // image card that owns `path`, landing a new card first when the path came
+  // from a derived result (mask / cutout) with no source card of its own.
+  const openImageEditorOnPath = (path: string) => {
+    const owner = nodes.find(
+      (n) =>
+        (n.data as HgripeNodeData).kind === "imageSource" &&
+        (n.data as HgripeNodeData).params?.path === path,
+    );
+    if (owner) {
+      openMediaEdit(owner.id);
+      return;
+    }
+    takeSnapshot();
+    const origin = screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+    const node = {
+      ...makeNode(newNodeId("imageSource"), "imageSource", origin.x, origin.y, { path }),
+      selected: true,
+    };
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
+    setSelectedId(node.id);
+    void primeIngest([path]);
+    openMediaEdit(node.id);
+  };
+
   // The blank editor's "open image" entry: pick a file, land it on a new image
   // card, and re-open the editor on that card.
   const pickIntoImageEditor = async () => {
@@ -1630,6 +1658,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         <PreviewModal
           title={imagePreviewPath.split(/[\\/]/).pop() || t("preview.imageTitle")}
           layers={[{ label: "Image", path: imagePreviewPath }]}
+          onOpenImageEditor={() => {
+            const path = imagePreviewPath;
+            setImagePreviewPath(null);
+            openImageEditorOnPath(path);
+          }}
           onClose={() => setImagePreviewPath(null)}
         />
       )}

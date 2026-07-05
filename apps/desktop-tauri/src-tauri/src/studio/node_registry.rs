@@ -32,7 +32,7 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
     // Pure in-process graph logic: routing, comparisons, sources, sinks.
     let (executor, category) = match kind {
         "prompt" | "batch" | "imageSource" | "videoSource" | "psdTemplate" | "number"
-        | "reroute" | "group" | "compare" | "logic" | "if" | "switch" | "preview" | "save" => {
+        | "reroute" | "group" | "compare" | "logic" | "if" | "switch" | "save" => {
             (Graph, CpuLight)
         }
         // `python/bridge` CLI cards: CPU-bound subprocess work.
