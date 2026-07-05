@@ -292,6 +292,19 @@ export function MaskEditModal({
         if (!layer.visible) return;
         layer.ops.forEach((op, i) => {
           if (op.disabled || (li === state.current.active && i === editingPath)) return;
+          if (isBrushOp(op) && op.points.length > 0) {
+            // Committed brush-stroke bands, mirroring `paintStroke`: mode
+            // colour at 0.55, dimmed further by a sub-1 flow.
+            const [r, g, b] = op.mode === "subtract" ? [244, 98, 98] : [86, 168, 255];
+            const flow = op.flow ?? 1;
+            items.push({
+              kind: "band",
+              points: op.points.map(([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number]),
+              radius: Math.min(1, op.radius / frameDims.w),
+              color: [r / 255, g / 255, b / 255, 0.55 * (flow < 1 ? Math.max(0.15, flow) : 1)],
+            });
+            return;
+          }
           if (!isPathOp(op) || op.points.length < 2) return;
           const [r, g, b] =
             op.mode === "subtract" ? [244, 98, 98] : op.mode === "intersect" ? [190, 120, 255] : [86, 168, 255];
@@ -304,6 +317,17 @@ export function MaskEditModal({
             fill: [r / 255, g / 255, b / 255, 0.3],
           });
         });
+      });
+    }
+    // Matte strokes (amber) render whether or not a preview runs, like the
+    // canvas painter.
+    for (const s of state.current.matte_strokes) {
+      if (s.points.length === 0) continue;
+      items.push({
+        kind: "band",
+        points: s.points.map(([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number]),
+        radius: Math.min(1, s.radius / frameDims.w),
+        color: [244 / 255, 196 / 255, 84 / 255, 0.6],
       });
     }
     if (lastMarquee) {
@@ -940,19 +964,21 @@ export function MaskEditModal({
     // While previewing a morphology op, the proxy overlay already folds in the
     // brush strokes (transformed), so skip the raw stroke overlay to avoid a
     // confusing double-draw; matte strokes / points / marquee still render.
-    if (!previewing) {
+    // Committed brush bands and vector paths render host-side (the viewport
+    // overlay scene); the canvas draws them only for the fallback stage.
+    if (!previewing && !underlay && !presented) {
       state.current.layers.forEach((layer, li) => {
         if (!layer.visible) return;
         layer.ops.forEach((op, i) => {
           if (op.disabled || (li === state.current.active && i === editingPath)) return;
           if (isBrushOp(op)) paintStroke(ctx, op);
-          // Committed vector paths render host-side (the viewport overlay
-          // scene); the canvas draws them only for the fallback stage.
-          else if (isPathOp(op) && !underlay && !presented) paintPath(ctx, op);
+          else if (isPathOp(op)) paintPath(ctx, op);
         });
       });
     }
-    state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
+    if (!underlay && !presented) {
+      state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
+    }
     const live = drawing.current;
     if (live) {
       if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {

@@ -356,6 +356,19 @@ enum OverlayItem {
         #[serde(default)]
         fill: Option<[f32; 4]>,
     },
+    /// A round-capped brush-stroke band — the advisory overlay for committed
+    /// paint / matte strokes. Unlike the fixed screen-size items, the band's
+    /// width is document-space (normalized against the document width), so it
+    /// scales with zoom like the stroke it stands for.
+    Band {
+        /// `[x, y]` centreline vertices, normalized; a single point is a dot.
+        points: Vec<[f32; 2]>,
+        /// Band radius as a fraction of the document width.
+        radius: f32,
+        /// Band colour `[r, g, b, a]` in 0..=1 (alpha applied once over the
+        /// whole band, however the centreline self-overlaps).
+        color: [f32; 4],
+    },
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -548,6 +561,20 @@ fn composite_overlay_scene(
                 let pts: Vec<(f32, f32)> = points.iter().map(|p| map(p[0], p[1])).collect();
                 stroke_polyline(surface, &pts, *stroke, *dash);
             }
+            OverlayItem::Band {
+                points,
+                radius,
+                color,
+            } => {
+                if points.is_empty() {
+                    continue;
+                }
+                let pts: Vec<(f32, f32)> = points.iter().map(|p| map(p[0], p[1])).collect();
+                // The document-space radius on the surface: normalized doc
+                // width times the x scale of `map`.
+                let r = (radius * pw as f32 * sw as f32 / vw as f32).max(0.5);
+                fill_band(surface, &pts, r, *color);
+            }
             OverlayItem::Marker {
                 center,
                 shape,
@@ -580,6 +607,64 @@ fn composite_overlay_scene(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Fill a round-capped band around a polyline over a graded surface, in
+/// surface pixel coordinates. Coverage is collected into a mask first so the
+/// blend applies once however the centreline self-overlaps — the same read a
+/// translucent canvas stroke gives.
+fn fill_band(
+    surface: &mut hgripe_grade::GradeSurface,
+    pts: &[(f32, f32)],
+    r: f32,
+    rgba: [f32; 4],
+) {
+    let (sw, sh) = (surface.w as i64, surface.h as i64);
+    if sw == 0 || sh == 0 {
+        return;
+    }
+    let r = r.min(sw.max(sh) as f32);
+    let alpha = rgba[3];
+    let mut mask = vec![false; (sw * sh) as usize];
+    let mut stamp = |cx: f32, cy: f32| {
+        let (x0, x1) = (((cx - r).floor() as i64).max(0), ((cx + r).ceil() as i64).min(sw - 1));
+        let (y0, y1) = (((cy - r).floor() as i64).max(0), ((cy + r).ceil() as i64).min(sh - 1));
+        for yi in y0..=y1 {
+            for xi in x0..=x1 {
+                let dx = xi as f32 - cx;
+                let dy = yi as f32 - cy;
+                if dx * dx + dy * dy <= r * r {
+                    mask[(yi * sw + xi) as usize] = true;
+                }
+            }
+        }
+    };
+    // Stamp discs along the centreline; half-radius spacing keeps the edge
+    // sag under r/32 of a pixel-radius, visually round.
+    let spacing = (r * 0.5).max(1.0);
+    stamp(pts[0].0, pts[0].1);
+    for seg in pts.windows(2) {
+        let (ax, ay) = seg[0];
+        let (bx, by) = seg[1];
+        let len = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+        if !len.is_finite() {
+            continue;
+        }
+        let steps = ((len / spacing).ceil() as u32).clamp(1, 1 << 15);
+        for i in 1..=steps {
+            let t = i as f32 / steps as f32;
+            stamp(ax + (bx - ax) * t, ay + (by - ay) * t);
+        }
+    }
+    for (i, covered) in mask.iter().enumerate() {
+        if !covered {
+            continue;
+        }
+        let base = i * 4;
+        for ch in 0..3 {
+            surface.data[base + ch] = rgba[ch] * alpha + surface.data[base + ch] * (1.0 - alpha);
         }
     }
 }
@@ -1329,6 +1414,31 @@ pub(crate) fn viewport_set_overlay_scene(
                             );
                         }
                     }
+                    OverlayItem::Band {
+                        points,
+                        radius,
+                        color,
+                    } => {
+                        if points.len() > MAX_OVERLAY_POLYGON_POINTS {
+                            return Err(format!(
+                                "overlay band has {} points (max {MAX_OVERLAY_POLYGON_POINTS})",
+                                points.len()
+                            ));
+                        }
+                        if points.iter().flatten().any(|v| !v.is_finite()) || !radius.is_finite() {
+                            return Err("overlay scene coordinates must be finite".to_string());
+                        }
+                        if !(0.0..=1.0).contains(radius) {
+                            return Err(format!(
+                                "overlay band radius must be between 0 and 1, got {radius}"
+                            ));
+                        }
+                        if color.iter().any(|v| !(0.0..=1.0).contains(v)) {
+                            return Err(
+                                "overlay colours must be between 0 and 1".to_string()
+                            );
+                        }
+                    }
                     OverlayItem::Marker {
                         center,
                         size,
@@ -2019,6 +2129,70 @@ mod tests {
         // A far corner stays untouched.
         let out = ((30 * 32 + 30) * 4) as usize;
         assert_eq!(surface.data[out], 0.0);
+    }
+
+    #[test]
+    fn overlay_band_fills_a_round_capped_stroke_once() {
+        let mut surface = hgripe_grade::GradeSurface {
+            w: 32,
+            h: 32,
+            data: vec![0.0; 32 * 32 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let scene = OverlayScene {
+            items: vec![OverlayItem::Band {
+                // A self-overlapping centreline: out and back along row 0.5.
+                points: vec![[0.2, 0.5], [0.8, 0.5], [0.2, 0.5]],
+                radius: 4.0 / 32.0,
+                color: [0.0, 0.0, 1.0, 0.5],
+            }],
+        };
+        composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
+        // On the centreline the band blends exactly once: 0.5 blue.
+        let mid = ((16 * 32 + 16) * 4) as usize;
+        assert!((surface.data[mid + 2] - 0.5).abs() < 1e-4, "band must blend once, got {}", surface.data[mid + 2]);
+        // The round cap extends past the endpoint...
+        let cap = ((16 * 32 + 28) * 4) as usize;
+        assert!(surface.data[cap + 2] > 0.4, "round cap must be filled");
+        // ...but a far corner stays untouched.
+        let out = ((2 * 32 + 2) * 4) as usize;
+        assert_eq!(surface.data[out + 2], 0.0);
+    }
+
+    #[test]
+    fn overlay_band_validation_rejects_bad_values() {
+        let vp = viewport_create("image_edit".to_string()).expect("create");
+        let band = |radius: f32, color: [f32; 4]| OverlayScene {
+            items: vec![OverlayItem::Band {
+                points: vec![[0.2, 0.5], [0.8, 0.5]],
+                radius,
+                color,
+            }],
+        };
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(band(f32::NAN, [0.0, 0.0, 1.0, 0.5])),
+        )
+        .expect_err("non-finite radius must be rejected");
+        assert!(err.contains("finite"));
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(band(1.5, [0.0, 0.0, 1.0, 0.5])),
+        )
+        .expect_err("out-of-range radius must be rejected");
+        assert!(err.contains("radius"));
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(band(0.05, [0.0, 0.0, 2.0, 0.5])),
+        )
+        .expect_err("out-of-range colours must be rejected");
+        assert!(err.contains("between 0 and 1"));
+        viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(band(0.05, [0.0, 0.0, 1.0, 0.5])),
+        )
+        .expect("a valid band is accepted");
+        viewport_destroy_inner(vp.viewport_id).expect("destroy");
     }
 
     #[test]

@@ -148,6 +148,39 @@ describe("WgpuViewportHost", () => {
         },
       }),
     ).rejects.toThrow(/between 0 and 1/);
+    // Brush-stroke bands carry a document-space radius in 0..=1.
+    await host.command({
+      kind: "set_overlay_scene",
+      scene: {
+        items: [
+          {
+            kind: "band",
+            points: [
+              [0.2, 0.5],
+              [0.8, 0.5],
+            ],
+            radius: 0.05,
+            color: [86 / 255, 168 / 255, 1, 0.55],
+          },
+        ],
+      },
+    });
+    await expect(
+      host.command({
+        kind: "set_overlay_scene",
+        scene: {
+          items: [{ kind: "band", points: [[0.5, 0.5]], radius: 1.5, color: [0, 0, 1, 0.5] }],
+        },
+      }),
+    ).rejects.toThrow(/radius/);
+    await expect(
+      host.command({
+        kind: "set_overlay_scene",
+        scene: {
+          items: [{ kind: "band", points: [[0.5, 0.5]], radius: 0.05, color: [0, 0, 2, 0.5] }],
+        },
+      }),
+    ).rejects.toThrow(/between 0 and 1/);
     // Clearing is accepted.
     await host.command({ kind: "set_overlay_scene", scene: null });
     await host.close();
