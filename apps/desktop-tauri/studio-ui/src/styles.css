@@ -1603,16 +1603,16 @@ button:disabled { opacity: 0.6; cursor: default; }
 /* Unified image editor: PS-style open-document tabs on their own row */
 .media-viewer-tabs-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   min-height: 36px;
-  padding: 8px 12px 0;
+  padding: 6px 12px;
   background: #191c26;
   border-bottom: 1px solid var(--border);
 }
 .media-edit-tabs {
   display: inline-flex;
-  align-items: stretch;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -1621,9 +1621,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   background: #11131a;
   color: var(--muted);
   border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  padding: 6px 14px;
+  border-radius: 999px;
+  padding: 4px 14px;
   cursor: pointer;
   font-size: 12px;
   line-height: 16px;
