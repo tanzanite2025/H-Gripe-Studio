@@ -39,7 +39,7 @@ import type {
   MaskDocument,
 } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
-import { maskEditReducer, type FillDraft } from "./maskEditModal/actions";
+import { maskEditReducer, type FillDraft, type MaskEditAction } from "./maskEditModal/actions";
 import {
   paintAnchorDraft,
   paintCloneSource,
@@ -112,6 +112,11 @@ interface MaskEditModalProps {
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
 
+// Ops an active marquee selection does NOT confine: whole-mask reshapes keep
+// their global meaning even while a selection is up (PS transforms / crops
+// the selection contents, which the mask model has no notion of).
+const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
+
 /** Image Size dialog draft: pixel size + linked aspect + resample filter. */
 interface ImageSizeDraft {
   w: number;
@@ -166,7 +171,7 @@ export function MaskEditModal({
   workspace = "mask",
 }: MaskEditModalProps) {
   const t = useT();
-  const [state, dispatch] = useReducer(maskEditReducer, initial, initEditState);
+  const [state, rawDispatch] = useReducer(maskEditReducer, initial, initEditState);
   // Mirror the in-progress document out to the host so it survives remounts
   // (e.g. the image editor's document-tab switches).
   const onDocChangeRef = useRef(onDocChange);
@@ -328,14 +333,33 @@ export function MaskEditModal({
   const [fgColor, setFgColor] = useState("#ffffff");
   const [bgColor, setBgColor] = useState("#000000");
   const [colorPicker, setColorPicker] = useState<"fg" | "bg" | null>(null);
-  // Last committed rect/ellipse marquee: the marching ants stay visible after
-  // the drag lands so the selection reads (PS-style); cleared on tool switch.
+  // The active rect/ellipse marquee selection (PS-style): marching ants stay
+  // visible across tools, subsequent edit steps are confined to it (`clip`),
+  // and Ctrl+D / a plain marquee click deselects.
   const [lastMarquee, setLastMarquee] = useState<{
     region: [number, number, number, number];
     ellipse: boolean;
   } | null>(null);
   const lastMarqueeRef = useRef(lastMarquee);
   lastMarqueeRef.current = lastMarquee;
+  // PS selection semantics: an active marquee is only a selection — it never
+  // lands on the edit stack itself. Instead, edit steps recorded while it is
+  // active carry it as their `clip`, so replay confines their effect to the
+  // selection. Whole-mask reshapes (transform / crop / select-all) stay global.
+  const dispatch = useCallback((action: MaskEditAction) => {
+    const lm = lastMarqueeRef.current;
+    if (lm) {
+      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
+      if (action.type === "stroke") {
+        action = { ...action, stroke: { ...action.stroke, clip } };
+      } else if (action.type === "path") {
+        action = { ...action, path: { ...action.path, clip } };
+      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
+        action = { ...action, op: { ...action.op, clip } };
+      }
+    }
+    rawDispatch(action);
+  }, []);
   // Floating size panel beside the selection: a local W×H draft, re-seeded
   // whenever the committed marquee changes.
   const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -625,7 +649,11 @@ export function MaskEditModal({
     redo: () => dispatch({ type: "redo" }),
     redo_alt: () => dispatch({ type: "redo" }),
     step_backward: () => dispatch({ type: "undo" }),
-    clear: () => dispatch({ type: "clear" }),
+    clear: () => {
+      // PS Ctrl+D: with an active selection, deselect; otherwise clear edits.
+      if (lastMarqueeRef.current) setLastMarquee(null);
+      else dispatch({ type: "clear" });
+    },
     select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
     delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
     reselect: () => dispatch({ type: "reselect" }),
@@ -1383,14 +1411,9 @@ export function MaskEditModal({
       const toMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
       dispatch({ type: toMatte ? "matte_stroke" : "stroke", stroke });
     } else if (marqueeMove.current) {
-      // Land the moved selection as a fresh rect / ellipse step (same shape a
-      // drag or the manual size inputs record).
-      const { from } = marqueeMove.current;
+      // The moved selection is already live in `lastMarquee`; nothing lands
+      // on the edit stack (the selection is not a mask edit).
       marqueeMove.current = null;
-      const lm = lastMarqueeRef.current;
-      if (lm && (Math.abs(lm.region[0] - from[0]) >= 1 || Math.abs(lm.region[1] - from[1]) >= 1)) {
-        dispatch({ type: "op", op: { type: lm.ellipse ? "ellipse" : "rect", region: lm.region } });
-      }
     } else if (moveDrag.current) {
       const { start, end } = moveDrag.current;
       moveDrag.current = null;
@@ -1424,18 +1447,22 @@ export function MaskEditModal({
             [region[2], region[3]],
             [region[0], region[3]],
           ]);
+        } else if (tool.id === "rect" || tool.id === "ellipse") {
+          // PS marquee: the drag only defines the selection — nothing lands
+          // on the edit stack until a subsequent operation uses it.
+          setLastMarquee({
+            region: region as [number, number, number, number],
+            ellipse: tool.id === "ellipse",
+          });
+          // Surface the selection's size readout / manual inputs: they live
+          // on the 选项 tab, which may be behind another tab in its group.
+          dock.onSelect("options");
         } else {
           dispatch({ type: "op", op: { type: tool.id, region } });
-          if (tool.id === "rect" || tool.id === "ellipse") {
-            setLastMarquee({
-              region: region as [number, number, number, number],
-              ellipse: tool.id === "ellipse",
-            });
-            // Surface the selection's size readout / manual inputs: they live
-            // on the 选项 tab, which may be behind another tab in its group.
-            dock.onSelect("options");
-          }
         }
+      } else if (tool.id === "rect" || tool.id === "ellipse") {
+        // A plain click with a marquee tool drops the selection (PS deselect).
+        setLastMarquee(null);
       }
       forceRedraw((n) => n + 1);
     } else if (shapeDrag.current) {
@@ -1469,7 +1496,6 @@ export function MaskEditModal({
       patchDrag.current = null;
     }
     if (t.id !== "perspective_crop") setQuadDraft(null);
-    if (t.kind !== "marquee") setLastMarquee(null);
     // Picking a marquee tool surfaces its 选项 tab (size readout + manual
     // width/height inputs) so the selection's numbers are in view.
     if (t.id === "rect" || t.id === "ellipse") dock.onSelect("options");
@@ -1534,7 +1560,6 @@ export function MaskEditModal({
     const x0 = Math.min(lastMarquee?.region[0] ?? 0, dims.w - cw);
     const y0 = Math.min(lastMarquee?.region[1] ?? 0, dims.h - ch);
     const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
-    dispatch({ type: "op", op: { type: ellipse ? "ellipse" : "rect", region } });
     setLastMarquee({ region, ellipse });
   };
 
@@ -1613,7 +1638,7 @@ export function MaskEditModal({
           {/* Floating selection-size panel: centred below the marquee's
               bottom edge, clamped to the window. Screen-space so the view
               transform never scales it. */}
-          {lastMarquee && !marquee.current && canvasRef.current
+          {lastMarquee && !marquee.current && tool.kind === "marquee" && canvasRef.current
             ? (() => {
                 const rect = canvasRef.current.getBoundingClientRect();
                 const [x0, y0, x1, y1] = lastMarquee.region;

@@ -23,7 +23,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "undo", combo: "ctrl+z", status: "ready", hint: "Undo the last edit." },
   { id: "redo", combo: "ctrl+shift+z", status: "ready", hint: "Redo." },
   { id: "redo_alt", combo: "ctrl+y", status: "ready", hint: "Redo (alternate)." },
-  { id: "clear", combo: "ctrl+d", status: "ready", hint: "Clear all edits (PS Deselect)." },
+  { id: "clear", combo: "ctrl+d", status: "ready", hint: "Deselect the marquee selection; with none, clear all edits (PS Deselect)." },
   { id: "invert", combo: "ctrl+shift+i", status: "ready", hint: "Invert the mask (PS Inverse selection)." },
   { id: "step_backward", combo: "alt+ctrl+z", status: "ready", hint: "Step backward in history (PS legacy undo)." },
   { id: "tool_path_select", combo: "a", status: "ready", hint: "Re-edit the last committed path's anchors (PS direct selection)." },

@@ -18,7 +18,7 @@ export const MASK_SHORTCUT_ZH: Record<string, { hint: string }> = {
   undo: { hint: "撤销上一步编辑。" },
   redo: { hint: "重做。" },
   redo_alt: { hint: "重做（备用键）。" },
-  clear: { hint: "清空全部编辑（对应 PS 取消选择）。" },
+  clear: { hint: "取消当前框选选区；无选区时清空全部编辑（对应 PS 取消选择）。" },
   invert: { hint: "反相蒙版（对应 PS 反选）。" },
   brush_smaller: { hint: "减小笔刷。" },
   brush_larger: { hint: "增大笔刷。" },
