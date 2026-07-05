@@ -1261,14 +1261,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                     d.imagePath ?? (typeof d.params?.path === "string" ? (d.params.path as string) : null);
                   return {
                     id: n.id,
-                    label: p?.split(/[\\/]/).pop() ?? null,
+                    label: p?.split(/[\\/]/).pop() || null,
                     active: n.id === mediaEditSource?.id,
                   };
                 })
                 // Pathless image cards have no document to show; only cards
                 // with an image become tabs.
-                .filter((tab) => tab.label != null || tab.active)
-                .map((tab) => ({ ...tab, label: tab.label ?? t("mediaEdit.title") }));
+                .filter((tab): tab is { id: string; label: string; active: boolean } => tab.label != null);
               return {
                 editor: "media" as const,
                 target: {
