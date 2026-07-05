@@ -18,6 +18,9 @@ interface LayersPanelProps {
   dims: { w: number; h: number };
   /** Backing source image for the base image layer thumbnail. */
   imagePath?: string | null;
+  /** Product surface: the image workspace's bottom layer is the image itself,
+   * so it keeps the file's name and thumbnail even once it records edits. */
+  workspace?: "image" | "mask";
   dispatch: MaskEditDispatch;
   /** Called before any layer switch/removal to drop an in-flight anchor edit. */
   onBeforeLayerChange: () => void;
@@ -79,7 +82,7 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBeforeLayerChange }: LayersPanelProps) {
+export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   const [renaming, setRenaming] = useState<number | null>(null);
@@ -202,8 +205,14 @@ export function LayersPanel({ layers, active, dims, imagePath, dispatch, onBefor
       <div className="mask-layer-list">
         {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
           const layer = layers[i];
-          const showBaseImage = Boolean(imagePath && i === 0 && layer.ops.length === 0 && layer.kind !== "adjustment");
-          const displayName = showBaseImage && imagePath ? basename(imagePath) : layer.name;
+          const showBaseImage = Boolean(
+            imagePath &&
+              i === 0 &&
+              layer.kind !== "adjustment" &&
+              (workspace === "image" || layer.ops.length === 0),
+          );
+          const displayName =
+            showBaseImage && imagePath && layer.name === "Background" ? basename(imagePath) : layer.name;
           return (
             <div
               key={layer.id}
