@@ -44,6 +44,7 @@ import {
   paintAnchorDraft,
   paintCloneSource,
   paintColorSamples,
+  paintCropDim,
   paintDragArrow,
   paintLassoLoop,
   paintMarquee,
@@ -107,10 +108,6 @@ interface MaskEditModalProps {
   hideTitle?: boolean;
   /** Product surface using this heavy pixel editor. */
   workspace?: "image" | "mask";
-  /** Image-workspace crop commit: `[x, y, w, h]` in image pixels. When set,
-   * the crop tool crops the image (via the host's crop pipeline) instead of
-   * recording a mask-clearing op. */
-  onCropCommit?: (box: [number, number, number, number]) => void;
 }
 
 /** A crop-draft region's corners in TL, TR, BR, BL order. */
@@ -181,7 +178,6 @@ export function MaskEditModal({
   editorName,
   hideTitle,
   workspace = "mask",
-  onCropCommit,
 }: MaskEditModalProps) {
   const t = useT();
   const [state, rawDispatch] = useReducer(maskEditReducer, initial, initEditState);
@@ -402,6 +398,22 @@ export function MaskEditModal({
   // it and frames fall back to the PNG transport. The brush/path/marquee
   // canvas is DOM, so it keeps compositing above the hole.
   const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  // Image-workspace crop: the last confirmed crop step on any visible layer.
+  // The stage dims everything outside the kept region so the crop reads as a
+  // document state (undoable via history), not a one-shot action.
+  const cropRegion = useMemo(() => {
+    if (workspace !== "image") return null;
+    let last: [number, number, number, number] | null = null;
+    for (const layer of state.current.layers) {
+      if (!layer.visible) continue;
+      for (const op of layer.ops) {
+        if (op.type === "crop" && op.region && op.region.length >= 4) {
+          last = [op.region[0], op.region[1], op.region[2], op.region[3]];
+        }
+      }
+    }
+    return last;
+  }, [workspace, state]);
   // Image-workspace adjustment preview (image-kernel K2): the adjustment
   // stack compiles to a grade document and grades the displayed frame on the
   // f32 kernel — the same maths the video grade dialog runs. Null in the
@@ -1053,7 +1065,8 @@ export function MaskEditModal({
     }
     if (quadDraft) paintQuadDraft(ctx, quadDraft);
     if (cropDraft) paintQuadDraft(ctx, cropCorners(cropDraft));
-  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee]);
+    if (cropRegion) paintCropDim(ctx, cropRegion, dims.w, dims.h);
+  }, [dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee]);
 
   useEffect(() => {
     redraw();
@@ -1210,9 +1223,10 @@ export function MaskEditModal({
       forceRedraw((n) => n + 1);
       return;
     }
-    if (tool.id === "crop" && workspace === "image" && onCropCommit) {
-      // Image crop: drag a box, adjust its corners, then click inside to crop
-      // the image through the host's crop pipeline.
+    if (tool.id === "crop" && workspace === "image") {
+      // Image crop: drag a box, adjust its corners, then click inside to
+      // confirm — the crop lands on the document's edit stack (undoable via
+      // history) and the stage dims everything outside the kept region.
       const draft = cropDraft;
       if (draft) {
         const grabRadius = Math.max(10, dims.w * 0.012);
@@ -1225,12 +1239,18 @@ export function MaskEditModal({
         }
         setCropDraft(null);
         if (pt[0] >= draft[0] && pt[0] <= draft[2] && pt[1] >= draft[1] && pt[1] <= draft[3]) {
-          onCropCommit([
-            Math.round(draft[0]),
-            Math.round(draft[1]),
-            Math.round(draft[2] - draft[0]),
-            Math.round(draft[3] - draft[1]),
-          ]);
+          dispatch({
+            type: "op",
+            op: {
+              type: "crop",
+              region: [
+                Math.round(draft[0]),
+                Math.round(draft[1]),
+                Math.round(draft[2]),
+                Math.round(draft[3]),
+              ],
+            },
+          });
           return;
         }
       }
@@ -1636,7 +1656,7 @@ export function MaskEditModal({
       marquee.current = null;
       const region = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
       if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
-        if (tool.id === "crop" && workspace === "image" && onCropCommit) {
+        if (tool.id === "crop" && workspace === "image") {
           // The box becomes an adjustable rect; the commit happens on the
           // click inside it.
           setCropDraft(region as [number, number, number, number]);
