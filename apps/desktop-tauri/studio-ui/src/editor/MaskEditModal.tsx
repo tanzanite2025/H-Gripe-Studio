@@ -107,7 +107,19 @@ interface MaskEditModalProps {
   hideTitle?: boolean;
   /** Product surface using this heavy pixel editor. */
   workspace?: "image" | "mask";
+  /** Image-workspace crop commit: `[x, y, w, h]` in image pixels. When set,
+   * the crop tool crops the image (via the host's crop pipeline) instead of
+   * recording a mask-clearing op. */
+  onCropCommit?: (box: [number, number, number, number]) => void;
 }
+
+/** A crop-draft region's corners in TL, TR, BR, BL order. */
+const cropCorners = (r: readonly [number, number, number, number]): [number, number][] => [
+  [r[0], r[1]],
+  [r[2], r[1]],
+  [r[2], r[3]],
+  [r[0], r[3]],
+];
 
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
@@ -169,6 +181,7 @@ export function MaskEditModal({
   editorName,
   hideTitle,
   workspace = "mask",
+  onCropCommit,
 }: MaskEditModalProps) {
   const t = useT();
   const [state, rawDispatch] = useReducer(maskEditReducer, initial, initEditState);
@@ -524,6 +537,11 @@ export function MaskEditModal({
   // between the box drag and the commit click, plus the corner being dragged.
   const [quadDraft, setQuadDraft] = useState<[number, number][] | null>(null);
   const quadCorner = useRef<number | null>(null);
+  // Image-workspace crop: the adjustable rect draft ([x0, y0, x1, y1]
+  // image-space) between the box drag and the commit click, plus the corner
+  // being dragged (TL / TR / BR / BL).
+  const [cropDraft, setCropDraft] = useState<[number, number, number, number] | null>(null);
+  const cropCorner = useRef<number | null>(null);
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
@@ -1034,7 +1052,8 @@ export function MaskEditModal({
       if (pd) paintDragArrow(ctx, pd.start, pd.end);
     }
     if (quadDraft) paintQuadDraft(ctx, quadDraft);
-  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, lastMarquee]);
+    if (cropDraft) paintQuadDraft(ctx, cropCorners(cropDraft));
+  }, [dims.w, dims.h, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee]);
 
   useEffect(() => {
     redraw();
@@ -1191,6 +1210,34 @@ export function MaskEditModal({
       forceRedraw((n) => n + 1);
       return;
     }
+    if (tool.id === "crop" && workspace === "image" && onCropCommit) {
+      // Image crop: drag a box, adjust its corners, then click inside to crop
+      // the image through the host's crop pipeline.
+      const draft = cropDraft;
+      if (draft) {
+        const grabRadius = Math.max(10, dims.w * 0.012);
+        const idx = cropCorners(draft).findIndex(
+          ([qx, qy]) => Math.hypot(qx - pt[0], qy - pt[1]) <= grabRadius,
+        );
+        if (idx >= 0) {
+          cropCorner.current = idx;
+          return;
+        }
+        setCropDraft(null);
+        if (pt[0] >= draft[0] && pt[0] <= draft[2] && pt[1] >= draft[1] && pt[1] <= draft[3]) {
+          onCropCommit([
+            Math.round(draft[0]),
+            Math.round(draft[1]),
+            Math.round(draft[2] - draft[0]),
+            Math.round(draft[3] - draft[1]),
+          ]);
+          return;
+        }
+      }
+      marquee.current = { start: pt, end: pt };
+      forceRedraw((n) => n + 1);
+      return;
+    }
     if (tool.id === "perspective_crop") {
       // Perspective crop: drag corners of the pending quad, click inside it
       // to commit, or drag a fresh box.
@@ -1331,6 +1378,19 @@ export function MaskEditModal({
       setQuadDraft((prev) => (prev ? prev.map((q, i) => (i === idx ? p : q)) : prev));
       return;
     }
+    if (cropCorner.current != null) {
+      const p = toImage(e);
+      const idx = cropCorner.current;
+      setCropDraft((prev) => {
+        if (!prev) return prev;
+        const [x0, y0, x1, y1] = prev;
+        if (idx === 0) return [p[0], p[1], x1, y1];
+        if (idx === 1) return [x0, p[1], p[0], y1];
+        if (idx === 2) return [x0, y0, p[0], p[1]];
+        return [p[0], y0, x1, p[1]];
+      });
+      return;
+    }
     if (patchDrag.current) {
       patchDrag.current.end = toImage(e);
       redraw();
@@ -1400,6 +1460,20 @@ export function MaskEditModal({
     }
     if (quadCorner.current != null) {
       quadCorner.current = null;
+      return;
+    }
+    if (cropCorner.current != null) {
+      cropCorner.current = null;
+      setCropDraft((prev) =>
+        prev
+          ? [
+              Math.min(prev[0], prev[2]),
+              Math.min(prev[1], prev[3]),
+              Math.max(prev[0], prev[2]),
+              Math.max(prev[1], prev[3]),
+            ]
+          : prev,
+      );
       return;
     }
     if (patchDrag.current) {
@@ -1562,7 +1636,11 @@ export function MaskEditModal({
       marquee.current = null;
       const region = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
       if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
-        if (tool.id === "perspective_crop") {
+        if (tool.id === "crop" && workspace === "image" && onCropCommit) {
+          // The box becomes an adjustable rect; the commit happens on the
+          // click inside it.
+          setCropDraft(region as [number, number, number, number]);
+        } else if (tool.id === "perspective_crop") {
           // The box becomes an adjustable quad; the commit happens on the
           // click inside it.
           setQuadDraft([
@@ -1620,6 +1698,7 @@ export function MaskEditModal({
       patchDrag.current = null;
     }
     if (t.id !== "perspective_crop") setQuadDraft(null);
+    if (t.id !== "crop") setCropDraft(null);
     // Picking a marquee tool surfaces its 选项 tab (size readout + manual
     // width/height inputs) so the selection's numbers are in view.
     if (t.id === "rect" || t.id === "ellipse") dock.onSelect("options");

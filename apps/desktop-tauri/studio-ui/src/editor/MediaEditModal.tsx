@@ -29,7 +29,7 @@ interface MediaEditModalProps {
   /** Draft sink: called on every edit so tab switches keep the document. */
   onDocChange?: (doc: ImageDocument) => void;
   onCommitMask: (edits: ImageDocument) => void;
-  // Kept for EditorHost request compatibility; crop opens through editor:"crop".
+  /** Crop-tool commit: hands the drawn box to the host's crop pipeline. */
   onCommitCrop: (commit: CropCommit) => void;
   onClose: () => void;
 }
@@ -44,6 +44,7 @@ export function MediaEditModal({
   initial,
   onDocChange,
   onCommitMask,
+  onCommitCrop,
   onClose,
 }: MediaEditModalProps) {
   const t = useT();
@@ -97,6 +98,10 @@ export function MediaEditModal({
       hideTitle
       editorName={t("mediaEdit.editor")}
       workspace="image"
+      onCropCommit={(box) => {
+        onCommitCrop({ mode: "manual", cropBox: box, aspect: "free", marginPct: 0 });
+        onClose();
+      }}
     />
   );
 }
