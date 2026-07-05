@@ -137,13 +137,13 @@ const DEFAULT_DOCK_LAYOUT: DockLayoutState = {
   ],
   railWidth: 320,
 };
-const IMAGE_DOCK_STORAGE_KEY = "hgripe.studio.imageDock.v3";
+const IMAGE_DOCK_STORAGE_KEY = "hgripe.studio.imageDock.v4";
 // The image workspace is its own product surface: no mask-only docks
-// (channels / paths are mask concepts — the mask workspace keeps them).
+// (paths / mask-ops are mask concepts — the mask workspace keeps them).
 const IMAGE_DOCK_LAYOUT: DockLayoutState = {
   groups: [
     { tabs: ["adjustments", "options"], active: "adjustments" },
-    { tabs: ["layers", "history"], active: "layers" },
+    { tabs: ["layers", "channels", "history"], active: "layers" },
   ],
   railWidth: 360,
 };
