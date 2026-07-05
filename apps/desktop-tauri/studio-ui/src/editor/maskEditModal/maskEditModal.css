@@ -799,13 +799,26 @@
 }
 .mask-layer-row button:hover:not(:disabled) { color: #fff; }
 .mask-layer-row button:disabled { opacity: 0.4; cursor: default; }
-/* PS bottom action bar: right-aligned icon buttons under the layer list. */
+/* The Layers tab body is a full-height column so the action bar can pin to
+   the panel's bottom edge; the list scrolls in between. */
+.mask-layers-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.mask-layers-body .mask-layer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* PS bottom action bar: right-aligned icon buttons pinned under the list. */
 .mask-layer-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
-  margin: 0 -8px;
+  margin: auto -8px 0;
   padding: 2px 4px;
   background: var(--ps-tab-strip);
   border-top: 1px solid var(--ps-dock-border);

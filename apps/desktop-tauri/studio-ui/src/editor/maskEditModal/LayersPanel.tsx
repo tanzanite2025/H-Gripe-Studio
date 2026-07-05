@@ -164,7 +164,7 @@ export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask
   };
 
   return (
-    <div className="mask-panel-body">
+    <div className="mask-panel-body mask-layers-body">
       <div className="mask-layer-head">
         <select
           className="mask-layer-blend"
@@ -347,6 +347,14 @@ export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask
       ) : null}
 
       <div className="mask-layer-actions">
+        <button
+          className="mask-layer-action"
+          title={t("mask.layerInvertTitle")}
+          disabled={!activeLayer || activeLayer.locked}
+          onClick={() => dispatch({ type: "op", op: { type: "invert" } })}
+        >
+          {t("mask.layerActionInvert")}
+        </button>
         <button
           className={`mask-layer-action${activeLayer?.linked ? " on" : ""}`}
           title={activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}

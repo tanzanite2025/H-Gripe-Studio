@@ -19,7 +19,6 @@ const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; name: string
   { key: "mask.adjPhotoFilter", glyph: "PF", name: "照片滤镜" },
   { key: "mask.adjChannelMixer", glyph: "CM", name: "通道混和器" },
   { key: "mask.adjColorLookup", glyph: "CL", name: "颜色查找" },
-  { key: "mask.adjInvert", glyph: "IV", name: "反相" },
   { key: "mask.adjPosterize", glyph: "PS", name: "色调分离" },
   { key: "mask.adjThreshold", glyph: "TH", name: "阈值" },
   { key: "mask.adjSelectiveColor", glyph: "SC", name: "可选颜色" },
