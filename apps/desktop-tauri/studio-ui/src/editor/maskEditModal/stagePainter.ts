@@ -89,6 +89,24 @@ export function paintLassoLoop(ctx: CanvasRenderingContext2D, points: [number, n
   ctx.setLineDash([]);
 }
 
+/** Confirmed image-crop step: dim everything outside the kept region. */
+export function paintCropDim(
+  ctx: CanvasRenderingContext2D,
+  region: readonly [number, number, number, number],
+  w: number,
+  h: number,
+) {
+  const [x0, y0, x1, y1] = region;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, 0, w, Math.max(0, y0));
+  ctx.fillRect(0, y1, w, Math.max(0, h - y1));
+  ctx.fillRect(0, y0, Math.max(0, x0), Math.max(0, y1 - y0));
+  ctx.fillRect(x1, y0, Math.max(0, w - x1), Math.max(0, y1 - y0));
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, y1 - y0 - 1);
+}
+
 /** Perspective-crop quad draft: dashed outline plus draggable corner squares. */
 export function paintQuadDraft(ctx: CanvasRenderingContext2D, quad: readonly [number, number][]) {
   ctx.strokeStyle = "rgba(255,255,255,0.9)";
