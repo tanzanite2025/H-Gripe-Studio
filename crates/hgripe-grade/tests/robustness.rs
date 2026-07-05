@@ -5,8 +5,8 @@
 // this pins graceful degradation.
 
 use hgripe_grade::{
-    apply_op, composite_over, histogram, vectorscope, waveform, BlendMode, CurveChannel, GradeOp,
-    GradeSpace, GradeSurface, HslQualifier, WarpPoint,
+    apply_op, composite_over, histogram, vectorscope, waveform, BlendMode, ColorRange,
+    CurveChannel, GradeOp, GradeSpace, GradeSurface, HslQualifier, RangeAdjust, WarpPoint,
 };
 
 fn hostile_surface(space: GradeSpace) -> GradeSurface {
@@ -181,6 +181,28 @@ fn all_ops() -> Vec<GradeOp> {
                     sat_radius: 1e6,
                 },
             ],
+        },
+        // Degenerate colour ranges: empty, non-finite, extreme deltas.
+        GradeOp::ColorRanges {
+            ranges: vec![],
+            monochrome: false,
+        },
+        GradeOp::ColorRanges {
+            ranges: vec![
+                RangeAdjust {
+                    range: ColorRange::Reds,
+                    hue: f32::NAN,
+                    saturation: f32::INFINITY,
+                    lightness: f32::NEG_INFINITY,
+                },
+                RangeAdjust {
+                    range: ColorRange::Blacks,
+                    hue: 1e6,
+                    saturation: -1e6,
+                    lightness: 1e6,
+                },
+            ],
+            monochrome: true,
         },
         // Degenerate 1D LUTs: minimal size, inverted/out-of-range entries.
         GradeOp::Lut1d {

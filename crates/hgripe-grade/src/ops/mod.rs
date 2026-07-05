@@ -168,6 +168,24 @@ pub enum GradeOp {
     /// points accumulate. No points is identity; non-finite points are
     /// skipped.
     ColorWarper { points: Vec<WarpPoint> },
+    /// Unified colour-range adjustment on encoded values (the one tool
+    /// covering PS selective-colour / black-white / hue-saturation): each
+    /// pixel gets a membership weight per named range (six 120°-wide hue
+    /// triangles scaled by saturation, plus whites / neutrals / blacks
+    /// gated by lightness and desaturation), and the per-range deltas
+    /// accumulate weighted in HSL — `hue` shifts in degrees, `saturation`
+    /// scales by `1 + w·amount`, `lightness` adds `w·amount`.
+    /// `monochrome` drops saturation to 0 after the lightness deltas, so
+    /// the per-range `lightness` sliders become a parametric B&W mix.
+    /// Neutral is all-zero deltas with `monochrome = false`; ranges with
+    /// non-finite values are skipped. The global 3×3 channel mixer stays a
+    /// separate op ([`GradeOp::RgbMixer`]) — it is a linear matrix, not a
+    /// range-weighted adjustment.
+    ColorRanges {
+        ranges: Vec<RangeAdjust>,
+        #[serde(default)]
+        monochrome: bool,
+    },
     /// Unsharp mask on encoded values: `v + amount × (v − blur(v))`,
     /// clamped; `blur` is the (2×`radius`+1)² box mean (`radius` clamps to
     /// `1..=3`, i.e. 3×3 / 5×5 / 7×7; absent reads as 1). Spatial — see
@@ -248,6 +266,55 @@ pub struct WarpPoint {
     pub sat_scale: f32,
     pub hue_radius: f32,
     pub sat_radius: f32,
+}
+
+/// The nine PS-style colour ranges (see [`GradeOp::ColorRanges`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorRange {
+    Reds,
+    Yellows,
+    Greens,
+    Cyans,
+    Blues,
+    Magentas,
+    Whites,
+    Neutrals,
+    Blacks,
+}
+
+impl ColorRange {
+    /// The pixel's membership weight in this range, from its HSL. Chromatic
+    /// ranges are a triangular hue window (±60° about the range's primary /
+    /// secondary hue) scaled by saturation; whites / neutrals / blacks are
+    /// smoothstep lightness zones scaled by desaturation.
+    pub(crate) fn weight(self, h: f32, s: f32, l: f32) -> f32 {
+        let hue_weight = |center: f32| {
+            let d = (h - center).rem_euclid(360.0);
+            let dh = d.min(360.0 - d);
+            (1.0 - dh / 60.0).max(0.0) * s
+        };
+        match self {
+            ColorRange::Reds => hue_weight(0.0),
+            ColorRange::Yellows => hue_weight(60.0),
+            ColorRange::Greens => hue_weight(120.0),
+            ColorRange::Cyans => hue_weight(180.0),
+            ColorRange::Blues => hue_weight(240.0),
+            ColorRange::Magentas => hue_weight(300.0),
+            ColorRange::Whites => smoothstep(2.0 * l - 1.0) * (1.0 - s),
+            ColorRange::Neutrals => (1.0 - smoothstep((2.0 * l - 1.0).abs())) * (1.0 - s),
+            ColorRange::Blacks => smoothstep(1.0 - 2.0 * l) * (1.0 - s),
+        }
+    }
+}
+
+/// One range's HSL deltas (see [`GradeOp::ColorRanges`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RangeAdjust {
+    pub range: ColorRange,
+    pub hue: f32,
+    pub saturation: f32,
+    pub lightness: f32,
 }
 
 /// Apply one op to every pixel's RGB (alpha untouched).
@@ -482,6 +549,39 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 )
             });
         }
+        GradeOp::ColorRanges { ranges, monochrome } => {
+            let ranges: Vec<RangeAdjust> = ranges
+                .iter()
+                .copied()
+                .filter(|r| {
+                    [r.hue, r.saturation, r.lightness]
+                        .iter()
+                        .all(|v| v.is_finite())
+                })
+                .collect();
+            let monochrome = *monochrome;
+            for_each_hsl(surface, n, |h, s, l| {
+                let mut hue_shift = 0.0f32;
+                let mut sat_factor = 1.0f32;
+                let mut lum_shift = 0.0f32;
+                for r in &ranges {
+                    let w = r.range.weight(h, s, l);
+                    hue_shift += w * r.hue;
+                    sat_factor *= 1.0 + w * r.saturation;
+                    lum_shift += w * r.lightness;
+                }
+                let out_s = if monochrome {
+                    0.0
+                } else {
+                    (s * sat_factor.max(0.0)).clamp(0.0, 1.0)
+                };
+                (
+                    (h + hue_shift).rem_euclid(360.0),
+                    out_s,
+                    (l + lum_shift).clamp(0.0, 1.0),
+                )
+            });
+        }
         GradeOp::Lut1d { size, table } => {
             let lut = Lut1d::new(*size, table);
             for px in 0..n {
@@ -687,6 +787,50 @@ mod tests {
         for (got, want) in s.data.iter().zip(&before) {
             assert!((got - want).abs() < 1e-4);
         }
+    }
+
+    #[test]
+    fn color_ranges_neutral_is_a_no_op_and_monochrome_desaturates() {
+        let ranges: Vec<RangeAdjust> = [
+            ColorRange::Reds,
+            ColorRange::Yellows,
+            ColorRange::Greens,
+            ColorRange::Cyans,
+            ColorRange::Blues,
+            ColorRange::Magentas,
+            ColorRange::Whites,
+            ColorRange::Neutrals,
+            ColorRange::Blacks,
+        ]
+        .into_iter()
+        .map(|range| RangeAdjust {
+            range,
+            hue: 0.0,
+            saturation: 0.0,
+            lightness: 0.0,
+        })
+        .collect();
+        let mut s = one_px([0.7, 0.2, 0.4]);
+        let before = s.data.clone();
+        apply_op(
+            &mut s,
+            &GradeOp::ColorRanges {
+                ranges: ranges.clone(),
+                monochrome: false,
+            },
+        );
+        for (got, want) in s.data.iter().zip(&before) {
+            assert!((got - want).abs() < 1e-5);
+        }
+        apply_op(
+            &mut s,
+            &GradeOp::ColorRanges {
+                ranges,
+                monochrome: true,
+            },
+        );
+        assert!((s.data[0] - s.data[1]).abs() < 1e-6);
+        assert!((s.data[1] - s.data[2]).abs() < 1e-6);
     }
 
     #[test]

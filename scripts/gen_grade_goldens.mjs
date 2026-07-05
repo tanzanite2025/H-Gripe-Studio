@@ -352,7 +352,41 @@ function applyOp(surface, op) {
       });
       break;
     }
+    case "color_ranges": {
+      const ranges = op.ranges.filter((r) =>
+        [r.hue, r.saturation, r.lightness].every((v) => Number.isFinite(v)),
+      );
+      const monochrome = op.monochrome ?? false;
+      forEachHsl(surface, (h, s, l) => {
+        let hueShift = 0;
+        let satFactor = 1;
+        let lumShift = 0;
+        for (const r of ranges) {
+          const w = rangeWeight(r.range, h, s, l);
+          hueShift += w * r.hue;
+          satFactor *= 1 + w * r.saturation;
+          lumShift += w * r.lightness;
+        }
+        const outS = monochrome ? 0 : clamp01(s * Math.max(satFactor, 0));
+        return [(((h + hueShift) % 360) + 360) % 360, outS, clamp01(l + lumShift)];
+      });
+      break;
+    }
   }
+}
+
+// Colour-range membership weight (mirrors Rust `ColorRange::weight`).
+const RANGE_HUE_CENTERS = { reds: 0, yellows: 60, greens: 120, cyans: 180, blues: 240, magentas: 300 };
+function rangeWeight(range, h, s, l) {
+  const center = RANGE_HUE_CENTERS[range];
+  if (center !== undefined) {
+    const d = (((h - center) % 360) + 360) % 360;
+    const dh = Math.min(d, 360 - d);
+    return Math.max(1 - dh / 60, 0) * s;
+  }
+  if (range === "whites") return smoothstep(2 * l - 1) * (1 - s);
+  if (range === "neutrals") return (1 - smoothstep(Math.abs(2 * l - 1))) * (1 - s);
+  return smoothstep(1 - 2 * l) * (1 - s);
 }
 
 function softClip(v, hs, ls) {
@@ -1029,6 +1063,79 @@ writeFileSync(
   JSON.stringify({ kind: "doc", cases: mixerCases }, null, 2) + "\n",
 );
 console.log(`wrote ${mixerCases.length} mixer cases`);
+
+// ---- Colour-range cases: the unified selective-colour / B&W / hue-sat op ----
+
+const neutralRanges = ["reds", "yellows", "greens", "cyans", "blues", "magentas", "whites", "neutrals", "blacks"]
+  .map((range) => ({ range, hue: 0, saturation: 0, lightness: 0 }));
+const rangeCase = (range, deltas) => ({ range, hue: 0, saturation: 0, lightness: 0, ...deltas });
+
+const colorRangeCases = [
+  docCase("color_ranges: all-zero deltas are a no-op", {
+    layers: [layer([{ type: "color_ranges", ranges: neutralRanges, monochrome: false }])],
+  }, opsInput),
+  docCase("color_ranges: shift reds toward orange", {
+    layers: [layer([{ type: "color_ranges", ranges: [rangeCase("reds", { hue: 30 })], monochrome: false }])],
+  }, opsInput),
+  docCase("color_ranges: desaturate greens, boost blues", {
+    layers: [layer([{ type: "color_ranges", ranges: [
+      rangeCase("greens", { saturation: -0.8 }),
+      rangeCase("blues", { saturation: 0.5 }),
+    ], monochrome: false }])],
+  }, opsInput),
+  docCase("color_ranges: lift yellows, darken cyans and magentas", {
+    layers: [layer([{ type: "color_ranges", ranges: [
+      rangeCase("yellows", { lightness: 0.2 }),
+      rangeCase("cyans", { lightness: -0.15 }),
+      rangeCase("magentas", { lightness: -0.1 }),
+    ], monochrome: false }])],
+  }, opsInput),
+  docCase("color_ranges: whites / neutrals / blacks lightness zones", {
+    layers: [layer([{ type: "color_ranges", ranges: [
+      rangeCase("whites", { lightness: -0.1 }),
+      rangeCase("neutrals", { saturation: 0.3, lightness: 0.05 }),
+      rangeCase("blacks", { lightness: 0.12 }),
+    ], monochrome: false }])],
+  }, opsInput),
+  docCase("color_ranges: monochrome with per-range lightness mix", {
+    layers: [layer([{ type: "color_ranges", ranges: [
+      rangeCase("reds", { lightness: 0.2 }),
+      rangeCase("greens", { lightness: -0.1 }),
+      rangeCase("blues", { lightness: -0.3 }),
+    ], monochrome: true }])],
+  }, opsInput),
+  docCase("color_ranges: every range adjusted at once", {
+    layers: [layer([{ type: "color_ranges", ranges: [
+      rangeCase("reds", { hue: 15, saturation: 0.2 }),
+      rangeCase("yellows", { hue: -10, lightness: 0.1 }),
+      rangeCase("greens", { saturation: -0.4 }),
+      rangeCase("cyans", { hue: 20 }),
+      rangeCase("blues", { saturation: 0.3, lightness: -0.05 }),
+      rangeCase("magentas", { hue: -25 }),
+      rangeCase("whites", { lightness: -0.05 }),
+      rangeCase("neutrals", { saturation: 0.15 }),
+      rangeCase("blacks", { lightness: 0.08 }),
+    ], monochrome: false }])],
+  }, opsInput),
+  docCase("color_ranges: pro_photo space", {
+    layers: [layer([{ type: "color_ranges", ranges: [
+      rangeCase("reds", { hue: 20, saturation: 0.25 }),
+      rangeCase("blues", { lightness: 0.1 }),
+    ], monochrome: false }])],
+  }, opsInputPro),
+  docCase("color_ranges: stacked with exposure under soft_light and mask", {
+    layers: [layer([
+      { type: "exposure", ev: 0.3 },
+      { type: "color_ranges", ranges: [rangeCase("reds", { hue: 25, saturation: 0.2 })], monochrome: false },
+    ], { blend: "soft_light", opacity: 0.8, mask: [1, 0.5, 0, 1, 0.25, 0.75] })],
+  }, opsInput),
+];
+
+writeFileSync(
+  new URL("../crates/hgripe-grade/goldens/ops_color_ranges.json", import.meta.url),
+  JSON.stringify({ kind: "doc", cases: colorRangeCases }, null, 2) + "\n",
+);
+console.log(`wrote ${colorRangeCases.length} color-range cases`);
 
 // ---- 1D LUT cases (wave 3) ----
 

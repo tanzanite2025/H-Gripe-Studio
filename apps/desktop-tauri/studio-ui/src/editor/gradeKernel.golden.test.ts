@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import blendSeparable from "../../../../../crates/hgripe-grade/goldens/blend_separable.json";
 import opsBlurVignette from "../../../../../crates/hgripe-grade/goldens/ops_blur_vignette.json";
+import opsColorRanges from "../../../../../crates/hgripe-grade/goldens/ops_color_ranges.json";
 import opsCore from "../../../../../crates/hgripe-grade/goldens/ops_core.json";
 import opsHdr from "../../../../../crates/hgripe-grade/goldens/ops_hdr.json";
 import opsLut1d from "../../../../../crates/hgripe-grade/goldens/ops_lut1d.json";
@@ -110,6 +111,7 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
     ["ops_pro.json", opsPro],
     ["ops_hdr.json", opsHdr],
     ["ops_mixer.json", opsMixer],
+    ["ops_color_ranges.json", opsColorRanges],
     ["ops_lut1d.json", opsLut1d],
     ["ops_warper.json", opsWarper],
     ["ops_spatial.json", opsSpatial],

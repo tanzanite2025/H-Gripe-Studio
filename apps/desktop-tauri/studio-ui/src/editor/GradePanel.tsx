@@ -15,8 +15,10 @@ import {
   MAX_BLUR_SIGMA,
   MAX_RADIUS,
   parseCube,
+  type ColorRange,
   type GradeDoc,
   type GradeOp,
+  type RangeAdjust,
   type WarpPoint,
 } from "./gradeKernel";
 
@@ -63,6 +65,7 @@ const ADDABLE_OPS = [
   "contrast",
   "saturation",
   "rgb_mixer",
+  "color_ranges",
   "color_warper",
   "sharpen",
   "denoise",
@@ -81,6 +84,7 @@ const OP_LABEL_KEYS: Partial<Record<GradeOp["type"], MsgKey>> = {
   contrast: "grade.op_contrast",
   saturation: "grade.op_saturation",
   rgb_mixer: "grade.op_rgb_mixer",
+  color_ranges: "grade.op_color_ranges",
   color_warper: "grade.op_color_warper",
   sharpen: "grade.op_sharpen",
   denoise: "grade.op_denoise",
@@ -111,6 +115,12 @@ function defaultOp(kind: AddableOp): GradeOp {
       return { type: "saturation", amount: 0 };
     case "rgb_mixer":
       return { type: "rgb_mixer", red: [1, 0, 0], green: [0, 1, 0], blue: [0, 0, 1], monochrome: false };
+    case "color_ranges":
+      return {
+        type: "color_ranges",
+        ranges: COLOR_RANGES.map((range) => ({ range, hue: 0, saturation: 0, lightness: 0 })),
+        monochrome: false,
+      };
     case "color_warper":
       return { type: "color_warper", points: [] };
     case "sharpen":
@@ -125,6 +135,19 @@ function defaultOp(kind: AddableOp): GradeOp {
       return { type: "vignette", amount: 0, midpoint: 0.5, feather: 0.5 };
   }
 }
+
+/** The nine colour ranges of the unified range-adjust op, in menu order. */
+const COLOR_RANGES: ColorRange[] = [
+  "reds",
+  "yellows",
+  "greens",
+  "cyans",
+  "blues",
+  "magentas",
+  "whites",
+  "neutrals",
+  "blacks",
+];
 
 function defaultWarpPoint(): WarpPoint {
   return { hue: 0, sat: 0.5, hue_shift: 0, sat_scale: 1, hue_radius: 30, sat_radius: 0.25 };
@@ -463,6 +486,49 @@ export function GradePanel({
           </>
         );
       }
+      case "color_ranges":
+        return (
+          <>
+            {op.ranges.map((r, ri) => (
+              <div className="field grade-warp-point" key={r.range}>
+                <span>{t(`grade.range_${r.range}`)}</span>
+                {(
+                  [
+                    ["hue", -180, 180, 1],
+                    ["saturation", -1, 1, 0.01],
+                    ["lightness", -1, 1, 0.01],
+                  ] as const
+                ).map(([key, min, max, step]) => (
+                  <span className="slider-row" key={key}>
+                    <small className="muted">{t(`grade.range_${key}`)}</small>
+                    <input
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={r[key]}
+                      onChange={(e) => {
+                        const ranges: RangeAdjust[] = op.ranges.map((q, j) =>
+                          j === ri ? { ...q, [key]: Number(e.target.value) } : q,
+                        );
+                        updateOp(i, { ...op, ranges });
+                      }}
+                    />
+                    <output>{r[key]}</output>
+                  </span>
+                ))}
+              </div>
+            ))}
+            <label className="field checkbox-row">
+              <input
+                type="checkbox"
+                checked={op.monochrome ?? false}
+                onChange={(e) => updateOp(i, { ...op, monochrome: e.target.checked })}
+              />
+              <span>{t("grade.monochrome")}</span>
+            </label>
+          </>
+        );
       case "color_warper":
         return (
           <>

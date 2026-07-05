@@ -121,6 +121,7 @@ export const GRADE_OPS: Record<GradeOp["type"], OpMeta> = {
   contrast: GRADE_ADJ,
   soft_clip: GRADE_ADJ,
   rgb_mixer: GRADE_ADJ,
+  color_ranges: GRADE_ADJ,
   color_warper: GRADE_ADJ,
   sharpen: GRADE_ADJ,
   denoise: GRADE_ADJ,
