@@ -169,7 +169,9 @@ export function MaskEditModal({
   useEffect(() => {
     onDocChangeRef.current?.(state.current);
   }, [state]);
-  const [toolId, setToolId] = useState<string>(DEFAULT_TOOL_ID);
+  // Open on the move tool (PS V) — reaching for the brush is opt-in, so a
+  // stray first drag never paints the mask.
+  const [toolId, setToolId] = useState<string>("move");
   // Last-used variant per multi-tool PS slot: the slot button's visible face,
   // and what the slot's shortcut letter re-selects.
   const [slotFaces, setSlotFaces] = useState<Record<string, string>>({});
