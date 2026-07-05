@@ -66,6 +66,7 @@ export function fmtDuration(ms?: number): string {
 // parked off-screen — the real perf/quality discipline for large media.
 function LazyThumb({ path }: { path: string }) {
   const t = useT();
+  const editing = useNodeEditing();
   const ref = useRef<HTMLDivElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
 
@@ -98,7 +99,13 @@ function LazyThumb({ path }: { path: string }) {
   return (
     <div ref={ref} className="node-thumb-wrap">
       {src ? (
-        <img className="node-thumb" src={src} alt="preview" />
+        <img
+          className="node-thumb"
+          src={src}
+          alt="preview"
+          title={t("node.thumbPreviewTitle")}
+          onDoubleClick={() => editing?.openImagePreview?.(path)}
+        />
       ) : (
         <div className="node-thumb placeholder">{t("common.loadingShort")}</div>
       )}
@@ -227,7 +234,13 @@ function ImageSourceCard({ id, path }: { id: string; path: string }) {
   return (
     <div ref={ref} className="media-card">
       {src ? (
-        <img className="node-thumb" src={src} alt="preview" />
+        <img
+          className="node-thumb"
+          src={src}
+          alt="preview"
+          title={t("node.thumbPreviewTitle")}
+          onDoubleClick={() => editing?.openImagePreview?.(path)}
+        />
       ) : (
         <div className="node-thumb placeholder">{t("common.loadingShort")}</div>
       )}
@@ -476,13 +489,6 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
         {inlineParams.length > 0 ? (
           <div className="inline-field-grid">{inlineParams.map(renderInlineParam)}</div>
         ) : null}
-
-        {spec.kind === "preview" &&
-          (d.imagePath ? (
-            <LazyThumb path={d.imagePath} />
-          ) : (
-            <div className="node-thumb placeholder">{t("node.noImage")}</div>
-          ))}
 
         {spec.kind === "subjectMask" ? (
           <div className="subject-mask">
