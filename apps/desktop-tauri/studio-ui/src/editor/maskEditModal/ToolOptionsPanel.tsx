@@ -1,7 +1,7 @@
 // Right rail — "Tool options" panel block: per-tool parameters plus the
 // contextual drafts (morphology preview, pen path, fill / transform / anchor).
 
-import { useContext, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useContext, type Dispatch, type SetStateAction } from "react";
 import { ANCHOR_PATH_TOOLS, toolTargets, type MaskTool, type PaintTarget, type ShapeKind } from "../maskTools";
 import type { ColorSample, RulerLine } from "./stagePainter";
 import { localizeTool } from "../maskToolsI18n";
@@ -59,12 +59,6 @@ interface ToolOptionsPanelProps {
   editingPath: number | null;
   commitPathEdit: () => void;
   cancelPathEdit: () => void;
-  /** Last committed rect/ellipse marquee (image-space region), if any. */
-  marqueeRect: { region: [number, number, number, number]; ellipse: boolean } | null;
-  /** Canvas pixel size (bounds for the manual marquee inputs). */
-  dims: { w: number; h: number };
-  /** Build / resize the selection to an exact pixel size. */
-  applyMarqueeSize: (w: number, h: number) => void;
 }
 
 export function ToolOptionsPanel({
@@ -111,19 +105,9 @@ export function ToolOptionsPanel({
   editingPath,
   commitPathEdit,
   cancelPathEdit,
-  marqueeRect,
-  dims,
-  applyMarqueeSize,
 }: ToolOptionsPanelProps) {
   const t = useT();
   const lang = useContext(LangContext);
-  // Manual marquee size draft, re-seeded from the committed selection.
-  const marqueeW = marqueeRect ? Math.round(marqueeRect.region[2] - marqueeRect.region[0]) : 0;
-  const marqueeH = marqueeRect ? Math.round(marqueeRect.region[3] - marqueeRect.region[1]) : 0;
-  const [sizeDraft, setSizeDraft] = useState<{ w: number; h: number }>({ w: marqueeW, h: marqueeH });
-  useEffect(() => {
-    setSizeDraft({ w: marqueeW, h: marqueeH });
-  }, [marqueeW, marqueeH]);
   // Brush-like tools stamp with a sized tip; everything else (move, marquee,
   // path, view, sample…) has no brush, so no size slider (PS contextual
   // options: only show what the tool in hand actually uses).
@@ -269,45 +253,6 @@ export function ToolOptionsPanel({
               <button onClick={cancelPenPath}>{t("mask.cancelPath")}</button>
             </span>
           ) : null}
-        </div>
-      ) : null}
-      {tool.id === "rect" || tool.id === "ellipse" ? (
-        <div className="field">
-          <span>{t("mask.marqueeSizeTitle")}</span>
-          {marqueeRect ? (
-            <output>
-              {marqueeW} × {marqueeH} px · ({Math.round(marqueeRect.region[0])}, {Math.round(marqueeRect.region[1])})
-            </output>
-          ) : (
-            <small className="muted">{t("mask.marqueeEmpty")}</small>
-          )}
-          <span className="slider-row">
-            <input
-              type="number"
-              min={2}
-              max={dims.w}
-              value={sizeDraft.w || ""}
-              placeholder={t("mask.imageSizeWidth")}
-              onChange={(e) => setSizeDraft((prev) => ({ ...prev, w: Number(e.target.value) }))}
-            />
-            <span>×</span>
-            <input
-              type="number"
-              min={2}
-              max={dims.h}
-              value={sizeDraft.h || ""}
-              placeholder={t("mask.imageSizeHeight")}
-              onChange={(e) => setSizeDraft((prev) => ({ ...prev, h: Number(e.target.value) }))}
-            />
-            <button
-              className="primary"
-              disabled={sizeDraft.w < 2 || sizeDraft.h < 2}
-              onClick={() => applyMarqueeSize(sizeDraft.w, sizeDraft.h)}
-            >
-              {t("mask.marqueeApply")}
-            </button>
-          </span>
-          <small className="muted">{t("mask.marqueeHint")}</small>
         </div>
       ) : null}
       {tool.kind === "path_edit" ? (
