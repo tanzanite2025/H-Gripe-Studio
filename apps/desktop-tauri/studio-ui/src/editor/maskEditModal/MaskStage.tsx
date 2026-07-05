@@ -34,9 +34,14 @@ interface MaskStageProps {
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
+  /** PS-style brush cursor: the tip's outline (image px) for brush-sized
+   * tools, or null (no outline). Position is driven imperatively through
+   * `brushCursorRef` (left/top %) to avoid re-rendering per pointer move. */
+  brushCursor: { diameter: number } | null;
+  brushCursorRef: MutableRefObject<HTMLDivElement | null>;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, backend, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, backend, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
   const windowRect = {
     left: `${frameView.panX * 100}%`,
     top: `${frameView.panY * 100}%`,
@@ -69,7 +74,7 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
           ref={canvasRef}
           className="mask-edit-canvas"
           style={{
-            cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : toolId === "rotate_view" ? "crosshair" : undefined,
+            cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -77,6 +82,17 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
           onPointerLeave={onPointerUp}
           onContextMenu={(e) => e.preventDefault()}
         />
+        {brushCursor ? (
+          <div
+            ref={brushCursorRef}
+            className="mask-brush-cursor"
+            style={{
+              width: `${(brushCursor.diameter / dims.w) * 100}%`,
+              height: `${(brushCursor.diameter / dims.h) * 100}%`,
+              display: "none",
+            }}
+          />
+        ) : null}
       </div>
       <ViewportBackendBadge backend={backend} />
     </div>

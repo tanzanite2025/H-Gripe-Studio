@@ -265,6 +265,8 @@ export function MaskEditModal({
   // In-progress freehand stroke (image-space points), null when not drawing.
   const drawing = useRef<{ points: [number, number][] } | null>(null);
   const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // PS-style brush cursor ring (positioned imperatively on pointer move).
+  const brushCursorEl = useRef<HTMLDivElement | null>(null);
   // Last committed rect/ellipse marquee: the marching ants stay visible after
   // the drag lands so the selection reads (PS-style); cleared on tool switch.
   const [lastMarquee, setLastMarquee] = useState<{
@@ -1030,6 +1032,15 @@ export function MaskEditModal({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    // PS-style brush cursor: follow the pointer (image-space %, so the ring
+    // tracks the view transform). Imperative style writes — no re-render.
+    const cursorEl = brushCursorEl.current;
+    if (cursorEl) {
+      const [x, y] = toImage(e);
+      cursorEl.style.left = `${(x / dims.w) * 100}%`;
+      cursorEl.style.top = `${(y / dims.h) * 100}%`;
+      cursorEl.style.display = spacePan ? "none" : "";
+    }
     if (rotateDrag.current) {
       const { angle, rotate } = rotateDrag.current;
       setView((v) => rotateTo(v, rotate + pointerAngle(e) - angle));
@@ -1090,6 +1101,9 @@ export function MaskEditModal({
   };
 
   const onPointerUp = () => {
+    // Also reached from the canvas's pointer-leave: hide the brush ring until
+    // the pointer is back over the canvas.
+    if (brushCursorEl.current) brushCursorEl.current.style.display = "none";
     if (rotateDrag.current) {
       rotateDrag.current = null;
       return;
@@ -1371,6 +1385,13 @@ export function MaskEditModal({
     [tool.kind, toolId],
   );
 
+  // Brush-sized tools show a ring of the tip's true diameter at the cursor
+  // (PS brush cursor); [ / ] resize it live. Same predicate as the size
+  // slider in the tool-options panel.
+  const usesBrushCursor =
+    ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind) &&
+    !["quick_select", "patch", "content_aware_move"].includes(tool.id);
+
   // Manual marquee size (right rail): build / resize the selection numerically.
   // Anchored at the last marquee's top-left (or the image origin), clamped to
   // the canvas, and recorded as the same rect / ellipse op a drag would make.
@@ -1446,6 +1467,8 @@ export function MaskEditModal({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            brushCursor={usesBrushCursor && !spacePan ? { diameter: brushSize * 2 } : null}
+            brushCursorRef={brushCursorEl}
           />
 
           <div
