@@ -37,6 +37,10 @@ export interface ToolbarProps {
   // Unified image editor (mask + crop) for an image source card.
   onOpenImageEdit: () => void;
 
+  // Bottom production drawer (Edit / Timeline + Grade).
+  drawerOpen: boolean;
+  onToggleDrawer: () => void;
+
   // Panels
   showProject: boolean;
   setShowProject: Dispatch<SetStateAction<boolean>>;
@@ -69,6 +73,8 @@ export function Toolbar({
   onToggleLang,
   onOpenModels,
   onOpenImageEdit,
+  drawerOpen,
+  onToggleDrawer,
   showProject,
   setShowProject,
   showSnapshots,
@@ -101,6 +107,13 @@ export function Toolbar({
           )}
           <button onClick={onOpenImageEdit} title={t("btn.imageEditTitle")}>
             {t("btn.imageEdit")}
+          </button>
+          <button
+            onClick={onToggleDrawer}
+            title={drawerOpen ? t("btn.drawerCloseTitle") : t("btn.drawerTitle")}
+            className={drawerOpen ? "active" : undefined}
+          >
+            {t("btn.drawer")}
           </button>
           {isDesktop && (
             <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>
