@@ -4,7 +4,6 @@ import {
   MiniMap,
   addEdge,
   useReactFlow,
-  MarkerType,
   type Connection,
   type Edge,
   type Node,
@@ -21,6 +20,7 @@ import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
 import { ChamferEdge } from "./ChamferEdge";
 import { BindingEdge } from "./BindingEdge";
+import { DragConnectionLine } from "./DragConnectionLine";
 import { miniMapColor } from "./minimap";
 import { DND_NODE_KIND } from "./Palette";
 import { nodeSpec } from "../graph/nodeSpecs";
@@ -61,11 +61,7 @@ interface FlowCanvasProps {
 
 const SNAP_GRID: [number, number] = [16, 16];
 const DATA_EDGE_TYPE = "chamfer";
-const DATA_EDGE_MARKER = {
-  type: MarkerType.ArrowClosed,
-  width: 16,
-  height: 16,
-};
+const CONNECTION_LINE_CONTAINER_STYLE = { zIndex: 1002, pointerEvents: "none" as const };
 
 export function FlowCanvas({
   nodes,
@@ -95,7 +91,6 @@ export function FlowCanvas({
       edges.map((edge) => ({
         ...edge,
         type: edge.type === "binding" ? "binding" : DATA_EDGE_TYPE,
-        markerEnd: edge.markerEnd ?? DATA_EDGE_MARKER,
       })),
     [edges],
   );
@@ -140,9 +135,7 @@ export function FlowCanvas({
   const onConnect: OnConnect = useCallback(
     (params) => {
       onBeforeConnect?.();
-      setEdges((eds) =>
-        addEdge({ ...params, type: DATA_EDGE_TYPE, markerEnd: DATA_EDGE_MARKER }, eds),
-      );
+      setEdges((eds) => addEdge({ ...params, type: DATA_EDGE_TYPE }, eds));
     },
     [setEdges, onBeforeConnect],
   );
@@ -155,10 +148,7 @@ export function FlowCanvas({
     return miniMapColor(data.status, nodeSpec(data.kind).category);
   }, []);
 
-  const defaultEdgeOptions = useMemo(
-    () => ({ type: DATA_EDGE_TYPE, markerEnd: DATA_EDGE_MARKER }),
-    [],
-  );
+  const defaultEdgeOptions = useMemo(() => ({ type: DATA_EDGE_TYPE }), []);
 
   const handleNodeContextMenu = useCallback(
     (e: React.MouseEvent, node: Node) => {
@@ -202,6 +192,8 @@ export function FlowCanvas({
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      connectionLineComponent={DragConnectionLine}
+      connectionLineContainerStyle={CONNECTION_LINE_CONTAINER_STYLE}
       defaultEdgeOptions={defaultEdgeOptions}
       onNodeDragStop={(_, node) => onNodeDragStop?.(node)}
       onMoveEnd={(_, viewport) => onViewportChange?.(viewport)}

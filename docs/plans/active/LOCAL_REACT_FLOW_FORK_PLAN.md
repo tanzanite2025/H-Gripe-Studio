@@ -132,7 +132,8 @@ Use a soft-cut sequence:
    - Add a local package such as `packages/hgripe-flow`.
    - The Studio app imports graph primitives from `hgripe-flow`, not directly
      from `@xyflow/react`.
-   - First version can re-export upstream unchanged.
+   - The adapter should expose only the app-facing surface the Studio actually
+     uses. Old upstream edge helpers must not be part of the product API.
 
 3. **Local source import**
    - Bring the required React Flow / XYFlow source into the local package.
@@ -261,7 +262,7 @@ prove the app still works.
 ## Implementation Order
 
 1. Document and pin the current upstream `@xyflow/react` version.
-2. Add `packages/hgripe-flow` as a re-export adapter.
+2. Add `packages/hgripe-flow` as a local adapter.
 3. Move app imports from `@xyflow/react` to `@hgripe/flow`.
 4. Run the studio UI tests and build.
 5. Vendor or copy the needed upstream source into `hgripe-flow`.
@@ -293,5 +294,6 @@ prove the app still works.
 - `packages/hgripe-flow` exists as the local graph adapter package.
 - Studio imports must route through `@hgripe/flow`, not directly through
   `@xyflow/react`.
-- The adapter still re-exports `@xyflow/react@12.3.5`; no graph behavior is
-  intentionally changed in this phase.
+- The adapter is no longer a blanket re-export. It exposes only the React Flow
+  primitives currently used by Studio, and the graph wire system is owned by
+  H-Gripe's chamfer edge implementation.

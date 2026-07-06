@@ -1,6 +1,5 @@
 // H-Gripe's default data wire: a lightweight structured polyline with one 45
-// degree diagonal cut. It intentionally avoids Bezier curves, plain hard
-// elbows, and full graph obstacle routing.
+// degree diagonal cut.
 
 export interface Pt {
   x: number;

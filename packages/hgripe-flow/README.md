@@ -3,9 +3,9 @@
 Local graph adapter for H-Gripe Studio.
 
 This package is the first soft-cut away from direct `@xyflow/react` imports.
-It currently re-exports `@xyflow/react@12.3.5` unchanged so the Studio app can
-compile and behave exactly as before while all product code imports from one
-owned boundary.
+It exposes a narrow app-facing surface over `@xyflow/react@12.3.5`, so the
+Studio app can compile while old upstream edge styles are not part of the
+product API.
 
 ## Boundary
 
@@ -14,6 +14,10 @@ owned boundary.
 - node and edge components
 - handles, viewport, minimap, pan / zoom / fit view
 - selection, connection, and canvas interaction hooks
+
+For workflow wires, the only product edge style is H-Gripe's single-cut
+chamfer line with a direction arrow. Bezier, plain elbow, and obstacle-avoid
+edge helpers are not exported from this package.
 
 It must not own heavy media pixels:
 
@@ -28,7 +32,7 @@ Those stay in the Rust / WGPU / media-kernel layers.
 
 - Package: `@xyflow/react`
 - Version: `12.3.5`
-- Current phase: re-export adapter
+- Current phase: narrow adapter with H-Gripe edge ownership
 
 Next phase: vendor the required upstream source into this package while keeping
 the exported app-facing API stable.

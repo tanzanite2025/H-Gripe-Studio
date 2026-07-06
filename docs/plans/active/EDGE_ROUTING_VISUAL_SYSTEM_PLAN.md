@@ -7,8 +7,8 @@
 
 ## Core Decision
 
-The default and only normal workflow wire style should be a chamfered
-orthogonal edge:
+The default and only normal workflow wire style should be a single-cut chamfer
+edge:
 
 ```text
 port -> horizontal segment -> single 45 degree diagonal cut -> horizontal segment -> port
@@ -73,6 +73,13 @@ Default edge:
 - always shows direction with an arrow marker at the target end
 - uses stable spacing so edges do not jump while unrelated nodes update
 - keeps the edge visually behind cards and above the canvas background
+
+Dragging connection line:
+
+- reuses the same single-cut `chamferPath` as committed edges
+- renders above node cards while the user is dragging from a port
+- keeps an arrow marker at the current target end
+- does not run Bezier, plain orthogonal, or obstacle-routing logic per mousemove
 
 Selected edge:
 
@@ -268,6 +275,8 @@ edge type "hgripe-chamfer"
 
 When the upstream source is vendored, the edge implementation can move deeper
 into the local graph package without changing the Studio app import boundary.
+The local package should not expose upstream Bezier, plain elbow, or
+obstacle-avoid edge APIs to Studio.
 
 ## Minimal Algorithm Sketch
 
@@ -327,10 +336,12 @@ At very low zoom:
 
 - The default canvas edge is a 45 degree single-cut structured line with an
   arrow marker.
-- Bezier, plain orthogonal, and avoidance edge choices are not available in the
+- Bezier, plain elbow, and avoidance edge choices are not available in the
   normal product UI.
 - Row-level ports visually align with the exact operation row they represent.
 - Dragging nodes does not reroute the entire graph unnecessarily.
+- Dragging a new connection keeps the temporary wire above cards and uses the
+  same lightweight single-cut path as committed edges.
 - Selected, running, failed, and muted edges are visually distinct.
 - The edge system stays inside `@hgripe/flow` / graph UI ownership.
 - WGPU media viewports and GPU strategy remain independent.
