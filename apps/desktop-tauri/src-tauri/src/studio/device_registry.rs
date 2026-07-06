@@ -57,6 +57,11 @@ pub(crate) struct DeviceRegistrySnapshot {
     /// Shared viewport surface device — cached state only, never initialised
     /// by a snapshot (the lazy-init startup guard stays intact).
     pub viewport_surface: RegistryEntry,
+    /// The last uncaptured GPU error on the surface device (out of memory,
+    /// validation, internal), when one has been recorded — the failing
+    /// present fell back to the PNG transport and the error stays visible.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewport_surface_last_error: Option<String>,
     /// Vendored FFmpeg software baseline.
     pub ffmpeg: RegistryEntry,
     /// Hardware encoder names compiled into the vendored libav (compiled-in
@@ -103,6 +108,7 @@ pub(crate) fn snapshot() -> DeviceRegistrySnapshot {
         viewport_surface: RegistryEntry::from_capability(
             super::wgpu_device::surface_device_status(),
         ),
+        viewport_surface_last_error: super::wgpu_device::last_uncaptured_error(),
         ffmpeg: RegistryEntry::from_capability(super::video_engine::ffmpeg_capability()),
         ffmpeg_hw_encoders: ffmpeg_hw_encoder_names(),
         ffmpeg_hw_decoders: ffmpeg_hw_decoder_names(),
