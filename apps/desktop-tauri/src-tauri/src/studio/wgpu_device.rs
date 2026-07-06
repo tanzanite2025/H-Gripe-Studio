@@ -9,7 +9,7 @@
 //! PNG transport path instead of failing.
 
 #[cfg(feature = "viewport-surface")]
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::studio::device_report::DeviceUsed;
 
@@ -41,6 +41,36 @@ pub(crate) struct SurfaceDeviceReport {
 #[cfg(feature = "viewport-surface")]
 static SHARED: OnceLock<Result<Arc<SharedGpu>, String>> = OnceLock::new();
 
+/// The device-lost reason, recorded by the callback registered at device
+/// creation (GPU_DEVICE_STRATEGY_PLAN long-term step 4: structured
+/// device-lost handling). Once set, every surface path sees the shared
+/// device as unavailable with this reason and downgrades to the PNG
+/// transport — reported, never silent.
+#[cfg(feature = "viewport-surface")]
+static DEVICE_LOST: Mutex<Option<String>> = Mutex::new(None);
+
+/// The recorded device-lost reason, if the shared device has been lost.
+#[cfg(feature = "viewport-surface")]
+pub(crate) fn device_lost_reason() -> Option<String> {
+    DEVICE_LOST.lock().ok().and_then(|guard| guard.clone())
+}
+
+/// The recorded detail line for a device loss: the structured reason class
+/// plus the driver's message, so the fallback stays diagnosable.
+#[cfg(feature = "viewport-surface")]
+fn device_lost_detail(reason: wgpu::DeviceLostReason, message: &str) -> String {
+    format!("wgpu device lost ({reason:?}): {message}")
+}
+
+#[cfg(feature = "viewport-surface")]
+fn record_device_lost(reason: wgpu::DeviceLostReason, message: String) {
+    let detail = device_lost_detail(reason, &message);
+    eprintln!("[viewport] {detail} — surfaces downgrade to the PNG transport");
+    if let Ok(mut guard) = DEVICE_LOST.lock() {
+        guard.get_or_insert(detail);
+    }
+}
+
 #[cfg(feature = "viewport-surface")]
 fn init_shared_gpu() -> Result<Arc<SharedGpu>, String> {
     let instance =
@@ -60,6 +90,7 @@ fn init_shared_gpu() -> Result<Arc<SharedGpu>, String> {
         ..Default::default()
     }))
     .map_err(|e| format!("device request failed: {e}"))?;
+    device.set_device_lost_callback(record_device_lost);
     eprintln!("[viewport] shared wgpu device initialised: {adapter_summary}");
     Ok(Arc::new(SharedGpu {
         instance,
@@ -82,7 +113,10 @@ pub(crate) fn shared_gpu() -> Result<Arc<SharedGpu>, String> {
             eprintln!("[viewport] shared wgpu device unavailable, PNG fallback stays: {e}");
         })
     }) {
-        Ok(gpu) => Ok(Arc::clone(gpu)),
+        Ok(gpu) => match device_lost_reason() {
+            Some(reason) => Err(reason),
+            None => Ok(Arc::clone(gpu)),
+        },
         Err(e) => Err(e.clone()),
     }
 }
@@ -179,7 +213,10 @@ pub(crate) fn surface_device_status() -> Result<String, String> {
     #[cfg(feature = "viewport-surface")]
     {
         match SHARED.get() {
-            Some(Ok(gpu)) => Ok(gpu.adapter_summary.clone()),
+            Some(Ok(gpu)) => match device_lost_reason() {
+                Some(reason) => Err(format!("{} — {}", gpu.adapter_summary, reason)),
+                None => Ok(gpu.adapter_summary.clone()),
+            },
             Some(Err(reason)) => Err(reason.clone()),
             None => {
                 Err("not initialised yet (initialises on the first presented viewport)".to_string())
@@ -251,6 +288,14 @@ mod tests {
             Ok(detail) => assert!(!detail.is_empty()),
             Err(reason) => assert!(!reason.is_empty()),
         }
+    }
+
+    #[cfg(feature = "viewport-surface")]
+    #[test]
+    fn device_lost_detail_keeps_reason_class_and_message() {
+        let detail = device_lost_detail(wgpu::DeviceLostReason::Unknown, "D3D12 device removed");
+        assert!(detail.contains("Unknown"), "{detail}");
+        assert!(detail.contains("D3D12 device removed"), "{detail}");
     }
 
     #[cfg(feature = "viewport-surface")]
