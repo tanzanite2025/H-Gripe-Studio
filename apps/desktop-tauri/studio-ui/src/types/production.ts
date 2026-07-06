@@ -452,7 +452,27 @@ export interface MaskLayer {
   ops: EditOp[];
   /** The tone map an `"adjustment"` layer applies (revisable at any time). */
   adjustment?: LayerAdjustment;
+  /** Layer mask attachment gating the layer; absent means no mask. */
+  mask?: LayerMask;
 }
+
+/**
+ * PS layer mask attachment: a grayscale coverage stack gating its layer's
+ * effect. A mask is a target on the layer, not a sibling layer — deleting or
+ * disabling it touches only the attachment.
+ */
+export interface LayerMask {
+  id: string;
+  /** The mask's own ordered edit stack, replayed in recorded order. */
+  ops: EditOp[];
+  /** Disabled (PS Shift-click): keep the data, bypass the gating. */
+  disabled?: boolean;
+  /** Pixel↔mask link broken (PS chain icon off): they move separately. */
+  unlinked?: boolean;
+}
+
+/** Which attachment of the active layer receives new edits. */
+export type LayerTargetKind = "pixel" | "mask";
 
 /** Resampling filter for the document-level image-size request. */
 export type ImageResample = "auto" | "nearest" | "bilinear" | "bicubic";
@@ -480,6 +500,8 @@ export interface MaskDocument {
   canvas?: ImageCanvasSize;
   /** Visual layer tags. Empty means every layer keeps the default row style. */
   layerGroups: LayerGroup[];
+  /** Which attachment of the active layer receives new edits; absent ⇒ pixel. */
+  activeTarget?: LayerTargetKind;
 }
 
 export function emptyMaskLayer(name = "Background"): MaskLayer {
@@ -510,6 +532,17 @@ export function emptyMaskDocument(): MaskDocument {
 /** The layer new edits are recorded onto (always present, clamped). */
 export function activeLayer(doc: MaskDocument): MaskLayer {
   return doc.layers[Math.min(Math.max(doc.active, 0), doc.layers.length - 1)];
+}
+
+/** A fresh empty layer-mask attachment. */
+export function emptyLayerMask(): LayerMask {
+  return { id: `mask-${Math.random().toString(36).slice(2, 10)}`, ops: [] };
+}
+
+/** The active layer's target receiving new edits (`"mask"` only when the
+ * active layer owns a mask attachment). */
+export function activeTargetKind(doc: MaskDocument): LayerTargetKind {
+  return doc.activeTarget === "mask" && activeLayer(doc).mask ? "mask" : "pixel";
 }
 
 export function isPathOp(op: EditOp): op is PathOp {

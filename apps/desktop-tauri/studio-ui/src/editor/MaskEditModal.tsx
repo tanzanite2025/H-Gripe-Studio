@@ -30,6 +30,7 @@ import {
   composeTransforms,
   editCount,
   initEditState,
+  layerOpStacks,
   type TransformParams,
 } from "./maskEdit";
 import type {
@@ -39,7 +40,7 @@ import type {
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
-import { isBrushOp, isPathOp } from "../types/production";
+import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
 import { maskEditReducer, type FillDraft, type MaskEditAction } from "./maskEditModal/actions";
 import {
   paintAnchorDraft,
@@ -395,10 +396,11 @@ export function MaskEditModal({
     // morphology preview runs, the proxy tint already folds the paths in, so
     // the vector overlay drops them (mirrors the canvas skip).
     if (!previewing) {
+      const activeTarget = activeTargetKind(state.current);
       state.current.layers.forEach((layer, li) => {
         if (!layer.visible) return;
-        layer.ops.forEach((op, i) => {
-          if (op.disabled || (li === state.current.active && i === editingPath)) return;
+        layerOpStacks(layer).forEach(({ target, ops }) => ops.forEach((op, i) => {
+          if (op.disabled || (li === state.current.active && target === activeTarget && i === editingPath)) return;
           if (isBrushOp(op) && op.points.length > 0) {
             // Committed brush-stroke bands, mirroring `paintStroke`: mode
             // colour at 0.55, dimmed further by a sub-1 flow.
@@ -423,7 +425,7 @@ export function MaskEditModal({
             stroke: [r / 255, g / 255, b / 255, 0.9],
             fill: [r / 255, g / 255, b / 255, 0.3],
           });
-        });
+        }));
       });
     }
     // Matte strokes (amber) render whether or not a preview runs, like the
@@ -1252,13 +1254,14 @@ export function MaskEditModal({
     // Committed brush bands and vector paths render host-side (the viewport
     // overlay scene); the canvas draws them only for the fallback stage.
     if (!previewing && !underlay && !presented) {
+      const activeTarget = activeTargetKind(state.current);
       state.current.layers.forEach((layer, li) => {
         if (!layer.visible) return;
-        layer.ops.forEach((op, i) => {
-          if (op.disabled || (li === state.current.active && i === editingPath)) return;
+        layerOpStacks(layer).forEach(({ target, ops }) => ops.forEach((op, i) => {
+          if (op.disabled || (li === state.current.active && target === activeTarget && i === editingPath)) return;
           if (isBrushOp(op)) paintStroke(ctx, op);
           else if (isPathOp(op)) paintPath(ctx, op);
-        });
+        }));
       });
     }
     if (!underlay && !presented) {
@@ -2413,6 +2416,7 @@ export function MaskEditModal({
                 layers={layers}
                 layerGroups={state.current.layerGroups}
                 active={state.current.active}
+                activeTarget={activeTargetKind(state.current)}
               dims={dims}
               imagePath={imagePath}
               workspace={workspace}

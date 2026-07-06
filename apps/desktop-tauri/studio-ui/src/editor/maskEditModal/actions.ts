@@ -9,6 +9,7 @@ import {
   addPath,
   addPoint,
   addLayer,
+  addLayerMask,
   clearEdits,
   duplicateLayer,
   mergeLayers,
@@ -17,8 +18,10 @@ import {
   renameLayer,
   reselect,
   removeLayer,
+  removeLayerMask,
   removeOp,
   setActiveLayer,
+  setActiveTarget,
   setCanvasSize,
   setLayerBlend,
   setLayerGroup,
@@ -26,6 +29,8 @@ import {
   setLayerOpacity,
   toggleLayerLink,
   toggleLayerLock,
+  toggleLayerMaskDisabled,
+  toggleLayerMaskLink,
   toggleLayerVisible,
   toggleOp,
   undo,
@@ -46,6 +51,7 @@ import type {
   LayerAdjustment,
   LayerBlend,
   LayerGroup,
+  LayerTargetKind,
   MaskOperation,
   PointPrompt,
 } from "../../types/production";
@@ -81,6 +87,11 @@ export type MaskEditAction =
   | { type: "layer_blend"; index: number; blend: LayerBlend }
   | { type: "layer_groups"; groups: LayerGroup[] }
   | { type: "layer_group"; index: number; groupId: string | null }
+  | { type: "layer_mask_add"; index: number }
+  | { type: "layer_mask_remove"; index: number }
+  | { type: "layer_mask_disable"; index: number }
+  | { type: "layer_mask_link"; index: number }
+  | { type: "target_active"; target: LayerTargetKind }
   | { type: "canvas_size"; canvas: ImageCanvasSize };
 
 export type MaskEditDispatch = (action: MaskEditAction) => void;
@@ -153,6 +164,16 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return setLayerGroups(state, action.groups);
     case "layer_group":
       return setLayerGroup(state, action.index, action.groupId);
+    case "layer_mask_add":
+      return addLayerMask(state, action.index);
+    case "layer_mask_remove":
+      return removeLayerMask(state, action.index);
+    case "layer_mask_disable":
+      return toggleLayerMaskDisabled(state, action.index);
+    case "layer_mask_link":
+      return toggleLayerMaskLink(state, action.index);
+    case "target_active":
+      return setActiveTarget(state, action.target);
     case "canvas_size":
       return setCanvasSize(state, action.canvas);
   }
