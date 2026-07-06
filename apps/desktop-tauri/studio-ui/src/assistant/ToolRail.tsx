@@ -14,7 +14,7 @@ interface ToolRailProps {
   onToggleAssistant: () => void;
 }
 
-const BUTTON_SIZE = 80;
+const BUTTON_SIZE = 64;
 
 function defaultPos(): FloatingPos {
   return { x: window.innerWidth - BUTTON_SIZE - 16, y: Math.round(window.innerHeight * 0.45) };
@@ -93,7 +93,7 @@ export function ToolRail({ assistantOpen, onToggleAssistant }: ToolRailProps) {
       aria-label={t("assistant.title")}
       aria-pressed={assistantOpen}
     >
-      <EyesIcon size={52} />
+      <EyesIcon size={64} />
     </button>
   );
 }
