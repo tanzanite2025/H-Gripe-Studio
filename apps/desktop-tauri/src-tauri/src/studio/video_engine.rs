@@ -165,9 +165,8 @@ pub(crate) fn encode_with_device<T>(
     if requested == DeviceRequest::Gpu {
         match super::ffmpeg_native::hardware_h264_encoder() {
             None => {
-                fallback_reason = Some(
-                    "no hardware H.264 encoder compiled into the vendored libav".to_string(),
-                );
+                fallback_reason =
+                    Some("no hardware H.264 encoder compiled into the vendored libav".to_string());
             }
             Some(hw) => match encode(&hw) {
                 Ok(out) => return Ok((out, DeviceUsed::FfmpegHw, requested, None)),
