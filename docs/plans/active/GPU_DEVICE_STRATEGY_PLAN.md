@@ -454,8 +454,12 @@ This should be a settings surface, not a required setup wizard.
     landed: `probe_engines` carries `ffmpeg_hw` (hardware encoders compiled
     into the vendored libav via `avcodec_find_encoder_by_name` — nvenc / qsv /
     amf / mf, or the reason none exist) and the capability summary shows an
-    `ffmpeg hw encoders` line. Nothing selects a hardware encoder yet; that
-    lands with the encode-path fallback wiring.
+    `ffmpeg hw encoders` line. Fallback half landed for `videoAssemble`: an
+    explicit `device: gpu` request tries the first compiled-in hardware H.264
+    encoder and falls back to the software baseline with the failure reason
+    kept visible on `assemble_report` (`device: ffmpeg_hw` only on success);
+    `auto`/`cpu` stay on the software baseline. `videoTrim` / timeline export
+    join later.
 13. Build cross-kernel device registry later.
 14. Build GPU queue/memory policy only after timeline/export workloads demand it.
 
