@@ -32,6 +32,10 @@ export interface TimelineExportResult {
   graded_frame_count: number;
   /** Backend that ran the grade kernel (`cpu` / `gpu`), when frames were graded. */
   grade_backend?: "cpu" | "gpu";
+  /** Encode device (shared DeviceReport vocabulary, e.g. ffmpeg_sw / ffmpeg_hw). */
+  encode_device?: string;
+  /** Why the encode fell back to the software baseline, when it did. */
+  encode_fallback_reason?: string;
   /** Audio clips mixed into the output's AAC track (0 = video only). */
   audio_clip_count: number;
   /** Why the export stayed video-only although audio clips were sent. */
@@ -47,6 +51,8 @@ export async function timelineExport(
   fps: number,
   opts: {
     codec?: string;
+    /** Encode device request: gpu tries a hardware H.264 encoder with a visible software fallback. */
+    device?: "auto" | "cpu" | "gpu";
     outputName?: string;
     gradeDocs?: (string | null)[];
     /**
@@ -63,6 +69,7 @@ export async function timelineExport(
     frames,
     fps,
     codec: opts.codec ?? null,
+    device: opts.device ?? null,
     outputName: opts.outputName ?? null,
     gradeDocs: opts.gradeDocs ?? null,
     frameTimes: opts.frameTimes ?? null,

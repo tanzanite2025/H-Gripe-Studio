@@ -929,6 +929,16 @@ export const messages = {
   },
   "export.fps": { en: "fps", zh: "帧率" },
   "export.outputName": { en: "output name", zh: "输出文件名" },
+  "export.device": { en: "device", zh: "设备" },
+  "export.deviceTitle": {
+    en: "gpu tries a hardware H.264 encoder and falls back to software encode with a visible reason",
+    zh: "gpu 会尝试硬件 H.264 编码器，失败时回退软件编码并显示原因",
+  },
+  "export.hwEncodeNote": { en: "hardware encode (ffmpeg_hw)", zh: "硬件编码（ffmpeg_hw）" },
+  "export.encodeFallback": {
+    en: "software encode fallback: {reason}",
+    zh: "已回退软件编码：{reason}",
+  },
   "export.outputNamePlaceholder": { en: "assembled-<time>.mp4", zh: "assembled-<时间>.mp4" },
   "export.emptyPlan": {
     en: "nothing to encode — add still-image clips to the video track first",

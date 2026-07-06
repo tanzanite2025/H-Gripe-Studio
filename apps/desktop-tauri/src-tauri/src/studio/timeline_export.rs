@@ -39,6 +39,13 @@ pub(crate) struct TimelineExportResult {
     /// Why the grade fell back to CPU, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) grade_backend_fallback_reason: Option<String>,
+    /// Encode device from the shared DeviceReport vocabulary (`ffmpeg_hw`
+    /// only when an explicit gpu request landed on a hardware encoder).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) encode_device: Option<String>,
+    /// Why the encode fell back to the software baseline, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) encode_fallback_reason: Option<String>,
     /// Audio clips mixed into the output's AAC track (0 = video only).
     pub(crate) audio_clip_count: u64,
     /// Why the export stayed video-only although audio clips were sent.
@@ -179,6 +186,7 @@ pub(crate) fn timeline_export(
     frames: Vec<String>,
     fps: f64,
     codec: Option<String>,
+    device: Option<String>,
     output_name: Option<String>,
     grade_docs: Option<Vec<Option<String>>>,
     frame_times: Option<Vec<Option<f64>>>,
@@ -224,6 +232,9 @@ pub(crate) fn timeline_export(
     if let Some(codec) = codec {
         params.insert("codec".to_string(), json!(codec));
     }
+    if let Some(device) = device {
+        params.insert("device".to_string(), json!(device));
+    }
     if let Some(name) = output_name {
         params.insert("output_name".to_string(), json!(name));
     }
@@ -245,6 +256,15 @@ pub(crate) fn timeline_export(
         .get("duration_sec")
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
+    let assemble_report = outputs.get("assemble_report");
+    let encode_device = assemble_report
+        .and_then(|r| r.get("device"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let encode_fallback_reason = assemble_report
+        .and_then(|r| r.get("engine_fallback_reason"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
 
     let mut audio_clip_count = 0u64;
     let mut audio_skipped_reason: Option<String> = None;
@@ -267,6 +287,8 @@ pub(crate) fn timeline_export(
         graded_frame_count,
         grade_backend: backend.as_ref().map(|b| b.name),
         grade_backend_fallback_reason: backend.and_then(|b| b.fallback_reason),
+        encode_device,
+        encode_fallback_reason,
         audio_clip_count,
         audio_skipped_reason,
     })
@@ -323,7 +345,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_frames() {
-        let err = timeline_export(vec![], 24.0, None, None, None, None, None).unwrap_err();
+        let err = timeline_export(vec![], 24.0, None, None, None, None, None, None).unwrap_err();
         assert!(err.contains("needs at least one frame"), "{err}");
     }
 
@@ -332,6 +354,7 @@ mod tests {
         let err = timeline_export(
             vec!["Z:/definitely/missing-frame.png".to_string()],
             24.0,
+            None,
             None,
             None,
             None,

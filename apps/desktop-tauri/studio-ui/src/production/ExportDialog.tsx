@@ -37,6 +37,8 @@ type ExportState =
       durationSec: number;
       gradedFrameCount: number;
       gradeBackend: "cpu" | "gpu" | null;
+      encodeDevice: string | null;
+      encodeFallbackReason: string | null;
       audioClipCount: number;
       audioSkippedReason: string | null;
     }
@@ -51,6 +53,7 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const t = useT();
   const [fps, setFps] = useState(DEFAULT_EXPORT_FPS);
+  const [device, setDevice] = useState<"auto" | "cpu" | "gpu">("auto");
   const [outputName, setOutputName] = useState("");
   const [state, setState] = useState<ExportState>({ phase: "idle" });
 
@@ -83,6 +86,7 @@ export function ExportDialog({
     setState({ phase: "running" });
     try {
       const result = await timelineExport(frames.paths, plan.fps, {
+        device: device !== "auto" ? device : undefined,
         outputName: outputName.trim() || undefined,
         gradeDocs: frames.gradeDocs.some((d) => d !== null) ? frames.gradeDocs : undefined,
         frameTimes: frames.hasVideoFrames ? frames.frameTimes : undefined,
@@ -109,6 +113,8 @@ export function ExportDialog({
         durationSec: result.duration_sec,
         gradedFrameCount: result.graded_frame_count ?? 0,
         gradeBackend: result.grade_backend ?? null,
+        encodeDevice: result.encode_device ?? null,
+        encodeFallbackReason: result.encode_fallback_reason ?? null,
         audioClipCount: result.audio_clip_count ?? 0,
         audioSkippedReason: result.audio_skipped_reason ?? null,
       });
@@ -153,6 +159,18 @@ export function ExportDialog({
               />
             </label>
             <label className="field">
+              <span>{t("export.device")}</span>
+              <select
+                value={device}
+                title={t("export.deviceTitle")}
+                onChange={(e) => setDevice(e.target.value as "auto" | "cpu" | "gpu")}
+              >
+                <option value="auto">auto</option>
+                <option value="cpu">cpu</option>
+                <option value="gpu">gpu</option>
+              </select>
+            </label>
+            <label className="field">
               <span>{t("export.outputName")}</span>
               <input
                 type="text"
@@ -191,12 +209,23 @@ export function ExportDialog({
                   })}
                 </>
               ) : null}
+              {state.encodeDevice === "ffmpeg_hw" ? (
+                <>
+                  {" · "}
+                  {t("export.hwEncodeNote")}
+                </>
+              ) : null}
               {state.audioClipCount > 0 ? (
                 <>
                   {" · "}
                   {t("export.audioNote", { n: state.audioClipCount })}
                 </>
               ) : null}
+            </p>
+          ) : null}
+          {state.phase === "done" && state.encodeFallbackReason && device === "gpu" ? (
+            <p className="export-warning">
+              {t("export.encodeFallback", { reason: state.encodeFallbackReason })}
             </p>
           ) : null}
           {state.phase === "done" && state.audioSkippedReason ? (
