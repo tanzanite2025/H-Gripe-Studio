@@ -1,11 +1,10 @@
 // Timeline render plan (UNIFIED_PRODUCTION_DRAWER_PLAN.md step 9): a pure,
 // serializable description of what the export encodes, built from the timeline
-// plus the media bin. The encode path covers the video track's still clips
-// (expanded to one image path per output frame at the chosen fps) and the
-// audio tracks' clips (mixed down with their trim/gain/fade edits and muxed
-// into the output by the backend); video-clip re-encode consumes the same
-// plan once its backend lane lands, so unsupported segments surface as
-// warnings instead of silently disappearing.
+// plus the media bin. The encode path covers the video track's still and
+// video clips (expanded to one frame per output frame at the chosen fps —
+// stills repeat their image path, video clips carry a clip-local decode time
+// the backend resolves through the media engine) and the audio tracks' clips
+// (mixed down with their trim/gain/fade edits and muxed into the output).
 
 import { defaultAudioEdit, type AudioClipEdit } from "./audioEdit";
 import type { MediaAsset } from "./mediaBin";
@@ -37,13 +36,12 @@ export interface AudioRenderSegment extends RenderSegment {
 
 export type RenderWarning =
   | { kind: "missing_asset"; clipId: string; assetId: string }
-  | { kind: "video_clip_skipped"; clipId: string }
   | { kind: "gap"; atSec: number; lengthSec: number };
 
 export interface RenderPlan {
   timelineId: string;
   fps: number;
-  /** Encodable still segments of the first video track, in timeline order. */
+  /** Encodable segments (stills and video clips) of the first video track. */
   video: RenderSegment[];
   /** Audio-track segments, mixed down and muxed into the output. */
   audio: AudioRenderSegment[];
@@ -58,8 +56,8 @@ export const MAX_EXPORT_FRAMES = 20000;
 /**
  * Build the render plan for a timeline: order the first video track's clips,
  * resolve their bin assets, collect the audio clips with their edits, and
- * report anything the encode path cannot carry (missing assets, video clips,
- * gaps between clips).
+ * report anything the encode path cannot carry (missing assets, gaps
+ * between clips).
  */
 export function buildRenderPlan(
   timeline: TimelineModel,
@@ -84,11 +82,6 @@ export function buildRenderPlan(
     const asset = byId.get(clip.assetId);
     if (!asset) {
       warnings.push({ kind: "missing_asset", clipId: clip.id, assetId: clip.assetId });
-      continue;
-    }
-    if (clip.kind === "video") {
-      warnings.push({ kind: "video_clip_skipped", clipId: clip.id });
-      cursor = Math.max(cursor, clip.start + clip.duration);
       continue;
     }
     if (clip.start > cursor + 1e-6) {
@@ -135,28 +128,45 @@ export function buildRenderPlan(
 }
 
 export interface ExpandedFrames {
-  /** One image path per output frame, in order. */
+  /** One media path per output frame, in order (image or video file). */
   paths: string[];
   /** Per-frame grade doc (JSON string), aligned with `paths`. */
   gradeDocs: (string | null)[];
+  /**
+   * Per-frame clip-local decode time, aligned with `paths`: `null` for
+   * still frames (the path is the frame image), seconds into the source
+   * for video-clip frames (the backend decodes the frame at that time).
+   */
+  frameTimes: (number | null)[];
+  /** True when any frame needs a video decode (`frameTimes` non-null). */
+  hasVideoFrames: boolean;
 }
 
 /**
- * Expand the plan's still segments into one image path per output frame
- * (each carrying its clip's grade doc), gaps dropped (segments encode
- * back-to-back). Returns `null` when the frame count would exceed
- * {@link MAX_EXPORT_FRAMES}.
+ * Expand the plan's segments into one frame per output frame (each carrying
+ * its clip's grade doc), gaps dropped (segments encode back-to-back). Still
+ * frames repeat the image path; video-clip frames pair the video path with
+ * the clip-local time to decode. Returns `null` when the frame count would
+ * exceed {@link MAX_EXPORT_FRAMES}.
  */
-export function expandStillFrames(plan: RenderPlan): ExpandedFrames | null {
+export function expandPlanFrames(plan: RenderPlan): ExpandedFrames | null {
   const paths: string[] = [];
   const gradeDocs: (string | null)[] = [];
+  const frameTimes: (number | null)[] = [];
+  let hasVideoFrames = false;
   for (const segment of plan.video) {
     const count = Math.max(1, Math.round(segment.duration * plan.fps));
     if (paths.length + count > MAX_EXPORT_FRAMES) return null;
     for (let i = 0; i < count; i += 1) {
       paths.push(segment.path);
       gradeDocs.push(segment.gradeDoc);
+      if (segment.kind === "video") {
+        frameTimes.push(Math.min(i / plan.fps, segment.duration));
+        hasVideoFrames = true;
+      } else {
+        frameTimes.push(null);
+      }
     }
   }
-  return { paths, gradeDocs };
+  return { paths, gradeDocs, frameTimes, hasVideoFrames };
 }

@@ -8,7 +8,7 @@ import type { TimelineModel } from "./timeline";
 import {
   buildRenderPlan,
   DEFAULT_EXPORT_FPS,
-  expandStillFrames,
+  expandPlanFrames,
   type RenderWarning,
 } from "./renderPlan";
 
@@ -66,15 +66,13 @@ export function ExportDialog({
     () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc, clipAudioEdit }),
     [timeline, assets, fps, clipGradeDoc, clipAudioEdit],
   );
-  const frames = useMemo(() => expandStillFrames(plan), [plan]);
+  const frames = useMemo(() => expandPlanFrames(plan), [plan]);
   const canExport = plan.video.length > 0 && frames !== null && state.phase !== "running";
 
   const warningText = (w: RenderWarning): string => {
     switch (w.kind) {
       case "missing_asset":
         return t("export.warnMissingAsset", { id: w.assetId });
-      case "video_clip_skipped":
-        return t("export.warnVideoSkipped");
       case "gap":
         return t("export.warnGap", { at: w.atSec.toFixed(1), len: w.lengthSec.toFixed(1) });
     }
@@ -87,6 +85,7 @@ export function ExportDialog({
       const result = await timelineExport(frames.paths, plan.fps, {
         outputName: outputName.trim() || undefined,
         gradeDocs: frames.gradeDocs.some((d) => d !== null) ? frames.gradeDocs : undefined,
+        frameTimes: frames.hasVideoFrames ? frames.frameTimes : undefined,
         audio:
           plan.audio.length > 0
             ? plan.audio.map((s) => ({

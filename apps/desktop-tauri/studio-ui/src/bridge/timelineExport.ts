@@ -1,8 +1,9 @@
 // Bridge for the drawer's timeline export command: send the expanded frame
-// sequence (one image path per output frame) plus the audio segments to the
-// backend `timeline_export` command, which encodes the video through the same
-// FFmpeg seam as the `videoAssemble` node executor and muxes the audio
-// mixdown in as an AAC track.
+// sequence (one media path per output frame; video-clip frames pair the
+// path with a clip-local decode time) plus the audio segments to the backend
+// `timeline_export` command, which encodes the video through the same FFmpeg
+// seam as the `videoAssemble` node executor and muxes the audio mixdown in
+// as an AAC track.
 
 import { tauriInvoke } from "./core";
 
@@ -48,6 +49,11 @@ export async function timelineExport(
     codec?: string;
     outputName?: string;
     gradeDocs?: (string | null)[];
+    /**
+     * Per-frame clip-local decode time, aligned with `frames`: `null` for
+     * still frames, seconds into the source for video-clip frames.
+     */
+    frameTimes?: (number | null)[];
     audio?: TimelineAudioSegment[];
   } = {},
 ): Promise<TimelineExportResult | null> {
@@ -59,6 +65,7 @@ export async function timelineExport(
     codec: opts.codec ?? null,
     outputName: opts.outputName ?? null,
     gradeDocs: opts.gradeDocs ?? null,
+    frameTimes: opts.frameTimes ?? null,
     audio: opts.audio ?? null,
   })) as TimelineExportResult;
 }
