@@ -595,6 +595,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       frames: { label: "帧列表", hint: "帧图像路径，每行一个（连接的 frames 输入优先）" },
       fps: { label: "帧率", hint: "输出帧率" },
       codec: { label: "编码器", hint: "ffmpeg 编码器；libx264 兼容性最好" },
+      device: {
+        label: "设备",
+        hint: "gpu 会尝试硬件 H.264 编码器（nvenc/qsv/amf/mf），失败时回退软件编码并显示原因；auto/cpu 使用软件编码",
+      },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: {
         label: "输出名",

@@ -1831,6 +1831,15 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         hint: "ffmpeg encoder; libx264 is the most compatible",
       },
       {
+        key: "device",
+        label: "Device",
+        control: "select",
+        options: ["auto", "cpu", "gpu"],
+        defaultValue: "auto",
+        inline: true,
+        hint: "gpu tries a hardware H.264 encoder (nvenc/qsv/amf/mf) and falls back to software encode with a visible reason; auto/cpu use software encode",
+      },
+      {
         key: "output_dir",
         label: "Output dir",
         control: "path",

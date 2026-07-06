@@ -137,6 +137,15 @@ pub(crate) fn hardware_encoders() -> Vec<String> {
         .collect()
 }
 
+/// The first hardware H.264 encoder compiled into the vendored libav, if any
+/// (the encoder an explicit `device: gpu` encode request tries before falling
+/// back to the software baseline).
+pub(crate) fn hardware_h264_encoder() -> Option<String> {
+    hardware_encoders()
+        .into_iter()
+        .find(|name| name.starts_with("h264_"))
+}
+
 /// Encode/trim result mirrored onto the `videoAssemble` / `videoTrim` node
 /// reports (the same shape the PyAV worker's payloads carried).
 #[derive(Debug, Clone)]
@@ -719,7 +728,9 @@ struct Encoder {
 impl Encoder {
     fn open(out: &Path, width: u32, height: u32, fps: f64, codec: &str) -> Result<Self, String> {
         let h264_names = ["h264", "libx264", "libopenh264", "openh264"];
-        if !h264_names.iter().any(|n| codec.eq_ignore_ascii_case(n)) {
+        let hw_h264_names = ["h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"];
+        let is_hw = hw_h264_names.iter().any(|n| codec.eq_ignore_ascii_case(n));
+        if !is_hw && !h264_names.iter().any(|n| codec.eq_ignore_ascii_case(n)) {
             return Err(format!(
                 "unsupported codec '{codec}': the native encoder ships H.264 only"
             ));
@@ -755,6 +766,13 @@ impl Encoder {
 
             let mut encoder = ffi::avcodec_find_encoder_by_name(codec_name.as_ptr());
             if encoder.is_null() {
+                // A hardware encoder must be exactly what was asked for — the
+                // caller owns the software fallback (and its visible reason).
+                if is_hw {
+                    return Err(format!(
+                        "hardware encoder '{codec}' is not compiled into the vendored libav"
+                    ));
+                }
                 encoder = ffi::avcodec_find_encoder(ffi::AV_CODEC_ID_H264);
             }
             if encoder.is_null() {
