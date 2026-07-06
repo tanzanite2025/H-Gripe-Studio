@@ -1,4 +1,4 @@
-// Layered image asset protocol (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md).
+// Layered image asset protocol (docs/plans/completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md).
 //
 // A `LayeredImageAsset` is the project-internal result of splitting a flat
 // image into editable production layers; PSD is only one import/export format

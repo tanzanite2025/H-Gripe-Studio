@@ -1,5 +1,5 @@
 //! Heuristic shadow candidate detection for `smartLayerSplit`
-//! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 3 文字/logo/阴影).
+//! (docs/plans/completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 3 文字/logo/阴影).
 //!
 //! Deterministic, weight-free CPU detector: a cast shadow is a background
 //! region markedly darker than the background's own baseline that sits next
