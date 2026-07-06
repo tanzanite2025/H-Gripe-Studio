@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { useT } from "../i18n";
+import {
+  REGISTRY_EVENT,
+  apiProfilesFor,
+  loadRegistry,
+} from "../models/backendRegistry";
+import { ModelManagerModal } from "../models/ModelManagerModal";
 import type { LocalPreset } from "../runtime/promptOptimize";
 import {
+  appendTurn,
+  assistantApiReply,
   emptyAssistantSession,
   latestDraft,
   loadAssistantSession,
@@ -39,6 +48,15 @@ export function PromptAssistantPanel({
   const t = useT();
   const [session, setSession] = useState(loadAssistantSession);
   const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
+  // Reloaded on every registry save so manager edits show up live.
+  const [registry, setRegistry] = useState(() => loadRegistry());
+  useEffect(() => {
+    const reload = () => setRegistry(loadRegistry());
+    window.addEventListener(REGISTRY_EVENT, reload);
+    return () => window.removeEventListener(REGISTRY_EVENT, reload);
+  }, []);
   const logRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -49,11 +67,43 @@ export function PromptAssistantPanel({
 
   const draft = latestDraft(session);
 
+  // Global manager options for the assistant backend (plan step 4: the same
+  // capability-filtered selector API every card uses; the session keeps only
+  // the managed ref).
+  const apiOptions = apiProfilesFor(registry, "prompt.rewrite");
+  const backendRef = session.backend.kind === "api_profile" ? session.backend.ref : null;
+  const backendValue = backendRef !== null ? `api:${backendRef}` : "local";
+  const backendDangling =
+    backendRef !== null && !apiOptions.some((p) => p.ref === backendRef);
+
   const send = () => {
-    const next = sendAssistantMessage(session, input);
-    if (next === session) return;
-    setSession(next);
+    const text = input.trim();
+    if (!text || busy) return;
+    if (session.backend.kind === "local") {
+      const next = sendAssistantMessage(session, input);
+      if (next === session) return;
+      setSession(next);
+      setInput("");
+      return;
+    }
+    const ref = session.backend.ref;
+    const profile = apiOptions.find((p) => p.ref === ref);
+    const asked = appendTurn(session, "user", text);
+    setSession(asked);
     setInput("");
+    if (!profile) {
+      setSession(appendTurn(asked, "assistant", t("assistant.backendGone", { ref })));
+      return;
+    }
+    setBusy(true);
+    assistantApiReply(text, profile)
+      .then((reply) => setSession((s) => appendTurn(s, "assistant", reply)))
+      .catch((err: unknown) =>
+        setSession((s) =>
+          appendTurn(s, "assistant", t("assistant.apiError", { error: String(err) })),
+        ),
+      )
+      .finally(() => setBusy(false));
   };
 
   return (
@@ -73,19 +123,53 @@ export function PromptAssistantPanel({
       <div className="assistant-backend">
         <span>{t("assistant.backend")}</span>
         <select
-          value={session.preset}
-          onChange={(e) =>
-            setSession((s) => ({ ...s, preset: e.target.value as LocalPreset }))
-          }
-          aria-label={t("assistant.preset")}
+          value={backendDangling ? "" : backendValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSession((s) => ({
+              ...s,
+              backend: v.startsWith("api:")
+                ? { kind: "api_profile", ref: v.slice("api:".length) }
+                : { kind: "local" },
+            }));
+          }}
+          aria-label={t("assistant.backend")}
         >
-          {PRESET_OPTIONS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
+          {backendDangling && <option value="">{backendRef}</option>}
+          <option value="local">{t("assistant.backendLocal")}</option>
+          {apiOptions.length > 0 && (
+            <optgroup label={t("models.selector.groupApi")}>
+              {apiOptions.map((p) => (
+                <option key={p.ref} value={`api:${p.ref}`}>
+                  {p.display_name}
+                  {p.provider_kind ? ` (${p.provider_kind})` : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
+        <button type="button" onClick={() => setManagerOpen(true)}>
+          {t("models.selector.manage")}
+        </button>
       </div>
+      {session.backend.kind === "local" && (
+        <div className="assistant-backend">
+          <span>{t("assistant.preset")}</span>
+          <select
+            value={session.preset}
+            onChange={(e) =>
+              setSession((s) => ({ ...s, preset: e.target.value as LocalPreset }))
+            }
+            aria-label={t("assistant.preset")}
+          >
+            {PRESET_OPTIONS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="assistant-log" ref={logRef}>
         {session.messages.length === 0 && (
           <p className="assistant-empty">{t("assistant.empty")}</p>
@@ -95,6 +179,7 @@ export function PromptAssistantPanel({
             {m.text}
           </div>
         ))}
+        {busy && <p className="assistant-empty">{t("assistant.waiting")}</p>}
       </div>
       <div className="assistant-input">
         <textarea
@@ -109,7 +194,7 @@ export function PromptAssistantPanel({
           placeholder={t("assistant.placeholder")}
           rows={2}
         />
-        <button onClick={send} disabled={!input.trim()}>
+        <button onClick={send} disabled={!input.trim() || busy}>
           {t("assistant.send")}
         </button>
       </div>
@@ -132,12 +217,25 @@ export function PromptAssistantPanel({
         </button>
         <span className="spacer" />
         <button
-          onClick={() => setSession((s) => ({ ...emptyAssistantSession(), preset: s.preset }))}
+          onClick={() =>
+            setSession((s) => ({ ...emptyAssistantSession(), preset: s.preset, backend: s.backend }))
+          }
           disabled={session.messages.length === 0}
         >
           {t("assistant.clear")}
         </button>
       </div>
+      {managerOpen &&
+        createPortal(
+          <ModelManagerModal
+            capability="prompt.rewrite"
+            onClose={() => {
+              setManagerOpen(false);
+              setRegistry(loadRegistry());
+            }}
+          />,
+          document.body,
+        )}
     </div>
   );
 }

@@ -281,7 +281,13 @@ Bottom drawer
    (insert writes the draft into the selected `prompt` / `promptOptimize`
    card's `text` param; create spawns a selected `promptOptimize` card with
    the draft; plus copy-to-clipboard and clear-session).
-4. Wire API profile selection through the global API Manager.
+4. ✅ Wire API profile selection through the global API Manager
+   (panel backend select goes through the same capability-filtered selector
+   API as cards — `apiProfilesFor(registry, "prompt.rewrite")` — with a
+   Manage button opening the shared `ModelManagerModal`; replies run the same
+   `text.generate` broker task as the `promptOptimize` card's `api` mode via
+   `assistantApiReply`; the session stores only `{ kind: "api_profile", ref }`,
+   never provider URLs or keys; failures surface as assistant turns).
 5. Wire local text model selection through the Local Model Manager.
 6. ✅ Add session persistence separate from workflow graph persistence
    (localStorage-backed session in `promptAssistantState.ts`; multi-session
