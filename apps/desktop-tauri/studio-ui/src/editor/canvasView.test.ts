@@ -116,6 +116,11 @@ describe("canvasView (M8)", () => {
     expect(deep.zoom).toBe(8);
     expect(deep.panX + 1 / (2 * deep.zoom)).toBeCloseTo(0.5);
     expect(deep.panY + 1 / (2 * deep.zoom)).toBeCloseTo(0.5);
+    // A frame smaller than the stage (an image at its natural pixels, or a
+    // one-axis fit): the window widens by the covering ratio so everything
+    // on screen stays inside it.
+    expect(viewWindow({ zoom: 2, panX: 0, panY: 0 }, 400, 450, 800, 450)).toEqual({ zoom: 1, panX: 0, panY: 0 });
+    expect(viewWindow({ zoom: 8, panX: 0, panY: 0 }, 400, 450, 800, 450)).toEqual({ zoom: 4, panX: 0.375, panY: 0.375 });
     // A rotated view is not an axis-aligned window: keep the full frame.
     expect(viewWindow({ zoom: 2, panX: 0, panY: 0, rotate: 30 }, W, H)).toEqual({ zoom: 1, panX: 0, panY: 0 });
     // No measured base yet: keep the full frame.

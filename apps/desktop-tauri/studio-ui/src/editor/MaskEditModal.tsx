@@ -323,10 +323,19 @@ export function MaskEditModal({
   // the surface placement following it) carries the motion frame-to-frame;
   // the host re-renders the window at matching detail once the view settles,
   // instead of a full render round-trip per input event.
-  const targetViewportView = useMemo(
-    () => viewWindow(view, canvasRef.current?.offsetWidth ?? 0, canvasRef.current?.offsetHeight ?? 0),
-    [view],
-  );
+  const targetViewportView = useMemo(() => {
+    const canvas = canvasRef.current;
+    // The stage rect bounds what is visible of the transformed frame; the
+    // window must cover it even when the frame's base rect is smaller.
+    const stage = canvas?.closest<HTMLElement>(".mask-edit-stage");
+    return viewWindow(
+      view,
+      canvas?.offsetWidth ?? 0,
+      canvas?.offsetHeight ?? 0,
+      stage?.clientWidth ?? 0,
+      stage?.clientHeight ?? 0,
+    );
+  }, [view]);
   const [viewportView, setViewportView] = useState(targetViewportView);
   useEffect(() => {
     if (
