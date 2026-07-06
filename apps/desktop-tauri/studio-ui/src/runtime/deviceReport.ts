@@ -15,6 +15,7 @@
 // | detailRepaint `repaint_report`           | engine_requested                   | engine, device, precision   | engine_fallback_reason   |
 // | subjectMask `matte_report` (auto modes)  | device_requested                   | engine, device              | engine_fallback_reason   |
 // | videoAssemble `assemble_report`          | device_requested                   | engine, device (ffmpeg_sw)  | engine_fallback_reason   |
+// | videoTrim `trim_report`                  | device_requested                   | engine, device, decode_device | engine_fallback_reason, decode_fallback_reason |
 // | viewport frames (`ViewportBackend`)      | requested (auto|gpu|cpu)           | actual (wgpu|gpu|cpu)       | fallback_reason          |
 
 /** What the caller asked for (`device`/`viewport` request vocabulary). */
@@ -39,6 +40,10 @@ export interface DeviceReport {
   backend?: string;
   accelerated: boolean;
   fallbackReason?: string;
+  /** Decode-half telemetry when the operation decodes and re-encodes
+   * (videoTrim): the decode device and its own fallback reason, reported
+   * separately from the encode half. */
+  decode?: { used: DeviceUsed; fallbackReason?: string };
 }
 
 const REQUESTS: DeviceRequest[] = ["auto", "cpu", "cuda", "gpu"];
@@ -78,6 +83,8 @@ export interface EngineReportLike {
   device?: string | null;
   device_requested?: string | null;
   precision?: string | null;
+  decode_device?: string | null;
+  decode_fallback_reason?: string | null;
 }
 
 /** CPU-baseline engine ids: not an accelerated backend, device is plain CPU. */
@@ -100,14 +107,19 @@ export function deviceReportFromEngineReport(report: EngineReportLike): DeviceRe
     : asUsed(report.device) ?? "unknown";
   const precision = asText(report.precision);
   const backendParts = [engine, precision].filter(Boolean) as string[];
+  const decodeUsed = asUsed(report.decode_device);
+  const decode = decodeUsed
+    ? { used: decodeUsed, fallbackReason: asText(report.decode_fallback_reason) }
+    : undefined;
   return {
     requested: asRequest(report.device_requested),
     used,
     backend: backendParts.length > 0 ? backendParts.join(" ") : undefined,
     // Software FFmpeg is the vendored encode/decode baseline, not an
     // accelerated backend (only `ffmpeg_hw` counts as accelerated).
-    accelerated: ACCELERATED.has(used),
+    accelerated: ACCELERATED.has(used) || (decode ? ACCELERATED.has(decode.used) : false),
     fallbackReason: asText(report.engine_fallback_reason),
+    decode,
   };
 }
 
@@ -199,6 +211,11 @@ export function describeDeviceReport(report: DeviceReport): string {
   const notes: string[] = [];
   if (report.backend && report.backend !== report.used) notes.push(report.backend);
   if (report.fallbackReason) notes.push(`fallback: ${report.fallbackReason}`);
+  if (report.decode) {
+    let decode = `decode ${report.decode.used}`;
+    if (report.decode.fallbackReason) decode += ` (fallback: ${report.decode.fallbackReason})`;
+    notes.push(decode);
+  }
   if (notes.length > 0) line += ` (${notes.join("; ")})`;
   return line;
 }
@@ -212,6 +229,7 @@ const REPORT_OUTPUT_KEYS = [
   "repaint_report",
   "matte_report",
   "assemble_report",
+  "trim_report",
 ];
 
 /**

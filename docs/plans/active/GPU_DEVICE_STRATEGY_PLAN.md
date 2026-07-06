@@ -466,7 +466,9 @@ This should be a settings surface, not a required setup wizard.
     `video_engine::decode_with_device`): an explicit `device: gpu` request
     tries the compiled-in hardware decoder matching the input codec and
     retries on the software decoder with the reason kept visible
-    (`decode_device` / `decode_fallback_reason` on `trim_report`); playback
+    (`decode_device` / `decode_fallback_reason` on `trim_report`, and the
+    run log's device line reads `trim_report` too, appending a
+    `decode ffmpeg_sw/ffmpeg_hw` note with its fallback reason); playback
     scrubbing stays on the software baseline. Timeline export joined too:
     the export dialog's device select passes through `timeline_export` into
     the `videoAssemble` executor and the result surfaces `encode_device` /

@@ -1068,7 +1068,7 @@ mod tests {
         assert_eq!((meta.width, meta.height), (64, 48));
 
         let cut = dir.join("hgripe_native_trim_test.mp4");
-        let trimmed = trim_video(&clip, &cut, 0.5, Some(1.5), "h264").unwrap();
+        let trimmed = trim_video(&clip, &cut, 0.5, Some(1.5), "h264", None).unwrap();
         assert!(
             trimmed.frame_count >= 5 && trimmed.frame_count <= 7,
             "{trimmed:?}"
