@@ -876,10 +876,6 @@ export const messages = {
     en: "a clip references a missing bin asset ({id}) and is skipped",
     zh: "有 clip 引用了不存在的素材（{id}），已跳过",
   },
-  "export.warnVideoSkipped": {
-    en: "video clips are not encoded yet — this first export covers still clips",
-    zh: "视频 clip 暂未参与编码——第一版导出只覆盖静帧 clip",
-  },
   "export.audioSummary": {
     en: "{n} audio clip(s) will be mixed down and muxed into the output",
     zh: "{n} 个音频 clip 将混音并封装进输出文件",

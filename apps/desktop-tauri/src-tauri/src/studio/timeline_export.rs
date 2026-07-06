@@ -3,10 +3,11 @@
 //! plan into a video file. The UI builds the render plan (still clips expanded
 //! to per-frame image paths at the chosen fps) and this command reuses the
 //! `videoAssemble` executor for the actual FFmpeg encode — native in-process
-//! FFmpeg on default builds, the PyAV worker otherwise. Audio clips are mixed
-//! down (trim / gain / fades, summed at their timeline offsets) and muxed into
-//! the encoded video as an AAC track (`audio_mix`). Video-clip segments extend
-//! this seam later.
+//! FFmpeg on default builds, the PyAV worker otherwise. Video-clip frames
+//! arrive as (video path, clip-local time) pairs and are decoded through the
+//! media engine's `FrameSource` before the grade/encode passes. Audio clips
+//! are mixed down (trim / gain / fades, summed at their timeline offsets) and
+//! muxed into the encoded video as an AAC track (`audio_mix`).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -43,6 +44,53 @@ pub(crate) struct TimelineExportResult {
     /// Why the export stayed video-only although audio clips were sent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) audio_skipped_reason: Option<String>,
+}
+
+/// Substitute decoded video frames into the frame sequence: each frame with
+/// a decode time treats its path as a video source and renders the frame
+/// nearest that clip-local time under `frames_dir` via the media engine's
+/// `FrameSource` (repeated (path, time) pairs reuse the decoded file);
+/// frames without a time pass through as image paths.
+pub(super) fn resolve_video_frames(
+    frames: Vec<String>,
+    frame_times: &[Option<f64>],
+    frames_dir: &Path,
+) -> Result<Vec<String>, String> {
+    if frame_times.len() != frames.len() {
+        return Err(format!(
+            "frame_times length {} does not match frames length {}",
+            frame_times.len(),
+            frames.len()
+        ));
+    }
+    if !frame_times.iter().any(Option::is_some) {
+        return Ok(frames);
+    }
+    let mut source = super::video_engine::make_frame_source();
+    let mut rendered: HashMap<(String, i64), String> = HashMap::new();
+    let mut out = Vec::with_capacity(frames.len());
+    for (i, path) in frames.into_iter().enumerate() {
+        let Some(time_sec) = frame_times[i] else {
+            out.push(path);
+            continue;
+        };
+        if !time_sec.is_finite() || time_sec < 0.0 {
+            return Err(format!("invalid frame time {time_sec} at frame {i}"));
+        }
+        let key = (path.clone(), (time_sec * 1000.0).round() as i64);
+        if let Some(existing) = rendered.get(&key) {
+            out.push(existing.clone());
+            continue;
+        }
+        std::fs::create_dir_all(frames_dir)
+            .map_err(|err| format!("failed to create {}: {err}", frames_dir.display()))?;
+        let frame_out = frames_dir.join(format!("vframe_{}.png", rendered.len()));
+        let written = source.decode_frame(Path::new(path.trim()), time_sec, &frame_out)?;
+        let out_str = written.to_string_lossy().to_string();
+        rendered.insert(key, out_str.clone());
+        out.push(out_str);
+    }
+    Ok(out)
 }
 
 /// Frames ready for the encoder, plus the grading backend report.
@@ -118,8 +166,10 @@ pub(super) fn resolve_graded_frames(
     })
 }
 
-/// Encode `frames` (one image path per output frame, in order) at `fps` into a
-/// video under the project output dir. When `grade_docs` is given (aligned
+/// Encode `frames` (one media path per output frame, in order) at `fps` into
+/// a video under the project output dir. When `frame_times` is given (aligned
+/// with `frames`), frames with a time are video-clip frames decoded from
+/// their source at that clip-local time. When `grade_docs` is given (aligned
 /// with `frames`), each clip's stored grade document is applied to its frames
 /// before the encode — the export carries the same grades the program monitor
 /// and grade preview show. Backed by the same encoder as the `videoAssemble`
@@ -131,8 +181,22 @@ pub(crate) fn timeline_export(
     codec: Option<String>,
     output_name: Option<String>,
     grade_docs: Option<Vec<Option<String>>>,
+    frame_times: Option<Vec<Option<f64>>>,
     audio: Option<Vec<TimelineAudioSegment>>,
 ) -> Result<TimelineExportResult, String> {
+    let frames = match frame_times {
+        Some(times) if times.iter().any(Option::is_some) => {
+            let frames_dir = crate::runtime_paths()?.output_dir.join(format!(
+                "timeline_frames_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            ));
+            resolve_video_frames(frames, &times, &frames_dir)?
+        }
+        _ => frames,
+    };
     let graded = match grade_docs {
         Some(docs) if docs.iter().any(|d| d.is_some()) => {
             let graded_dir = crate::runtime_paths()?.output_dir.join(format!(
@@ -259,7 +323,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_frames() {
-        let err = timeline_export(vec![], 24.0, None, None, None, None).unwrap_err();
+        let err = timeline_export(vec![], 24.0, None, None, None, None, None).unwrap_err();
         assert!(err.contains("needs at least one frame"), "{err}");
     }
 
@@ -272,9 +336,66 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap_err();
         assert!(err.contains("does not exist"), "{err}");
+    }
+
+    #[test]
+    fn resolve_video_frames_validates_alignment_and_passes_stills_through() {
+        let frames = vec!["a.png".to_string(), "b.png".to_string()];
+        let dir = std::env::temp_dir().join("hgripe_export_vframes");
+
+        let err = resolve_video_frames(frames.clone(), &[None], &dir).unwrap_err();
+        assert!(err.contains("does not match"), "{err}");
+
+        // No decode times: the sequence passes through untouched.
+        let out = resolve_video_frames(frames.clone(), &[None, None], &dir).unwrap();
+        assert_eq!(out, frames);
+
+        let err = resolve_video_frames(frames, &[None, Some(-1.0)], &dir).unwrap_err();
+        assert!(err.contains("invalid frame time"), "{err}");
+    }
+
+    #[cfg(feature = "native-ffmpeg")]
+    #[test]
+    fn resolve_video_frames_decodes_and_reuses_repeated_times() {
+        // Encode a tiny video, then decode frames from it: repeated
+        // (path, time) pairs must share one decoded file.
+        let dir = std::env::temp_dir().join(format!("hgripe_export_vdec_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut stills = Vec::new();
+        for i in 0..6u8 {
+            let p = dir.join(format!("src_{i}.png"));
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                16,
+                16,
+                image::Rgba([i * 40, 0, 0, 255]),
+            ))
+            .save(&p)
+            .unwrap();
+            stills.push(p.to_string_lossy().to_string());
+        }
+        let clip = dir.join("clip.mp4");
+        super::super::ffmpeg_native::assemble_frames(&stills, &clip, 6.0, "libx264")
+            .expect("encode the source video");
+        let clip_str = clip.to_string_lossy().to_string();
+
+        let frames_dir = dir.join("vframes");
+        let out = resolve_video_frames(
+            vec![clip_str.clone(), clip_str.clone(), clip_str, "still.png".to_string()],
+            &[Some(0.0), Some(0.0), Some(0.5), None],
+            &frames_dir,
+        )
+        .expect("decode video frames");
+        assert_eq!(out[0], out[1], "repeated (path, time) reuses the file");
+        assert_ne!(out[0], out[2]);
+        assert!(Path::new(&out[0]).exists());
+        assert!(Path::new(&out[2]).exists());
+        assert_eq!(out[3], "still.png", "still frames pass through");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

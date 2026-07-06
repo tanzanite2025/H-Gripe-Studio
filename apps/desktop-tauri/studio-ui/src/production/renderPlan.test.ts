@@ -5,7 +5,7 @@ import { appendClip, createTimeline, trimClip, type TimelineModel } from "./time
 import {
   buildRenderPlan,
   DEFAULT_EXPORT_FPS,
-  expandStillFrames,
+  expandPlanFrames,
   MAX_EXPORT_FRAMES,
 } from "./renderPlan";
 
@@ -46,7 +46,7 @@ describe("buildRenderPlan", () => {
     ]);
   });
 
-  it("skips video clips with a warning and collects audio segments", () => {
+  it("collects video clips alongside stills and audio segments", () => {
     const assets = [
       asset("v1", "video", "C:/clip.mp4"),
       asset("s1", "image", "C:/still.png"),
@@ -54,9 +54,10 @@ describe("buildRenderPlan", () => {
     ];
     const { timeline } = withClips(assets);
     const plan = buildRenderPlan(timeline, assets);
-    expect(plan.video).toHaveLength(1);
+    expect(plan.video.map((s) => s.kind)).toEqual(["video", "still"]);
     expect(plan.audio).toHaveLength(1);
-    expect(plan.warnings.map((w) => w.kind)).toEqual(["video_clip_skipped"]);
+    expect(plan.durationSec).toBeCloseTo(4);
+    expect(plan.warnings).toEqual([]);
   });
 
   it("carries each audio clip's edit into its segment, defaulting when absent", () => {
@@ -92,7 +93,7 @@ describe("buildRenderPlan", () => {
   });
 });
 
-describe("expandStillFrames", () => {
+describe("expandPlanFrames", () => {
   it("emits one frame path per output frame, carrying the clip's grade doc", () => {
     const assets = [asset("a1", "image", "C:/one.png")];
     const { timeline, clipIds } = withClips(assets);
@@ -101,11 +102,32 @@ describe("expandStillFrames", () => {
       fps: 10,
       clipGradeDoc: (clipId) => (clipId === clipIds[0] ? doc : null),
     });
-    const frames = expandStillFrames(plan);
+    const frames = expandPlanFrames(plan);
     expect(frames?.paths).toHaveLength(20);
     expect(frames?.paths.every((f) => f === "C:/one.png")).toBe(true);
     expect(frames?.gradeDocs).toHaveLength(20);
     expect(frames?.gradeDocs.every((d) => d === doc)).toBe(true);
+    expect(frames?.frameTimes.every((t) => t === null)).toBe(true);
+    expect(frames?.hasVideoFrames).toBe(false);
+  });
+
+  it("pairs video-clip frames with clip-local decode times", () => {
+    const assets = [asset("v1", "video", "C:/clip.mp4"), asset("s1", "image", "C:/still.png")];
+    const { timeline } = withClips(assets);
+    const plan = buildRenderPlan(timeline, assets, { fps: 2 });
+    const frames = expandPlanFrames(plan);
+    expect(frames?.paths).toEqual([
+      "C:/clip.mp4",
+      "C:/clip.mp4",
+      "C:/clip.mp4",
+      "C:/clip.mp4",
+      "C:/still.png",
+      "C:/still.png",
+      "C:/still.png",
+      "C:/still.png",
+    ]);
+    expect(frames?.frameTimes).toEqual([0, 0.5, 1, 1.5, null, null, null, null]);
+    expect(frames?.hasVideoFrames).toBe(true);
   });
 
   it("refuses plans that exceed the frame budget", () => {
@@ -116,6 +138,6 @@ describe("expandStillFrames", () => {
     });
     timeline = result!.timeline;
     const plan = buildRenderPlan(timeline, assets, { fps: 10 });
-    expect(expandStillFrames(plan)).toBeNull();
+    expect(expandPlanFrames(plan)).toBeNull();
   });
 });
