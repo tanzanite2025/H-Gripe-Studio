@@ -6,6 +6,7 @@
 
 import { tauriInvoke } from "./core";
 import type { GradeDoc } from "../editor/gradeKernel";
+import { previewProxyMaxDim } from "../runtime/previewQuality";
 
 export interface GradePreviewResult {
   data_url: string;
@@ -21,7 +22,7 @@ export interface GradePreviewResult {
 export async function gradePreview(
   path: string,
   doc: GradeDoc,
-  maxDim = 1280,
+  maxDim = previewProxyMaxDim(),
 ): Promise<GradePreviewResult | null> {
   const invoke = tauriInvoke();
   if (!invoke) return null;
@@ -41,7 +42,7 @@ export async function videoFrameGradePreview(
   video: string,
   timestampSec: number,
   doc: GradeDoc,
-  maxDim = 1280,
+  maxDim = previewProxyMaxDim(),
 ): Promise<GradePreviewResult | null> {
   const invoke = tauriInvoke();
   if (!invoke) return null;

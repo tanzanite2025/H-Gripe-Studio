@@ -1138,6 +1138,13 @@ export const messages = {
     en: "Seeds unset node device params; explicit per-node choices always win.",
     zh: "作为节点未设置设备参数时的默认值；节点显式选择始终优先。",
   },
+  "models.previewQualityTitle": { en: "Preview quality", zh: "预览质量" },
+  "models.previewQuality.speed": { en: "prefer speed", zh: "优先速度" },
+  "models.previewQuality.fidelity": { en: "prefer fidelity", zh: "优先保真" },
+  "models.previewQualityHint": {
+    en: "Grade preview proxy size only; exports always run at full fidelity.",
+    zh: "仅影响调色预览代理尺寸；导出始终以完整保真度运行。",
+  },
   "models.gpuMaxJobsTitle": { en: "Max concurrent GPU jobs", zh: "GPU 并发上限" },
   "models.gpuMaxJobsHint": {
     en: "Width of the GPU compute lane. 1 keeps the device responsive; running jobs are never interrupted.",

@@ -439,7 +439,12 @@ Only after the manager exists, consider a settings surface:
   resizable (`set_gpu_limit`, clamped `1..=MAX_GPU_JOBS`): widening adds
   permits immediately, narrowing retires permits as running jobs finish —
   work is never interrupted.
-- prefer preview speed vs export fidelity
+- ✅ prefer preview speed vs export fidelity — a "Preview quality" select next
+  to the other controls (`runtime/previewQuality.ts`, localStorage-backed).
+  It only picks the grade preview proxy's long-edge size (speed = the
+  historical 1280, fidelity = 2560) for the grade viewport and the
+  `grade_preview` bridge defaults; exports never read it and always run at
+  full fidelity.
 
 This should be a settings surface, not a required setup wizard.
 
