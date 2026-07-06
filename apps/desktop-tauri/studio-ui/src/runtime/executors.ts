@@ -16,6 +16,7 @@ import {
   type LayeredImageAsset,
 } from "../production/layeredImage";
 import type { ExecutorRegistry } from "./dag";
+import { defaultDeviceParam } from "./devicePreference";
 import {
   optimizePromptLocally,
   promptOptimizeProviderSupported,
@@ -362,7 +363,7 @@ export const defaultExecutors: ExecutorRegistry = {
       protectSaturation: Boolean(ctx.params.protect_saturation ?? false),
       protectBrandColor: Boolean(ctx.params.protect_brand_color ?? true),
       engine: String(ctx.params.engine ?? "cpu") || undefined,
-      device: String(ctx.params.device ?? "auto").trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -396,7 +397,7 @@ export const defaultExecutors: ExecutorRegistry = {
       edgeDecontaminate: Boolean(ctx.params.edge_decontaminate ?? true),
       backgroundBlendStrength: Number(ctx.params.background_blend_strength ?? 0.4),
       engine: String(ctx.params.engine ?? "cpu").trim() || undefined,
-      device: String(ctx.params.device ?? "auto").trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -429,7 +430,7 @@ export const defaultExecutors: ExecutorRegistry = {
       textureStrength: Number(ctx.params.texture_strength ?? 0.25),
       preserveTextLogo: Boolean(ctx.params.preserve_text_logo ?? true),
       engine: String(ctx.params.engine ?? "cpu") || undefined,
-      device: String(ctx.params.device ?? "auto").trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       precision: String(ctx.params.precision ?? "auto").trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
@@ -458,7 +459,7 @@ export const defaultExecutors: ExecutorRegistry = {
       watchTargets: String(ctx.params.watch_targets ?? "").trim() || undefined,
       mode: String(ctx.params.mode ?? "balanced") || undefined,
       engine: String(ctx.params.engine ?? "rules").trim() || undefined,
-      device: String(ctx.params.device ?? "auto").trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });

@@ -7,6 +7,12 @@ import { listProfiles } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
 import { summarizeCapabilities, summarizeDeviceRegistry } from "../runtime/capabilitySummary";
 import {
+  DEVICE_PREFERENCES,
+  getDevicePreference,
+  setDevicePreference,
+  type DevicePreference,
+} from "../runtime/devicePreference";
+import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
   duplicateLocalModel,
@@ -108,6 +114,11 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   // fetched alongside the engine probe on the same manual refresh.
   const [deviceRegistry, setDeviceRegistry] = useState<DeviceRegistrySnapshot | null>(null);
   const [probing, setProbing] = useState(false);
+  // Global default device preference (GPU plan long-term step 5): only seeds
+  // unset `device` params; explicit per-node choices always win.
+  const [devicePreference, setDevicePreferenceState] = useState<DevicePreference>(() =>
+    getDevicePreference(),
+  );
 
   const handleProbe = useCallback(() => {
     setProbing(true);
@@ -396,6 +407,24 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                 <p className="muted">{t("models.emptyLocal")}</p>
               )}
               <div className="model-manager-capability">
+                <div className="model-manager-list-actions">
+                  <span className="muted">{t("models.devicePreferenceTitle")}</span>
+                  <select
+                    value={devicePreference}
+                    onChange={(e) => {
+                      const next = e.target.value as DevicePreference;
+                      setDevicePreference(next);
+                      setDevicePreferenceState(next);
+                    }}
+                  >
+                    {DEVICE_PREFERENCES.map((pref) => (
+                      <option key={pref} value={pref}>
+                        {t(`models.devicePreference.${pref}` as MsgKey)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="muted">{t("models.devicePreferenceHint")}</span>
+                </div>
                 <div className="model-manager-list-actions">
                   <span className="muted">{t("models.capabilityTitle")}</span>
                   <button onClick={handleProbe} disabled={probing}>

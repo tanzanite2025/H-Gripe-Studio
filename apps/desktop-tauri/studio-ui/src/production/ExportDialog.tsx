@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { timelineExport } from "../bridge/timelineExport";
 import { useT } from "../i18n";
+import { getDevicePreference } from "../runtime/devicePreference";
 import type { AudioClipEdit } from "./audioEdit";
 import type { MediaAsset } from "./mediaBin";
 import type { TimelineModel } from "./timeline";
@@ -53,7 +54,9 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const t = useT();
   const [fps, setFps] = useState(DEFAULT_EXPORT_FPS);
-  const [device, setDevice] = useState<"auto" | "cpu" | "gpu">("auto");
+  // Seeded from the global device preference (GPU plan long-term step 5);
+  // the dialog's explicit select still overrides per export.
+  const [device, setDevice] = useState<"auto" | "cpu" | "gpu">(() => getDevicePreference());
   const [outputName, setOutputName] = useState("");
   const [state, setState] = useState<ExportState>({ phase: "idle" });
 
