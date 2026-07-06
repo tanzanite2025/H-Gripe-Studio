@@ -16,7 +16,8 @@ import {
 } from "../viewport/view";
 
 /**
- * The canvas view: `zoom` ≥ 1 (1 = fit), pan offsets in pre-scale CSS px,
+ * The canvas view: `zoom` relative to fit (1 = fit, below 1 zooms out to a
+ * letterboxed image, PS-style), pan offsets in pre-scale CSS px,
  * `rotate` an optional view rotation in degrees (PS rotate-view: purely a
  * screen-space transform, never part of the document; absent ⇒ 0).
  */
@@ -30,7 +31,7 @@ export interface CanvasView {
 /** Fit-on-screen: the canvas fills its stage slot, unpanned. */
 export const FIT_VIEW: CanvasView = { zoom: 1, panX: 0, panY: 0 };
 
-export const MIN_ZOOM = 1;
+export const MIN_ZOOM = 1 / 16;
 export const MAX_ZOOM = 16;
 /** Multiplicative zoom step per Ctrl+= / Ctrl+- / zoom-tool click. */
 export const ZOOM_STEP = 1.5;
@@ -46,7 +47,7 @@ export function viewTransform(view: CanvasView): string {
 }
 
 export function isFitView(view: CanvasView): boolean {
-  return view.zoom <= MIN_ZOOM + EPS && view.panX === 0 && view.panY === 0 && !view.rotate;
+  return Math.abs(view.zoom - 1) <= EPS && view.panX === 0 && view.panY === 0 && !view.rotate;
 }
 
 /** Normalise an angle in degrees to (-180, 180]. */
@@ -67,13 +68,19 @@ export function rotateTo(view: CanvasView, deg: number): CanvasView {
 
 /**
  * Clamp the view: zoom into [MIN, MAX]; pan so the scaled canvas never pulls
- * an edge past the stage centre line — at fit zoom the pan collapses to 0.
- * `baseW`/`baseH` are the canvas's *untransformed* displayed CSS size.
+ * an edge past the stage centre line (the surrounding letterbox shows,
+ * PS-style) — at or below fit zoom the image stays centred and the pan
+ * collapses to 0. `baseW`/`baseH` are the canvas's *untransformed* displayed
+ * CSS size.
  */
 export function clampView(view: CanvasView, baseW: number, baseH: number): CanvasView {
   const zoom = Math.min(Math.max(view.zoom, MIN_ZOOM), MAX_ZOOM);
-  const maxX = (baseW * (zoom - 1)) / 2;
-  const maxY = (baseH * (zoom - 1)) / 2;
+  // The pan range opens up with zoom: none at or below fit, ramping until at
+  // 2× and beyond an image edge can be pulled all the way to the stage centre
+  // (`zoom / 2`), so the canvas beside it shows — PS scroll bounds.
+  const slack = Math.max(0, Math.min(zoom - 1, zoom / 2));
+  const maxX = baseW * slack;
+  const maxY = baseH * slack;
   // `+ 0` normalises a clamped-to-`-0` pan so fit views compare equal.
   return {
     zoom,
@@ -124,8 +131,8 @@ export function zoomOut(view: CanvasView, baseW: number, baseH: number): CanvasV
 
 /**
  * 100% zoom (Ctrl+1): one image pixel = one screen pixel, i.e.
- * `zoom = imageW / baseW` (clamped; a small image on a large stage stays at
- * fit rather than upscaling past its pixels).
+ * `zoom = imageW / baseW` (clamped; a small image on a large stage shrinks
+ * below fit to its actual pixels, PS-style).
  */
 export function zoom100(view: CanvasView, imageW: number, baseW: number, baseH: number): CanvasView {
   const zoom = baseW > 0 ? imageW / baseW : MIN_ZOOM;

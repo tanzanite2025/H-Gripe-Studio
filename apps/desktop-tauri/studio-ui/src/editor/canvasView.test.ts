@@ -27,20 +27,27 @@ describe("canvasView (M8)", () => {
     let v = zoomIn(FIT_VIEW, W, H);
     expect(v.zoom).toBeCloseTo(ZOOM_STEP);
     v = zoomOut(v, W, H);
-    expect(v.zoom).toBeCloseTo(MIN_ZOOM);
+    expect(v.zoom).toBeCloseTo(1);
     expect(isFitView(v)).toBe(true);
-    // Zooming out at fit stays at fit; zooming in saturates at MAX.
-    expect(zoomOut(FIT_VIEW, W, H).zoom).toBe(MIN_ZOOM);
+    // Zooming out at fit keeps going below fit (PS letterboxed zoom-out),
+    // saturating at MIN; zooming in saturates at MAX.
+    expect(zoomOut(FIT_VIEW, W, H).zoom).toBeCloseTo(1 / ZOOM_STEP);
+    let min = FIT_VIEW;
+    for (let i = 0; i < 20; i++) min = zoomOut(min, W, H);
+    expect(min.zoom).toBe(MIN_ZOOM);
+    expect(min.panX).toBe(0);
     let max = FIT_VIEW;
     for (let i = 0; i < 20; i++) max = zoomIn(max, W, H);
     expect(max.zoom).toBe(MAX_ZOOM);
   });
 
   it("pan clamps so the canvas edge never passes the stage centre, collapsing at fit", () => {
+    // At 2× the pan range reaches `zoom / 2`: an edge can be pulled all the
+    // way to the stage centre, revealing the canvas beside it.
     const zoomed = { zoom: 2, panX: 0, panY: 0 };
     const panned = panBy(zoomed, 10_000, -10_000, W, H);
-    expect(panned.panX).toBe((W * (2 - 1)) / 2);
-    expect(panned.panY).toBe(-(H * (2 - 1)) / 2);
+    expect(panned.panX).toBe(W);
+    expect(panned.panY).toBe(-H);
     // At fit zoom there is nowhere to pan.
     expect(panBy(FIT_VIEW, 50, 50, W, H)).toEqual(FIT_VIEW);
     // Zooming back out re-clamps a large pan.
@@ -62,11 +69,11 @@ describe("canvasView (M8)", () => {
     expect(v1.panY + v1.zoom * py).toBeCloseTo(ay);
   });
 
-  it("zoom100 maps one image pixel to one screen pixel and never upscales past fit", () => {
+  it("zoom100 maps one image pixel to one screen pixel, below fit for small images", () => {
     // 8K image displayed at 800 CSS px → 100% zoom is ×9.6.
     expect(zoom100(FIT_VIEW, 7680, W, H).zoom).toBeCloseTo(7680 / W);
-    // A small image on a large stage stays at fit (no blurry upscale).
-    expect(zoom100(FIT_VIEW, 400, W, H).zoom).toBe(MIN_ZOOM);
+    // A small image on a large stage shrinks below fit to its actual pixels.
+    expect(zoom100(FIT_VIEW, 400, W, H).zoom).toBeCloseTo(400 / W);
     // Absurd ratios still clamp to MAX.
     expect(zoom100(FIT_VIEW, 100_000, W, H).zoom).toBe(MAX_ZOOM);
   });
