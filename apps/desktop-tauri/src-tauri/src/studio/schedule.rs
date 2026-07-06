@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn category_mirrors_executor_split() {
         use JobCategory::*;
-        for kind in ["prompt", "reroute", "if", "switch", "save"] {
+        for kind in ["number", "reroute", "if", "switch", "save"] {
             assert_eq!(category_for_kind(kind), Some(CpuLight), "{kind}");
         }
         for kind in [

@@ -3,10 +3,8 @@
 // receives one. Pure graph-shape helpers so App wiring stays testable.
 
 /** Cards whose `text` param takes the draft directly. */
-const PROMPT_TEXT_KINDS = new Set(["prompt", "promptOptimize"]);
-
 export function isPromptTextTarget(kind: string): boolean {
-  return PROMPT_TEXT_KINDS.has(kind);
+  return kind === "promptOptimize";
 }
 
 /** Cards the assistant's Insert action can target. */

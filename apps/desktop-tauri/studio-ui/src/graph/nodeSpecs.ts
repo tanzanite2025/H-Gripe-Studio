@@ -123,26 +123,6 @@ function port(id: string, label: string, type: PortDataType): PortSpec {
 }
 
 export const NODE_SPECS: Record<string, NodeSpec> = {
-  prompt: {
-    kind: "prompt",
-    family: "utility",
-    executor: "graph",
-    palette: "internal",
-    title: "Prompt",
-    description: "A text prompt fed into generation nodes.",
-    category: "source",
-    inputs: [],
-    outputs: [port("text", "text", "text")],
-    params: [
-      {
-        key: "text",
-        label: "Prompt",
-        control: "textarea",
-        defaultValue: "",
-        inline: true,
-      },
-    ],
-  },
   promptOptimize: {
     kind: "promptOptimize",
     family: "utility",

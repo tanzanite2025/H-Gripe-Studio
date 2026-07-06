@@ -65,7 +65,6 @@ describe("nodeSpecs executor tagging", () => {
       generate: "api",
       detailRepaint: "api",
       promptOptimize: "hybrid",
-      prompt: "graph",
     };
     for (const [kind, executor] of Object.entries(expected)) {
       expect(NODE_SPECS[kind]?.executor, kind).toBe(executor);
@@ -83,7 +82,7 @@ describe("nodeSpecs executor tagging", () => {
     ]);
 
     const expected: Record<string, string> = {
-      prompt: "source",
+      promptOptimize: "source",
       imageSource: "source",
       videoSource: "source",
       psdTemplate: "source",

@@ -147,7 +147,7 @@ function dropExtension(path: string): string {
 
 // Minimal pre-wired workflow: Prompt -> Generate.
 const initialNodes: Node[] = [
-  makeNode("prompt-1", "prompt", 40, 120, { text: "a watercolor fox" }),
+  makeNode("prompt-1", "promptOptimize", 40, 120, { text: "a watercolor fox" }),
   makeNode("generate-1", "generate", 360, 80),
 ];
 const initialEdges: Edge[] = [
@@ -985,9 +985,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         return;
       }
       takeSnapshot();
-      const id = newNodeId("prompt");
+      const id = newNodeId("promptOptimize");
       setNodes((ns) =>
-        ns.concat(makeNode(id, "prompt", target.position.x - 320, target.position.y + 40, { text })),
+        ns.concat(
+          makeNode(id, "promptOptimize", target.position.x - 320, target.position.y + 40, {
+            text,
+          }),
+        ),
       );
       setEdges((es) =>
         es.concat({

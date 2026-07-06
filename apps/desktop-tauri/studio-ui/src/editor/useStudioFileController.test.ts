@@ -50,7 +50,7 @@ function setup(nodes: Node[], edges: Edge[] = []) {
   const setSelectedId = vi.fn();
   const takeSnapshot = vi.fn();
   const setMessage = vi.fn();
-  const sampleNodes = [makeNode("s1", "prompt")];
+  const sampleNodes = [makeNode("s1", "promptOptimize")];
   const sampleEdges: Edge[] = [];
   const options: StudioFileControllerOptions = {
     nodes,
@@ -77,25 +77,25 @@ afterEach(() => {
 
 describe("useStudioFileController", () => {
   it("flags the file dirty on a user edit but not on the initial mount", () => {
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result, rerender } = renderHook((props) => useStudioFileController(props), {
       initialProps: options,
     });
     // The mount swap is treated as programmatic, so nothing is dirty yet.
     expect(result.current.fileDirty).toBe(false);
 
-    rerender({ ...options, nodes: [makeNode("p1", "prompt"), makeNode("p2", "prompt")] });
+    rerender({ ...options, nodes: [makeNode("p1", "promptOptimize"), makeNode("p2", "promptOptimize")] });
     expect(result.current.fileDirty).toBe(true);
   });
 
   it("suppresses the next dirty-mark for a programmatic swap", () => {
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result, rerender } = renderHook((props) => useStudioFileController(props), {
       initialProps: options,
     });
 
     act(() => result.current.suppressNextDirty());
-    rerender({ ...options, nodes: [makeNode("p1", "prompt"), makeNode("p2", "prompt")] });
+    rerender({ ...options, nodes: [makeNode("p1", "promptOptimize"), makeNode("p2", "promptOptimize")] });
     expect(result.current.fileDirty).toBe(false);
   });
 
@@ -105,7 +105,7 @@ describe("useStudioFileController", () => {
       JSON.stringify({ version: 1, nodes: [], edges: [] }),
     );
     const openInCanvasTab = vi.fn(() => "opened" as const);
-    const { options, setNodes, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setNodes, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() =>
       useStudioFileController({ ...options, openInCanvasTab }),
     );
@@ -126,7 +126,7 @@ describe("useStudioFileController", () => {
 
   it("captures a named snapshot when the prompt is answered", () => {
     vi.spyOn(window, "prompt").mockReturnValue("My snapshot");
-    const { options, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
 
     act(() => result.current.captureSnapshot());
@@ -137,7 +137,7 @@ describe("useStudioFileController", () => {
 
   it("does not capture a snapshot when the prompt is cancelled", () => {
     vi.spyOn(window, "prompt").mockReturnValue(null);
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
 
     act(() => result.current.captureSnapshot());
@@ -146,7 +146,7 @@ describe("useStudioFileController", () => {
 
   it("restores a snapshot into the editor, swapping the graph", () => {
     vi.spyOn(window, "prompt").mockReturnValue("snap");
-    const { options, setNodes, setEdges } = setup([makeNode("p1", "prompt")]);
+    const { options, setNodes, setEdges } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
 
     act(() => result.current.captureSnapshot());
@@ -163,7 +163,7 @@ describe("useStudioFileController", () => {
   it("guards snapshot restore behind the discard prompt when the file is dirty", () => {
     vi.spyOn(window, "prompt").mockReturnValue("snap");
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { options, setNodes } = setup([makeNode("p1", "prompt")]);
+    const { options, setNodes } = setup([makeNode("p1", "promptOptimize")]);
     const { result, rerender } = renderHook((props) => useStudioFileController(props), {
       initialProps: options,
     });
@@ -171,7 +171,7 @@ describe("useStudioFileController", () => {
     act(() => result.current.captureSnapshot());
     const id = result.current.snapshots[0].id;
     // Make the file dirty so the restore must ask for confirmation.
-    rerender({ ...options, nodes: [makeNode("p1", "prompt"), makeNode("p2", "prompt")] });
+    rerender({ ...options, nodes: [makeNode("p1", "promptOptimize"), makeNode("p2", "promptOptimize")] });
     expect(result.current.fileDirty).toBe(true);
     setNodes.mockClear();
 
@@ -182,7 +182,7 @@ describe("useStudioFileController", () => {
 
   it("computes a snapshot diff and clears it", () => {
     vi.spyOn(window, "prompt").mockReturnValue("snap");
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
 
     act(() => result.current.captureSnapshot());
@@ -199,7 +199,7 @@ describe("useStudioFileController", () => {
   it("deletes a snapshot only after confirmation", () => {
     vi.spyOn(window, "prompt").mockReturnValue("snap");
     const confirm = vi.spyOn(window, "confirm");
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
 
     act(() => result.current.captureSnapshot());
@@ -215,7 +215,7 @@ describe("useStudioFileController", () => {
   });
 
   it("auto-captures before a run only when enabled and the graph is non-empty", () => {
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
 
     // When disabled, the pre-run hook is a no-op.
@@ -239,7 +239,7 @@ describe("useStudioFileController", () => {
   });
 
   it("loads a browser-preview file, swapping the graph and clearing currentFile", async () => {
-    const { options, setNodes, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setNodes, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
     const graphJson = JSON.stringify({ version: 1, nodes: [], edges: [] });
     const file = { name: "wf.json", text: async () => graphJson } as unknown as File;
@@ -253,7 +253,7 @@ describe("useStudioFileController", () => {
   });
 
   it("resets to the sample graph via the discard-guarded reset", () => {
-    const { options, setNodes, setEdges, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setNodes, setEdges, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
     setNodes.mockClear();
     setEdges.mockClear();
@@ -265,7 +265,7 @@ describe("useStudioFileController", () => {
   });
 
   it("creates a new untitled workflow", () => {
-    const { options, setNodes, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setNodes, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioFileController(options));
     setNodes.mockClear();
 

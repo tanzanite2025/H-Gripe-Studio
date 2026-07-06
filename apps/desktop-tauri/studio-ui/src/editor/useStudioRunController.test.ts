@@ -73,7 +73,7 @@ afterEach(() => {
 
 describe("useStudioRunController", () => {
   it("runs the browser-preview path and records a succeeded run", async () => {
-    const { options, focusNode, autoSnapshotBeforeRun } = setup([makeNode("p1", "prompt")]);
+    const { options, focusNode, autoSnapshotBeforeRun } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -107,7 +107,7 @@ describe("useStudioRunController", () => {
       await gate;
       return { outputs: new Map() };
     });
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -146,7 +146,7 @@ describe("useStudioRunController", () => {
         return { outputs: new Map() };
       },
     );
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -167,7 +167,7 @@ describe("useStudioRunController", () => {
       observer?.onNodeRun?.("p1", { status: "failed", durationMs: 5, error: "boom" } as NodeRunInfo);
       return { outputs: new Map() };
     });
-    const { options, patchNode, focusNode } = setup([makeNode("p1", "prompt")]);
+    const { options, patchNode, focusNode } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -188,7 +188,7 @@ describe("useStudioRunController", () => {
 
   it("marks the run failed when execution throws", async () => {
     runGraphMock.mockRejectedValue(new Error("kaboom"));
-    const { options, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -202,7 +202,7 @@ describe("useStudioRunController", () => {
 
   it("marks the run cancelled when execution throws a cancellation", async () => {
     runGraphMock.mockRejectedValue(new Error("Run was cancelled"));
-    const { options, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -230,7 +230,7 @@ describe("useStudioRunController", () => {
   });
 
   it("runBatch is a no-op without a batch node", async () => {
-    const { options, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     expect(result.current.hasBatch).toBe(false);
@@ -246,12 +246,12 @@ describe("useStudioRunController", () => {
   });
 
   it("runs every canvas of a project run and records a project record", async () => {
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     const graph = (id: string) => ({
       version: 1 as const,
-      nodes: [{ id, kind: "prompt", position: { x: 0, y: 0 }, params: {} }],
+      nodes: [{ id, kind: "promptOptimize", position: { x: 0, y: 0 }, params: {} }],
       edges: [],
     });
     await act(async () => {
@@ -276,12 +276,12 @@ describe("useStudioRunController", () => {
     runGraphMock
       .mockRejectedValueOnce(new Error("kaboom"))
       .mockResolvedValueOnce({ outputs: new Map() });
-    const { options, patchNode } = setup([makeNode("p1", "prompt")]);
+    const { options, patchNode } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     const graph = (id: string) => ({
       version: 1 as const,
-      nodes: [{ id, kind: "prompt", position: { x: 0, y: 0 }, params: {} }],
+      nodes: [{ id, kind: "promptOptimize", position: { x: 0, y: 0 }, params: {} }],
       edges: [],
     });
     await act(async () => {
@@ -301,7 +301,7 @@ describe("useStudioRunController", () => {
   });
 
   it("project run is a no-op when every canvas is empty", async () => {
-    const { options, setMessage } = setup([makeNode("p1", "prompt")]);
+    const { options, setMessage } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -316,7 +316,7 @@ describe("useStudioRunController", () => {
   });
 
   it("clears the log and (with confirmation) the history", async () => {
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {
@@ -347,7 +347,7 @@ describe("useStudioRunController", () => {
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
 
-    const { options } = setup([makeNode("p1", "prompt")]);
+    const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result } = renderHook(() => useStudioRunController(options));
 
     await act(async () => {

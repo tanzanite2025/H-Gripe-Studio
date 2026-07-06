@@ -267,10 +267,6 @@ fn execute_studio_graph_node(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
     match node.kind.as_str() {
-        "prompt" => Ok(studio_output_map([(
-            "text",
-            json!(studio_value_to_string(node.params.get("text"))),
-        )])),
         "batch" => {
             let items = studio_batch_items(node.params.get("items"));
             let index = studio_value_to_number(node.params.get("index")).max(0.0) as usize;
@@ -694,7 +690,6 @@ mod tests {
     fn executor_classification_partitions_kinds() {
         use StudioExecutor::*;
         for kind in [
-            "prompt",
             "batch",
             "imageSource",
             "videoSource",
@@ -746,6 +741,6 @@ mod tests {
                 .unwrap_err();
         assert!(err.contains("not a compute node"), "{err}");
         // A genuine graph node still resolves through its own handler.
-        assert!(execute_studio_graph_node(&node_with_kind("prompt"), &inputs).is_ok());
+        assert!(execute_studio_graph_node(&node_with_kind("batch"), &inputs).is_ok());
     }
 }
