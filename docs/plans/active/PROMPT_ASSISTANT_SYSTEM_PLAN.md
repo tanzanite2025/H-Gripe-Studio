@@ -288,7 +288,11 @@ Bottom drawer
    `text.generate` broker task as the `promptOptimize` card's `api` mode via
    `assistantApiReply`; the session stores only `{ kind: "api_profile", ref }`,
    never provider URLs or keys; failures surface as assistant turns).
-5. Wire local text model selection through the Local Model Manager.
+5. ✅ Wire local text model selection through the Local Model Manager
+   (backend select lists `localModelsFor(registry, "prompt.rewrite")` next to
+   API profiles; the session stores `{ kind: "local_model", ref }`. Managed
+   local models draft via the built-in rewriter — with a visible note — until
+   the local text engine lands, matching the Prompt card's local behaviour).
 6. ✅ Add session persistence separate from workflow graph persistence
    (localStorage-backed session in `promptAssistantState.ts`; multi-session
    history remains future work).

@@ -2,9 +2,10 @@
 // conversation lives outside the workflow graph — pure helpers + localStorage
 // persistence, kept out of the component for testing. Backends: the local
 // rule-based rewriter shared with the `promptOptimize` card's `local` mode,
-// or a `prompt.rewrite` API profile from the global model manager (the
-// session stores only the managed ref — never provider URLs or keys). Local
-// text models join through the Local Model Manager in a later step.
+// a `prompt.rewrite` API profile, or a managed local text model from the
+// global model manager (the session stores only the managed ref — never
+// provider URLs or keys). Managed local models draft through the built-in
+// rewriter until the local text engine lands.
 
 import { runTaskJson } from "../bridge/run";
 import type { ApiProfileEntry } from "../models/backendRegistry";
@@ -23,7 +24,8 @@ export interface PromptAssistantMessage {
 /** Which rewriter answers the conversation. Only the managed ref is stored. */
 export type AssistantBackend =
   | { kind: "local" }
-  | { kind: "api_profile"; ref: string };
+  | { kind: "api_profile"; ref: string }
+  | { kind: "local_model"; ref: string };
 
 export interface PromptAssistantSession {
   messages: PromptAssistantMessage[];
@@ -49,8 +51,12 @@ export function isLocalPreset(v: unknown): v is LocalPreset {
 function sanitizeBackend(raw: unknown): AssistantBackend {
   if (raw && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
-    if (o.kind === "api_profile" && typeof o.ref === "string" && o.ref) {
-      return { kind: "api_profile", ref: o.ref };
+    if (
+      (o.kind === "api_profile" || o.kind === "local_model") &&
+      typeof o.ref === "string" &&
+      o.ref
+    ) {
+      return { kind: o.kind, ref: o.ref };
     }
   }
   return { kind: "local" };

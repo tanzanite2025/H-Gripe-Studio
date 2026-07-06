@@ -1884,6 +1884,10 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 2px 6px;
   font-size: 11px;
 }
+.assistant-note {
+  font-style: italic;
+  opacity: 0.8;
+}
 .assistant-log {
   flex: 1;
   min-height: 0;

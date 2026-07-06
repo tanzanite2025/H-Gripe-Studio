@@ -25,7 +25,19 @@ function seedRegistry(): void {
           health: "valid",
         },
       ],
-      localModels: [],
+      localModels: [
+        {
+          ref: "qwen-mini",
+          display_name: "Qwen mini",
+          capabilities: ["prompt.rewrite"],
+          engine: "ort",
+          weights_path: "",
+          device_policy: "auto",
+          precision_policy: "auto",
+          health: "installed",
+          fallback_policy: "built_in",
+        },
+      ],
     }),
   );
 }
@@ -132,6 +144,23 @@ describe("PromptAssistantPanel", () => {
       expect(msgs[1].textContent).toBe("a majestic fox, golden hour");
     });
     expect(runTaskJsonMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists manager local models and drafts via the built-in rewriter", () => {
+    seedRegistry();
+    const { container } = render(<PromptAssistantPanel {...panelProps()} />);
+    const backend = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
+    expect(
+      Array.from(backend.options).some((o) => o.value === "localModel:qwen-mini"),
+    ).toBe(true);
+    fireEvent.change(backend, { target: { value: "localModel:qwen-mini" } });
+    // Preset row stays for local model backends (built-in rewriter drafts).
+    expect(container.querySelectorAll(".assistant-backend select").length).toBe(2);
+    sendMessage(container, "a fox, a fox, forest");
+    const msgs = container.querySelectorAll(".assistant-msg");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1].textContent).toBe("a fox, forest");
+    expect(runTaskJsonMock).not.toHaveBeenCalled();
   });
 
   it("surfaces API failures as an assistant turn", async () => {
