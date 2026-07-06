@@ -268,12 +268,24 @@ Bottom drawer
 
 ## Implementation Path
 
-1. Add right tool rail shell with a Prompt Assistant entry.
-2. Add Prompt Assistant floating/docked panel with local-only mock conversation.
-3. Add insert actions for selected Prompt node and create Prompt node.
+1. ✅ Add right tool rail shell with a Prompt Assistant entry
+   (`studio-ui/src/assistant/ToolRail.tsx`: fixed right rail, `P` entry,
+   open state persisted).
+2. ✅ Add Prompt Assistant floating/docked panel with local-only mock
+   conversation (`PromptAssistantPanel.tsx`: docked right panel above the
+   bottom drawer; the "backend" is the deterministic local rewriter shared
+   with the `promptOptimize` card's `local` mode, preset selectable; session
+   persists in localStorage via `promptAssistantState.ts`, separate from
+   workflow persistence).
+3. ✅ Add insert actions for selected Prompt node and create Prompt node
+   (insert writes the draft into the selected `prompt` / `promptOptimize`
+   card's `text` param; create spawns a selected `promptOptimize` card with
+   the draft; plus copy-to-clipboard and clear-session).
 4. Wire API profile selection through the global API Manager.
 5. Wire local text model selection through the Local Model Manager.
-6. Add session persistence separate from workflow graph persistence.
+6. ✅ Add session persistence separate from workflow graph persistence
+   (localStorage-backed session in `promptAssistantState.ts`; multi-session
+   history remains future work).
 7. Add target-aware prompt insertion for Prompt and Generate cards.
 8. Add the `Prompt` card `Optimize` row using the same manager-backed backend
    refs.

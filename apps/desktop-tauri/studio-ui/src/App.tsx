@@ -110,6 +110,9 @@ import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
 import { ModelManagerModal } from "./models/ModelManagerModal";
+import { ToolRail } from "./assistant/ToolRail";
+import { PromptAssistantPanel } from "./assistant/PromptAssistantPanel";
+import { loadAssistantOpen, saveAssistantOpen } from "./assistant/promptAssistantState";
 import type { ModelCapability } from "./models/backendRegistry";
 import { useT } from "./i18n";
 
@@ -935,6 +938,50 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     ],
   );
 
+  // Software-level Prompt Assistant (PROMPT_ASSISTANT_SYSTEM_PLAN): a right
+  // tool rail + docked panel that stays reachable while the bottom drawer is
+  // open. The panel drafts prompt text; the graph only receives what the user
+  // explicitly inserts.
+  const [assistantOpen, setAssistantOpen] = useState(loadAssistantOpen);
+  const toggleAssistant = useCallback(() => {
+    setAssistantOpen((open) => {
+      saveAssistantOpen(!open);
+      return !open;
+    });
+  }, []);
+  const selectedPromptNode = useMemo(() => {
+    const node = nodes.find((n) => n.id === selectedId);
+    if (!node) return null;
+    const kind = String((node.data as HgripeNodeData).kind);
+    return kind === "prompt" || kind === "promptOptimize" ? node : null;
+  }, [nodes, selectedId]);
+  const handleAssistantInsert = useCallback(
+    (text: string) => {
+      if (!selectedPromptNode || !text) return;
+      onParamChange(selectedPromptNode.id, "text", text);
+      setMessage(t("assistant.inserted"));
+    },
+    [selectedPromptNode, onParamChange, setMessage, t],
+  );
+  const handleAssistantCreate = useCallback(
+    (text: string) => {
+      if (!text) return;
+      takeSnapshot();
+      const id = newNodeId("promptOptimize");
+      const pos = screenToFlowPosition({
+        x: window.innerWidth / 2 - 140,
+        y: window.innerHeight / 3,
+      });
+      setNodes((ns) => [
+        ...ns.map((n) => ({ ...n, selected: false })),
+        { ...makeNode(id, "promptOptimize", pos.x, pos.y, { text }), selected: true },
+      ]);
+      handleCanvasSelect(id);
+      setMessage(t("assistant.created"));
+    },
+    [takeSnapshot, newNodeId, screenToFlowPosition, setNodes, handleCanvasSelect, setMessage, t],
+  );
+
   // Subscribe to the Tauri webview file-drop (desktop only; browser preview has
   // no native drag-drop paths). Re-subscribes if the handler identity changes.
   useEffect(() => {
@@ -1689,6 +1736,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onToggleProtected={handleToggleProtected}
         />
       </NodeEditingContext.Provider>
+      <ToolRail assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} />
+      {assistantOpen && (
+        <div
+          className={
+            drawerMode === "collapsed" ? "assistant-dock" : "assistant-dock drawer-open"
+          }
+        >
+          <PromptAssistantPanel
+            insertTargetTitle={selectedPromptNode ? selectedPromptNode.id : null}
+            onInsertIntoSelected={handleAssistantInsert}
+            onCreatePromptNode={handleAssistantCreate}
+            onClose={toggleAssistant}
+          />
+        </div>
+      )}
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />
       )}
