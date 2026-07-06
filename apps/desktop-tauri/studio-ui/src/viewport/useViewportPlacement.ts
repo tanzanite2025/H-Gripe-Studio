@@ -43,15 +43,25 @@ function samePlacement(a: ViewportPlacement | null, b: ViewportPlacement): boole
  * `onPlaced` receives the host's placement report (fallback contract):
  * callers that presented their first frame before the surface window existed
  * re-render on `presented: true` so the frame moves off the PNG transport.
+ *
+ * `remeasureKey` re-measures on change without re-mounting the tracking. CSS
+ * transforms move the element without firing the resize observer, so a caller
+ * whose element sits under a transform (canvas zoom/pan) passes its view
+ * state here to keep the surface window under the transformed rect.
  */
 export function useViewportPlacement(
   host: WgpuViewportHost | null,
   ref: RefObject<HTMLElement | null>,
   enabled = true,
   onPlaced?: (report: ViewportPlacementReport) => void,
+  remeasureKey?: unknown,
 ): void {
   const onPlacedRef = useRef(onPlaced);
   onPlacedRef.current = onPlaced;
+  const scheduleRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    scheduleRef.current?.();
+  }, [remeasureKey]);
   useEffect(() => {
     const el = ref.current;
     if (!host || !host.isOpen || !el) return;
@@ -98,6 +108,7 @@ export function useViewportPlacement(
       });
     };
 
+    scheduleRef.current = schedule;
     const observer = new ResizeObserver(schedule);
     observer.observe(el);
     window.addEventListener("resize", schedule);
@@ -106,6 +117,7 @@ export function useViewportPlacement(
 
     return () => {
       cancelled = true;
+      scheduleRef.current = null;
       if (frame !== null) cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", schedule);
