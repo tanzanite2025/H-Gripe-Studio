@@ -384,7 +384,12 @@ mod tests {
 
         let frames_dir = dir.join("vframes");
         let out = resolve_video_frames(
-            vec![clip_str.clone(), clip_str.clone(), clip_str, "still.png".to_string()],
+            vec![
+                clip_str.clone(),
+                clip_str.clone(),
+                clip_str,
+                "still.png".to_string(),
+            ],
             &[Some(0.0), Some(0.0), Some(0.5), None],
             &frames_dir,
         )
