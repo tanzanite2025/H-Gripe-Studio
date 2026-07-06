@@ -450,7 +450,12 @@ This should be a settings surface, not a required setup wizard.
     hardware encode is not enabled), the run log reads `assemble_report`, and
     `ffmpeg_sw` is classified as the non-accelerated baseline in the shared
     vocabulary. Hardware encode joins per step 12.
-12. Add hardware FFmpeg only behind explicit probe/report/fallback.
+12. Add hardware FFmpeg only behind explicit probe/report/fallback. Probe half
+    landed: `probe_engines` carries `ffmpeg_hw` (hardware encoders compiled
+    into the vendored libav via `avcodec_find_encoder_by_name` — nvenc / qsv /
+    amf / mf, or the reason none exist) and the capability summary shows an
+    `ffmpeg hw encoders` line. Nothing selects a hardware encoder yet; that
+    lands with the encode-path fallback wiring.
 13. Build cross-kernel device registry later.
 14. Build GPU queue/memory policy only after timeline/export workloads demand it.
 

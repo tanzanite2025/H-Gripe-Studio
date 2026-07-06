@@ -72,6 +72,10 @@ describe("summarizeCapabilities", () => {
       cards: [],
       wgpu: { available: true, detail: "NVIDIA GeForce RTX 4090 (Vulkan)" },
       ffmpeg: { available: false, detail: "native-ffmpeg feature disabled (no vendored libav decoder)" },
+      ffmpeg_hw: {
+        available: false,
+        detail: "no hardware encoders in the vendored libav (software x264 only)",
+      },
       display_adapters: {
         available: true,
         detail: "NVIDIA GeForce RTX 4090 (Vulkan), NVIDIA GeForce RTX 4090 (Dx12)",
@@ -91,6 +95,24 @@ describe("summarizeCapabilities", () => {
     expect(byLabel["display adapters"]).toEqual({
       label: "display adapters",
       value: "NVIDIA GeForce RTX 4090 (Vulkan), NVIDIA GeForce RTX 4090 (Dx12)",
+      tone: "ok",
+    });
+    expect(byLabel["ffmpeg hw encoders"]).toEqual({
+      label: "ffmpeg hw encoders",
+      value: "no hardware encoders in the vendored libav (software x264 only)",
+      tone: "warn",
+    });
+  });
+
+  it("lists compiled-in hardware encoders as an ok line", () => {
+    const lines = summarizeCapabilities({
+      cards: [],
+      ffmpeg_hw: { available: true, detail: "h264_nvenc, hevc_nvenc" },
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["ffmpeg hw encoders"]).toEqual({
+      label: "ffmpeg hw encoders",
+      value: "h264_nvenc, hevc_nvenc",
       tone: "ok",
     });
   });

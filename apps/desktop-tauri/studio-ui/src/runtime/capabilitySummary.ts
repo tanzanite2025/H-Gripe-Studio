@@ -75,6 +75,13 @@ export function summarizeCapabilities(report: EngineProbeReport): CapabilityLine
       tone: report.ffmpeg.available ? "ok" : "warn",
     });
   }
+  if (report.ffmpeg_hw) {
+    lines.push({
+      label: "ffmpeg hw encoders",
+      value: report.ffmpeg_hw.detail,
+      tone: report.ffmpeg_hw.available ? "ok" : "warn",
+    });
+  }
   if (report.model_cache_dir) {
     lines.push({ label: "model cache", value: report.model_cache_dir, tone: "ok" });
   }

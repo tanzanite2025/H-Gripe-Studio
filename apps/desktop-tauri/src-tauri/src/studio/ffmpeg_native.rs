@@ -110,6 +110,33 @@ impl FrameSource for NativeFfmpegFrameSource {
     }
 }
 
+/// Hardware video encoders compiled into the vendored libav, by encoder name
+/// (probe only — nothing selects them yet; GPU_DEVICE_STRATEGY_PLAN step 12
+/// adds hardware FFmpeg strictly behind an explicit probe/report/fallback).
+/// `avcodec_find_encoder_by_name` only reports what was compiled in; whether
+/// the driver/device actually accepts a session is still a per-run question,
+/// so per-run DeviceReports remain the source of truth.
+pub(crate) fn hardware_encoders() -> Vec<String> {
+    const CANDIDATES: [&str; 8] = [
+        "h264_nvenc",
+        "hevc_nvenc",
+        "h264_qsv",
+        "hevc_qsv",
+        "h264_amf",
+        "hevc_amf",
+        "h264_mf",
+        "hevc_mf",
+    ];
+    CANDIDATES
+        .iter()
+        .filter(|name| {
+            let c = CString::new(**name).expect("static encoder name");
+            unsafe { !ffi::avcodec_find_encoder_by_name(c.as_ptr()).is_null() }
+        })
+        .map(|name| name.to_string())
+        .collect()
+}
+
 /// Encode/trim result mirrored onto the `videoAssemble` / `videoTrim` node
 /// reports (the same shape the PyAV worker's payloads carried).
 #[derive(Debug, Clone)]
