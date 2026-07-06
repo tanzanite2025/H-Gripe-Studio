@@ -6,7 +6,14 @@ import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 import { ProgramMonitor } from "./ProgramMonitor";
 import { targetKey, type ProductionTarget } from "./productionTarget";
-import { timelineDuration, trackEnd, type TimelineModel } from "./timeline";
+import {
+  clipKindForAsset,
+  timelineDuration,
+  trackEnd,
+  trackKindForClip,
+  type TimelineModel,
+  type TrackKind,
+} from "./timeline";
 
 export interface AddableAsset {
   kind: MediaAssetKind;
@@ -34,6 +41,12 @@ export interface ProductionDrawerProps {
   onSelectClip: (clipId: string | null) => void;
   /** Append the active bin asset as a clip at the end of a compatible track. */
   onAddActiveToTimeline: () => void;
+  /** Append the active bin asset at the end of a specific track. */
+  onAddActiveToTrack: (trackId: string) => void;
+  /** Append an empty video / audio track to the timeline. */
+  onAddTrack: (kind: TrackKind) => void;
+  /** Remove a track and its clips (the last remaining track stays). */
+  onRemoveTrack: (trackId: string) => void;
   onRemoveClip: (clipId: string) => void;
   /** Right-click on an image asset / still clip: open the existing image editor. */
   onOpenImageEdit: (assetId: string) => void;
@@ -94,6 +107,9 @@ export function ProductionDrawer({
   selectedClipId,
   onSelectClip,
   onAddActiveToTimeline,
+  onAddActiveToTrack,
+  onAddTrack,
+  onRemoveTrack,
   onRemoveClip,
   onOpenImageEdit,
   onOpenAudioEdit,
@@ -266,6 +282,12 @@ export function ProductionDrawer({
               >
                 {t("drawer.addToTimeline")}
               </button>
+              <button onClick={() => onAddTrack("video")} title={t("drawer.addVideoTrackTitle")}>
+                {t("drawer.addVideoTrack")}
+              </button>
+              <button onClick={() => onAddTrack("audio")} title={t("drawer.addAudioTrackTitle")}>
+                {t("drawer.addAudioTrack")}
+              </button>
               <button
                 onClick={onOpenExport}
                 disabled={timeline.tracks.every((track) => track.clips.length === 0)}
@@ -280,14 +302,34 @@ export function ProductionDrawer({
               <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
             )}
             <div className="production-timeline-tracks">
-              {timeline.tracks.map((track) => {
+              {timeline.tracks.map((track, index) => {
                 // Scale every lane to the same overall timeline length so clip
                 // positions line up vertically across tracks.
                 const total = Math.max(timelineDuration(timeline), Math.max(trackEnd(track), 1));
+                const laneNumber = timeline.tracks.filter((other, i) => other.kind === track.kind && i <= index).length;
+                const activeAsset = assets.find((a) => a.id === activeAssetId) ?? null;
+                const acceptsActive =
+                  !!activeAsset && trackKindForClip(clipKindForAsset(activeAsset.kind)) === track.kind;
                 return (
                   <div key={track.id} className="production-track">
                     <span className={`production-track-label track-${track.kind}`}>
-                      {track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")}
+                      {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
+                    </span>
+                    <span className="production-track-controls">
+                      <button
+                        onClick={() => onAddActiveToTrack(track.id)}
+                        disabled={!acceptsActive}
+                        title={t("drawer.addToTrackTitle")}
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => onRemoveTrack(track.id)}
+                        disabled={timeline.tracks.length <= 1}
+                        title={t("drawer.removeTrackTitle")}
+                      >
+                        ×
+                      </button>
                     </span>
                     <div className="production-track-lane">
                       {track.clips.map((clip) => {
