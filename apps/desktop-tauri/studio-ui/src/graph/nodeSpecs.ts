@@ -144,14 +144,6 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
         port: "text",
       },
       {
-        key: "model_select",
-        label: "Model",
-        control: "model",
-        defaultValue: "",
-        hint: "empty = pass through · pick a local model or API profile from the manager",
-        inline: true,
-      },
-      {
         key: "mode",
         label: "Optimize",
         control: "select",
