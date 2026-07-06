@@ -1235,9 +1235,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const editing = useMemo(
     () => ({
       onParamChange,
-      // The settings icon stays on the card, but the inspector sidebar is
-      // retired until its replacement is decided — clicking only selects.
-      openInspector: (nodeId: string) => {
+      // The card settings (gear) button; its surface is to be designed, so
+      // clicking only selects the node for now.
+      onCardSettings: (nodeId: string) => {
         setSelectedId(nodeId);
       },
       openPreview,
