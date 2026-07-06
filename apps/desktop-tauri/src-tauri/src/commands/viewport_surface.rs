@@ -62,6 +62,58 @@ fn frame_within_texture_limit(width: u32, height: u32, max: u32) -> Result<(), S
     Ok(())
 }
 
+/// A normalized view window over the document: `(zoom, pan_x, pan_y)` where
+/// the window spans `[pan, pan + 1/zoom]` on each axis (the viewport view
+/// contract). The surface caches the window its frame texture covers so a
+/// later view can re-present as a pure GPU crop of the same texture.
+type ViewWindow = (f32, f32, f32);
+
+/// The blit uniform: NDC quad scale/offset plus the UV rect sampled from the
+/// frame texture — `[sx, sy, ox, oy, u0, v0, uw, vh]`.
+type BlitUniform = [f32; 8];
+
+/// Identity presentation of a `fit`-scaled quad sampling the whole texture.
+#[cfg_attr(not(all(windows, feature = "viewport-surface")), allow(dead_code))]
+fn identity_uniform(fit: [f32; 2]) -> BlitUniform {
+    [fit[0], fit[1], 0.0, 0.0, 0.0, 0.0, 1.0, 1.0]
+}
+
+/// The uniform presenting the `req` view window out of a texture covering the
+/// `cov` window, aspect-fit scaled by `fit`. The quad shrinks to the covered
+/// intersection (background shows where the texture has no pixels — a
+/// zoom-out past the cached crop letterboxes until the settle render lands);
+/// `None` when the windows do not overlap at all (present the bare clear).
+#[cfg_attr(not(all(windows, feature = "viewport-surface")), allow(dead_code))]
+fn crop_uniform(cov: ViewWindow, req: ViewWindow, fit: [f32; 2]) -> Option<BlitUniform> {
+    let (zc, pcx, pcy) = cov;
+    let (zr, prx, pry) = req;
+    if !(zc > 0.0 && zr > 0.0) {
+        return None;
+    }
+    let axis = |pc: f32, pr: f32| -> Option<(f32, f32, f32, f32)> {
+        let lo = pr.max(pc);
+        let hi = (pr + 1.0 / zr).min(pc + 1.0 / zc);
+        if hi <= lo {
+            return None;
+        }
+        // Fractions of the requested window the intersection spans, and the
+        // UV range of the covering texture it samples.
+        Some(((lo - pr) * zr, (hi - pr) * zr, (lo - pc) * zc, (hi - pc) * zc))
+    };
+    let (fx0, fx1, u0, u1) = axis(pcx, prx)?;
+    let (fy0, fy1, v0, v1) = axis(pcy, pry)?;
+    Some([
+        (fx1 - fx0) * fit[0],
+        (fy1 - fy0) * fit[1],
+        (fx0 + fx1 - 1.0) * fit[0],
+        (1.0 - (fy0 + fy1)) * fit[1],
+        u0,
+        v0,
+        u1 - u0,
+        v1 - v0,
+    ])
+}
+
 /// Report the frontend receives from `viewport_set_placement`: whether the
 /// native surface path took the placement, in the shared fallback vocabulary.
 /// `presented: false` + a reason means the PNG transport stays authoritative.
@@ -159,8 +211,9 @@ pub(crate) fn present_frame(
     _app: &tauri::AppHandle,
     viewport_id: &str,
     image: &image::RgbaImage,
+    view: ViewWindow,
 ) -> bool {
-    native::present_frame(viewport_id, image)
+    native::present_frame(viewport_id, image, view)
 }
 
 #[cfg(not(all(windows, feature = "viewport-surface")))]
@@ -168,7 +221,22 @@ pub(crate) fn present_frame(
     _app: &tauri::AppHandle,
     _viewport_id: &str,
     _image: &image::RgbaImage,
+    _view: ViewWindow,
 ) -> bool {
+    false
+}
+
+/// Re-present the surface's cached frame texture cropped to `view` — a pure
+/// GPU pass with no render, no upload, and no pixel IPC (the zoom/pan fast
+/// path). Returns `false` when there is no presented texture to crop (never
+/// presented, hidden, no GPU): the caller simply waits for the settle render.
+#[cfg(all(windows, feature = "viewport-surface"))]
+pub(crate) fn present_view(viewport_id: &str, view: ViewWindow) -> bool {
+    native::present_view(viewport_id, view)
+}
+
+#[cfg(not(all(windows, feature = "viewport-surface")))]
+pub(crate) fn present_view(_viewport_id: &str, _view: ViewWindow) -> bool {
     false
 }
 
@@ -202,7 +270,10 @@ mod native {
         WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_DISABLED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
     };
 
-    use super::{frame_within_texture_limit, PlacementReport};
+    use super::{
+        crop_uniform, frame_within_texture_limit, identity_uniform, BlitUniform, PlacementReport,
+        ViewWindow,
+    };
     use crate::studio::wgpu_device::{shared_gpu, SharedGpu};
 
     /// One viewport's presentation window and its (re)configurable surface.
@@ -216,8 +287,14 @@ mod native {
         /// Cached frame texture + bind group, recreated when the frame size
         /// changes; a same-size frame only re-uploads pixels.
         frame_tex: Option<FrameTexture>,
-        /// Aspect-fit uniform buffer (`vec2 scale`), written per present.
+        /// Blit uniform buffer (quad NDC rect + sampled UV rect), written per
+        /// present.
         fit_buf: Option<wgpu::Buffer>,
+        /// The normalized view window the cached frame texture covers.
+        frame_view: ViewWindow,
+        /// A view window re-presented as a GPU crop of the cached texture
+        /// (the zoom/pan fast path); `None` presents the texture whole.
+        crop_view: Option<ViewWindow>,
     }
 
     struct FrameTexture {
@@ -322,7 +399,7 @@ mod native {
     /// WGSL blit: a quad scaled to the aspect-fit rect, sampling the frame
     /// texture; everything outside the quad keeps the clear (app background).
     const BLIT_SHADER: &str = r#"
-struct Fit { scale: vec2<f32>, pad: vec2<f32> };
+struct Fit { scale: vec2<f32>, offset: vec2<f32>, uv_off: vec2<f32>, uv_scale: vec2<f32> };
 @group(0) @binding(0) var frame_tex: texture_2d<f32>;
 @group(0) @binding(1) var frame_samp: sampler;
 @group(0) @binding(2) var<uniform> fit: Fit;
@@ -336,8 +413,8 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
         vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
     let c = corners[i];
     var out: VsOut;
-    out.pos = vec4<f32>(c * fit.scale, 0.0, 1.0);
-    out.uv = vec2<f32>(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
+    out.pos = vec4<f32>(c * fit.scale + fit.offset, 0.0, 1.0);
+    out.uv = fit.uv_off + vec2<f32>(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5) * fit.uv_scale;
     return out;
 }
 
@@ -470,7 +547,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         if entry.fit_buf.is_none() {
             entry.fit_buf = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("viewport-surface-fit"),
-                size: 16,
+                size: 32,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
@@ -566,6 +643,45 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     #[cfg(test)]
     mod tests {
         use super::fit_scale;
+        use crate::commands::viewport_surface::{crop_uniform, identity_uniform};
+
+        #[test]
+        fn crop_uniform_identity_when_windows_match() {
+            let fit = [1.0, 0.5];
+            let u = crop_uniform((2.0, 0.25, 0.25), (2.0, 0.25, 0.25), fit).unwrap();
+            let id = identity_uniform(fit);
+            for (a, b) in u.iter().zip(id.iter()) {
+                assert!((a - b).abs() < 1e-5, "{u:?} vs {id:?}");
+            }
+        }
+
+        #[test]
+        fn crop_uniform_zoom_in_samples_a_sub_window() {
+            // Texture covers the whole frame; the view asks for the centre
+            // quarter: full quad, UV rect [0.25, 0.75].
+            let u = crop_uniform((1.0, 0.0, 0.0), (2.0, 0.25, 0.25), [1.0, 1.0]).unwrap();
+            let expect = [1.0, 1.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5];
+            for (a, b) in u.iter().zip(expect.iter()) {
+                assert!((a - b).abs() < 1e-5, "{u:?}");
+            }
+        }
+
+        #[test]
+        fn crop_uniform_zoom_out_shrinks_the_quad() {
+            // Texture covers the centre quarter; the view asks for the whole
+            // frame: the quad shrinks to the covered half extent, whole UV.
+            let u = crop_uniform((2.0, 0.25, 0.25), (1.0, 0.0, 0.0), [1.0, 1.0]).unwrap();
+            let expect = [0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0];
+            for (a, b) in u.iter().zip(expect.iter()) {
+                assert!((a - b).abs() < 1e-5, "{u:?}");
+            }
+        }
+
+        #[test]
+        fn crop_uniform_rejects_disjoint_and_degenerate_windows() {
+            assert!(crop_uniform((4.0, 0.0, 0.0), (4.0, 0.5, 0.5), [1.0, 1.0]).is_none());
+            assert!(crop_uniform((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), [1.0, 1.0]).is_none());
+        }
 
         #[test]
         fn fit_scale_letterboxes_without_crop_or_stretch() {
@@ -636,22 +752,35 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        // Draw the last uploaded frame texture aspect-fit over the clear when
-        // one exists; the fit uniform is refreshed here so a placement resize
-        // re-letterboxes the same texture without a re-upload.
+        // Draw the last uploaded frame texture over the clear when one
+        // exists; the uniform is refreshed here so a placement resize
+        // re-letterboxes the same texture without a re-upload, and an active
+        // view crop (the zoom/pan fast path) presents its window of it.
         let blit = match &entry.frame_tex {
             Some(tex) => {
                 let format = entry.config.as_ref().expect("config just ensured").format;
-                let scale = fit_scale(tex.width, tex.height, w, h);
-                let mut bytes = [0u8; 16];
-                bytes[0..4].copy_from_slice(&scale[0].to_le_bytes());
-                bytes[4..8].copy_from_slice(&scale[1].to_le_bytes());
-                gpu.queue.write_buffer(
-                    entry.fit_buf.as_ref().expect("fit buffer set with texture"),
-                    0,
-                    &bytes,
-                );
-                Some((blit_pipeline(gpu, format)?, &tex.bind_group))
+                let fit = fit_scale(tex.width, tex.height, w, h);
+                let uniform = match entry.crop_view {
+                    Some(req) => crop_uniform(entry.frame_view, req, fit),
+                    None => Some(identity_uniform(fit)),
+                };
+                match uniform {
+                    Some(uniform) => {
+                        let mut bytes = [0u8; 32];
+                        for (i, v) in uniform.iter().enumerate() {
+                            bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+                        }
+                        gpu.queue.write_buffer(
+                            entry.fit_buf.as_ref().expect("fit buffer set with texture"),
+                            0,
+                            &bytes,
+                        );
+                        Some((blit_pipeline(gpu, format)?, &tex.bind_group))
+                    }
+                    // The view window is entirely outside the cached frame:
+                    // present the bare background until the settle render.
+                    None => None,
+                }
             }
             None => None,
         };
@@ -698,7 +827,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     /// S2 frame presentation: upload the rendered pixels and blit them on the
     /// viewport's surface. `false` means the caller must fall back to the PNG
     /// transport (no surface window, hidden, no GPU, or a device error).
-    pub(super) fn present_frame(viewport_id: &str, image: &image::RgbaImage) -> bool {
+    pub(super) fn present_frame(
+        viewport_id: &str,
+        image: &image::RgbaImage,
+        view: ViewWindow,
+    ) -> bool {
         let gpu = match shared_gpu() {
             Ok(gpu) => gpu,
             Err(_) => return false,
@@ -716,6 +849,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         let result = (|| -> Result<(), String> {
             let format = entry.config.as_ref().expect("config checked").format;
             upload_frame(&gpu, entry, image, format)?;
+            // The fresh frame covers `view` whole: it supersedes any crop.
+            entry.frame_view = view;
+            entry.crop_view = None;
             let (w, h) = {
                 let config = entry.config.as_ref().expect("config checked");
                 (config.width, config.height)
@@ -726,6 +862,37 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             Ok(()) => true,
             Err(reason) => {
                 eprintln!("[viewport] surface present fell back for {viewport_id}: {reason}");
+                false
+            }
+        }
+    }
+
+    /// The zoom/pan fast path: re-present the cached frame texture cropped to
+    /// `view` — one uniform write and one render pass, no render, no upload.
+    pub(super) fn present_view(viewport_id: &str, view: ViewWindow) -> bool {
+        let gpu = match shared_gpu() {
+            Ok(gpu) => gpu,
+            Err(_) => return false,
+        };
+        let mut map = match surfaces().lock() {
+            Ok(map) => map,
+            Err(_) => return false,
+        };
+        let Some(entry) = map.get_mut(viewport_id) else {
+            return false;
+        };
+        if !entry.presented || entry.config.is_none() || entry.frame_tex.is_none() {
+            return false;
+        }
+        entry.crop_view = Some(view);
+        let (w, h) = {
+            let config = entry.config.as_ref().expect("config checked");
+            (config.width, config.height)
+        };
+        match clear_surface(&gpu, entry, w, h) {
+            Ok(()) => true,
+            Err(reason) => {
+                eprintln!("[viewport] surface view present fell back for {viewport_id}: {reason}");
                 false
             }
         }
@@ -833,6 +1000,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                         presented: false,
                         frame_tex: None,
                         fit_buf: None,
+                        frame_view: (1.0, 0.0, 0.0),
+                        crop_view: None,
                     })
                 }
             };

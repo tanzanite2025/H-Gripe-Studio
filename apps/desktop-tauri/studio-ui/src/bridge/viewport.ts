@@ -573,6 +573,30 @@ export async function setViewportView(
   mockGet(viewportId).view = { zoom, panX, panY };
 }
 
+/**
+ * The zoom/pan fast path (surface swap): set the view and re-present the
+ * native surface's cached frame texture cropped to it — a pure GPU pass with
+ * no render and no pixel transport. Resolves `false` when no presented
+ * texture exists to crop (browser preview, surface hidden, no frame yet):
+ * the caller keeps riding its CSS transform until the settle render.
+ */
+export async function presentViewportView(
+  viewportId: string,
+  zoom: number,
+  panX: number,
+  panY: number,
+): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    return (await invoke("viewport_present_view", { viewportId, zoom, panX, panY })) as boolean;
+  }
+  if (!(Number.isFinite(zoom) && Number.isFinite(panX) && Number.isFinite(panY)) || zoom <= 0) {
+    throw new Error("view parameters must be finite with a positive zoom");
+  }
+  mockGet(viewportId).view = { zoom, panX, panY };
+  return false;
+}
+
 export async function renderViewportFrame(viewportId: string): Promise<ViewportFrame> {
   const invoke = tauriInvoke();
   if (invoke) {

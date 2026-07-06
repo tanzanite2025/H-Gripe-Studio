@@ -525,6 +525,10 @@ export function MaskEditModal({
     presentEnabled,
     viewportOverlayScene,
     view,
+    // Un-debounced view: every zoom/pan tick re-presents the surface's
+    // cached frame as a GPU crop (the fast path) while `viewportView` above
+    // waits for the settle re-render.
+    targetViewportView,
   );
   const underlay = viewport.underlay;
   const presented = viewport.presented;
