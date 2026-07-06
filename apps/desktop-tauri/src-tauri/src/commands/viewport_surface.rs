@@ -98,7 +98,12 @@ fn crop_uniform(cov: ViewWindow, req: ViewWindow, fit: [f32; 2]) -> Option<BlitU
         }
         // Fractions of the requested window the intersection spans, and the
         // UV range of the covering texture it samples.
-        Some(((lo - pr) * zr, (hi - pr) * zr, (lo - pc) * zc, (hi - pc) * zc))
+        Some((
+            (lo - pr) * zr,
+            (hi - pr) * zr,
+            (lo - pc) * zc,
+            (hi - pc) * zc,
+        ))
     };
     let (fx0, fx1, u0, u1) = axis(pcx, prx)?;
     let (fy0, fy1, v0, v1) = axis(pcy, pry)?;
