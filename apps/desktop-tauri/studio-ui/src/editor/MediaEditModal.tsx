@@ -110,8 +110,8 @@ export function MediaEditModal({
         ) : null}
       </div>
     ) : null;
-  const collapseArrow = (
-    <button className="media-edit-collapse" title={t("mediaEdit.collapse")} onClick={onClose}>
+  const collapseArrow = (requestClose: () => void) => (
+    <button className="media-edit-collapse" title={t("mediaEdit.collapse")} onClick={requestClose}>
       <svg viewBox="0 0 48 8" width="48" height="8" aria-hidden="true">
         <path d="M2 1.5 L24 6.5 L46 1.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
