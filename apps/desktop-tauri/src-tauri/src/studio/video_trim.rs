@@ -80,18 +80,23 @@ pub(super) fn execute_studio_video_trim(
     #[cfg(feature = "native-ffmpeg")]
     {
         // Engine telemetry (GPU_DEVICE_STRATEGY_PLAN shared DeviceReport
-        // vocabulary): the shared opt-in hardware selection/fallback — only
-        // an explicit `device: gpu` request tries a hardware H.264 encoder,
-        // with the fallback reason kept visible on the report.
-        let (stats, device_used, requested, fallback_reason) =
-            super::video_engine::encode_with_device(&device, &codec, |codec| {
-                super::ffmpeg_native::trim_video(
-                    Path::new(&video),
-                    Path::new(&out_path),
-                    start_sec,
-                    end_sec,
-                    codec,
-                )
+        // vocabulary): the shared opt-in hardware selection/fallback, per
+        // operation — only an explicit `device: gpu` request tries the
+        // hardware decoder matching the input codec and a hardware H.264
+        // encoder; either half falls back to the software baseline
+        // independently, with its reason kept visible on the report.
+        let ((stats, device_used, requested, fallback_reason), decode_used, decode_reason) =
+            super::video_engine::decode_with_device(&device, Path::new(&video), |decoder| {
+                super::video_engine::encode_with_device(&device, &codec, |codec| {
+                    super::ffmpeg_native::trim_video(
+                        Path::new(&video),
+                        Path::new(&out_path),
+                        start_sec,
+                        end_sec,
+                        codec,
+                        decoder,
+                    )
+                })
             })?;
         Ok(studio_output_map([
             ("video", json!(out_path)),
@@ -112,6 +117,8 @@ pub(super) fn execute_studio_video_trim(
                     "device": device_used.as_str(),
                     "device_requested": requested.as_str(),
                     "engine_fallback_reason": fallback_reason,
+                    "decode_device": decode_used.as_str(),
+                    "decode_fallback_reason": decode_reason,
                 }),
             ),
         ]))

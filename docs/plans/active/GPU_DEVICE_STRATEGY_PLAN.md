@@ -455,15 +455,19 @@ This should be a settings surface, not a required setup wizard.
     landed: `probe_engines` carries `ffmpeg_hw` (hardware encoders compiled
     into the vendored libav via `avcodec_find_encoder_by_name` — nvenc / qsv /
     amf / mf, or the reason none exist) and `ffmpeg_hw_decode` (hardware
-    decoders via `avcodec_find_decoder_by_name` — cuvid / qsv — probe only;
-    playback stays on the software baseline until decode gets its own
-    report/fallback), and the capability summary shows `ffmpeg hw encoders` /
-    `ffmpeg hw decoders` lines. Fallback half landed for `videoAssemble` and
-    `videoTrim` (shared `video_engine::encode_with_device`): an explicit
-    `device: gpu` request tries the first compiled-in hardware H.264 encoder
-    and falls back to the software baseline with the failure reason kept
-    visible on the node report (`device: ffmpeg_hw` only on success);
-    `auto`/`cpu` stay on the software baseline. Timeline export joined too:
+    decoders via `avcodec_find_decoder_by_name` — cuvid / qsv), and the
+    capability summary shows `ffmpeg hw encoders` / `ffmpeg hw decoders`
+    lines. Fallback half landed for `videoAssemble` and `videoTrim` (shared
+    `video_engine::encode_with_device`): an explicit `device: gpu` request
+    tries the first compiled-in hardware H.264 encoder and falls back to the
+    software baseline with the failure reason kept visible on the node report
+    (`device: ffmpeg_hw` only on success); `auto`/`cpu` stay on the software
+    baseline. Decode fallback landed for `videoTrim` (shared
+    `video_engine::decode_with_device`): an explicit `device: gpu` request
+    tries the compiled-in hardware decoder matching the input codec and
+    retries on the software decoder with the reason kept visible
+    (`decode_device` / `decode_fallback_reason` on `trim_report`); playback
+    scrubbing stays on the software baseline. Timeline export joined too:
     the export dialog's device select passes through `timeline_export` into
     the `videoAssemble` executor and the result surfaces `encode_device` /
     `encode_fallback_reason` (hardware note on success, fallback warning on
