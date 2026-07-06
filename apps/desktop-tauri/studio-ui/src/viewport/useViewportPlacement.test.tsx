@@ -61,12 +61,16 @@ describe("useViewportPlacement", () => {
       commands.push(cmd);
       return originalCommand(cmd);
     });
+    const place = vi.spyOn(host, "place");
 
     const { unmount } = renderHook(() => useViewportPlacement(host, elementRef()));
     await waitFor(() => {
-      expect(commands).toContainEqual({
-        kind: "set_placement",
-        placement: { x: 10, y: 20, width: 300, height: 200, dpr: window.devicePixelRatio || 1 },
+      expect(place).toHaveBeenCalledWith({
+        x: 10,
+        y: 20,
+        width: 300,
+        height: 200,
+        dpr: window.devicePixelRatio || 1,
       });
     });
 
@@ -77,32 +81,37 @@ describe("useViewportPlacement", () => {
     await host.close();
   });
 
+  it("reports the placement report to onPlaced", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    vi.spyOn(host, "place").mockResolvedValue({ presented: true });
+    const reports: boolean[] = [];
+
+    renderHook(() =>
+      useViewportPlacement(host, elementRef(), true, (report) => {
+        reports.push(report.presented);
+      }),
+    );
+    await waitFor(() => expect(reports).toEqual([true]));
+    await host.close();
+  });
+
   it("re-sends only when the rect actually changed", async () => {
     const host = await WgpuViewportHost.open("image_edit");
-    const commands: unknown[] = [];
-    const originalCommand = host.command.bind(host);
-    vi.spyOn(host, "command").mockImplementation(async (cmd) => {
-      commands.push(cmd);
-      return originalCommand(cmd);
-    });
+    const place = vi.spyOn(host, "place");
 
     const ref = elementRef();
     renderHook(() => useViewportPlacement(host, ref));
-    await waitFor(() =>
-      expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(1),
-    );
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1));
 
     // Same rect: a scroll event schedules a re-measure but nothing is sent.
     window.dispatchEvent(new Event("scroll"));
     await new Promise((r) => setTimeout(r, 10));
-    expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(1);
+    expect(place).toHaveBeenCalledTimes(1);
 
     // Changed rect: the new placement goes out.
     rect = { ...rect, left: 50, right: 350 };
     window.dispatchEvent(new Event("scroll"));
-    await waitFor(() =>
-      expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(2),
-    );
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(2));
     await host.close();
   });
 
@@ -115,14 +124,13 @@ describe("useViewportPlacement", () => {
       return originalCommand(cmd);
     });
 
+    const place = vi.spyOn(host, "place");
     const ref = elementRef();
     const { rerender } = renderHook(
       ({ enabled }: { enabled: boolean }) => useViewportPlacement(host, ref, enabled),
       { initialProps: { enabled: true } },
     );
-    await waitFor(() =>
-      expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(1),
-    );
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1));
 
     // Disabling hides the surface (a state the surface cannot represent).
     rerender({ enabled: false });
@@ -132,9 +140,7 @@ describe("useViewportPlacement", () => {
 
     // Re-enabling resends the placement, which re-shows the surface.
     rerender({ enabled: true });
-    await waitFor(() =>
-      expect(commands.filter((c) => (c as { kind: string }).kind === "set_placement")).toHaveLength(2),
-    );
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(2));
     await host.close();
   });
 });

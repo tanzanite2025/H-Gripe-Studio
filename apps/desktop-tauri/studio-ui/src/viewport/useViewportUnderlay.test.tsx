@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openMockViewportCount, registerLayeredAsset } from "../bridge/viewport";
 import { useViewportUnderlay } from "./useViewportUnderlay";
+import { WgpuViewportHost } from "./WgpuViewportHost";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 
 // The resource registry is Tauri-only; stub it so the hook takes the open
@@ -19,6 +20,7 @@ vi.mock("../bridge/files", () => ({
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("useViewportUnderlay view state", () => {
@@ -138,6 +140,48 @@ describe("useViewportUnderlay view state", () => {
     );
     expect(openMockViewportCount()).toBe(1);
     expect(result.current.underlay).toMatch(/^data:image\//);
+    unmount();
+    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+  });
+
+  it("re-renders onto the surface when the placement takes after the first frame", async () => {
+    // Placement tracking needs layout plumbing jsdom lacks.
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      return setTimeout(() => cb(0), 0) as unknown as number;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+      clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+    });
+
+    // The surface takes the placement; frames rendered after it present.
+    let placed = false;
+    vi.spyOn(WgpuViewportHost.prototype, "place").mockImplementation(async () => {
+      placed = true;
+      return { presented: true };
+    });
+    const renderFrame = vi
+      .spyOn(WgpuViewportHost.prototype, "renderFrame")
+      .mockImplementation(async () => ({
+        data_url: placed ? "" : "data:image/png;base64,",
+        width: 640,
+        height: 640,
+        backend: { requested: "auto" as const, actual: placed ? ("wgpu" as const) : ("cpu" as const) },
+        presented: placed,
+      }));
+
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const { result, unmount } = renderHook(() =>
+      useViewportUnderlay("image_edit", "a.png", 640, IDENTITY_VIEW, null, { current: el }),
+    );
+    // The first frame rides the PNG transport (placement not yet sent)…
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    // …then the placement report triggers one re-render onto the surface.
+    await waitFor(() => expect(result.current.presented).toBe(true));
+    expect(result.current.underlay).toBeNull();
+    expect(result.current.backend?.actual).toBe("wgpu");
+    expect(renderFrame).toHaveBeenCalledTimes(2);
     unmount();
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });

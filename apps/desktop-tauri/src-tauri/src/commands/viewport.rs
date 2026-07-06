@@ -82,12 +82,18 @@ pub(crate) struct ViewportBackend {
     pub fallback_reason: Option<String>,
 }
 
+/// The backend report a CPU-rendered, PNG-transported frame carries. When the
+/// frame instead presents on the native surface the caller replaces this with
+/// [`surface_backend_report`], so the reason here describes only the fallback
+/// leg of the transport.
 fn cpu_backend() -> ViewportBackend {
     ViewportBackend {
         requested: "auto".to_string(),
         actual: "cpu".to_string(),
         detail: None,
-        fallback_reason: Some("wgpu transport not implemented yet (phase 1)".to_string()),
+        fallback_reason: Some(
+            "png transport (frame not presented on the native surface)".to_string(),
+        ),
     }
 }
 

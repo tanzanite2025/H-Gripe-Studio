@@ -107,11 +107,11 @@ describe("deviceReportFromViewportBackend", () => {
     const report = deviceReportFromViewportBackend({
       requested: "gpu",
       actual: "cpu",
-      fallback_reason: "wgpu transport not implemented yet (phase 1)",
+      fallback_reason: "png transport (frame not presented on the native surface)",
     });
     expect(report.used).toBe("cpu");
     expect(report.accelerated).toBe(false);
-    expect(report.fallbackReason).toBe("wgpu transport not implemented yet (phase 1)");
+    expect(report.fallbackReason).toBe("png transport (frame not presented on the native surface)");
   });
 });
 

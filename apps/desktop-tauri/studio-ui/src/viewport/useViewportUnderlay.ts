@@ -166,13 +166,35 @@ export function useViewportUnderlay(
 
   // Placement tracking (surface swap): inert without a placement ref — the
   // hook then never sends placement and frames stay on the PNG transport.
+  // The first frame renders before the placement lands (the surface window
+  // is created lazily by the first `set_placement`), so it always rides the
+  // PNG transport; when the report says the surface took the placement and
+  // the current frame is not on it yet, one re-render moves it over.
   const noPlacementRef = useRef<HTMLElement | null>(null);
-  useViewportPlacement(openHost, placementRef ?? noPlacementRef, presentEnabled);
+  const framePresentedRef = useRef(false);
   const sentPresentEnabledRef = useRef(true);
   const presentEnabledRef = useRef(presentEnabled);
   presentEnabledRef.current = presentEnabled;
+  useViewportPlacement(openHost, placementRef ?? noPlacementRef, presentEnabled, (report) => {
+    const host = hostRef.current;
+    if (!report.presented || framePresentedRef.current) return;
+    if (!host || !host.isOpen || !presentEnabledRef.current) return;
+    runCoalesced(host, async () => {
+      const frame = await host.renderFrame();
+      if (hostRef.current !== host) return;
+      framePresentedRef.current = frame.presented;
+      setState((s) => ({
+        ...s,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
+        backend: frame.backend,
+        settled: true,
+      }));
+    });
+  });
 
   useEffect(() => {
+    framePresentedRef.current = false;
     setState({
       underlay: null,
       presented: false,
@@ -233,6 +255,7 @@ export function useViewportUnderlay(
       // A non-identity first frame is the view window; scale back to the
       // full-frame size so `dims` is view-independent.
       const zoom = Math.max(initialView.zoom, 1);
+      framePresentedRef.current = frame.presented;
       setState({
         underlay: frame.presented ? null : frame.data_url,
         presented: frame.presented,
@@ -270,6 +293,7 @@ export function useViewportUnderlay(
       }
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
+      framePresentedRef.current = frame.presented;
       setState((s) => ({
         ...s,
         underlay: frame.presented ? null : frame.data_url,
@@ -296,6 +320,7 @@ export function useViewportUnderlay(
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
       // Keep `dims`: the view window changes size, the frame does not.
+      framePresentedRef.current = frame.presented;
       setState((s) => ({
         ...s,
         underlay: frame.presented ? null : frame.data_url,
@@ -320,6 +345,7 @@ export function useViewportUnderlay(
       await host.command({ kind: "set_mask_overlay", overlay: maskOverlay });
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
+      framePresentedRef.current = frame.presented;
       setState((s) => ({
         ...s,
         underlay: frame.presented ? null : frame.data_url,
@@ -343,6 +369,7 @@ export function useViewportUnderlay(
       await host.command({ kind: "set_overlay_scene", scene: overlayScene });
       const frame = await host.renderFrame();
       if (cancelled || hostRef.current !== host) return;
+      framePresentedRef.current = frame.presented;
       setState((s) => ({
         ...s,
         underlay: frame.presented ? null : frame.data_url,
