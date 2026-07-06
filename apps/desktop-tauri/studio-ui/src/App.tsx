@@ -111,6 +111,7 @@ import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
 import { ModelManagerModal } from "./models/ModelManagerModal";
 import { ToolRail } from "./assistant/ToolRail";
+import { FloatingDock } from "./assistant/FloatingDock";
 import { PromptAssistantPanel } from "./assistant/PromptAssistantPanel";
 import { loadAssistantOpen, saveAssistantOpen } from "./assistant/promptAssistantState";
 import {
@@ -1797,18 +1798,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       </NodeEditingContext.Provider>
       <ToolRail assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} />
       {assistantOpen && (
-        <div
-          className={
-            drawerMode === "collapsed" ? "assistant-dock" : "assistant-dock drawer-open"
-          }
-        >
+        <FloatingDock>
           <PromptAssistantPanel
             insertTargetTitle={assistantInsertTarget ? assistantInsertTarget.id : null}
             onInsertIntoSelected={handleAssistantInsert}
             onCreatePromptNode={handleAssistantCreate}
             onClose={toggleAssistant}
           />
-        </div>
+        </FloatingDock>
       )}
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />

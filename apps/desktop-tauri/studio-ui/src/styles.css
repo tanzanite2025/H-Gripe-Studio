@@ -1799,40 +1799,33 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 
 
-/* ---- right tool rail + Prompt Assistant panel (software-level, above the
-   bottom drawer so it stays reachable while the drawer is open) ---- */
-.tool-rail {
+/* ---- floating assistant launcher + Prompt Assistant panel: always the
+   top-most surfaces, above the media editor, drawers, and modals ---- */
+.assistant-fab {
   position: fixed;
-  right: 0;
-  top: 96px;
-  z-index: 60;
+  z-index: 2001;
+  width: 80px;
+  height: 80px;
+  padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 4px;
+  align-items: center;
+  justify-content: center;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
+  border-radius: 50%;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+  touch-action: none;
 }
-.tool-rail-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  cursor: pointer;
+.assistant-fab:active {
+  cursor: grabbing;
 }
-.tool-rail-btn.active {
+.assistant-fab.active {
   border-color: var(--accent);
-  color: var(--accent);
 }
-.tool-rail-btn .eyes-icon {
+.assistant-fab .eyes-icon {
   display: block;
-  margin: 0 auto;
+  pointer-events: none;
 }
 .eyes-icon-face {
   fill: var(--text);
@@ -1843,23 +1836,21 @@ button:disabled { opacity: 0.6; cursor: default; }
 .eyes-icon-pupil {
   fill: var(--text);
 }
-.tool-rail-btn.active .eyes-icon-face {
+.assistant-fab.active .eyes-icon-face {
   fill: var(--accent);
 }
 .assistant-dock {
   position: fixed;
-  right: 40px;
-  top: 96px;
-  bottom: 16px;
-  z-index: 60;
+  z-index: 2000;
   display: flex;
+  max-height: calc(100vh - 24px);
 }
-.assistant-dock.drawer-open { bottom: 280px; }
 .assistant-panel {
   display: flex;
   flex-direction: column;
   width: 320px;
   min-height: 0;
+  max-height: 70vh;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1871,6 +1862,12 @@ button:disabled { opacity: 0.6; cursor: default; }
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.assistant-head:active {
+  cursor: grabbing;
 }
 .assistant-head h2 { margin: 0; font-size: 13px; }
 .assistant-head .spacer { flex: 1; }
