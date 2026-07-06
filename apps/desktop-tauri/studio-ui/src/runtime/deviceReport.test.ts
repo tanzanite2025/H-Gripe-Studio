@@ -136,6 +136,23 @@ describe("describeDeviceReport", () => {
     ).toBe("device cuda -> cpu (fallback: CUDA provider unavailable)");
   });
 
+  it("renders the decode half as its own note", () => {
+    expect(
+      describeDeviceReport({
+        requested: "gpu",
+        used: "ffmpeg_hw",
+        backend: "ffmpeg",
+        accelerated: true,
+        decode: {
+          used: "ffmpeg_sw",
+          fallbackReason: "no hardware decoder for 'vp9' compiled into the vendored libav",
+        },
+      }),
+    ).toBe(
+      "device gpu -> ffmpeg_hw (ffmpeg; decode ffmpeg_sw (fallback: no hardware decoder for 'vp9' compiled into the vendored libav))",
+    );
+  });
+
   it("omits the arrow when no request was recorded", () => {
     expect(describeDeviceReport({ used: "wgpu", backend: "wgpu", accelerated: true })).toBe(
       "device wgpu",
@@ -233,10 +250,34 @@ describe("deviceReportFromNodeOutputs", () => {
     });
     expect(report?.requested).toBe("auto");
     expect(report?.used).toBe("ffmpeg_sw");
+    expect(report?.decode).toBeUndefined();
     expect(report?.backend).toBe("ffmpeg");
     expect(report?.accelerated).toBe(false);
     expect(report?.fallbackReason).toBe(
       "hardware encode not enabled (vendored libav software baseline)",
+    );
+  });
+
+  it("reads videoTrim trim_report with the decode half kept visible", () => {
+    const report = deviceReportFromNodeOutputs({
+      video: "/out/cut.mp4",
+      trim_report: {
+        codec: "libx264",
+        engine: "ffmpeg",
+        device: "ffmpeg_sw",
+        device_requested: "gpu",
+        engine_fallback_reason: "hardware encoder 'h264_nvenc' failed: open error",
+        decode_device: "ffmpeg_hw",
+        decode_fallback_reason: null,
+      },
+    });
+    expect(report?.requested).toBe("gpu");
+    expect(report?.used).toBe("ffmpeg_sw");
+    expect(report?.decode).toEqual({ used: "ffmpeg_hw", fallbackReason: undefined });
+    // A hardware decode counts as accelerated even when the encode fell back.
+    expect(report?.accelerated).toBe(true);
+    expect(report?.fallbackReason).toBe(
+      "hardware encoder 'h264_nvenc' failed: open error",
     );
   });
 
