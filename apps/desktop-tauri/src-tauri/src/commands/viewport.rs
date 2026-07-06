@@ -530,7 +530,13 @@ fn composite_overlay_scene(
                 } else {
                     let (x1, y1) = (region[0].min(region[2]), region[1].min(region[3]));
                     let (x2, y2) = (region[0].max(region[2]), region[1].max(region[3]));
-                    vec![map(x1, y1), map(x2, y1), map(x2, y2), map(x1, y2), map(x1, y1)]
+                    vec![
+                        map(x1, y1),
+                        map(x2, y1),
+                        map(x2, y2),
+                        map(x1, y2),
+                        map(x1, y1),
+                    ]
                 };
                 stroke_polyline(surface, &pts, OVERLAY_ANTS_UNDER, false);
                 stroke_polyline(surface, &pts, OVERLAY_ANTS_DASH, true);
@@ -544,8 +550,7 @@ fn composite_overlay_scene(
                 if points.len() < 2 {
                     continue;
                 }
-                let mut pts: Vec<(f32, f32)> =
-                    points.iter().map(|p| map(p[0], p[1])).collect();
+                let mut pts: Vec<(f32, f32)> = points.iter().map(|p| map(p[0], p[1])).collect();
                 if let Some(fill) = fill {
                     fill_polygon_evenodd(surface, &pts, *fill);
                 }
@@ -618,12 +623,7 @@ fn composite_overlay_scene(
 /// surface pixel coordinates. Coverage is collected into a mask first so the
 /// blend applies once however the centreline self-overlaps — the same read a
 /// translucent canvas stroke gives.
-fn fill_band(
-    surface: &mut hgripe_grade::GradeSurface,
-    pts: &[(f32, f32)],
-    r: f32,
-    rgba: [f32; 4],
-) {
+fn fill_band(surface: &mut hgripe_grade::GradeSurface, pts: &[(f32, f32)], r: f32, rgba: [f32; 4]) {
     let (sw, sh) = (surface.w as i64, surface.h as i64);
     if sw == 0 || sh == 0 {
         return;
@@ -632,8 +632,14 @@ fn fill_band(
     let alpha = rgba[3];
     let mut mask = vec![false; (sw * sh) as usize];
     let mut stamp = |cx: f32, cy: f32| {
-        let (x0, x1) = (((cx - r).floor() as i64).max(0), ((cx + r).ceil() as i64).min(sw - 1));
-        let (y0, y1) = (((cy - r).floor() as i64).max(0), ((cy + r).ceil() as i64).min(sh - 1));
+        let (x0, x1) = (
+            ((cx - r).floor() as i64).max(0),
+            ((cx + r).ceil() as i64).min(sw - 1),
+        );
+        let (y0, y1) = (
+            ((cy - r).floor() as i64).max(0),
+            ((cy + r).ceil() as i64).min(sh - 1),
+        );
         for yi in y0..=y1 {
             for xi in x0..=x1 {
                 let dx = xi as f32 - cx;
@@ -681,8 +687,14 @@ fn fill_disc(
 ) {
     let (sw, sh) = (surface.w as i64, surface.h as i64);
     let alpha = rgba[3];
-    let (x0, x1) = (((cx - r).floor() as i64).max(0), ((cx + r).ceil() as i64).min(sw - 1));
-    let (y0, y1) = (((cy - r).floor() as i64).max(0), ((cy + r).ceil() as i64).min(sh - 1));
+    let (x0, x1) = (
+        ((cx - r).floor() as i64).max(0),
+        ((cx + r).ceil() as i64).min(sw - 1),
+    );
+    let (y0, y1) = (
+        ((cy - r).floor() as i64).max(0),
+        ((cy + r).ceil() as i64).min(sh - 1),
+    );
     for yi in y0..=y1 {
         for xi in x0..=x1 {
             let dx = xi as f32 - cx;
@@ -1396,9 +1408,7 @@ pub(crate) fn viewport_set_overlay_scene(
                         }
                         let colours = stroke.iter().chain(fill.iter().flatten());
                         if colours.into_iter().any(|v| !(0.0..=1.0).contains(v)) {
-                            return Err(
-                                "overlay colours must be between 0 and 1".to_string()
-                            );
+                            return Err("overlay colours must be between 0 and 1".to_string());
                         }
                     }
                     OverlayItem::Polyline { points, stroke, .. } => {
@@ -1412,9 +1422,7 @@ pub(crate) fn viewport_set_overlay_scene(
                             return Err("overlay scene coordinates must be finite".to_string());
                         }
                         if stroke.iter().any(|v| !(0.0..=1.0).contains(v)) {
-                            return Err(
-                                "overlay colours must be between 0 and 1".to_string()
-                            );
+                            return Err("overlay colours must be between 0 and 1".to_string());
                         }
                     }
                     OverlayItem::Band {
@@ -1437,9 +1445,7 @@ pub(crate) fn viewport_set_overlay_scene(
                             ));
                         }
                         if color.iter().any(|v| !(0.0..=1.0).contains(v)) {
-                            return Err(
-                                "overlay colours must be between 0 and 1".to_string()
-                            );
+                            return Err("overlay colours must be between 0 and 1".to_string());
                         }
                     }
                     OverlayItem::Marker {
@@ -1454,9 +1460,7 @@ pub(crate) fn viewport_set_overlay_scene(
                         }
                         let colours = stroke.iter().chain(fill.iter().flatten());
                         if colours.into_iter().any(|v| !(0.0..=1.0).contains(v)) {
-                            return Err(
-                                "overlay colours must be between 0 and 1".to_string()
-                            );
+                            return Err("overlay colours must be between 0 and 1".to_string());
                         }
                     }
                 }
@@ -1636,7 +1640,9 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             // timeline playhead to clip-local source time.
             let clip = timeline_clip(&timeline_id, &clip_id)?;
             if clip.kind == "still" {
-                return render_image_path(id, &clip.path, width, height, grade_doc, view, None, None);
+                return render_image_path(
+                    id, &clip.path, width, height, grade_doc, view, None, None,
+                );
             }
             let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
             #[cfg(feature = "native-ffmpeg")]
@@ -1875,7 +1881,11 @@ fn render_image_path(
     overlay_scene: Option<&OverlayScene>,
 ) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
-    if grade_doc.is_some() || !view.is_identity() || mask_overlay.is_some() || overlay_scene.is_some() {
+    if grade_doc.is_some()
+        || !view.is_identity()
+        || mask_overlay.is_some()
+        || overlay_scene.is_some()
+    {
         // Graded and/or viewed frame: run the grading kernel (identity when
         // no doc is set) over the view window of the source's sRGB proxy.
         let doc = parse_grade_doc(grade_doc.as_ref())?;
@@ -2001,9 +2011,11 @@ mod tests {
         };
 
         let grade = viewport_create("grade_preview".to_string()).expect("create");
-        let err =
-            viewport_set_overlay_scene(grade.viewport_id.clone(), Some(scene([0.1, 0.1, 0.5, 0.5])))
-                .expect_err("grade_preview must reject an overlay scene");
+        let err = viewport_set_overlay_scene(
+            grade.viewport_id.clone(),
+            Some(scene([0.1, 0.1, 0.5, 0.5])),
+        )
+        .expect_err("grade_preview must reject an overlay scene");
         assert!(err.contains("does not accept an overlay scene"));
         viewport_destroy_inner(grade.viewport_id).expect("destroy");
 
@@ -2016,9 +2028,11 @@ mod tests {
             assert!(map.get(&id).expect("open").overlay_scene.is_some());
         }
         // Non-finite coordinates fail loudly.
-        let err =
-            viewport_set_overlay_scene(vp.viewport_id.clone(), Some(scene([0.1, f32::NAN, 0.5, 0.5])))
-                .expect_err("non-finite coordinates must be rejected");
+        let err = viewport_set_overlay_scene(
+            vp.viewport_id.clone(),
+            Some(scene([0.1, f32::NAN, 0.5, 0.5])),
+        )
+        .expect_err("non-finite coordinates must be rejected");
         assert!(err.contains("finite"));
         // Clearing drops the scene.
         viewport_set_overlay_scene(vp.viewport_id.clone(), None).expect("clear");
@@ -2048,7 +2062,10 @@ mod tests {
         let stroked = surface.data.chunks(4).filter(|px| px[2] > 0.5).count();
         // A dashed outline touches some pixels (never zero, never a fill).
         assert!(stroked > 8, "expected a stroked outline, got {stroked}");
-        assert!(stroked < 16 * 16, "outline must not fill the region: {stroked}");
+        assert!(
+            stroked < 16 * 16,
+            "outline must not fill the region: {stroked}"
+        );
         // Interior stays untouched.
         let mid = ((16 * 32 + 16) * 4) as usize;
         assert_eq!(surface.data[mid], 0.0);
@@ -2128,7 +2145,10 @@ mod tests {
         assert!(surface.data[pin + 1] > 0.9, "disc must be filled");
         // Cross: horizontal arm through (7.5, 23.5) is white.
         let arm = ((23 * 32 + 5) * 4) as usize;
-        assert!(surface.data[arm] > 0.9 && surface.data[arm + 2] > 0.9, "cross arm must be stroked");
+        assert!(
+            surface.data[arm] > 0.9 && surface.data[arm + 2] > 0.9,
+            "cross arm must be stroked"
+        );
         // A far corner stays untouched.
         let out = ((30 * 32 + 30) * 4) as usize;
         assert_eq!(surface.data[out], 0.0);
@@ -2153,7 +2173,11 @@ mod tests {
         composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
         // On the centreline the band blends exactly once: 0.5 blue.
         let mid = ((16 * 32 + 16) * 4) as usize;
-        assert!((surface.data[mid + 2] - 0.5).abs() < 1e-4, "band must blend once, got {}", surface.data[mid + 2]);
+        assert!(
+            (surface.data[mid + 2] - 0.5).abs() < 1e-4,
+            "band must blend once, got {}",
+            surface.data[mid + 2]
+        );
         // The round cap extends past the endpoint...
         let cap = ((16 * 32 + 28) * 4) as usize;
         assert!(surface.data[cap + 2] > 0.4, "round cap must be filled");
@@ -2243,7 +2267,10 @@ mod tests {
         };
         let err = viewport_set_overlay_scene(
             vp.viewport_id.clone(),
-            Some(poly(vec![[0.0, f32::INFINITY], [1.0, 1.0]], [0.0, 0.0, 0.0, 1.0])),
+            Some(poly(
+                vec![[0.0, f32::INFINITY], [1.0, 1.0]],
+                [0.0, 0.0, 0.0, 1.0],
+            )),
         )
         .expect_err("non-finite points must be rejected");
         assert!(err.contains("finite"));
@@ -2255,7 +2282,10 @@ mod tests {
         assert!(err.contains("between 0 and 1"));
         viewport_set_overlay_scene(
             vp.viewport_id.clone(),
-            Some(poly(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], [0.3, 0.6, 1.0, 0.9])),
+            Some(poly(
+                vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+                [0.3, 0.6, 1.0, 0.9],
+            )),
         )
         .expect("a valid polygon is accepted");
         viewport_destroy_inner(vp.viewport_id).expect("destroy");
