@@ -16,14 +16,34 @@ export default defineConfig({
         find: /^@hgripe\/flow$/,
         replacement: fileURLToPath(new URL("../../../packages/hgripe-flow/src/index.ts", import.meta.url)),
       },
-      {
-        find: /^@xyflow\/react\/dist\/style\.css$/,
-        replacement: fileURLToPath(new URL("node_modules/@xyflow/react/dist/style.css", import.meta.url)),
-      },
+      // Vendored upstream (no npm @xyflow packages): see packages/hgripe-flow/src/upstream.
       {
         find: /^@xyflow\/react$/,
-        replacement: fileURLToPath(new URL("node_modules/@xyflow/react/dist/esm/index.js", import.meta.url)),
+        replacement: fileURLToPath(
+          new URL("../../../packages/hgripe-flow/src/upstream/react/index.ts", import.meta.url),
+        ),
       },
+      {
+        find: /^@xyflow\/system$/,
+        replacement: fileURLToPath(
+          new URL("../../../packages/hgripe-flow/src/upstream/system/index.ts", import.meta.url),
+        ),
+      },
+      // The vendored source lives outside this app dir, so its bare imports
+      // must resolve back into this app's node_modules.
+      ...[
+        "classcat",
+        "zustand",
+        "react",
+        "react-dom",
+        "d3-drag",
+        "d3-selection",
+        "d3-transition",
+        "d3-zoom",
+      ].map((dep) => ({
+        find: new RegExp(`^${dep}(/.*)?$`),
+        replacement: fileURLToPath(new URL(`node_modules/${dep}`, import.meta.url)) + "$1",
+      })),
     ],
   },
   // Relative base so assets resolve correctly when served via tauri://localhost.

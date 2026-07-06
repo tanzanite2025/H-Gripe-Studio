@@ -19,7 +19,17 @@
       "@hgripe/flow/style.css": ["../../../packages/hgripe-flow/src/style.css"],
       "react": ["node_modules/@types/react/index.d.ts"],
       "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime.d.ts"],
-      "@xyflow/react": ["node_modules/@xyflow/react/dist/esm/index.d.ts"]
+      "react-dom": ["node_modules/@types/react-dom/index.d.ts"],
+      "classcat": ["node_modules/classcat/index.d.ts"],
+      "zustand": ["node_modules/zustand/index.d.ts"],
+      "zustand/shallow": ["node_modules/zustand/shallow.d.ts"],
+      "zustand/traditional": ["node_modules/zustand/traditional.d.ts"],
+      "d3-drag": ["node_modules/@types/d3-drag/index.d.ts"],
+      "d3-selection": ["node_modules/@types/d3-selection/index.d.ts"],
+      "d3-transition": ["node_modules/@types/d3-transition/index.d.ts"],
+      "d3-zoom": ["node_modules/@types/d3-zoom/index.d.ts"],
+      "@xyflow/react": ["../../../packages/hgripe-flow/src/upstream/react/index.ts"],
+      "@xyflow/system": ["../../../packages/hgripe-flow/src/upstream/system/index.ts"]
     },
 
     "strict": true,
@@ -30,5 +40,5 @@
 
     "types": ["vitest/globals"]
   },
-  "include": ["src"]
+  "include": ["src", "../../../packages/hgripe-flow/src"]
 }
