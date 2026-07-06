@@ -133,9 +133,10 @@ pub(crate) fn ffmpeg_hw_capability() -> Result<String, String> {
 
 /// Probe the FFmpeg *hardware decoder* capability for the capability summary
 /// (GPU_DEVICE_STRATEGY_PLAN step 12: hardware FFmpeg is per-operation and
-/// joins only behind an explicit probe/report/fallback — this is the decode
-/// probe/report half; nothing selects a hardware decoder yet, playback stays
-/// on the software baseline). `Ok(names)` when the vendored libav has
+/// joins only behind an explicit probe/report/fallback — an explicit
+/// `device: gpu` trim tries a matching hardware decoder through
+/// [`decode_with_device`]; playback scrubbing stays on the software
+/// baseline). `Ok(names)` when the vendored libav has
 /// hardware decoders compiled in, `Err(reason)` otherwise. Compiled-in is not
 /// a session guarantee: the driver can still refuse at run time.
 pub(crate) fn ffmpeg_hw_decode_capability() -> Result<String, String> {
@@ -152,6 +153,64 @@ pub(crate) fn ffmpeg_hw_decode_capability() -> Result<String, String> {
     {
         Err("native-ffmpeg feature disabled (no vendored libav)".to_string())
     }
+}
+
+/// The compiled-in hardware decoder matching an input codec name (e.g.
+/// `h264` -> `h264_cuvid`), from a probed decoder list. Pure name matching,
+/// kept separate from the ffi probe so it is testable.
+#[cfg_attr(not(feature = "native-ffmpeg"), allow(dead_code))]
+pub(crate) fn decoder_for_codec(codec: &str, decoders: &[String]) -> Option<String> {
+    let prefix = format!("{codec}_");
+    decoders
+        .iter()
+        .find(|name| name.starts_with(&prefix))
+        .cloned()
+}
+
+/// The compiled-in hardware decoder for `video`'s codec, or the reason there
+/// is none (probe the input codec, then match a `{codec}_*` hardware
+/// decoder).
+#[cfg(feature = "native-ffmpeg")]
+pub(crate) fn hardware_decoder_for_input(video: &std::path::Path) -> Result<String, String> {
+    let codec = super::ffmpeg_native::probe_input_codec(video)?;
+    decoder_for_codec(&codec, &super::ffmpeg_native::hardware_decoders()).ok_or_else(|| {
+        format!("no hardware decoder for '{codec}' compiled into the vendored libav")
+    })
+}
+
+/// Run a decode-and-re-encode with the shared opt-in hardware *decode*
+/// selection/fallback (GPU_DEVICE_STRATEGY_PLAN step 12, per-operation): only
+/// an explicit `device: gpu` request tries the compiled-in hardware decoder
+/// matching the input codec; any failure retries with the software decoder
+/// and keeps the reason visible. `auto` stays on the software baseline (with
+/// the standing "not enabled" reason); an honored `cpu` request is not a
+/// fallback. Returns `(output, decode_used, decode_reason)` for the caller's
+/// `*_report` telemetry (the encode half reports separately through
+/// [`encode_with_device`]).
+#[cfg(feature = "native-ffmpeg")]
+pub(crate) fn decode_with_device<T>(
+    device: &str,
+    video: &std::path::Path,
+    run: impl Fn(Option<&str>) -> Result<T, String>,
+) -> Result<(T, super::device_report::DeviceUsed, Option<String>), String> {
+    use super::device_report::DeviceUsed;
+    let mut fallback_reason = match device {
+        "cpu" => None,
+        _ => Some("hardware decode not enabled (vendored libav software baseline)".to_string()),
+    };
+    if device == "gpu" {
+        match hardware_decoder_for_input(video) {
+            Err(reason) => fallback_reason = Some(reason),
+            Ok(hw) => match run(Some(&hw)) {
+                Ok(out) => return Ok((out, DeviceUsed::FfmpegHw, None)),
+                Err(err) => {
+                    fallback_reason = Some(format!("hardware decoder '{hw}' failed: {err}"));
+                }
+            },
+        }
+    }
+    let out = run(None)?;
+    Ok((out, DeviceUsed::FfmpegSw, fallback_reason))
 }
 
 /// Run an encode with the shared opt-in hardware selection/fallback
@@ -400,6 +459,21 @@ mod tests {
             self.decodes.fetch_add(1, Ordering::SeqCst);
             Ok(poster_out.to_path_buf())
         }
+    }
+
+    #[test]
+    fn decoder_for_codec_matches_by_codec_prefix() {
+        let decoders = vec!["h264_cuvid".to_string(), "hevc_qsv".to_string()];
+        assert_eq!(
+            decoder_for_codec("h264", &decoders).as_deref(),
+            Some("h264_cuvid")
+        );
+        assert_eq!(
+            decoder_for_codec("hevc", &decoders).as_deref(),
+            Some("hevc_qsv")
+        );
+        // No cross-codec match: av1 input must not pick an h264 decoder.
+        assert_eq!(decoder_for_codec("av1", &decoders), None);
     }
 
     #[test]

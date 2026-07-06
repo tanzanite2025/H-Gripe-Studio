@@ -138,10 +138,11 @@ pub(crate) fn hardware_encoders() -> Vec<String> {
 }
 
 /// Hardware video decoders compiled into the vendored libav, by decoder name
-/// (probe only — decode stays on the software baseline; GPU_DEVICE_STRATEGY_PLAN
-/// step 12 adds hardware FFmpeg strictly behind an explicit
-/// probe/report/fallback, per operation). `avcodec_find_decoder_by_name` only
-/// reports what was compiled in; whether the driver/device actually accepts a
+/// (GPU_DEVICE_STRATEGY_PLAN step 12: hardware FFmpeg strictly behind an
+/// explicit probe/report/fallback, per operation — an explicit `device: gpu`
+/// trim tries the decoder matching the input codec; playback scrubbing stays
+/// on the software baseline). `avcodec_find_decoder_by_name` only reports
+/// what was compiled in; whether the driver/device actually accepts a
 /// session is still a per-run question.
 pub(crate) fn hardware_decoders() -> Vec<String> {
     const CANDIDATES: [&str; 6] = [
@@ -237,18 +238,29 @@ pub(crate) fn assemble_frames(
     })
 }
 
+/// The input video's codec name (e.g. `h264`), for picking a matching
+/// hardware decoder before a decode-and-re-encode run.
+pub(crate) fn probe_input_codec(video: &Path) -> Result<String, String> {
+    let decoder = Decoder::open(video)?;
+    let meta = decoder.probe()?;
+    meta.codec
+        .ok_or_else(|| "input video codec could not be identified".to_string())
+}
+
 /// Cut `[start_sec, end_sec)` out of `video` into `out` (the native
 /// `videoTrim` path). Decode-and-re-encode so the cut is frame-accurate
 /// rather than snapping to keyframes; audio is not carried over, mirroring
-/// the PyAV worker's `trim`.
+/// the PyAV worker's `trim`. `decoder_name` selects a specific (hardware)
+/// decoder for the input; `None` uses the stream's default software decoder.
 pub(crate) fn trim_video(
     video: &Path,
     out: &Path,
     start_sec: f64,
     end_sec: Option<f64>,
     codec: &str,
+    decoder_name: Option<&str>,
 ) -> Result<VideoEncodeStats, String> {
-    let mut decoder = Decoder::open(video)?;
+    let mut decoder = Decoder::open_with(video, decoder_name)?;
     let meta = decoder.probe()?;
     let fps = meta.fps.filter(|f| *f > 0.0).unwrap_or(30.0);
     let width = (meta.width - meta.width % 2).max(2);
@@ -309,6 +321,13 @@ struct Decoder {
 
 impl Decoder {
     fn open(video: &Path) -> Result<Self, String> {
+        Self::open_with(video, None)
+    }
+
+    /// Open with a specific decoder by name (e.g. a hardware decoder such as
+    /// `h264_cuvid`) instead of the stream's default software decoder. The
+    /// named decoder must match the stream's codec.
+    fn open_with(video: &Path, decoder_name: Option<&str>) -> Result<Self, String> {
         let path = CString::new(video.to_string_lossy().as_bytes())
             .map_err(|_| "video path contains a NUL byte".to_string())?;
         unsafe {
@@ -333,6 +352,20 @@ impl Decoder {
 
             let stream = *(*fmt).streams.add(stream_index as usize);
             let codecpar = (*stream).codecpar;
+            if let Some(name) = decoder_name {
+                let c = CString::new(name)
+                    .map_err(|_| "decoder name contains a NUL byte".to_string())?;
+                let named = ffi::avcodec_find_decoder_by_name(c.as_ptr());
+                if named.is_null() {
+                    ffi::avformat_close_input(&mut fmt);
+                    return Err(format!("decoder '{name}' is not compiled in"));
+                }
+                if (*named).id != (*codecpar).codec_id {
+                    ffi::avformat_close_input(&mut fmt);
+                    return Err(format!("decoder '{name}' does not match the input codec"));
+                }
+                decoder = named;
+            }
             let codec_ctx = ffi::avcodec_alloc_context3(decoder);
             if codec_ctx.is_null() {
                 ffi::avformat_close_input(&mut fmt);
