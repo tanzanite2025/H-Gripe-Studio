@@ -87,6 +87,10 @@ import { ColorPicker, hexToRgb } from "./maskEditModal/ColorPicker";
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
 
+/** Idle time after the last view change before the underlay re-renders at
+ * the new window's detail; the CSS transform carries the motion until then. */
+const VIEW_SETTLE_MS = 120;
+
 interface MaskEditModalProps {
   title: string;
   /** Backing image path (best-effort underlay); may be missing in preview. */
@@ -315,10 +319,25 @@ export function MaskEditModal({
   // checkerboard so the user can still paint in the correct pixel space.
   // The requested frame is the canvas view's visible window, so underlay
   // detail follows the zoom (rendered through the viewport's cached proxy).
-  const viewportView = useMemo(
+  // Debounced: during a wheel zoom / pan drag the stage's CSS transform (and
+  // the surface placement following it) carries the motion frame-to-frame;
+  // the host re-renders the window at matching detail once the view settles,
+  // instead of a full render round-trip per input event.
+  const targetViewportView = useMemo(
     () => viewWindow(view, canvasRef.current?.offsetWidth ?? 0, canvasRef.current?.offsetHeight ?? 0),
     [view],
   );
+  const [viewportView, setViewportView] = useState(targetViewportView);
+  useEffect(() => {
+    if (
+      targetViewportView.zoom === viewportView.zoom &&
+      targetViewportView.panX === viewportView.panX &&
+      targetViewportView.panY === viewportView.panY
+    )
+      return;
+    const timer = setTimeout(() => setViewportView(targetViewportView), VIEW_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [targetViewportView, viewportView]);
   // The selection tint (morphology preview / quick-mask ruby) composites
   // host-side over the rendered frame, so it follows the view window's
   // detail; when no host frame presents (browser preview) the canvas
@@ -505,6 +524,7 @@ export function MaskEditModal({
     underlayAnchorRef,
     presentEnabled,
     viewportOverlayScene,
+    view,
   );
   const underlay = viewport.underlay;
   const presented = viewport.presented;

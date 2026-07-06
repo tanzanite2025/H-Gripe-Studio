@@ -115,6 +115,28 @@ describe("useViewportPlacement", () => {
     await host.close();
   });
 
+  it("re-measures when the remeasure key changes (CSS transform moved the rect)", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    const place = vi.spyOn(host, "place");
+
+    const ref = elementRef();
+    const { rerender } = renderHook(
+      ({ key }: { key: number }) => useViewportPlacement(host, ref, true, undefined, key),
+      { initialProps: { key: 1 } },
+    );
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1));
+
+    // A transform changes the rect without firing the resize observer; the
+    // key change alone re-measures and sends the moved placement.
+    rect = { ...rect, left: 80, right: 380 };
+    rerender({ key: 2 });
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(2));
+    expect(place).toHaveBeenLastCalledWith(
+      expect.objectContaining({ x: 80 }),
+    );
+    await host.close();
+  });
+
   it("hides the surface while disabled and re-places when re-enabled", async () => {
     const host = await WgpuViewportHost.open("image_edit");
     const commands: unknown[] = [];

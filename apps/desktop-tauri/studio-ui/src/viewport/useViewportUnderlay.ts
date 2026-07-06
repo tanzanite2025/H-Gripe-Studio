@@ -103,6 +103,11 @@ export function useViewportUnderlay(
    * detail — one screen pixel wide at any zoom — instead of on a
    * document-size canvas. */
   overlayScene: ViewportOverlayScene | null = null,
+  /** Re-measures the surface placement on change (CSS transforms move the
+   * placement element without firing the resize observer): callers whose
+   * stage zooms/pans with a transform pass their view state here so the
+   * surface window follows it. */
+  placementKey: unknown = undefined,
 ): ViewportUnderlay {
   const [state, setState] = useState<Omit<ViewportUnderlay, "host">>({
     underlay: null,
@@ -175,7 +180,7 @@ export function useViewportUnderlay(
   const sentPresentEnabledRef = useRef(true);
   const presentEnabledRef = useRef(presentEnabled);
   presentEnabledRef.current = presentEnabled;
-  useViewportPlacement(openHost, placementRef ?? noPlacementRef, presentEnabled, (report) => {
+  const onPlaced = (report: { presented: boolean }) => {
     const host = hostRef.current;
     if (!report.presented || framePresentedRef.current) return;
     if (!host || !host.isOpen || !presentEnabledRef.current) return;
@@ -191,7 +196,14 @@ export function useViewportUnderlay(
         settled: true,
       }));
     });
-  });
+  };
+  useViewportPlacement(
+    openHost,
+    placementRef ?? noPlacementRef,
+    presentEnabled,
+    onPlaced,
+    placementKey,
+  );
 
   useEffect(() => {
     framePresentedRef.current = false;
