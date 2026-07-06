@@ -5,7 +5,14 @@
 // untouched per slider change — and the viewport is destroyed on unmount or
 // when the target path changes.
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { tauriInvoke } from "../bridge/core";
 import { registerResource } from "../bridge/files";
 import {
@@ -33,6 +40,42 @@ type GradeViewportRef =
   | { kind: "node_output"; nodeId: string }
   | { kind: "resource"; resourceId: string };
 
+/** Wrap an async render so previews are latest-wins (GPU queue policy): at
+ * most one call is in flight and one is queued. While a render runs, only the
+ * newest request waits — a superseded queued request resolves `null` without
+ * ever dispatching. Exported for tests; product code uses it through
+ * [`useGradeViewport`]. */
+export function latestWinsGate<A extends unknown[], T>(
+  run: (...args: A) => Promise<T | null>,
+): (...args: A) => Promise<T | null> {
+  let inFlight = false;
+  let queued: {
+    args: A;
+    resolve: (value: Promise<T | null> | null) => void;
+  } | null = null;
+  const gated = (...args: A): Promise<T | null> => {
+    if (inFlight) {
+      queued?.resolve(null); // superseded before dispatch
+      return new Promise((resolve) => {
+        queued = { args, resolve };
+      });
+    }
+    inFlight = true;
+    const result = run(...args);
+    const settle = () => {
+      inFlight = false;
+      const next = queued;
+      if (next) {
+        queued = null;
+        next.resolve(gated(...next.args));
+      }
+    };
+    result.then(settle, settle);
+    return result;
+  };
+  return gated;
+}
+
 interface OpenGradeViewport {
   host: WgpuViewportHost;
   ref: GradeViewportRef;
@@ -45,9 +88,11 @@ export interface GradeViewportApi {
    * (optionally zoomed/panned) view window through the host.
    * `temporalDenoise` (`0..=1`, video targets only) blends graded frames
    * against the previous graded frame during continuous playback — the host
-   * restarts the chain on a seek or source change. Resolves to `null`
-   * outside Tauri (browser preview), where callers keep their in-webview
-   * mirror fallback. */
+   * restarts the chain on a seek or source change. Preview renders are
+   * latest-wins: at most one render is in flight and one is queued — a new
+   * request supersedes the queued one, which resolves `null` without ever
+   * reaching the host. Also resolves to `null` outside Tauri (browser
+   * preview), where callers keep their in-webview mirror fallback. */
   renderGraded: (
     doc: unknown,
     view?: ViewportViewState,
@@ -94,7 +139,7 @@ export function useGradeViewport(
     };
   }, [path, isVideo, nodeRef, size]);
 
-  const renderGraded = useCallback(
+  const renderOnce = useCallback(
     async (
       doc: unknown,
       view?: ViewportViewState,
@@ -131,7 +176,11 @@ export function useGradeViewport(
           open.ref.kind === "node_output"
             ? { kind: "node_output", nodeId: open.ref.nodeId }
             : isVideo
-              ? { kind: "video_frame", resourceId: open.ref.resourceId, timeSec: timeRef.current }
+              ? {
+                  kind: "video_frame",
+                  resourceId: open.ref.resourceId,
+                  timeSec: timeRef.current,
+                }
               : { kind: "image", resourceId: open.ref.resourceId },
       });
       await open.host.command({
@@ -154,6 +203,12 @@ export function useGradeViewport(
     },
     [path, isVideo, nodeRef, size],
   );
+
+  // Latest-wins gate over `renderOnce` (GPU queue policy): the host renders
+  // one preview at a time; while it does, only the newest request waits — a
+  // stacked slider drag cancels the queued render before it ever dispatches,
+  // instead of piling renders up behind the command boundary.
+  const renderGraded = useMemo(() => latestWinsGate(renderOnce), [renderOnce]);
 
   const readPixels = useCallback(async (): Promise<ViewportPixels | null> => {
     const open = await hostRef.current;

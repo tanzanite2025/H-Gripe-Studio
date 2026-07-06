@@ -362,11 +362,20 @@ mechanism.
 
 Possible policy:
 
-- one full-resolution GPU compute job at a time
-- previews are latest-wins and cancellable
-- playback decode must not stall on model inference
-- export jobs can queue
-- CPU fallback is allowed when GPU is busy or unavailable
+- ✅ one full-resolution GPU compute job at a time — the `Gpu` lane is
+  `Semaphore(1)` in `StudioScheduler`.
+- ✅ previews are latest-wins and cancellable — the grade preview renders
+  through `latestWinsGate` (`useGradeViewport.ts`): at most one render in
+  flight and one queued, a stacked slider drag supersedes the queued render
+  before it dispatches; the playback engine's scrub queue is latest-wins the
+  same way (`coalesce_latest`).
+- ✅ playback decode must not stall on model inference — the playback engine
+  runs on its own dedicated decode thread, outside the scheduler's GPU gate.
+- ✅ export jobs can queue — `VideoEncode` is its own `Semaphore(1)`; queued
+  encodes wait on the permit without holding the GPU gate.
+- ✅ CPU fallback is allowed when GPU is busy or unavailable — every GPU path
+  (viewport surface, grade kernel, ONNX providers, FFmpeg hw decode) carries
+  a reported CPU/software fallback.
 
 Do not over-engineer this before video/timeline/export are real product paths.
 
