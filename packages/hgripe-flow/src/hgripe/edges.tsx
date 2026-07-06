@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   addEdge,
   BaseEdge,
@@ -27,7 +28,46 @@ export type HgripeFlowProps<NodeType extends Node = Node, EdgeType extends Edge 
 
 const EDGE_STROKE = "#aeb4c2";
 const BINDING_STROKE = "#7c5cff";
-const DRAG_ARROW_ID = "hgripe-drag-connection-arrow";
+const DRAG_STROKE_VALID = "#8fb2ff";
+const DRAG_STROKE_INVALID = "#ff6b6b";
+
+// Default arrow markers are defined once per canvas and shared by every edge
+// (SVG url(#id) references resolve document-wide). A per-edge marker is only
+// rendered for edges with a custom stroke colour, so a large graph does not
+// carry one <defs><marker> pair per wire.
+const DATA_ARROW_ID = "hgripe-edge-arrow";
+const BINDING_ARROW_ID = "hgripe-binding-arrow";
+const DRAG_ARROW_VALID_ID = "hgripe-drag-arrow-valid";
+const DRAG_ARROW_INVALID_ID = "hgripe-drag-arrow-invalid";
+
+function ArrowMarker({ id, fill }: { id: string; fill: string }) {
+  return (
+    <marker
+      id={id}
+      viewBox={EDGE_ARROW_MARKER.viewBox}
+      refX={EDGE_ARROW_MARKER.refX}
+      refY={EDGE_ARROW_MARKER.refY}
+      markerWidth={EDGE_ARROW_MARKER.markerWidth}
+      markerHeight={EDGE_ARROW_MARKER.markerHeight}
+      orient="auto-start-reverse"
+    >
+      <path d="M 0 0 L 10 5 L 0 10 z" fill={fill} />
+    </marker>
+  );
+}
+
+const SharedEdgeMarkers = memo(function SharedEdgeMarkers() {
+  return (
+    <svg style={{ position: "absolute", width: 0, height: 0 }} aria-hidden>
+      <defs>
+        <ArrowMarker id={DATA_ARROW_ID} fill={EDGE_STROKE} />
+        <ArrowMarker id={BINDING_ARROW_ID} fill={BINDING_STROKE} />
+        <ArrowMarker id={DRAG_ARROW_VALID_ID} fill={DRAG_STROKE_VALID} />
+        <ArrowMarker id={DRAG_ARROW_INVALID_ID} fill={DRAG_STROKE_INVALID} />
+      </defs>
+    </svg>
+  );
+});
 
 export function normalizeHgripeEdges(edges: Edge[]): Edge[] {
   for (const edge of edges) {
@@ -62,6 +102,7 @@ export function addHgripeDataEdge(edge: Connection | Edge, edges: Edge[]): Edge[
 
 export function HgripeFlow<NodeType extends Node = Node, EdgeType extends Edge = Edge>({
   edges,
+  children,
   ...props
 }: HgripeFlowProps<NodeType, EdgeType>) {
   const normalizedEdges = edges ? (normalizeHgripeEdges(edges as Edge[]) as EdgeType[]) : edges;
@@ -74,36 +115,38 @@ export function HgripeFlow<NodeType extends Node = Node, EdgeType extends Edge =
       connectionLineComponent={DragConnectionLine}
       connectionLineContainerStyle={HGRIPE_CONNECTION_LINE_CONTAINER_STYLE}
       defaultEdgeOptions={HGRIPE_DEFAULT_EDGE_OPTIONS}
-    />
+    >
+      <SharedEdgeMarkers />
+      {children}
+    </ReactFlow>
   );
 }
 
-export function ChamferEdge({ id, sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
+export const ChamferEdge = memo(function ChamferEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  style,
+}: EdgeProps) {
   const path = chamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
-  const stroke = String(style?.stroke ?? EDGE_STROKE);
-  const markerId = edgeMarkerId("hgripe-edge-arrow", id);
+  const customStroke = style?.stroke ? String(style.stroke) : undefined;
+  const markerId = customStroke ? edgeMarkerId(DATA_ARROW_ID, id) : DATA_ARROW_ID;
 
   return (
     <>
-      <defs>
-        <marker
-          id={markerId}
-          viewBox={EDGE_ARROW_MARKER.viewBox}
-          refX={EDGE_ARROW_MARKER.refX}
-          refY={EDGE_ARROW_MARKER.refY}
-          markerWidth={EDGE_ARROW_MARKER.markerWidth}
-          markerHeight={EDGE_ARROW_MARKER.markerHeight}
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={stroke} />
-        </marker>
-      </defs>
+      {customStroke ? (
+        <defs>
+          <ArrowMarker id={markerId} fill={customStroke} />
+        </defs>
+      ) : null}
       <BaseEdge
         id={id}
         path={path}
         markerEnd={`url(#${markerId})`}
         style={{
-          stroke,
+          stroke: EDGE_STROKE,
           strokeWidth: EDGE_STROKE_WIDTH,
           strokeLinecap: "round",
           strokeLinejoin: "round",
@@ -112,34 +155,33 @@ export function ChamferEdge({ id, sourceX, sourceY, targetX, targetY, style }: E
       />
     </>
   );
-}
+});
 
-export function BindingEdge({ id, sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
+export const BindingEdge = memo(function BindingEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  style,
+}: EdgeProps) {
   const path = chamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
-  const stroke = String(style?.stroke ?? BINDING_STROKE);
-  const markerId = edgeMarkerId("hgripe-binding-arrow", id);
+  const customStroke = style?.stroke ? String(style.stroke) : undefined;
+  const markerId = customStroke ? edgeMarkerId(BINDING_ARROW_ID, id) : BINDING_ARROW_ID;
 
   return (
     <>
-      <defs>
-        <marker
-          id={markerId}
-          viewBox={EDGE_ARROW_MARKER.viewBox}
-          refX={EDGE_ARROW_MARKER.refX}
-          refY={EDGE_ARROW_MARKER.refY}
-          markerWidth={EDGE_ARROW_MARKER.markerWidth}
-          markerHeight={EDGE_ARROW_MARKER.markerHeight}
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={stroke} />
-        </marker>
-      </defs>
+      {customStroke ? (
+        <defs>
+          <ArrowMarker id={markerId} fill={customStroke} />
+        </defs>
+      ) : null}
       <BaseEdge
         id={id}
         path={path}
         markerEnd={`url(#${markerId})`}
         style={{
-          stroke,
+          stroke: BINDING_STROKE,
           strokeWidth: EDGE_STROKE_WIDTH,
           strokeLinecap: "round",
           strokeLinejoin: "round",
@@ -149,7 +191,7 @@ export function BindingEdge({ id, sourceX, sourceY, targetX, targetY, style }: E
       />
     </>
   );
-}
+});
 
 export function DragConnectionLine({
   fromX,
@@ -160,35 +202,21 @@ export function DragConnectionLine({
   connectionLineStyle,
 }: ConnectionLineComponentProps) {
   const valid = connectionStatus !== "invalid";
-  const stroke = valid ? "#8fb2ff" : "#ff6b6b";
+  const stroke = valid ? DRAG_STROKE_VALID : DRAG_STROKE_INVALID;
+  const markerId = valid ? DRAG_ARROW_VALID_ID : DRAG_ARROW_INVALID_ID;
   const path = chamferPath({ x: fromX, y: fromY }, { x: toX, y: toY });
 
   return (
-    <>
-      <defs>
-        <marker
-          id={DRAG_ARROW_ID}
-          viewBox={EDGE_ARROW_MARKER.viewBox}
-          refX={EDGE_ARROW_MARKER.refX}
-          refY={EDGE_ARROW_MARKER.refY}
-          markerWidth={EDGE_ARROW_MARKER.markerWidth}
-          markerHeight={EDGE_ARROW_MARKER.markerHeight}
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={stroke} />
-        </marker>
-      </defs>
-      <path
-        d={path}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={EDGE_STROKE_WIDTH}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        markerEnd={`url(#${DRAG_ARROW_ID})`}
-        style={connectionLineStyle}
-      />
-    </>
+    <path
+      d={path}
+      fill="none"
+      stroke={stroke}
+      strokeWidth={EDGE_STROKE_WIDTH}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      markerEnd={`url(#${markerId})`}
+      style={connectionLineStyle}
+    />
   );
 }
 

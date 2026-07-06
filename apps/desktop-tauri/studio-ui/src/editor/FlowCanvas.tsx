@@ -153,6 +153,19 @@ export function FlowCanvas({
     e.dataTransfer.dropEffect = "move";
   }, []);
 
+  const handleNodeDragStop = useCallback(
+    (_: unknown, node: Node) => onNodeDragStop?.(node),
+    [onNodeDragStop],
+  );
+  const handleMoveEnd = useCallback(
+    (_: unknown, vp: Viewport) => onViewportChange?.(vp),
+    [onViewportChange],
+  );
+  const handleSelectionChange = useCallback(
+    ({ nodes: sel }: { nodes: Node[] }) => onSelect(sel[0]?.id ?? null),
+    [onSelect],
+  );
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -174,12 +187,12 @@ export function FlowCanvas({
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
-      onNodeDragStop={(_, node) => onNodeDragStop?.(node)}
-      onMoveEnd={(_, viewport) => onViewportChange?.(viewport)}
+      onNodeDragStop={handleNodeDragStop}
+      onMoveEnd={handleMoveEnd}
       snapToGrid={snapToGrid}
       snapGrid={SNAP_GRID}
       isValidConnection={isValidConnection}
-      onSelectionChange={({ nodes: sel }) => onSelect(sel[0]?.id ?? null)}
+      onSelectionChange={handleSelectionChange}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onlyRenderVisibleElements
