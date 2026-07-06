@@ -222,7 +222,8 @@ Add or refine a single capability summary that aggregates existing probes:
 - ✅ wgpu adapter status
 - ✅ ONNX providers
 - ✅ FFmpeg vendored library status
-- future FFmpeg hardware encoder availability
+- FFmpeg hardware encoder/decoder availability (`ffmpeg hw encoders` /
+  `ffmpeg hw decoders` summary lines)
 - external model plugin device status, when a plugin is installed
 
 This should be a diagnostic snapshot, not the source of truth for every run.
@@ -453,8 +454,11 @@ This should be a settings surface, not a required setup wizard.
 12. Add hardware FFmpeg only behind explicit probe/report/fallback. Probe half
     landed: `probe_engines` carries `ffmpeg_hw` (hardware encoders compiled
     into the vendored libav via `avcodec_find_encoder_by_name` — nvenc / qsv /
-    amf / mf, or the reason none exist) and the capability summary shows an
-    `ffmpeg hw encoders` line. Fallback half landed for `videoAssemble` and
+    amf / mf, or the reason none exist) and `ffmpeg_hw_decode` (hardware
+    decoders via `avcodec_find_decoder_by_name` — cuvid / qsv — probe only;
+    playback stays on the software baseline until decode gets its own
+    report/fallback), and the capability summary shows `ffmpeg hw encoders` /
+    `ffmpeg hw decoders` lines. Fallback half landed for `videoAssemble` and
     `videoTrim` (shared `video_engine::encode_with_device`): an explicit
     `device: gpu` request tries the first compiled-in hardware H.264 encoder
     and falls back to the software baseline with the failure reason kept

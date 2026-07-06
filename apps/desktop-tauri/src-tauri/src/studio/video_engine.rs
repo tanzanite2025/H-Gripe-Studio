@@ -131,6 +131,29 @@ pub(crate) fn ffmpeg_hw_capability() -> Result<String, String> {
     }
 }
 
+/// Probe the FFmpeg *hardware decoder* capability for the capability summary
+/// (GPU_DEVICE_STRATEGY_PLAN step 12: hardware FFmpeg is per-operation and
+/// joins only behind an explicit probe/report/fallback — this is the decode
+/// probe/report half; nothing selects a hardware decoder yet, playback stays
+/// on the software baseline). `Ok(names)` when the vendored libav has
+/// hardware decoders compiled in, `Err(reason)` otherwise. Compiled-in is not
+/// a session guarantee: the driver can still refuse at run time.
+pub(crate) fn ffmpeg_hw_decode_capability() -> Result<String, String> {
+    #[cfg(feature = "native-ffmpeg")]
+    {
+        let decoders = super::ffmpeg_native::hardware_decoders();
+        if decoders.is_empty() {
+            Err("no hardware decoders in the vendored libav (software decode only)".to_string())
+        } else {
+            Ok(decoders.join(", "))
+        }
+    }
+    #[cfg(not(feature = "native-ffmpeg"))]
+    {
+        Err("native-ffmpeg feature disabled (no vendored libav)".to_string())
+    }
+}
+
 /// Run an encode with the shared opt-in hardware selection/fallback
 /// (GPU_DEVICE_STRATEGY_PLAN step 12): only an explicit `device: gpu` request
 /// tries the first compiled-in hardware H.264 encoder; any failure falls back

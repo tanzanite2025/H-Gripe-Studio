@@ -137,6 +137,31 @@ pub(crate) fn hardware_encoders() -> Vec<String> {
         .collect()
 }
 
+/// Hardware video decoders compiled into the vendored libav, by decoder name
+/// (probe only — decode stays on the software baseline; GPU_DEVICE_STRATEGY_PLAN
+/// step 12 adds hardware FFmpeg strictly behind an explicit
+/// probe/report/fallback, per operation). `avcodec_find_decoder_by_name` only
+/// reports what was compiled in; whether the driver/device actually accepts a
+/// session is still a per-run question.
+pub(crate) fn hardware_decoders() -> Vec<String> {
+    const CANDIDATES: [&str; 6] = [
+        "h264_cuvid",
+        "hevc_cuvid",
+        "av1_cuvid",
+        "h264_qsv",
+        "hevc_qsv",
+        "av1_qsv",
+    ];
+    CANDIDATES
+        .iter()
+        .filter(|name| {
+            let c = CString::new(**name).expect("static decoder name");
+            unsafe { !ffi::avcodec_find_decoder_by_name(c.as_ptr()).is_null() }
+        })
+        .map(|name| name.to_string())
+        .collect()
+}
+
 /// The first hardware H.264 encoder compiled into the vendored libav, if any
 /// (the encoder an explicit `device: gpu` encode request tries before falling
 /// back to the software baseline).
