@@ -6,6 +6,7 @@ import {
   REGISTRY_EVENT,
   apiProfilesFor,
   loadRegistry,
+  localModelsFor,
 } from "../models/backendRegistry";
 import { ModelManagerModal } from "../models/ModelManagerModal";
 import type { LocalPreset } from "../runtime/promptOptimize";
@@ -67,19 +68,29 @@ export function PromptAssistantPanel({
 
   const draft = latestDraft(session);
 
-  // Global manager options for the assistant backend (plan step 4: the same
-  // capability-filtered selector API every card uses; the session keeps only
-  // the managed ref).
+  // Global manager options for the assistant backend (plan steps 4-5: the
+  // same capability-filtered selector API every card uses; the session keeps
+  // only the managed ref).
   const apiOptions = apiProfilesFor(registry, "prompt.rewrite");
-  const backendRef = session.backend.kind === "api_profile" ? session.backend.ref : null;
-  const backendValue = backendRef !== null ? `api:${backendRef}` : "local";
+  const localOptions = localModelsFor(registry, "prompt.rewrite");
+  const backend = session.backend;
+  const backendValue =
+    backend.kind === "api_profile"
+      ? `api:${backend.ref}`
+      : backend.kind === "local_model"
+        ? `localModel:${backend.ref}`
+        : "local";
   const backendDangling =
-    backendRef !== null && !apiOptions.some((p) => p.ref === backendRef);
+    (backend.kind === "api_profile" && !apiOptions.some((p) => p.ref === backend.ref)) ||
+    (backend.kind === "local_model" && !localOptions.some((m) => m.ref === backend.ref));
 
   const send = () => {
     const text = input.trim();
     if (!text || busy) return;
-    if (session.backend.kind === "local") {
+    // Managed local text models draft through the built-in rewriter until the
+    // local text engine lands (same behaviour as the Prompt card's local model
+    // selection); a real inference path replaces this reply in a later step.
+    if (session.backend.kind !== "api_profile") {
       const next = sendAssistantMessage(session, input);
       if (next === session) return;
       setSession(next);
@@ -130,13 +141,25 @@ export function PromptAssistantPanel({
               ...s,
               backend: v.startsWith("api:")
                 ? { kind: "api_profile", ref: v.slice("api:".length) }
-                : { kind: "local" },
+                : v.startsWith("localModel:")
+                  ? { kind: "local_model", ref: v.slice("localModel:".length) }
+                  : { kind: "local" },
             }));
           }}
           aria-label={t("assistant.backend")}
         >
-          {backendDangling && <option value="">{backendRef}</option>}
+          {backendDangling && <option value="">{backend.ref}</option>}
           <option value="local">{t("assistant.backendLocal")}</option>
+          {localOptions.length > 0 && (
+            <optgroup label={t("models.selector.groupLocal")}>
+              {localOptions.map((m) => (
+                <option key={m.ref} value={`localModel:${m.ref}`}>
+                  {m.display_name}
+                  {m.engine ? ` (${m.engine})` : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
           {apiOptions.length > 0 && (
             <optgroup label={t("models.selector.groupApi")}>
               {apiOptions.map((p) => (
@@ -152,7 +175,12 @@ export function PromptAssistantPanel({
           {t("models.selector.manage")}
         </button>
       </div>
-      {session.backend.kind === "local" && (
+      {session.backend.kind === "local_model" && !backendDangling && (
+        <div className="assistant-backend">
+          <span className="assistant-note">{t("assistant.localModelNote")}</span>
+        </div>
+      )}
+      {session.backend.kind !== "api_profile" && (
         <div className="assistant-backend">
           <span>{t("assistant.preset")}</span>
           <select

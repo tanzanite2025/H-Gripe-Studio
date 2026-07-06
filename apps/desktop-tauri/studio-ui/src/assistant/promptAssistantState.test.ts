@@ -84,6 +84,17 @@ describe("persistence", () => {
     expect(loadAssistantSession()).toEqual(emptyAssistantSession());
   });
 
+  it("round-trips the local model backend ref", () => {
+    saveAssistantSession({
+      ...emptyAssistantSession(),
+      backend: { kind: "local_model", ref: "qwen-mini" },
+    });
+    expect(loadAssistantSession().backend).toEqual({
+      kind: "local_model",
+      ref: "qwen-mini",
+    });
+  });
+
   it("round-trips the API backend ref and drops malformed backends", () => {
     saveAssistantSession({
       ...emptyAssistantSession(),

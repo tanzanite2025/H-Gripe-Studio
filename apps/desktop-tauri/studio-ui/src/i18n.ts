@@ -854,6 +854,10 @@ export const messages = {
     zh: "改写失败：{error}",
   },
   "assistant.waiting": { en: "Rewriting…", zh: "正在改写…" },
+  "assistant.localModelNote": {
+    en: "Local text models draft via the built-in rewriter until the local text engine lands.",
+    zh: "本地文本引擎落地前，本地模型暂用内置改写器起草。",
+  },
   "assistant.preset": { en: "Preset", zh: "预设" },
   "assistant.empty": {
     en: "Drafts stay local. Describe an idea and the assistant rewrites it into a prompt draft.",
