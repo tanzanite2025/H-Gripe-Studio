@@ -1799,6 +1799,147 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 
 
+/* ---- right tool rail + Prompt Assistant panel (software-level, above the
+   bottom drawer so it stays reachable while the drawer is open) ---- */
+.tool-rail {
+  position: fixed;
+  right: 0;
+  top: 96px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+.tool-rail-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.tool-rail-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.assistant-dock {
+  position: fixed;
+  right: 40px;
+  top: 96px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+}
+.assistant-dock.drawer-open { bottom: 280px; }
+.assistant-panel {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.assistant-head h2 { margin: 0; font-size: 13px; }
+.assistant-head .spacer { flex: 1; }
+.assistant-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.assistant-close:hover { color: var(--text); }
+.assistant-backend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.assistant-backend select {
+  background: #11131a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.assistant-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.assistant-empty { color: var(--muted); margin: 4px 0; }
+.assistant-msg {
+  max-width: 92%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.assistant-msg.user {
+  align-self: flex-end;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.assistant-msg.assistant {
+  align-self: flex-start;
+  background: #11131a;
+  border: 1px solid var(--border);
+}
+.assistant-input {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.assistant-input textarea {
+  flex: 1;
+  background: #11131a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  resize: none;
+}
+.assistant-input button { font-size: 12px; padding: 4px 10px; }
+.assistant-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.assistant-actions button { font-size: 11px; padding: 3px 9px; }
+.assistant-actions .spacer { flex: 1; }
+
 /* ---- bottom production drawer (Edit / Timeline + Grade) ---- */
 .production-drawer {
   display: flex;
