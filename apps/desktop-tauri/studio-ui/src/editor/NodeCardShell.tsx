@@ -2,7 +2,9 @@ import type { CSSProperties, ReactNode, Ref } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeSpec, PortSpec } from "../graph/nodeSpecs";
 import type { NodeStatus } from "../runtime/dag";
+import type { DeviceReport } from "../runtime/deviceReport";
 import { NodeTypeBadge } from "./NodeTypeBadge";
+import { NodeDeviceBadge } from "./NodeDeviceBadge";
 import { fmtDuration } from "./HgripeNode";
 
 // The one node-card frame every node kind renders through: outer card,
@@ -15,6 +17,8 @@ export interface NodeCardShellProps {
   status: NodeStatus;
   lod: boolean;
   durationMs?: number;
+  /** Last run's device report, rendered as a header badge when present. */
+  deviceReport?: DeviceReport | null;
   /** Extra element rendered inside the title row (e.g. the PSD tag). */
   titleExtra?: ReactNode;
   /** Opens the on-demand right-side Inspector for this node. */
@@ -42,6 +46,7 @@ export function NodeCardShell({
   status,
   lod,
   durationMs,
+  deviceReport,
   titleExtra,
   onOpenInspector,
   portContent,
@@ -64,6 +69,7 @@ export function NodeCardShell({
         <span className="node-title">{spec.title}</span>
         {titleExtra}
         <span className="node-header-actions">
+          <NodeDeviceBadge report={deviceReport} />
           {onRunCard && (
             <button
               type="button"

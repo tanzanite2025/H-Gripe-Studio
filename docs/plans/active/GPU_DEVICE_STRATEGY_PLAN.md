@@ -411,7 +411,10 @@ This should be a settings surface, not a required setup wizard.
    the grade panel's backend badge and the program monitor's frame badge now
    render from the shared `DeviceReport` (label from `used`, tooltip with
    `requested -> used` + fallback reason, and a visible ⚠ marker on fallback
-   instead of silently hiding it). Node-report/capability panels still pending.
+   instead of silently hiding it). Node cards and the Inspector show the same
+   report: after a run each reporting node's card header carries a
+   `NodeDeviceBadge` (used device, ⚠ on fallback, full line as tooltip) and
+   the Inspector shows a "Device (last run)" line.
 6. ✅ (existing probes) Add or refine capability summary as diagnostics only:
    `summarizeCapabilities` + Model Manager "Machine capability" section.
    `probe_engines` now also carries `wgpu` (grade kernel adapter summary, or

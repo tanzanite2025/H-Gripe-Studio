@@ -887,6 +887,18 @@ button:disabled { opacity: 0.6; cursor: default; }
   background: #2a2d37;
   color: var(--muted);
 }
+/* Per-node device transparency badge (shared DeviceReport vocabulary):
+   header shows the last run's used device, ⚠ on fallback, tooltip = full
+   one-line report. */
+.node-device-badge {
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #2a2d37;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.field code.path.warn { color: var(--err); }
 .node-status-dot {
   width: 8px;
   height: 8px;

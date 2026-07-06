@@ -19,6 +19,7 @@ import { psdTemplatePathWarning } from "./psdcheck";
 import { NodeCardShell } from "./NodeCardShell";
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import type { LayeredImageAsset } from "../production/layeredImage";
+import type { DeviceReport } from "../runtime/deviceReport";
 
 export interface HgripeNodeData extends Record<string, unknown> {
   kind: string;
@@ -45,6 +46,8 @@ export interface HgripeNodeData extends Record<string, unknown> {
   cutoutImagePath?: string | null;
   /** Layered image asset from the last run (smartLayerSplit node only). */
   layeredAsset?: LayeredImageAsset | null;
+  /** Last run's device report (shared DeviceReport vocabulary), if any. */
+  deviceReport?: DeviceReport | null;
 }
 
 function basename(p: string): string {
@@ -460,6 +463,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       status={status}
       lod={lod}
       durationMs={d.durationMs}
+      deviceReport={d.deviceReport}
       titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
       onOpenInspector={() => editing?.openInspector?.(id)}
       portContent={lod ? undefined : portContent}

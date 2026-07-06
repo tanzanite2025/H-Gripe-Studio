@@ -18,6 +18,7 @@ import {
   localModelCapability,
   rowBindingActive,
 } from "../models/backendBindings";
+import { describeDeviceReport } from "../runtime/deviceReport";
 import { OutputPicker } from "./OutputPicker";
 import { MediaViewer } from "./MediaViewer";
 import type { HgripeNodeData } from "./HgripeNode";
@@ -248,6 +249,15 @@ export function Inspector({ node, onParamChange, onClose }: InspectorProps) {
             </label>
           ))}
         </details>
+      )}
+
+      {data.deviceReport && (
+        <div className="field">
+          <span>{t("inspector.device")}</span>
+          <code className={`path${data.deviceReport.fallbackReason ? " warn" : ""}`}>
+            {describeDeviceReport(data.deviceReport)}
+          </code>
+        </div>
       )}
 
       {data.imagePath && (
