@@ -1804,25 +1804,23 @@ button:disabled { opacity: 0.6; cursor: default; }
 .assistant-fab {
   position: fixed;
   z-index: 2001;
-  width: 80px;
-  height: 80px;
+  width: 64px;
+  height: 64px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: none;
+  border: none;
   border-radius: 50%;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.4));
   cursor: grab;
   touch-action: none;
 }
 .assistant-fab:active {
   cursor: grabbing;
 }
-.assistant-fab.active {
-  border-color: var(--accent);
-}
+
 .assistant-fab .eyes-icon {
   display: block;
   pointer-events: none;
