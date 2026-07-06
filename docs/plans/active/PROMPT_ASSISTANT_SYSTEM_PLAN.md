@@ -296,7 +296,11 @@ Bottom drawer
 6. ✅ Add session persistence separate from workflow graph persistence
    (localStorage-backed session in `promptAssistantState.ts`; multi-session
    history remains future work).
-7. Add target-aware prompt insertion for Prompt and Generate cards.
+7. ✅ Add target-aware prompt insertion for Prompt and Generate cards
+   (`insertTarget.ts`: Prompt / Prompt Optimize cards take the draft in their
+   `text` param; a selected Generate card routes the draft to the Prompt card
+   feeding its `prompt` input, wires in a fresh Prompt card when the input is
+   free, and refuses — with a status message — when a non-prompt node owns it).
 8. Add the `Prompt` card `Optimize` row using the same manager-backed backend
    refs.
 9. Hide/migrate the old `Prompt Optimize` card from the normal palette.
