@@ -108,6 +108,29 @@ pub(crate) fn ffmpeg_capability() -> Result<String, String> {
     }
 }
 
+/// Probe the FFmpeg *hardware encoder* capability for the capability summary
+/// (GPU_DEVICE_STRATEGY_PLAN step 12: hardware FFmpeg joins only behind an
+/// explicit probe/report/fallback — this is the probe/report half; nothing
+/// selects a hardware encoder yet). `Ok(names)` when the vendored libav has
+/// hardware encoders compiled in, `Err(reason)` otherwise. Compiled-in is not
+/// a session guarantee: the driver can still refuse at run time, so per-run
+/// DeviceReports stay the source of truth.
+pub(crate) fn ffmpeg_hw_capability() -> Result<String, String> {
+    #[cfg(feature = "native-ffmpeg")]
+    {
+        let encoders = super::ffmpeg_native::hardware_encoders();
+        if encoders.is_empty() {
+            Err("no hardware encoders in the vendored libav (software x264 only)".to_string())
+        } else {
+            Ok(encoders.join(", "))
+        }
+    }
+    #[cfg(not(feature = "native-ffmpeg"))]
+    {
+        Err("native-ffmpeg feature disabled (no vendored libav)".to_string())
+    }
+}
+
 /// Build the decoder backend: the in-process libav decoder
 /// ([`super::ffmpeg_native`]) — decode errors surface as `Err` to the caller.
 /// Without `native-ffmpeg`, a stub source whose every call errors.
