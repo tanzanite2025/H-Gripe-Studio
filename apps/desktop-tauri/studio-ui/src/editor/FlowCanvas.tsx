@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ReactFlow,
-  Background,
   MiniMap,
   addEdge,
   useReactFlow,
@@ -201,7 +200,6 @@ export function FlowCanvas({
       proOptions={{ hideAttribution: true }}
       fitView
     >
-      <Background />
       {showMinimap && (
         <MiniMap
           className="flow-minimap"
