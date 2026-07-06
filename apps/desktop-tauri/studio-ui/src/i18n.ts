@@ -1131,6 +1131,7 @@ export const messages = {
   "models.fallbackPolicy": { en: "Fallback policy", zh: "回退策略" },
   "models.testing": { en: "testing…", zh: "测试中…" },
   "models.capabilityTitle": { en: "Machine capability", zh: "机器能力" },
+  "models.deviceRegistryTitle": { en: "Device registry", zh: "设备注册表" },
   "models.probeEngines": { en: "Check engines", zh: "检查引擎" },
   "models.probing": { en: "probing…", zh: "探测中…" },
   "models.capabilityHint": {

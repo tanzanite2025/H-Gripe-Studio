@@ -95,6 +95,14 @@ pub(crate) fn resolve_provider(request: OnnxDeviceRequest) -> OnnxProviderResolu
     }
 }
 
+/// The execution providers compiled into the vendored onnxruntime, for the
+/// central device registry (GPU_DEVICE_STRATEGY_PLAN step 13). CPU only
+/// today; accelerated providers (CUDA / DirectML) join this list when the
+/// runtime ships them, keeping [`resolve_provider`]'s request semantics.
+pub(crate) fn compiled_providers() -> Vec<&'static str> {
+    vec![DeviceUsed::Cpu.as_str()]
+}
+
 /// A warm ONNX session shared across runs. `Mutex` because `Session::run` needs
 /// `&mut self`; `Arc` so the pool and every in-flight segmenter share one copy.
 pub(super) type SharedSession = Arc<Mutex<Session>>;

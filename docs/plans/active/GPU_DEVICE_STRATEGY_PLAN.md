@@ -480,7 +480,16 @@ This should be a settings surface, not a required setup wizard.
     the `videoAssemble` executor and the result surfaces `encode_device` /
     `encode_fallback_reason` (hardware note on success, fallback warning on
     an unmet gpu request).
-13. Build cross-kernel device registry later.
+13. Done: `studio/device_registry.rs` is the central device registry
+    (Long-Term Step 1) — one `device_registry_snapshot` command records the
+    enumerated display adapters with their wgpu limits (`Adapter::limits()`;
+    wgpu exposes no memory size, so limits are the recorded capacity hint),
+    the grade wgpu / viewport surface / vendored FFmpeg backend status, the
+    compiled-in FFmpeg hardware encoder/decoder names, and the onnxruntime
+    execution providers. Diagnostics only: a snapshot never initialises the
+    viewport surface device (cached state read only) and per-run
+    DeviceReports stay the source of truth. The Model Manager renders it
+    below the capability summary on the same manual refresh.
 14. Build GPU queue/memory policy only after timeline/export workloads demand it.
 
 ## Success Criteria
