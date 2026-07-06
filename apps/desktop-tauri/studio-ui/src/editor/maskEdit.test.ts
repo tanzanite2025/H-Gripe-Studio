@@ -10,6 +10,7 @@ import {
   canRedo,
   canUndo,
   clearEdits,
+  composeTransforms,
   duplicateLayer,
   editCount,
   initEditState,
@@ -47,6 +48,21 @@ const stroke = (id: string): BrushStroke => ({
     [0, 0],
     [4, 4],
   ],
+});
+
+describe("maskEdit composeTransforms", () => {
+  it("composes translations additively", () => {
+    expect(
+      composeTransforms({ dx: 10, dy: 5, scale: 1, rotate: 0 }, { dx: -4, dy: 3, scale: 1, rotate: 0 }),
+    ).toEqual({ dx: 6, dy: 8, scale: 1, rotate: 0 });
+  });
+  it("carries the earlier translation through the later rotation and scale", () => {
+    const t = composeTransforms({ dx: 10, dy: 0, scale: 1, rotate: 0 }, { dx: 0, dy: 0, scale: 2, rotate: 90 });
+    expect(t.dx).toBeCloseTo(0);
+    expect(t.dy).toBeCloseTo(20);
+    expect(t.scale).toBe(2);
+    expect(t.rotate).toBe(90);
+  });
 });
 
 describe("maskEdit normalizeEditPaths", () => {
