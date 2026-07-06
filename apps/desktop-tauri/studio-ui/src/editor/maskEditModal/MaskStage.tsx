@@ -64,7 +64,12 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
     ...layerStyle,
   };
   return (
-    <div className={`mask-edit-stage${presented && !overlayOnly ? " presented" : ""}`}>
+    <div
+      className={`mask-edit-stage${presented && !overlayOnly ? " presented" : ""}`}
+      // Nothing on the stage is a native drag source: a stray drag-and-drop
+      // shows the no-drop cursor and swallows the tool's pointer events.
+      onDragStart={(e) => e.preventDefault()}
+    >
       <div
         className="mask-edit-frame"
         style={{

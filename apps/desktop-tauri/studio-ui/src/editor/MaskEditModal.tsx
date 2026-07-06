@@ -1380,6 +1380,11 @@ export function MaskEditModal({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // Capture the pointer for the whole gesture: events keep flowing when it
+    // leaves the canvas (a fast move drag would otherwise end at the edge),
+    // and no other element can start a native drag mid-gesture (the no-drop
+    // cursor that swallowed the move).
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     // An armed replace-color eyedropper consumes the next canvas click:
     // sample the underlay into the requesting swatch, nothing else fires.
     if (colorPickRequest.current) {
@@ -1391,7 +1396,6 @@ export function MaskEditModal({
     // Canvas navigation (M8): hand tool / Space-hold pans; zoom tool clicks
     // in (Alt+click out) anchored at the cursor. Neither records anything.
     if (spacePan || tool.id === "hand") {
-      (e.target as Element).setPointerCapture?.(e.pointerId);
       panDrag.current = { x: e.clientX, y: e.clientY };
       return;
     }
