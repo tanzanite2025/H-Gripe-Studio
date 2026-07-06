@@ -154,10 +154,24 @@ export function panBy(view: CanvasView, dx: number, dy: number, baseW: number, b
  * the visible window's centre in normalized canvas coordinates is
  * `0.5 − pan / (base · zoom)`. Under a rotated view the visible region is not
  * an axis-aligned window, so the full frame is kept.
+ *
+ * The stage can outsize the frame's base rect (an image capped at its natural
+ * pixels, or a fit constrained on only one axis): the region on screen then
+ * spans more of the frame than `1/zoom`. `stageW`/`stageH` widen the window
+ * by the covering ratio so it holds everything visible — a window smaller
+ * than the screen would crop the frame to its rect.
  */
-export function viewWindow(view: CanvasView, baseW: number, baseH: number): ViewportViewState {
-  if (view.zoom <= 1 || view.rotate || baseW <= 0 || baseH <= 0) return IDENTITY_VIEW;
-  const zoom = Math.min(view.zoom, MAX_VIEW_ZOOM);
+export function viewWindow(
+  view: CanvasView,
+  baseW: number,
+  baseH: number,
+  stageW = baseW,
+  stageH = baseH,
+): ViewportViewState {
+  if (view.rotate || baseW <= 0 || baseH <= 0) return IDENTITY_VIEW;
+  const cover = Math.max(stageW / baseW, stageH / baseH, 1);
+  const zoom = Math.min(view.zoom / cover, MAX_VIEW_ZOOM);
+  if (zoom <= 1) return IDENTITY_VIEW;
   const cx = 0.5 - view.panX / (baseW * view.zoom);
   const cy = 0.5 - view.panY / (baseH * view.zoom);
   return clampViewportView({
