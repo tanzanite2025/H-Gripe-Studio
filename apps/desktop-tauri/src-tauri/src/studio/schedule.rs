@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
 use super::node_registry::node_class;
 
@@ -74,11 +74,18 @@ fn default_cpu_pool() -> usize {
         .max(1)
 }
 
+/// Ceiling for the user-configurable GPU lane width (`set_gpu_limit`). Small
+/// on purpose: the lane exists to keep the device responsive, not to fan out.
+pub(crate) const MAX_GPU_JOBS: usize = 4;
+
 /// Process-wide gate for Studio compute lanes. Held as Tauri managed state so a
 /// full graph Run and (later) preview jobs contend on the *same* GPU permit
 /// rather than fighting the device independently.
 pub(crate) struct StudioScheduler {
     gpu: Arc<Semaphore>,
+    /// Current GPU lane width. Guards resizes so concurrent `set_gpu_limit`
+    /// calls cannot double-count permits.
+    gpu_limit: Mutex<usize>,
     video_encode: Arc<Semaphore>,
     cpu: Arc<Semaphore>,
     cpu_pool: usize,
@@ -94,6 +101,7 @@ impl StudioScheduler {
                 JobCategory::Gpu,
                 cpu_pool,
             ))),
+            gpu_limit: Mutex::new(concurrency_limit(JobCategory::Gpu, cpu_pool)),
             video_encode: Arc::new(Semaphore::new(concurrency_limit(
                 JobCategory::VideoEncode,
                 cpu_pool,
@@ -106,6 +114,30 @@ impl StudioScheduler {
     /// Configured CPU-pool size (the `CpuBound` concurrency limit).
     pub(crate) fn cpu_pool(&self) -> usize {
         self.cpu_pool
+    }
+
+    /// Current GPU lane width (permits the `Gpu` semaphore hands out).
+    pub(crate) async fn gpu_limit(&self) -> usize {
+        *self.gpu_limit.lock().await
+    }
+
+    /// Resize the GPU lane to `limit` jobs, clamped to `1..=MAX_GPU_JOBS`,
+    /// and return the applied width. Growing adds permits immediately;
+    /// shrinking waits for enough in-flight GPU jobs to finish, then retires
+    /// their permits — running work is never interrupted.
+    pub(crate) async fn set_gpu_limit(&self, limit: usize) -> usize {
+        let limit = limit.clamp(1, MAX_GPU_JOBS);
+        let mut current = self.gpu_limit.lock().await;
+        if limit > *current {
+            self.gpu.add_permits(limit - *current);
+        } else if limit < *current {
+            let retire = (*current - limit) as u32;
+            if let Ok(permits) = self.gpu.clone().acquire_many_owned(retire).await {
+                permits.forget();
+            }
+        }
+        *current = limit;
+        limit
     }
 
     /// Acquire a permit for a node's lane, holding it for the duration of the
@@ -122,6 +154,17 @@ impl StudioScheduler {
         };
         sem.clone().acquire_owned().await.ok()
     }
+}
+
+/// Resize the GPU lane (GPU_DEVICE_STRATEGY_PLAN long-term step 5, "max
+/// concurrent GPU jobs"). Clamped to `1..=MAX_GPU_JOBS`; returns the applied
+/// width so the settings surface can reflect the clamp.
+#[tauri::command]
+pub(crate) async fn set_gpu_max_jobs(
+    scheduler: tauri::State<'_, StudioScheduler>,
+    limit: usize,
+) -> Result<usize, String> {
+    Ok(scheduler.set_gpu_limit(limit).await)
 }
 
 impl Default for StudioScheduler {
@@ -210,5 +253,32 @@ mod tests {
         // Dropping the permit frees the single GPU slot again.
         drop(permit);
         assert!(scheduler.gpu.try_acquire().is_ok());
+    }
+
+    #[tokio::test]
+    async fn gpu_limit_resizes_and_clamps() {
+        let scheduler = StudioScheduler::with_cpu_pool(4);
+        assert_eq!(scheduler.gpu_limit().await, 1);
+
+        // Out-of-range requests clamp instead of failing.
+        assert_eq!(scheduler.set_gpu_limit(0).await, 1);
+        assert_eq!(scheduler.set_gpu_limit(99).await, MAX_GPU_JOBS);
+        assert_eq!(scheduler.gpu_limit().await, MAX_GPU_JOBS);
+
+        // Widening added permits: two jobs fit at width 2, a third does not.
+        assert_eq!(scheduler.set_gpu_limit(2).await, 2);
+        let a = scheduler.acquire(JobCategory::Gpu).await;
+        let b = scheduler.acquire(JobCategory::Gpu).await;
+        assert!(a.is_some() && b.is_some());
+        assert!(scheduler.gpu.try_acquire().is_err());
+
+        // Shrinking back to one retires the extra permit once released:
+        // only a single slot remains.
+        drop(a);
+        drop(b);
+        assert_eq!(scheduler.set_gpu_limit(1).await, 1);
+        let only = scheduler.gpu.try_acquire();
+        assert!(only.is_ok());
+        assert!(scheduler.gpu.try_acquire().is_err());
     }
 }

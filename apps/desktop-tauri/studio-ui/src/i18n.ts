@@ -1138,6 +1138,11 @@ export const messages = {
     en: "Seeds unset node device params; explicit per-node choices always win.",
     zh: "作为节点未设置设备参数时的默认值；节点显式选择始终优先。",
   },
+  "models.gpuMaxJobsTitle": { en: "Max concurrent GPU jobs", zh: "GPU 并发上限" },
+  "models.gpuMaxJobsHint": {
+    en: "Width of the GPU compute lane. 1 keeps the device responsive; running jobs are never interrupted.",
+    zh: "GPU 计算通道的并发宽度。1 可保持设备响应；调整不会中断正在运行的任务。",
+  },
   "models.capabilityTitle": { en: "Machine capability", zh: "机器能力" },
   "models.deviceRegistryTitle": { en: "Device registry", zh: "设备注册表" },
   "models.probeEngines": { en: "Check engines", zh: "检查引擎" },

@@ -152,6 +152,7 @@ fn main() {
             psd::detect_quality_issues,
             psd::probe_engines,
             studio::device_registry_snapshot,
+            studio::set_gpu_max_jobs,
             psd::get_model_paths,
             psd::set_model_paths,
             studio::grade_preview,
