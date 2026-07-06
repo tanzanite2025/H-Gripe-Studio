@@ -27,6 +27,7 @@ import {
   activeOps,
   canRedo,
   canUndo,
+  composeTransforms,
   editCount,
   initEditState,
   type TransformParams,
@@ -511,6 +512,28 @@ export function MaskEditModal({
     }
     return last;
   }, [workspace, state]);
+  // Image-workspace layer transform (move tool / free transform): the render
+  // target does not apply `transform` ops to the image, so the stage carries
+  // the composed committed transforms — plus the in-progress move drag — as a
+  // CSS transform on the presented window; the move reads live on screen.
+  const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
+  const imageTransform = useMemo(() => {
+    if (workspace !== "image") return null;
+    let t: TransformParams | null = null;
+    for (const layer of state.current.layers) {
+      if (!layer.visible) continue;
+      for (const op of layer.ops) {
+        if (isPathOp(op) || isBrushOp(op) || op.type !== "transform" || op.disabled) continue;
+        const params = { dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 };
+        t = t ? composeTransforms(t, params) : params;
+      }
+    }
+    if (moveDraft) {
+      const base = t ?? { dx: 0, dy: 0, scale: 1, rotate: 0 };
+      t = { ...base, dx: base.dx + moveDraft[0], dy: base.dy + moveDraft[1] };
+    }
+    return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
+  }, [workspace, state, moveDraft]);
   // Image-workspace adjustment preview (image-kernel K2): the adjustment
   // stack compiles to a grade document and grades the displayed frame on the
   // f32 kernel — the same maths the video grade dialog runs. Null in the
@@ -523,7 +546,13 @@ export function MaskEditModal({
   }, [workspace, state]);
   // Grading needs frame pixels, so it forces the PNG transport (a natively
   // presented surface frame has no readable data URL).
-  const presentEnabled = !overlayOnly && !view.rotate && !gradePreview && !entering && !closing;
+  // A rotated layer transform cannot present on the axis-aligned surface
+  // window (translate/scale only move and stretch its rect).
+  const presentEnabled =
+    !overlayOnly && !view.rotate && (imageTransform?.rotate ?? 0) === 0 && !gradePreview && !entering && !closing;
+  // The anchor moves under CSS transforms (view zoom/pan and the layer
+  // transform) without firing the resize observer: re-measure on either.
+  const placementKey = useMemo(() => ({ view, imageTransform }), [view, imageTransform]);
   const viewport = useViewportUnderlay(
     "image_edit",
     source,
@@ -533,7 +562,7 @@ export function MaskEditModal({
     underlayAnchorRef,
     presentEnabled,
     viewportOverlayScene,
-    view,
+    placementKey,
     // Un-debounced view: every zoom/pan tick re-presents the surface's
     // cached frame as a GPU crop (the fast path) while `viewportView` above
     // waits for the settle re-render.
@@ -1670,6 +1699,10 @@ export function MaskEditModal({
       });
     } else if (moveDrag.current) {
       moveDrag.current.end = toImage(e);
+      if (workspace === "image") {
+        const { start, end } = moveDrag.current;
+        setMoveDraft([end[0] - start[0], end[1] - start[1]]);
+      }
       redraw();
     } else if (gradientDrag.current) {
       gradientDrag.current.end = toImage(e);
@@ -1870,6 +1903,7 @@ export function MaskEditModal({
     } else if (moveDrag.current) {
       const { start, end } = moveDrag.current;
       moveDrag.current = null;
+      setMoveDraft(null);
       const dx = end[0] - start[0];
       const dy = end[1] - start[1];
       if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
@@ -2099,6 +2133,7 @@ export function MaskEditModal({
             presented={presented}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
+            imageTransform={imageTransform}
             backend={viewport.backend}
             overlayOnly={overlayOnly}
             spacePan={spacePan}
