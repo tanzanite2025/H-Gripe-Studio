@@ -181,9 +181,9 @@ pub(crate) fn surface_device_status() -> Result<String, String> {
         match SHARED.get() {
             Some(Ok(gpu)) => Ok(gpu.adapter_summary.clone()),
             Some(Err(reason)) => Err(reason.clone()),
-            None => Err(
-                "not initialised yet (initialises on the first presented viewport)".to_string(),
-            ),
+            None => {
+                Err("not initialised yet (initialises on the first presented viewport)".to_string())
+            }
         }
     }
     #[cfg(not(feature = "viewport-surface"))]
