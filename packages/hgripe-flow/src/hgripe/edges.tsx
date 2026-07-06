@@ -11,7 +11,12 @@ import {
   type ReactFlowProps,
 } from "@xyflow/react";
 import { chamferPath } from "./edgeRouting";
-import { EDGE_ARROW_MARKER, EDGE_STROKE_WIDTH, edgeMarkerId } from "./edgeVisual";
+import {
+  EDGE_ARROW_MARKER,
+  EDGE_STROKE_WIDTH,
+  EDGE_STROKE_WIDTH_SELECTED,
+  edgeMarkerId,
+} from "./edgeVisual";
 
 export const HGRIPE_DATA_EDGE_TYPE = "chamfer";
 export const HGRIPE_BINDING_EDGE_TYPE = "binding";
@@ -27,7 +32,9 @@ export type HgripeFlowProps<NodeType extends Node = Node, EdgeType extends Edge 
 >;
 
 const EDGE_STROKE = "#aeb4c2";
+const EDGE_STROKE_SELECTED = "#8fb2ff";
 const BINDING_STROKE = "#7c5cff";
+const BINDING_STROKE_SELECTED = "#a58fff";
 const DRAG_STROKE_VALID = "#8fb2ff";
 const DRAG_STROKE_INVALID = "#ff6b6b";
 
@@ -36,7 +43,9 @@ const DRAG_STROKE_INVALID = "#ff6b6b";
 // rendered for edges with a custom stroke colour, so a large graph does not
 // carry one <defs><marker> pair per wire.
 const DATA_ARROW_ID = "hgripe-edge-arrow";
+const DATA_ARROW_SELECTED_ID = "hgripe-edge-arrow-selected";
 const BINDING_ARROW_ID = "hgripe-binding-arrow";
+const BINDING_ARROW_SELECTED_ID = "hgripe-binding-arrow-selected";
 const DRAG_ARROW_VALID_ID = "hgripe-drag-arrow-valid";
 const DRAG_ARROW_INVALID_ID = "hgripe-drag-arrow-invalid";
 
@@ -61,7 +70,9 @@ const SharedEdgeMarkers = memo(function SharedEdgeMarkers() {
     <svg style={{ position: "absolute", width: 0, height: 0 }} aria-hidden>
       <defs>
         <ArrowMarker id={DATA_ARROW_ID} fill={EDGE_STROKE} />
+        <ArrowMarker id={DATA_ARROW_SELECTED_ID} fill={EDGE_STROKE_SELECTED} />
         <ArrowMarker id={BINDING_ARROW_ID} fill={BINDING_STROKE} />
+        <ArrowMarker id={BINDING_ARROW_SELECTED_ID} fill={BINDING_STROKE_SELECTED} />
         <ArrowMarker id={DRAG_ARROW_VALID_ID} fill={DRAG_STROKE_VALID} />
         <ArrowMarker id={DRAG_ARROW_INVALID_ID} fill={DRAG_STROKE_INVALID} />
       </defs>
@@ -128,11 +139,16 @@ export const ChamferEdge = memo(function ChamferEdge({
   sourceY,
   targetX,
   targetY,
+  selected,
   style,
 }: EdgeProps) {
   const path = chamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
-  const markerId = customStroke ? edgeMarkerId(DATA_ARROW_ID, id) : DATA_ARROW_ID;
+  const markerId = customStroke
+    ? edgeMarkerId(DATA_ARROW_ID, id)
+    : selected
+      ? DATA_ARROW_SELECTED_ID
+      : DATA_ARROW_ID;
 
   return (
     <>
@@ -146,8 +162,8 @@ export const ChamferEdge = memo(function ChamferEdge({
         path={path}
         markerEnd={`url(#${markerId})`}
         style={{
-          stroke: EDGE_STROKE,
-          strokeWidth: EDGE_STROKE_WIDTH,
+          stroke: selected ? EDGE_STROKE_SELECTED : EDGE_STROKE,
+          strokeWidth: selected ? EDGE_STROKE_WIDTH_SELECTED : EDGE_STROKE_WIDTH,
           strokeLinecap: "round",
           strokeLinejoin: "round",
           ...style,
@@ -163,11 +179,16 @@ export const BindingEdge = memo(function BindingEdge({
   sourceY,
   targetX,
   targetY,
+  selected,
   style,
 }: EdgeProps) {
   const path = chamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
-  const markerId = customStroke ? edgeMarkerId(BINDING_ARROW_ID, id) : BINDING_ARROW_ID;
+  const markerId = customStroke
+    ? edgeMarkerId(BINDING_ARROW_ID, id)
+    : selected
+      ? BINDING_ARROW_SELECTED_ID
+      : BINDING_ARROW_ID;
 
   return (
     <>
@@ -181,8 +202,8 @@ export const BindingEdge = memo(function BindingEdge({
         path={path}
         markerEnd={`url(#${markerId})`}
         style={{
-          stroke: BINDING_STROKE,
-          strokeWidth: EDGE_STROKE_WIDTH,
+          stroke: selected ? BINDING_STROKE_SELECTED : BINDING_STROKE,
+          strokeWidth: selected ? EDGE_STROKE_WIDTH_SELECTED : EDGE_STROKE_WIDTH,
           strokeLinecap: "round",
           strokeLinejoin: "round",
           strokeDasharray: "4 3",

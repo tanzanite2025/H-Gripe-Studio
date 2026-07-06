@@ -1,6 +1,14 @@
 # Edge Routing Visual System Plan
 
-> Status: active.
+> Status: active. Implementation-order steps 1–6 have landed: `@hgripe/flow`
+> owns `chamferPath` (unit-tested), `ChamferEdge` / `BindingEdge` are the only
+> workflow edge types, Studio renders through `HgripeFlow`, edges are stamped
+> via the `withHgripe*Edge` / `addHgripeDataEdge` helpers, and
+> `normalizeHgripeEdges` remains only as a legacy guard. From step 7, the
+> **selected** visual state has landed (higher-contrast stroke + slightly
+> heavier weight + matching arrow marker on both edge types). Remaining:
+> hover / running / error states, path caching (step 8), LOD simplification
+> (step 9), and explicit bend points / tidy routing (step 10).
 > Purpose: define the long-term wire style for the H-Gripe Studio node canvas,
 > so connection lines stay readable, performant, and aligned with product-level
 > node cards.
