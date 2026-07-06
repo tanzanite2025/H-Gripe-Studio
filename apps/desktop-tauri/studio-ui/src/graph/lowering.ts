@@ -54,12 +54,6 @@ const IMAGE_PROCESSING_ROWS: RowDef[] = [
     outputs: { "crop.out": "image" },
   },
   {
-    row: "mask",
-    kind: "subjectMask",
-    inputs: { "mask.in": "image" },
-    outputs: { "mask.out": "mask" },
-  },
-  {
     row: "repair",
     kind: "detailRepaint",
     inputs: { "repair.in": "image", "repair.report": "quality_report" },

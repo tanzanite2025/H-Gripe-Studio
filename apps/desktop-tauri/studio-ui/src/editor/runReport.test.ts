@@ -44,7 +44,7 @@ describe("buildRunReport", () => {
       "scope card card: 2 node(s) to execute (1 row(s) from 1 integrated card(s))",
     );
     expect(lines[1]).toBe(
-      "card card: runs enhance; skips layerSplit, grade, crop, mask, repair",
+      "card card: runs enhance; skips layerSplit, grade, crop, repair",
     );
   });
 
@@ -62,19 +62,19 @@ describe("buildRunReport", () => {
           id: "card",
           kind: "imageProcessing",
           params: {
-            "mask.local_model_ref": "sam2-base",
-            "mask.device": "cuda",
+            "enhance.local_model_ref": "realesrgan-x4",
+            "enhance.device": "cuda",
             "repair.api_profile_ref": "openai-main",
           },
         },
       ],
       [
-        { source: "src", sourcePort: "image", target: "card", targetPort: "mask.in" },
+        { source: "src", sourcePort: "image", target: "card", targetPort: "enhance.in" },
         { source: "src", sourcePort: "image", target: "card", targetPort: "repair.in" },
       ],
     );
     const lines = report(authored);
-    expect(lines).toContain('backend card::mask: local model "sam2-base" (device cuda)');
+    expect(lines).toContain('backend card::enhance: local model "realesrgan-x4" (device cuda)');
     expect(lines).toContain('backend card::repair: api profile "openai-main"');
   });
 });
