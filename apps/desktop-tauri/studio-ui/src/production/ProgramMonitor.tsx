@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { registerTimeline, unregisterTimeline, type TimelineClipRef } from "../bridge/viewport";
+import {
+  registerTimeline,
+  unregisterTimeline,
+  type TimelineClipRef,
+  type ViewportOverlayScene,
+} from "../bridge/viewport";
 import { useT } from "../i18n";
 import { describeDeviceReport, deviceReportFromViewportBackend } from "../runtime/deviceReport";
 import { useViewControls } from "../viewport/useViewControls";
@@ -9,6 +14,54 @@ import { useViewportPlacement } from "../viewport/useViewportPlacement";
 import type { MediaAsset } from "./mediaBin";
 import { resolvePreviewFrame } from "./previewFrame";
 import { timelineDuration, type TimelineModel } from "./timeline";
+
+/** Safe-area guides (WGPU plan item 3): action-safe 90% (solid) and
+ * title-safe 80% (dashed) rectangles plus a centre cross, stroked host-side
+ * over the presented frame at the view window's detail. Normalized document
+ * coordinates, so zoom/pan needs no re-send; a stable reference, so the
+ * preview skips no-op `set_overlay_scene` commands. */
+const GUIDE_STROKE: [number, number, number, number] = [1, 1, 1, 0.65];
+export const SAFE_AREA_SCENE: ViewportOverlayScene = {
+  items: [
+    {
+      kind: "polygon",
+      points: [
+        [0.05, 0.05],
+        [0.95, 0.05],
+        [0.95, 0.95],
+        [0.05, 0.95],
+      ],
+      stroke: GUIDE_STROKE,
+    },
+    {
+      kind: "polygon",
+      points: [
+        [0.1, 0.1],
+        [0.9, 0.1],
+        [0.9, 0.9],
+        [0.1, 0.9],
+      ],
+      stroke: GUIDE_STROKE,
+      dash: true,
+    },
+    {
+      kind: "polyline",
+      points: [
+        [0.48, 0.5],
+        [0.52, 0.5],
+      ],
+      stroke: GUIDE_STROKE,
+    },
+    {
+      kind: "polyline",
+      points: [
+        [0.5, 0.48],
+        [0.5, 0.52],
+      ],
+      stroke: GUIDE_STROKE,
+    },
+  ],
+};
 
 /**
  * Register the first video track's clips with the viewport host so playhead
@@ -91,6 +144,7 @@ export function ProgramMonitor({
   const t = useT();
   const [playheadSec, setPlayheadSec] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [safeArea, setSafeArea] = useState(false);
   const playheadRef = useRef(0);
   playheadRef.current = playheadSec;
   const { state, showFrame, host } = useVideoPreview();
@@ -124,8 +178,13 @@ export function ProgramMonitor({
             timeSec: clampedSec,
           }
         : target;
-    showFrame({ target: previewTarget, gradeDoc, view });
-  }, [target, registeredTimelineId, timeline.id, clampedSec, gradeDoc, view, showFrame]);
+    showFrame({
+      target: previewTarget,
+      gradeDoc,
+      view,
+      overlayScene: safeArea ? SAFE_AREA_SCENE : null,
+    });
+  }, [target, registeredTimelineId, timeline.id, clampedSec, gradeDoc, view, safeArea, showFrame]);
 
   useEffect(() => {
     if (!playing || duration <= 0) return;
@@ -205,6 +264,15 @@ export function ProgramMonitor({
           disabled={duration <= 0}
         />
         <span className="production-monitor-time">{clampedSec.toFixed(2)}s</span>
+        <button
+          type="button"
+          className="production-monitor-safe-area"
+          onClick={() => setSafeArea((on) => !on)}
+          title={t("drawer.monitorSafeAreaTitle")}
+          aria-pressed={safeArea}
+        >
+          {t("drawer.monitorSafeArea")}
+        </button>
       </div>
     </div>
   );

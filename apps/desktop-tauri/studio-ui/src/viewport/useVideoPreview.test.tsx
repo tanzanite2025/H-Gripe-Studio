@@ -113,6 +113,42 @@ describe("useVideoPreview coalescing", () => {
     unmount();
   });
 
+  it("sends the overlay scene once and clears it when omitted", async () => {
+    const setScene = vi.spyOn(viewportBridge, "setViewportOverlayScene");
+    const { result, unmount } = renderHook(() => useVideoPreview(320));
+
+    const scene: viewportBridge.ViewportOverlayScene = {
+      items: [
+        {
+          kind: "polygon",
+          points: [
+            [0.05, 0.05],
+            [0.95, 0.05],
+            [0.95, 0.95],
+            [0.05, 0.95],
+          ],
+          stroke: [1, 1, 1, 0.65],
+        },
+      ],
+    };
+    act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null, overlayScene: scene }));
+    await waitFor(() => expect(result.current.state.pending).toBe(false));
+    expect(setScene).toHaveBeenCalledTimes(1);
+    expect(setScene).toHaveBeenLastCalledWith(expect.any(String), scene);
+
+    // Same reference again: the command is skipped (no-op set).
+    act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null, overlayScene: scene }));
+    await waitFor(() => expect(result.current.state.pending).toBe(false));
+    expect(setScene).toHaveBeenCalledTimes(1);
+
+    // Omitting the scene clears it host-side.
+    act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null }));
+    await waitFor(() => expect(result.current.state.pending).toBe(false));
+    expect(setScene).toHaveBeenCalledTimes(2);
+    expect(setScene).toHaveBeenLastCalledWith(expect.any(String), null);
+    unmount();
+  });
+
   it("clears the frame on a null request (gap under the playhead)", async () => {
     const { result, unmount } = renderHook(() => useVideoPreview(320));
     act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null }));

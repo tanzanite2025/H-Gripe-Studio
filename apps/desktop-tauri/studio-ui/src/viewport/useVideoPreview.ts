@@ -12,7 +12,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerResource } from "../bridge/files";
-import type { ViewportBackend, ViewportFrame, ViewportTarget } from "../bridge/viewport";
+import type {
+  ViewportBackend,
+  ViewportFrame,
+  ViewportOverlayScene,
+  ViewportTarget,
+} from "../bridge/viewport";
 import type { PreviewFrameTarget } from "../production/previewFrame";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { WgpuViewportHost } from "./WgpuViewportHost";
@@ -42,6 +47,8 @@ interface MonitorState {
   gradeDoc: string | null;
   /** View last sent to the viewport, to skip no-op `set_view` commands. */
   view: ViewportViewState;
+  /** Overlay scene last sent to the viewport (by reference), to skip no-op sets. */
+  overlayScene: ViewportOverlayScene | null;
 }
 
 /**
@@ -60,6 +67,9 @@ export interface VideoPreviewRequest {
   gradeDoc: string | null;
   /** Monitor zoom/pan (viewport state); identity when omitted. */
   view?: ViewportViewState;
+  /** Vector overlay stroked over the frame host-side (safe-area guides).
+   * Callers keep a stable reference while unchanged; omitted means none. */
+  overlayScene?: ViewportOverlayScene | null;
 }
 
 /** Parse a stored grade doc (JSON string) for the viewport; bad JSON clears. */
@@ -120,7 +130,7 @@ export function useVideoPreview(size = 1280): {
         setState((s) => ({ ...s, frame: null, presented: false, pending: false, error: null }));
         return;
       }
-      const { target, gradeDoc, view = IDENTITY_VIEW } = request;
+      const { target, gradeDoc, view = IDENTITY_VIEW, overlayScene = null } = request;
       if (!monitorRef.current) {
         monitorRef.current = (async () => {
           const host = await WgpuViewportHost.open("video_preview");
@@ -132,6 +142,7 @@ export function useVideoPreview(size = 1280): {
             resources: new Map<string, string>(),
             gradeDoc: null,
             view: IDENTITY_VIEW,
+            overlayScene: null,
           };
         })().catch(() => null);
       }
@@ -172,6 +183,10 @@ export function useVideoPreview(size = 1280): {
       ) {
         await monitor.host.command({ kind: "set_view", ...view });
         monitor.view = view;
+      }
+      if (overlayScene !== monitor.overlayScene) {
+        await monitor.host.command({ kind: "set_overlay_scene", scene: overlayScene });
+        monitor.overlayScene = overlayScene;
       }
       if (monitor.hidden) {
         // Re-show the surface hidden by a gap frame before presenting on it.

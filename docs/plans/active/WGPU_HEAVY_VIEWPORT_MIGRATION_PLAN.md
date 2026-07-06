@@ -104,15 +104,20 @@ Remaining work (next stage), roughly in priority order:
    frame at the view window's detail. Text labels and in-drag feedback stay
    on the 2D canvas (DOM above the hole), and the canvas paints the full
    overlays as the browser-preview fallback.
-3. Scopes and overlays: safe area and scopes surfaces on top of the viewport
-   presentation (listed under "future overlays"). Scopes are done: the grade
+3. ✅ Scopes and overlays: safe area and scopes surfaces on top of the
+   viewport presentation (listed under "future overlays"). Scopes: the grade
    panel's collapsible scopes section (histogram, waveform, vectorscope)
    measures the displayed frame — explicit pixel readback through
    `viewport_read_pixels` on desktop (surface swap Phase S4), the mirror's
    graded surface in the browser preview — and draws through the shared
-   grade-kernel scope analysers (golden-pinned against Rust). The crop
-   editor's underlay presents on the native surface (the crop box and its
-   dim are DOM above the hole); safe-area guides await their feature.
+   grade-kernel scope analysers (golden-pinned against Rust). Safe area: the
+   program monitor's toggle strokes action-safe (90%) and title-safe (80%)
+   guides plus a centre cross host-side through the shared overlay-scene
+   path (`viewport_set_overlay_scene`, now accepted by `video_preview`
+   viewports too), so guides present at the view window's detail on both
+   the native surface and the PNG-transport fallback. The crop editor's
+   underlay presents on the native surface (the crop box and its dim are
+   DOM above the hole).
 4. ✅ Shared `DeviceReport` wiring: the viewport-presented surfaces report
    through the shared vocabulary from `GPU_DEVICE_STRATEGY_PLAN.md` — the
    program monitor and grade preview render normalized badges, and the
