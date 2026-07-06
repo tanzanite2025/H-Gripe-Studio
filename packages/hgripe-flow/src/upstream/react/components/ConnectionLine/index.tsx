@@ -10,7 +10,6 @@ import {
 } from '@xyflow/system';
 
 import { useStore } from '../../hooks/useStore';
-import { getSimpleBezierPath } from '../Edges/SimpleBezierEdge';
 import type { ConnectionLineComponent, ReactFlowState } from '../../types';
 import { useConnection } from '../../hooks/useConnection';
 
@@ -98,10 +97,8 @@ const ConnectionLine = ({ style, type = ConnectionLineType.Bezier, CustomCompone
 
   switch (type) {
     case ConnectionLineType.Bezier:
-      [path] = getBezierPath(pathParams);
-      break;
     case ConnectionLineType.SimpleBezier:
-      [path] = getSimpleBezierPath(pathParams);
+      [path] = getBezierPath(pathParams);
       break;
     case ConnectionLineType.Step:
       [path] = getSmoothStepPath({
