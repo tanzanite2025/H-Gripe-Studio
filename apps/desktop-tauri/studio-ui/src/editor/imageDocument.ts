@@ -15,6 +15,8 @@ import type {
   LayerAdjustment,
   LayerBlend,
   LayerGroup,
+  LayerMask,
+  LayerTargetKind,
   MaskDocument,
   MaskLayer,
 } from "../types/production";
@@ -72,6 +74,9 @@ export interface ImageLayer {
   groupId?: string;
   /** Layer mask gating the layer's effect (mask results land here). */
   mask?: ImageLayerMask;
+  /** Editable layer-mask attachment: the mask's own edit stack (bridged
+   * from the mask document's `LayerMask`; `mask` above is a baked image). */
+  layerMask?: LayerMask;
   /** Clipping mask (Alt+Ctrl+G): composite only inside the layer below. */
   clipped?: boolean;
 }
@@ -94,6 +99,8 @@ export interface ImageDocument {
   points: MaskDocument["points"];
   /** Visual layer tags carried through the mask/document bridge. */
   layerGroups: LayerGroup[];
+  /** Which attachment of the active layer receives new edits; absent ⇒ pixel. */
+  activeTarget?: LayerTargetKind;
 }
 
 export function emptyImageLayer(name = "Background"): ImageLayer {
@@ -132,6 +139,7 @@ function fromMaskLayer(l: MaskLayer): ImageLayer {
     ...(l.locked !== undefined ? { locked: l.locked } : null),
     ...(l.linked !== undefined ? { linked: l.linked } : null),
     ...(l.groupId !== undefined ? { groupId: l.groupId } : null),
+    ...(l.mask !== undefined ? { layerMask: l.mask } : null),
   };
 }
 
@@ -145,6 +153,7 @@ export function fromMaskDocument(doc: MaskDocument): ImageDocument {
     matte_strokes: doc.matte_strokes,
     points: doc.points,
     layerGroups: doc.layerGroups,
+    ...(doc.activeTarget !== undefined ? { activeTarget: doc.activeTarget } : null),
   };
 }
 
@@ -169,7 +178,7 @@ function toMaskLayer(l: ImageLayer): MaskLayer | null {
   };
   return l.layer.kind === "adjustment"
     ? { ...base, kind: "adjustment", ops: [], ...(l.layer.adjustment !== undefined ? { adjustment: l.layer.adjustment } : null) }
-    : { ...base, kind: "mask", ops: l.layer.edits };
+    : { ...base, kind: "mask", ops: l.layer.edits, ...(l.layerMask !== undefined ? { mask: l.layerMask } : null) };
 }
 
 /**
@@ -194,5 +203,6 @@ export function toMaskDocument(doc: ImageDocument): MaskDocument | null {
     points: doc.points,
     ...(doc.canvas !== undefined ? { canvas: doc.canvas } : null),
     layerGroups: doc.layerGroups,
+    ...(doc.activeTarget !== undefined ? { activeTarget: doc.activeTarget } : null),
   };
 }

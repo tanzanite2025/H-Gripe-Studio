@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { LayerBlend, LayerGroup, MaskLayer } from "../../types/production";
+import type { LayerBlend, LayerGroup, LayerTargetKind, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
 import { LAYER_GROUP_COLORS } from "../maskEdit";
 import { buildLayerThumb } from "../maskMorphology";
@@ -16,6 +16,9 @@ interface LayersPanelProps {
   layers: readonly MaskLayer[];
   layerGroups: readonly LayerGroup[];
   active: number;
+  /** Which attachment of the active layer receives new edits (PS: the
+   * highlighted content / mask thumbnail). */
+  activeTarget: LayerTargetKind;
   /** Image size (px); the thumbnail replay space. */
   dims: { w: number; h: number };
   /** Backing source image for the base image layer thumbnail. */
@@ -122,7 +125,7 @@ function groupStyle(group: LayerGroup): CSSProperties {
   return { "--mask-layer-group-color": group.color } as CSSProperties;
 }
 
-export function LayersPanel({ layers, layerGroups, active, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
+export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   const [renaming, setRenaming] = useState<number | null>(null);
@@ -168,6 +171,16 @@ export function LayersPanel({ layers, layerGroups, active, dims, imagePath, work
     setSelectedIds(new Set());
     onBeforeLayerChange();
     dispatch({ type: "layer_active", index: i });
+  };
+
+  // PS thumbnails: clicking the content / mask thumbnail activates that
+  // attachment as the edit target (the document stores it explicitly).
+  const selectTarget = (e: MouseEvent, i: number, target: LayerTargetKind) => {
+    e.stopPropagation();
+    setSelectedIds(new Set());
+    onBeforeLayerChange();
+    dispatch({ type: "layer_active", index: i });
+    if (target === "mask") dispatch({ type: "target_active", target });
   };
 
   const openMenu = (e: MouseEvent, i: number) => {
@@ -353,7 +366,11 @@ export function LayersPanel({ layers, layerGroups, active, dims, imagePath, work
                   ))}
                 </select>
               </span>
-              <span className="mask-layer-thumb" aria-hidden="true">
+              <button
+                className={`mask-layer-thumb${i === active && activeTarget === "pixel" ? " target" : ""}`}
+                title={t("mask.pixelThumbTitle")}
+                onClick={(e) => selectTarget(e, i, "pixel")}
+              >
                 {showBaseImage && imagePath ? (
                   <BaseImageThumb imagePath={imagePath} />
                 ) : layer.kind === "adjustment" ? (
@@ -361,7 +378,42 @@ export function LayersPanel({ layers, layerGroups, active, dims, imagePath, work
                 ) : (
                   <LayerThumb layer={layer} dims={dims} />
                 )}
-              </span>
+              </button>
+              {layer.mask ? (
+                <>
+                  <button
+                    className={`mask-layer-mask-link${layer.mask.unlinked ? "" : " on"}`}
+                    title={layer.mask.unlinked ? t("mask.maskLinkOff") : t("mask.maskLinkOn")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dispatch({ type: "layer_mask_link", index: i });
+                    }}
+                  >
+                    {t("mask.layerBadgeLink")}
+                  </button>
+                  <button
+                    className={`mask-layer-thumb mask-thumb${i === active && activeTarget === "mask" ? " target" : ""}${layer.mask.disabled ? " off" : ""}`}
+                    title={layer.mask.disabled ? t("mask.maskDisabledBadge") : t("mask.maskThumbTitle")}
+                    onClick={(e) => selectTarget(e, i, "mask")}
+                  >
+                    <LayerThumb layer={{ ...layer, ops: layer.mask.ops }} dims={dims} />
+                  </button>
+                </>
+              ) : (
+                // Reserved mask slot so rows do not jump; click attaches a mask.
+                <button
+                  className="mask-layer-thumb mask-thumb empty"
+                  title={t("mask.maskAdd")}
+                  disabled={layer.kind === "adjustment" || layer.locked}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBeforeLayerChange();
+                    dispatch({ type: "layer_mask_add", index: i });
+                  }}
+                >
+                  +
+                </button>
+              )}
               {renaming === i ? (
                 <input
                   className="mask-layer-rename"
@@ -446,6 +498,42 @@ export function LayersPanel({ layers, layerGroups, active, dims, imagePath, work
             >
               <span className="label">{t("mask.layerDuplicate")}</span>
             </button>
+            {activeLayer?.mask ? (
+              <>
+                <button
+                  className="mask-flyout-item"
+                  onClick={() => {
+                    dispatch({ type: "layer_mask_disable", index: active });
+                    setMenu(null);
+                  }}
+                >
+                  <span className="label">{activeLayer.mask.disabled ? t("mask.maskEnable") : t("mask.maskDisable")}</span>
+                </button>
+                <button
+                  className="mask-flyout-item"
+                  disabled={activeLayer.locked}
+                  onClick={() => {
+                    onBeforeLayerChange();
+                    dispatch({ type: "layer_mask_remove", index: active });
+                    setMenu(null);
+                  }}
+                >
+                  <span className="label">{t("mask.maskDelete")}</span>
+                </button>
+              </>
+            ) : (
+              <button
+                className="mask-flyout-item"
+                disabled={!activeLayer || activeLayer.kind === "adjustment" || activeLayer.locked}
+                onClick={() => {
+                  onBeforeLayerChange();
+                  dispatch({ type: "layer_mask_add", index: active });
+                  setMenu(null);
+                }}
+              >
+                <span className="label">{t("mask.maskAdd")}</span>
+              </button>
+            )}
             <button
               className="mask-flyout-item"
               disabled={layers.length <= 1 || activeLayer?.locked}
@@ -482,7 +570,11 @@ export function LayersPanel({ layers, layerGroups, active, dims, imagePath, work
         <button
           className="mask-layer-action"
           title={t("mask.layerMaskAddTitle")}
-          onClick={() => dispatch({ type: "layer_add", name: `Mask ${layers.length + 1}` })}
+          disabled={!activeLayer || Boolean(activeLayer.mask) || activeLayer.kind === "adjustment" || activeLayer.locked}
+          onClick={() => {
+            onBeforeLayerChange();
+            dispatch({ type: "layer_mask_add", index: active });
+          }}
         >
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />

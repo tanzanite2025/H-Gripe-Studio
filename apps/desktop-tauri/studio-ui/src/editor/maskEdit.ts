@@ -20,6 +20,8 @@ import type {
   LayerGroup,
   LayerAdjustment,
   LayerBlend,
+  LayerMask,
+  LayerTargetKind,
   MaskDocument,
   MaskLayer,
   MaskOperation,
@@ -27,7 +29,9 @@ import type {
 } from "../types/production";
 import {
   activeLayer,
+  activeTargetKind,
   emptyAdjustmentLayer,
+  emptyLayerMask,
   emptyMaskDocument,
   emptyMaskLayer,
   isMaskOperation,
@@ -72,6 +76,7 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     matte_strokes?: unknown;
     operations?: unknown;
     points?: unknown;
+    activeTarget?: unknown;
   };
   const matte_strokes = Array.isArray(v.matte_strokes) ? (v.matte_strokes as BrushStroke[]) : [];
   const points = Array.isArray(v.points)
@@ -92,6 +97,7 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
       points,
       ...(canvas ? { canvas } : {}),
       layerGroups,
+      ...(v.activeTarget === "mask" && layers[active]?.mask ? { activeTarget: "mask" as const } : {}),
     };
   }
   const ops: EditOp[] = Array.isArray(v.ops)
@@ -128,10 +134,12 @@ function normalizeLayer(value: unknown, validGroupIds?: ReadonlySet<string>): Ma
     groupId?: unknown;
     ops?: unknown;
     adjustment?: unknown;
+    mask?: unknown;
   };
   const blank = emptyMaskLayer();
   const adjustment = normalizeAdjustment(v.adjustment);
   const isAdjustment = v.kind === "adjustment" && adjustment !== null;
+  const mask = isAdjustment ? null : normalizeLayerMask(v.mask);
   return {
     id: typeof v.id === "string" && v.id ? v.id : blank.id,
     name: typeof v.name === "string" && v.name ? v.name : blank.name,
@@ -146,6 +154,18 @@ function normalizeLayer(value: unknown, validGroupIds?: ReadonlySet<string>): Ma
       : null),
     ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
     ...(isAdjustment ? { adjustment } : null),
+    ...(mask ? { mask } : null),
+  };
+}
+
+function normalizeLayerMask(value: unknown): LayerMask | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as { id?: unknown; ops?: unknown; disabled?: unknown; unlinked?: unknown };
+  return {
+    id: typeof v.id === "string" && v.id ? v.id : emptyLayerMask().id,
+    ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
+    ...(v.disabled === true ? { disabled: true } : null),
+    ...(v.unlinked === true ? { unlinked: true } : null),
   };
 }
 
@@ -238,9 +258,12 @@ function commit(state: EditState, next: MaskDocument): EditState {
   return { current: next, past, future: [] };
 }
 
-/** The active layer's ordered edit stack (what the history panel shows). */
+/** The active target's ordered edit stack (what the history panel shows):
+ * the active layer's pixel stack, or its layer mask's stack when the mask
+ * thumbnail is the active target. */
 export function activeOps(doc: MaskDocument): EditOp[] {
-  return activeLayer(doc).ops;
+  const layer = activeLayer(doc);
+  return activeTargetKind(doc) === "mask" && layer.mask ? layer.mask.ops : layer.ops;
 }
 
 /** Whether the layer receiving new edits is locked (PS "lock all"). */
@@ -248,12 +271,16 @@ export function activeLayerLocked(doc: MaskDocument): boolean {
   return activeLayer(doc).locked === true;
 }
 
-// Replace the active layer's ops (all sequential edits target the active layer).
+// Replace the active target's ops: the active layer's pixel stack, or its
+// layer mask's stack when the mask is the active target.
 function withActiveOps(doc: MaskDocument, ops: EditOp[]): MaskDocument {
   const active = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
+  const toMask = activeTargetKind(doc) === "mask";
   return {
     ...doc,
-    layers: doc.layers.map((l, i) => (i === active ? { ...l, ops } : l)),
+    layers: doc.layers.map((l, i) =>
+      i !== active ? l : toMask && l.mask ? { ...l, mask: { ...l.mask, ops } } : { ...l, ops },
+    ),
   };
 }
 
@@ -394,10 +421,85 @@ export function removeLayer(state: EditState, index: number): EditState {
   return commit(state, { ...state.current, layers: next, active });
 }
 
-/** Select the layer new edits are recorded onto. Not an undo step. */
+/** Select the layer new edits are recorded onto. Not an undo step. The
+ * active target resets to the pixel content — the mask target never moves
+ * across layers implicitly. */
 export function setActiveLayer(state: EditState, index: number): EditState {
-  if (index < 0 || index >= state.current.layers.length || index === state.current.active) return state;
-  return { ...state, current: { ...state.current, active: index } };
+  if (index < 0 || index >= state.current.layers.length) return state;
+  if (index === state.current.active && activeTargetKind(state.current) === "pixel") return state;
+  const { activeTarget: _, ...doc } = state.current;
+  return { ...state, current: { ...doc, active: index } };
+}
+
+/** Activate the pixel content or the layer mask of the active layer as the
+ * edit target (PS: click the content / mask thumbnail). Not an undo step. */
+export function setActiveTarget(state: EditState, target: LayerTargetKind): EditState {
+  if (target === "mask" && !activeLayer(state.current).mask) return state;
+  if (activeTargetKind(state.current) === target) return state;
+  const { activeTarget: _, ...doc } = state.current;
+  return { ...state, current: target === "mask" ? { ...doc, activeTarget: "mask" } : doc };
+}
+
+// --- layer mask attachments (PS: masks are targets on a layer, not layers) ---
+
+/** Attach an empty layer mask to a layer and activate it (undoable). No-op
+ * when the layer already owns a mask, is locked, or is an adjustment layer. */
+export function addLayerMask(state: EditState, index: number): EditState {
+  const layer = state.current.layers[index];
+  if (!layer || layer.mask || layer.locked || layer.kind === "adjustment") return state;
+  return commit(state, {
+    ...state.current,
+    layers: state.current.layers.map((l, i) => (i === index ? { ...l, mask: emptyLayerMask() } : l)),
+    active: index,
+    activeTarget: "mask",
+  });
+}
+
+/** Remove a layer's mask attachment only — never the layer itself (undoable). */
+export function removeLayerMask(state: EditState, index: number): EditState {
+  const layer = state.current.layers[index];
+  if (!layer?.mask || layer.locked) return state;
+  const { activeTarget: _, ...doc } = state.current;
+  return commit(state, {
+    ...doc,
+    layers: state.current.layers.map((l, i) => {
+      if (i !== index) return l;
+      const { mask: __, ...rest } = l;
+      return rest;
+    }),
+  });
+}
+
+/** Toggle a mask's disabled flag: keep the data, bypass the gating (undoable). */
+export function toggleLayerMaskDisabled(state: EditState, index: number): EditState {
+  const mask = state.current.layers[index]?.mask;
+  if (!mask) return state;
+  const next: LayerMask = { ...mask, disabled: !mask.disabled };
+  if (!next.disabled) delete next.disabled;
+  return commit(state, {
+    ...state.current,
+    layers: state.current.layers.map((l, i) => (i === index ? { ...l, mask: next } : l)),
+  });
+}
+
+/** Toggle the pixel↔mask link (PS chain icon; undoable). */
+export function toggleLayerMaskLink(state: EditState, index: number): EditState {
+  const mask = state.current.layers[index]?.mask;
+  if (!mask) return state;
+  const next: LayerMask = { ...mask, unlinked: !mask.unlinked };
+  if (!next.unlinked) delete next.unlinked;
+  return commit(state, {
+    ...state.current,
+    layers: state.current.layers.map((l, i) => (i === index ? { ...l, mask: next } : l)),
+  });
+}
+
+/** A layer's replayable op stacks: the pixel stack plus its enabled layer
+ * mask's stack (disabled masks keep their data but do not replay). */
+export function layerOpStacks(layer: MaskLayer): { target: LayerTargetKind; ops: EditOp[] }[] {
+  const stacks: { target: LayerTargetKind; ops: EditOp[] }[] = [{ target: "pixel", ops: layer.ops }];
+  if (layer.mask && !layer.mask.disabled) stacks.push({ target: "mask", ops: layer.mask.ops });
+  return stacks;
 }
 
 function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): EditState {
@@ -581,6 +683,9 @@ export function duplicateLayer(state: EditState): EditState {
     id: emptyMaskLayer().id,
     name: `${source.name} copy`,
     ops: source.ops.map((op) => ({ ...op })),
+    ...(source.mask
+      ? { mask: { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) } }
+      : null),
   };
   const layers = [...doc.layers.slice(0, index + 1), copy, ...doc.layers.slice(index + 1)];
   return commit(state, { ...doc, layers, active: index + 1 });
@@ -606,7 +711,7 @@ export const canRedo = (state: EditState): boolean => state.future.length > 0;
 export function isEmpty(doc: MaskDocument): boolean {
   return (
     doc.layers.length === 1 &&
-    doc.layers.every((l) => l.ops.length === 0) &&
+    doc.layers.every((l) => l.ops.length === 0 && !l.mask) &&
     doc.matte_strokes.length === 0 &&
     doc.points.length === 0
   );
@@ -615,6 +720,8 @@ export function isEmpty(doc: MaskDocument): boolean {
 /** Count of applied edits, for the modal's status line. */
 export function editCount(doc: MaskDocument): number {
   return (
-    doc.layers.reduce((n, l) => n + l.ops.length, 0) + doc.matte_strokes.length + doc.points.length
+    doc.layers.reduce((n, l) => n + l.ops.length + (l.mask?.ops.length ?? 0), 0) +
+    doc.matte_strokes.length +
+    doc.points.length
   );
 }

@@ -1014,7 +1014,38 @@
   color: var(--muted);
   background: #23252d;
   border: 1px solid #4a4d57;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  cursor: pointer;
+  overflow: hidden;
 }
+/* PS active-target ring: the thumbnail (content or mask) receiving edits. */
+.mask-layer-thumb.target {
+  border-color: var(--accent, #5aa7ff);
+  box-shadow: 0 0 0 1px var(--accent, #5aa7ff);
+}
+/* The mask slot sits right of the chain; the content thumb keeps its inset. */
+.mask-layer-thumb.mask-thumb { margin-left: 0; }
+/* Reserved empty mask slot: an add-mask affordance so rows do not jump. */
+.mask-layer-thumb.mask-thumb.empty {
+  border-style: dashed;
+  background: transparent;
+  color: transparent;
+}
+.mask-layer-row:hover .mask-layer-thumb.mask-thumb.empty:not(:disabled) { color: var(--muted); }
+.mask-layer-thumb.mask-thumb.empty:disabled { cursor: default; }
+/* Disabled mask (PS red X: data kept, gating bypassed). */
+.mask-layer-thumb.mask-thumb.off { opacity: 0.4; border-color: #c05050; }
+/* Pixel↔mask chain toggle between the two thumbnails. */
+.mask-layer-mask-link {
+  flex: none;
+  font-size: 9px !important;
+  padding: 0 2px !important;
+  margin-right: 2px;
+  color: var(--muted);
+  opacity: 0.4;
+}
+.mask-layer-mask-link.on { opacity: 1; }
 .mask-layer-name {
   flex: 0 1 clamp(92px, 36%, 150px);
   min-width: 0;
