@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import { MaskEditModal } from "./MaskEditModal";
 import type { CropCommit } from "./CropEditModal";
 import type { EditorTab } from "./host/EditorHost";
@@ -26,8 +26,8 @@ interface MediaEditModalProps {
   onSelectTab?: (id: string) => void;
   /** In-progress edit document restored when the tab re-activates. */
   initial?: ImageDocument | null;
-  /** Draft sink: called on the explicit save (the header light), never
-   * automatically — closing with unsaved edits drops them. */
+  /** Draft sink: mirrors every edit, so collapsing / reopening the editor
+   * restores the in-progress document (PS-style). */
   onDocChange?: (doc: ImageDocument) => void;
   onCommitMask: (edits: ImageDocument) => void;
   // Kept for EditorHost request compatibility; the crop tool records a
@@ -53,25 +53,19 @@ export function MediaEditModal({
   // grade-kernel render path lands (K2), the mask editor remains the canvas,
   // so documents bridge losslessly at this boundary in both directions.
   const maskInitial = useMemo(() => (initial ? toMaskDocument(initial) : null), [initial]);
-  // Explicit-save model: the editor mirrors every edit here, but the host
-  // draft only updates when the user clicks the save light. Red = unsaved
-  // edits (lost on close), green = saved (restored on reopen).
-  const latestDoc = useRef<MaskDocument | null>(null);
+  // Every edit mirrors straight into the host draft, so collapsing and
+  // reopening the editor restores layers / history exactly as left. The tab
+  // light reports the draft as saved; committing to the graph stays on the
+  // explicit Apply.
   const seeded = useRef(false);
-  const [dirty, setDirty] = useState(false);
   const handleDocChange = (doc: MaskDocument) => {
-    latestDoc.current = doc;
-    // The editor mirrors its initial document on mount; only later edits dirty.
+    // The editor mirrors its initial document on mount; only later edits
+    // rewrite the draft.
     if (!seeded.current) {
       seeded.current = true;
       return;
     }
-    setDirty(true);
-  };
-  const saveDraft = () => {
-    if (!dirty || !latestDoc.current) return;
-    onDocChange?.(fromMaskDocument(latestDoc.current));
-    setDirty(false);
+    onDocChange?.(fromMaskDocument(doc));
   };
   const tabStrip =
     (tabs && tabs.length > 0) || onPickFile ? (
@@ -88,17 +82,8 @@ export function MediaEditModal({
             }}
           >
             {tab.active && onDocChange ? (
-              // Per-document save light: saving lives on the image's own tab,
-              // so each open image commits its draft independently.
-              <span
-                className={`media-edit-light${dirty ? " unsaved" : ""}`}
-                role="button"
-                title={dirty ? t("mediaEdit.unsaved") : t("mediaEdit.saved")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  saveDraft();
-                }}
-              />
+              // Per-document draft light: green — edits persist automatically.
+              <span className="media-edit-light" title={t("mediaEdit.saved")} />
             ) : null}
             <span className="media-edit-tab-label">{tab.label}</span>
           </button>
