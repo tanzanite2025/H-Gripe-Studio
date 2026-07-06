@@ -148,6 +148,20 @@ export function ProductionDrawer({
     );
   }
 
+  const activeAsset = assets.find((a) => a.id === activeAssetId) ?? null;
+
+  // Premiere-style track stack: video tracks on top with the highest lane
+  // first (V2 above V1), audio tracks below in ascending order (A1 first).
+  const videoTracks = timeline.tracks.filter((track) => track.kind === "video");
+  const audioTracks = timeline.tracks.filter((track) => track.kind === "audio");
+  const orderedTracks = [
+    ...videoTracks.map((track, i) => ({ track, laneNumber: i + 1 })).reverse(),
+    ...audioTracks.map((track, i) => ({ track, laneNumber: i + 1 })),
+  ].map((entry, i, all) => ({
+    ...entry,
+    groupBoundary: i > 0 && all[i - 1].track.kind !== entry.track.kind,
+  }));
+
   const clipAssetName = (clipId: string): string => {
     for (const track of timeline.tracks) {
       const clip = track.clips.find((c) => c.id === clipId);
@@ -302,34 +316,37 @@ export function ProductionDrawer({
               <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
             )}
             <div className="production-timeline-tracks">
-              {timeline.tracks.map((track, index) => {
+              {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
                 // Scale every lane to the same overall timeline length so clip
                 // positions line up vertically across tracks.
                 const total = Math.max(timelineDuration(timeline), Math.max(trackEnd(track), 1));
-                const laneNumber = timeline.tracks.filter((other, i) => other.kind === track.kind && i <= index).length;
-                const activeAsset = assets.find((a) => a.id === activeAssetId) ?? null;
                 const acceptsActive =
                   !!activeAsset && trackKindForClip(clipKindForAsset(activeAsset.kind)) === track.kind;
                 return (
-                  <div key={track.id} className="production-track">
-                    <span className={`production-track-label track-${track.kind}`}>
-                      {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
-                    </span>
-                    <span className="production-track-controls">
-                      <button
-                        onClick={() => onAddActiveToTrack(track.id)}
-                        disabled={!acceptsActive}
-                        title={t("drawer.addToTrackTitle")}
-                      >
-                        +
-                      </button>
-                      <button
-                        onClick={() => onRemoveTrack(track.id)}
-                        disabled={timeline.tracks.length <= 1}
-                        title={t("drawer.removeTrackTitle")}
-                      >
-                        ×
-                      </button>
+                  <div
+                    key={track.id}
+                    className={`production-track${groupBoundary ? " production-track-group-start" : ""}`}
+                  >
+                    <span className="production-track-head">
+                      <span className={`production-track-label track-${track.kind}`}>
+                        {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
+                      </span>
+                      <span className="production-track-controls">
+                        <button
+                          onClick={() => onAddActiveToTrack(track.id)}
+                          disabled={!acceptsActive}
+                          title={t("drawer.addToTrackTitle")}
+                        >
+                          +
+                        </button>
+                        <button
+                          onClick={() => onRemoveTrack(track.id)}
+                          disabled={timeline.tracks.length <= 1}
+                          title={t("drawer.removeTrackTitle")}
+                        >
+                          ×
+                        </button>
+                      </span>
                     </span>
                     <div className="production-track-lane">
                       {track.clips.map((clip) => {
