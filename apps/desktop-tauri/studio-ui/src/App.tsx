@@ -11,7 +11,6 @@ import {
 
 import { FlowCanvas, type EdgeStyle } from "./editor/FlowCanvas";
 import { RunHud, type RunHudScope } from "./editor/RunHud";
-import { Inspector } from "./editor/Inspector";
 import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
@@ -184,7 +183,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setViewport,
   } = canvas;
   const { openNewCanvas, activateCanvas, closeCanvas, renameCanvas } = canvas;
-  const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
   const [edgeType, setEdgeType] = useState<EdgeStyle>("default");
@@ -259,10 +257,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedId) ?? null,
     [nodes, selectedId],
-  );
-  const inspectorNode = useMemo(
-    () => nodes.find((n) => n.id === inspectorNodeId) ?? null,
-    [nodes, inspectorNodeId],
   );
 
   // The selected split node's layered image asset. The last run's real
@@ -1241,9 +1235,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const editing = useMemo(
     () => ({
       onParamChange,
+      // The settings icon stays on the card, but the inspector sidebar is
+      // retired until its replacement is decided — clicking only selects.
       openInspector: (nodeId: string) => {
         setSelectedId(nodeId);
-        setInspectorNodeId(nodeId);
       },
       openPreview,
       openImagePreview: setImagePreviewPath,
@@ -1762,13 +1757,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
               />
             )}
           </div>
-          {inspectorNode && (
-            <Inspector
-              node={inspectorNode}
-              onParamChange={onParamChange}
-              onClose={() => setInspectorNodeId(null)}
-            />
-          )}
         </div>
         <ProductionDrawer
           mode={drawerMode}
