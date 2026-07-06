@@ -68,7 +68,7 @@ describe("lowerWorkflowGraph", () => {
         { id: "proc", kind: "imageProcessing", position: pos, params: {} },
       ],
       edges: [
-        { id: "e1", source: "src", sourcePort: "image", target: "proc", targetPort: "mask.in" },
+        { id: "e1", source: "src", sourcePort: "image", target: "proc", targetPort: "enhance.in" },
         { id: "e2", source: "src", sourcePort: "image", target: "proc", targetPort: "repair.in" },
         { id: "e3", source: "src", sourcePort: "image", target: "proc", targetPort: "repair.report" },
       ],
@@ -76,8 +76,8 @@ describe("lowerWorkflowGraph", () => {
     const { graph: lowered } = lowerWorkflowGraph(g);
     expect(lowered.nodes.map((n) => n.kind).sort()).toEqual([
       "detailRepaint",
+      "imageEnhance",
       "imageSource",
-      "subjectMask",
     ]);
     const repaint = lowered.nodes.find((n) => n.kind === "detailRepaint")!;
     const targets = lowered.edges
