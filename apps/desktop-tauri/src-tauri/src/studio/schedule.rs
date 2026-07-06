@@ -37,6 +37,11 @@ pub(crate) enum JobCategory {
     CpuBound,
     /// Local GPU / model inference (native ONNX). Serialised to one at a time.
     Gpu,
+    /// Video encode (assemble / trim through the vendored libav encoder).
+    /// Serialised to one at a time — encoders are memory-heavy and an encode
+    /// must not starve interactive work by fanning out — but on its own
+    /// permit, so an export does not block model inference on the GPU gate.
+    VideoEncode,
     /// A remote provider call through the broker. Bounded by the network / the
     /// provider, not the local GPU, so it does not take the GPU permit.
     Network,
@@ -57,7 +62,7 @@ pub(crate) fn concurrency_limit(category: JobCategory, cpu_pool: usize) -> usize
     match category {
         JobCategory::CpuLight | JobCategory::Network => usize::MAX,
         JobCategory::CpuBound => cpu_pool.max(1),
-        JobCategory::Gpu => 1,
+        JobCategory::Gpu | JobCategory::VideoEncode => 1,
     }
 }
 
@@ -74,6 +79,7 @@ fn default_cpu_pool() -> usize {
 /// rather than fighting the device independently.
 pub(crate) struct StudioScheduler {
     gpu: Arc<Semaphore>,
+    video_encode: Arc<Semaphore>,
     cpu: Arc<Semaphore>,
     cpu_pool: usize,
 }
@@ -86,6 +92,10 @@ impl StudioScheduler {
         Self {
             gpu: Arc::new(Semaphore::new(concurrency_limit(
                 JobCategory::Gpu,
+                cpu_pool,
+            ))),
+            video_encode: Arc::new(Semaphore::new(concurrency_limit(
+                JobCategory::VideoEncode,
                 cpu_pool,
             ))),
             cpu: Arc::new(Semaphore::new(cpu_pool)),
@@ -106,6 +116,7 @@ impl StudioScheduler {
     pub(crate) async fn acquire(&self, category: JobCategory) -> Option<OwnedSemaphorePermit> {
         let sem = match category {
             JobCategory::Gpu => &self.gpu,
+            JobCategory::VideoEncode => &self.video_encode,
             JobCategory::CpuBound => &self.cpu,
             JobCategory::CpuLight | JobCategory::Network => return None,
         };
@@ -139,6 +150,9 @@ mod tests {
         ] {
             assert_eq!(category_for_kind(kind), Some(CpuBound), "{kind}");
         }
+        // Video encodes hold their own single-slot lane, not the GPU permit.
+        assert_eq!(category_for_kind("videoAssemble"), Some(VideoEncode));
+        assert_eq!(category_for_kind("videoTrim"), Some(VideoEncode));
         // Native compute splits: ONNX matte on the GPU, crop is CPU geometry.
         assert_eq!(category_for_kind("subjectMask"), Some(Gpu));
         assert_eq!(category_for_kind("crop"), Some(CpuBound));
@@ -155,6 +169,7 @@ mod tests {
     fn gpu_is_single_slot_regardless_of_pool() {
         assert_eq!(concurrency_limit(JobCategory::Gpu, 1), 1);
         assert_eq!(concurrency_limit(JobCategory::Gpu, 64), 1);
+        assert_eq!(concurrency_limit(JobCategory::VideoEncode, 64), 1);
         assert_eq!(concurrency_limit(JobCategory::CpuBound, 8), 8);
         assert_eq!(concurrency_limit(JobCategory::CpuBound, 0), 1);
         assert_eq!(concurrency_limit(JobCategory::CpuLight, 8), usize::MAX);
@@ -181,8 +196,16 @@ mod tests {
             scheduler.gpu.try_acquire().is_err(),
             "a second GPU permit must not be available while one is held"
         );
-        // CPU-bound work still flows in parallel with the held GPU permit.
+        // CPU-bound work still flows in parallel with the held GPU permit,
+        // and a video encode holds its own lane rather than the GPU gate.
         assert!(scheduler.acquire(JobCategory::CpuBound).await.is_some());
+        let encode = scheduler.acquire(JobCategory::VideoEncode).await;
+        assert!(encode.is_some());
+        assert!(
+            scheduler.video_encode.try_acquire().is_err(),
+            "a second encode permit must not be available while one is held"
+        );
+        drop(encode);
 
         // Dropping the permit frees the single GPU slot again.
         drop(permit);

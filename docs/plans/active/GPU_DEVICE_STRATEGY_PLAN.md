@@ -341,6 +341,23 @@ network api
 
 This extends the existing executor lane idea rather than replacing it.
 
+Done: `JobCategory` in `studio/schedule.rs` is the resource-class vocabulary,
+mapped from the list above onto the lanes the app actually has today:
+
+- interactive ui → the frontend / `CpuLight` graph logic (never gated)
+- preview gpu → the shared viewport surface device (its own lazy-init path)
+- full-res render gpu / model inference gpu → `Gpu` (`Semaphore(1)`)
+- video decode → the playback engine's dedicated decode thread (latest-wins,
+  its own lane distinct from the scheduler)
+- video encode → `VideoEncode` (`Semaphore(1)`, its own permit so an
+  assemble/trim encode serialises against other encodes but does not block
+  model inference on the GPU gate)
+- audio cpu / file io → `CpuBound` (bounded pool)
+- network api → `Network` (ungated locally, bounded by the provider)
+
+New classes join by extending `JobCategory` + `node_class`, not by a parallel
+mechanism.
+
 ### Long-Term Step 3: GPU Queue Policy
 
 Possible policy:

@@ -35,7 +35,10 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
         | "group" | "compare" | "logic" | "if" | "switch" | "save" => (Graph, CpuLight),
         // `python/bridge` CLI cards: CPU-bound subprocess work.
         "psdContextAnalyze" | "matchLightColor" | "refineMaskEdge" | "imageEnhance"
-        | "detailWatchdog" | "psdExport" | "videoAssemble" | "videoTrim" => (Local, CpuBound),
+        | "detailWatchdog" | "psdExport" => (Local, CpuBound),
+        // Video encodes (vendored libav encoder) hold their own single-slot
+        // lane: serialised against each other, but not against the GPU gate.
+        "videoAssemble" | "videoTrim" => (Local, VideoEncode),
         // Native-Rust compute cards split by device use: the ONNX matte runs on
         // the GPU (serialised), plain crop geometry is CPU-only.
         "subjectMask" => (Compute, Gpu),
