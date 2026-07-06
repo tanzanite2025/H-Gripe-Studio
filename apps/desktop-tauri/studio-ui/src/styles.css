@@ -315,6 +315,8 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 
 .workspace { flex: 1; display: flex; min-height: 0; position: relative; }
+/* Full-height production drawer: the canvas workspace yields all its space. */
+.workspace-hidden { display: none; }
 .canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .canvas-flow { flex: 1; min-height: 0; position: relative; }
 
@@ -1820,7 +1822,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .production-drawer-rail-meta { color: var(--muted); font-size: 11px; }
 .production-drawer-half { height: 260px; }
-.production-drawer-full { height: 55vh; }
+.production-drawer-full { flex: 1; min-height: 0; }
 .production-drawer-head {
   display: flex;
   align-items: center;
@@ -2121,6 +2123,17 @@ button:disabled { opacity: 0.6; cursor: default; }
   min-height: 0;
 }
 .production-track { display: flex; align-items: stretch; gap: 6px; }
+.production-track-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.production-track-controls button {
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+}
 .production-track-label {
   width: 22px;
   flex: none;

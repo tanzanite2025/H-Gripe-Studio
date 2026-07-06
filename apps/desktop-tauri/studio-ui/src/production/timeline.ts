@@ -73,6 +73,13 @@ export function addTrack(timeline: TimelineModel, kind: TrackKind): TimelineMode
   };
 }
 
+/** Remove a track (and its clips); the last remaining track stays. */
+export function removeTrack(timeline: TimelineModel, trackId: string): TimelineModel {
+  if (timeline.tracks.length <= 1) return timeline;
+  if (!timeline.tracks.some((t) => t.id === trackId)) return timeline;
+  return { ...timeline, tracks: timeline.tracks.filter((t) => t.id !== trackId) };
+}
+
 export function trackEnd(track: TimelineTrack): number {
   return track.clips.reduce((end, c) => Math.max(end, c.start + c.duration), 0);
 }

@@ -92,13 +92,16 @@ import {
   type LayeredImageAsset,
 } from "./production/layeredImage";
 import {
+  addTrack,
   appendClip,
   createTimeline,
   findClip,
   removeClip,
   removeClipsForAsset,
+  removeTrack,
   trimClip,
   type TimelineModel,
+  type TrackKind,
 } from "./production/timeline";
 import {
   clampAudioEdit,
@@ -318,6 +321,32 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setTimeline(result.timeline);
     setSelectedClipId(result.clip.id);
   }, [activeAssetId, binAssets, timeline]);
+
+  const handleAddActiveToTrack = useCallback(
+    (trackId: string) => {
+      if (!activeAssetId) return;
+      const asset = binAssets.find((a) => a.id === activeAssetId);
+      if (!asset) return;
+      const result = appendClip(timeline, asset, { trackId });
+      if (!result || result.trackId !== trackId) return;
+      setTimeline(result.timeline);
+      setSelectedClipId(result.clip.id);
+    },
+    [activeAssetId, binAssets, timeline],
+  );
+
+  const handleAddTrack = useCallback((kind: TrackKind) => {
+    setTimeline((tl) => addTrack(tl, kind));
+  }, []);
+
+  const handleRemoveTrack = useCallback(
+    (trackId: string) => {
+      const next = removeTrack(timeline, trackId);
+      setTimeline(next);
+      setSelectedClipId((cur) => (cur && !findClip(next, cur) ? null : cur));
+    },
+    [timeline],
+  );
 
   const handleRemoveClip = useCallback((clipId: string) => {
     setTimeline((tl) => removeClip(tl, clipId));
@@ -1529,7 +1558,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             </div>
           </div>
         )}
-        <div className="workspace">
+        <div className={drawerMode === "full" ? "workspace workspace-hidden" : "workspace"}>
           <Palette
             onAdd={addNode}
             edgeType={edgeType}
@@ -1641,6 +1670,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           selectedClipId={selectedClipId}
           onSelectClip={handleSelectClip}
           onAddActiveToTimeline={handleAddActiveToTimeline}
+          onAddActiveToTrack={handleAddActiveToTrack}
+          onAddTrack={handleAddTrack}
+          onRemoveTrack={handleRemoveTrack}
           onRemoveClip={handleRemoveClip}
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}

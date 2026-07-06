@@ -11,6 +11,7 @@ import {
   findClip,
   removeClip,
   removeClipsForAsset,
+  removeTrack,
   timelineDuration,
   trackKindForClip,
   trimClip,
@@ -69,6 +70,16 @@ describe("timeline model", () => {
   it("adds tracks on demand", () => {
     const tl = addTrack(createTimeline(), "video");
     expect(tl.tracks.filter((t) => t.kind === "video")).toHaveLength(2);
+  });
+
+  it("removes a track with its clips but keeps the last track", () => {
+    const withClip = appendClip(createTimeline(), imageAsset)!;
+    const removed = removeTrack(withClip.timeline, withClip.trackId);
+    expect(removed.tracks.map((t) => t.kind)).toEqual(["audio"]);
+    expect(findClip(removed, withClip.clip.id)).toBeNull();
+    const last = removeTrack(removed, removed.tracks[0].id);
+    expect(last).toBe(removed);
+    expect(removeTrack(withClip.timeline, "missing")).toBe(withClip.timeline);
   });
 
   it("removes clips by id and by asset reference", () => {
