@@ -119,7 +119,7 @@ export function PromptAssistantPanel({
 
   return (
     <div className="assistant-panel" role="dialog" aria-label={t("assistant.title")}>
-      <div className="assistant-head">
+      <div className="assistant-head" data-drag-handle>
         <h2>{t("assistant.title")}</h2>
         <span className="spacer" />
         <button
