@@ -91,14 +91,14 @@ describe("PromptAssistantPanel", () => {
       <PromptAssistantPanel {...panelProps({ onInsertIntoSelected: onInsert })} />,
     );
     sendMessage(container, "a fox");
-    expect(actionButton(container, "Insert into selected Prompt").disabled).toBe(true);
+    expect(actionButton(container, "Insert into selected card").disabled).toBe(true);
 
     rerender(
       <PromptAssistantPanel
         {...panelProps({ insertTargetTitle: "promptOptimize-1", onInsertIntoSelected: onInsert })}
       />,
     );
-    const insert = actionButton(container, "Insert into selected Prompt");
+    const insert = actionButton(container, "Insert into selected card");
     expect(insert.disabled).toBe(false);
     fireEvent.click(insert);
     expect(onInsert).toHaveBeenCalledWith("a fox");

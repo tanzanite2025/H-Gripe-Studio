@@ -113,6 +113,11 @@ import { ModelManagerModal } from "./models/ModelManagerModal";
 import { ToolRail } from "./assistant/ToolRail";
 import { PromptAssistantPanel } from "./assistant/PromptAssistantPanel";
 import { loadAssistantOpen, saveAssistantOpen } from "./assistant/promptAssistantState";
+import {
+  isAssistantInsertTarget,
+  isPromptTextTarget,
+  planGenerateInsert,
+} from "./assistant/insertTarget";
 import type { ModelCapability } from "./models/backendRegistry";
 import { useT } from "./i18n";
 
@@ -949,19 +954,64 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       return !open;
     });
   }, []);
-  const selectedPromptNode = useMemo(() => {
+  const assistantInsertTarget = useMemo(() => {
     const node = nodes.find((n) => n.id === selectedId);
     if (!node) return null;
     const kind = String((node.data as HgripeNodeData).kind);
-    return kind === "prompt" || kind === "promptOptimize" ? node : null;
+    return isAssistantInsertTarget(kind) ? node : null;
   }, [nodes, selectedId]);
   const handleAssistantInsert = useCallback(
     (text: string) => {
-      if (!selectedPromptNode || !text) return;
-      onParamChange(selectedPromptNode.id, "text", text);
-      setMessage(t("assistant.inserted"));
+      const target = assistantInsertTarget;
+      if (!target || !text) return;
+      const kind = String((target.data as HgripeNodeData).kind);
+      if (isPromptTextTarget(kind)) {
+        onParamChange(target.id, "text", text);
+        setMessage(t("assistant.inserted"));
+        return;
+      }
+      // Generate card: route the draft to whatever feeds its `prompt` input.
+      const plan = planGenerateInsert(target.id, edges, (id) => {
+        const n = nodes.find((x) => x.id === id);
+        return n ? String((n.data as HgripeNodeData).kind) : null;
+      });
+      if (plan.action === "update_upstream") {
+        onParamChange(plan.nodeId, "text", text);
+        setMessage(t("assistant.insertedUpstream", { id: plan.nodeId }));
+        return;
+      }
+      if (plan.action === "blocked") {
+        setMessage(t("assistant.insertBlocked", { id: plan.nodeId }));
+        return;
+      }
+      takeSnapshot();
+      const id = newNodeId("prompt");
+      setNodes((ns) =>
+        ns.concat(makeNode(id, "prompt", target.position.x - 320, target.position.y + 40, { text })),
+      );
+      setEdges((es) =>
+        es.concat({
+          id: `edge-${id}`,
+          source: id,
+          sourceHandle: "text",
+          target: target.id,
+          targetHandle: "prompt",
+        }),
+      );
+      setMessage(t("assistant.insertedWired"));
     },
-    [selectedPromptNode, onParamChange, setMessage, t],
+    [
+      assistantInsertTarget,
+      nodes,
+      edges,
+      onParamChange,
+      takeSnapshot,
+      newNodeId,
+      setNodes,
+      setEdges,
+      setMessage,
+      t,
+    ],
   );
   const handleAssistantCreate = useCallback(
     (text: string) => {
@@ -1744,7 +1794,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           }
         >
           <PromptAssistantPanel
-            insertTargetTitle={selectedPromptNode ? selectedPromptNode.id : null}
+            insertTargetTitle={assistantInsertTarget ? assistantInsertTarget.id : null}
             onInsertIntoSelected={handleAssistantInsert}
             onCreatePromptNode={handleAssistantCreate}
             onClose={toggleAssistant}

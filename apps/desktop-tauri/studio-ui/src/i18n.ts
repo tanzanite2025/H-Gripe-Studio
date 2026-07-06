@@ -868,13 +868,25 @@ export const messages = {
     zh: "描述你想要的画面…",
   },
   "assistant.send": { en: "Send", zh: "发送" },
-  "assistant.insert": { en: "Insert into selected Prompt", zh: "插入选中提示词卡片" },
+  "assistant.insert": { en: "Insert into selected card", zh: "插入选中卡片" },
   "assistant.create": { en: "Create Prompt card", zh: "新建提示词卡片" },
   "assistant.copy": { en: "Copy", zh: "复制" },
   "assistant.clear": { en: "Clear session", zh: "清空会话" },
   "assistant.inserted": {
     en: "prompt inserted into the selected card",
     zh: "提示词已插入选中卡片",
+  },
+  "assistant.insertedUpstream": {
+    en: "prompt inserted into the connected Prompt card {id}",
+    zh: "提示词已插入相连的提示词卡片 {id}",
+  },
+  "assistant.insertedWired": {
+    en: "prompt card created and wired into the Generate card",
+    zh: "已新建提示词卡片并接入生成卡片",
+  },
+  "assistant.insertBlocked": {
+    en: "the Generate card's prompt input is already fed by {id} — edit that card instead",
+    zh: "生成卡片的提示词输入已由 {id} 提供，请直接编辑该卡片",
   },
   "assistant.created": {
     en: "prompt card created from the draft",
