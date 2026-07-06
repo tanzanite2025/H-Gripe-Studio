@@ -1,9 +1,26 @@
 // Bridge for the drawer's timeline export command: send the expanded frame
-// sequence (one image path per output frame) to the backend `timeline_export`
-// command, which encodes it through the same FFmpeg seam as the
-// `videoAssemble` node executor.
+// sequence (one image path per output frame) plus the audio segments to the
+// backend `timeline_export` command, which encodes the video through the same
+// FFmpeg seam as the `videoAssemble` node executor and muxes the audio
+// mixdown in as an AAC track.
 
 import { tauriInvoke } from "./core";
+
+// Field names are camelCase to match the Rust `TimelineAudioSegment` deserde.
+export interface TimelineAudioSegment {
+  /** Absolute media path of the clip's source file. */
+  path: string;
+  /** Timeline start, seconds. */
+  startSec: number;
+  /** Played length, seconds. */
+  durationSec: number;
+  /** Source in-point, seconds into the media file. */
+  trimStartSec: number;
+  /** Clip gain, decibels. */
+  gainDb: number;
+  fadeInSec: number;
+  fadeOutSec: number;
+}
 
 // Fields are snake_case to match the Rust `TimelineExportResult` serialization.
 export interface TimelineExportResult {
@@ -14,6 +31,10 @@ export interface TimelineExportResult {
   graded_frame_count: number;
   /** Backend that ran the grade kernel (`cpu` / `gpu`), when frames were graded. */
   grade_backend?: "cpu" | "gpu";
+  /** Audio clips mixed into the output's AAC track (0 = video only). */
+  audio_clip_count: number;
+  /** Why the export stayed video-only although audio clips were sent. */
+  audio_skipped_reason?: string;
 }
 
 /**
@@ -23,7 +44,12 @@ export interface TimelineExportResult {
 export async function timelineExport(
   frames: string[],
   fps: number,
-  opts: { codec?: string; outputName?: string; gradeDocs?: (string | null)[] } = {},
+  opts: {
+    codec?: string;
+    outputName?: string;
+    gradeDocs?: (string | null)[];
+    audio?: TimelineAudioSegment[];
+  } = {},
 ): Promise<TimelineExportResult | null> {
   const invoke = tauriInvoke();
   if (!invoke) return null;
@@ -33,5 +59,6 @@ export async function timelineExport(
     codec: opts.codec ?? null,
     outputName: opts.outputName ?? null,
     gradeDocs: opts.gradeDocs ?? null,
+    audio: opts.audio ?? null,
   })) as TimelineExportResult;
 }

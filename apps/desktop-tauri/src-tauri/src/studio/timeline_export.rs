@@ -3,8 +3,10 @@
 //! plan into a video file. The UI builds the render plan (still clips expanded
 //! to per-frame image paths at the chosen fps) and this command reuses the
 //! `videoAssemble` executor for the actual FFmpeg encode — native in-process
-//! FFmpeg on default builds, the PyAV worker otherwise. Video-clip segments and
-//! the audio mixdown/mux extend this seam later.
+//! FFmpeg on default builds, the PyAV worker otherwise. Audio clips are mixed
+//! down (trim / gain / fades, summed at their timeline offsets) and muxed into
+//! the encoded video as an AAC track (`audio_mix`). Video-clip segments extend
+//! this seam later.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -14,6 +16,7 @@ use serde_json::{json, Value};
 
 use hgripe_grade::GradeSurface;
 
+use super::audio_mix::TimelineAudioSegment;
 use super::grade::{apply_grade_doc, grade_space, parse_grade_doc, GradeBackend};
 use super::graph::StudioGraphNode;
 use super::studio_image;
@@ -35,6 +38,11 @@ pub(crate) struct TimelineExportResult {
     /// Why the grade fell back to CPU, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) grade_backend_fallback_reason: Option<String>,
+    /// Audio clips mixed into the output's AAC track (0 = video only).
+    pub(crate) audio_clip_count: u64,
+    /// Why the export stayed video-only although audio clips were sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) audio_skipped_reason: Option<String>,
 }
 
 /// Frames ready for the encoder, plus the grading backend report.
@@ -123,6 +131,7 @@ pub(crate) fn timeline_export(
     codec: Option<String>,
     output_name: Option<String>,
     grade_docs: Option<Vec<Option<String>>>,
+    audio: Option<Vec<TimelineAudioSegment>>,
 ) -> Result<TimelineExportResult, String> {
     let graded = match grade_docs {
         Some(docs) if docs.iter().any(|d| d.is_some()) => {
@@ -168,20 +177,80 @@ pub(crate) fn timeline_export(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let duration_sec = outputs
+        .get("duration_sec")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+
+    let mut audio_clip_count = 0u64;
+    let mut audio_skipped_reason: Option<String> = None;
+    if let Some(segments) = audio.filter(|s| !s.is_empty()) {
+        match mux_timeline_audio(&video_path, &segments, duration_sec) {
+            Ok(count) => audio_clip_count = count,
+            // The video is already on disk; a bad audio source degrades the
+            // export to video-only instead of discarding the encode.
+            Err(reason) => audio_skipped_reason = Some(reason),
+        }
+    }
+
     Ok(TimelineExportResult {
         video_path,
         frame_count: outputs
             .get("frame_count")
             .and_then(Value::as_u64)
             .unwrap_or(0),
-        duration_sec: outputs
-            .get("duration_sec")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0),
+        duration_sec,
         graded_frame_count,
         grade_backend: backend.as_ref().map(|b| b.name),
         grade_backend_fallback_reason: backend.and_then(|b| b.fallback_reason),
+        audio_clip_count,
+        audio_skipped_reason,
     })
+}
+
+/// Decode every audio segment's source, mix the timeline (trim / gain /
+/// fades at each clip's offset, trimmed to the video's length), and mux the
+/// mix as an AAC track into `video_path` in place. Returns the clip count.
+#[cfg(feature = "native-ffmpeg")]
+fn mux_timeline_audio(
+    video_path: &str,
+    segments: &[TimelineAudioSegment],
+    duration_sec: f64,
+) -> Result<u64, String> {
+    use super::audio_mix::{decode_audio_pcm, mix_timeline_audio, mux_video_with_audio};
+
+    let mut decoded: HashMap<&str, Vec<f32>> = HashMap::new();
+    for seg in segments {
+        if !decoded.contains_key(seg.path.as_str()) {
+            let pcm = decode_audio_pcm(Path::new(&seg.path))?;
+            decoded.insert(seg.path.as_str(), pcm);
+        }
+    }
+    let pairs: Vec<(TimelineAudioSegment, Vec<f32>)> = segments
+        .iter()
+        .map(|seg| (seg.clone(), decoded[seg.path.as_str()].clone()))
+        .collect();
+    let mix = mix_timeline_audio(&pairs, duration_sec);
+    if mix.is_empty() {
+        return Err("audio mix is empty (zero-length export)".to_string());
+    }
+
+    let video = Path::new(video_path);
+    let muxed = video.with_extension("mux.mp4");
+    mux_video_with_audio(video, &mix, &muxed)?;
+    std::fs::remove_file(video).map_err(|err| format!("failed to replace {video_path}: {err}"))?;
+    std::fs::rename(&muxed, video)
+        .map_err(|err| format!("failed to move the muxed file into place: {err}"))?;
+    Ok(segments.len() as u64)
+}
+
+#[cfg(not(feature = "native-ffmpeg"))]
+fn mux_timeline_audio(
+    _video_path: &str,
+    _segments: &[TimelineAudioSegment],
+    _duration_sec: f64,
+) -> Result<u64, String> {
+    Err("audio mixdown requires the `native-ffmpeg` build (vendored libav)".to_string())
 }
 
 #[cfg(test)]
@@ -190,7 +259,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_frames() {
-        let err = timeline_export(vec![], 24.0, None, None, None).unwrap_err();
+        let err = timeline_export(vec![], 24.0, None, None, None, None).unwrap_err();
         assert!(err.contains("needs at least one frame"), "{err}");
     }
 
@@ -199,6 +268,7 @@ mod tests {
         let err = timeline_export(
             vec!["Z:/definitely/missing-frame.png".to_string()],
             24.0,
+            None,
             None,
             None,
             None,

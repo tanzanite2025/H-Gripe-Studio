@@ -1,11 +1,13 @@
 // Timeline render plan (UNIFIED_PRODUCTION_DRAWER_PLAN.md step 9): a pure,
 // serializable description of what the export encodes, built from the timeline
-// plus the media bin. The first encode path covers the video track's still
-// clips (expanded to one image path per output frame at the chosen fps);
-// video-clip re-encode and the audio mixdown/mux consume the same plan once
-// their backend lanes land, so unsupported segments surface as warnings
-// instead of silently disappearing.
+// plus the media bin. The encode path covers the video track's still clips
+// (expanded to one image path per output frame at the chosen fps) and the
+// audio tracks' clips (mixed down with their trim/gain/fade edits and muxed
+// into the output by the backend); video-clip re-encode consumes the same
+// plan once its backend lane lands, so unsupported segments surface as
+// warnings instead of silently disappearing.
 
+import { defaultAudioEdit, type AudioClipEdit } from "./audioEdit";
 import type { MediaAsset } from "./mediaBin";
 import type { ClipKind, TimelineModel } from "./timeline";
 
@@ -23,10 +25,19 @@ export interface RenderSegment {
   gradeDoc: string | null;
 }
 
+/** An audio-track segment plus its non-destructive edit, for the mixdown. */
+export interface AudioRenderSegment extends RenderSegment {
+  /** Source in-point, seconds into the media file. */
+  trimStartSec: number;
+  /** Clip gain, decibels. */
+  gainDb: number;
+  fadeInSec: number;
+  fadeOutSec: number;
+}
+
 export type RenderWarning =
   | { kind: "missing_asset"; clipId: string; assetId: string }
   | { kind: "video_clip_skipped"; clipId: string }
-  | { kind: "audio_not_mixed"; clipCount: number }
   | { kind: "gap"; atSec: number; lengthSec: number };
 
 export interface RenderPlan {
@@ -34,8 +45,8 @@ export interface RenderPlan {
   fps: number;
   /** Encodable still segments of the first video track, in timeline order. */
   video: RenderSegment[];
-  /** Audio-track segments (reported, not yet mixed/muxed). */
-  audio: RenderSegment[];
+  /** Audio-track segments, mixed down and muxed into the output. */
+  audio: AudioRenderSegment[];
   /** Encoded output length, seconds (sum of encodable segment durations). */
   durationSec: number;
   warnings: RenderWarning[];
@@ -46,19 +57,25 @@ export const MAX_EXPORT_FRAMES = 20000;
 
 /**
  * Build the render plan for a timeline: order the first video track's clips,
- * resolve their bin assets, and report anything the first encode path cannot
- * carry (missing assets, video clips, unmixed audio, gaps between clips).
+ * resolve their bin assets, collect the audio clips with their edits, and
+ * report anything the encode path cannot carry (missing assets, video clips,
+ * gaps between clips).
  */
 export function buildRenderPlan(
   timeline: TimelineModel,
   assets: MediaAsset[],
-  opts: { fps?: number; clipGradeDoc?: (clipId: string) => string | null } = {},
+  opts: {
+    fps?: number;
+    clipGradeDoc?: (clipId: string) => string | null;
+    /** A clip's stored audio edit, applied in the mixdown. */
+    clipAudioEdit?: (clipId: string) => AudioClipEdit | null;
+  } = {},
 ): RenderPlan {
   const fps = opts.fps && opts.fps > 0 ? opts.fps : DEFAULT_EXPORT_FPS;
   const byId = new Map(assets.map((a) => [a.id, a]));
   const warnings: RenderWarning[] = [];
   const video: RenderSegment[] = [];
-  const audio: RenderSegment[] = [];
+  const audio: AudioRenderSegment[] = [];
 
   const videoTrack = timeline.tracks.find((t) => t.kind === "video");
   const ordered = [...(videoTrack?.clips ?? [])].sort((a, b) => a.start - b.start);
@@ -89,7 +106,6 @@ export function buildRenderPlan(
     });
   }
 
-  let audioClipCount = 0;
   for (const track of timeline.tracks.filter((t) => t.kind === "audio")) {
     for (const clip of [...track.clips].sort((a, b) => a.start - b.start)) {
       const asset = byId.get(clip.assetId);
@@ -97,7 +113,7 @@ export function buildRenderPlan(
         warnings.push({ kind: "missing_asset", clipId: clip.id, assetId: clip.assetId });
         continue;
       }
-      audioClipCount += 1;
+      const edit = opts.clipAudioEdit?.(clip.id) ?? defaultAudioEdit();
       audio.push({
         clipId: clip.id,
         kind: clip.kind,
@@ -106,10 +122,13 @@ export function buildRenderPlan(
         start: clip.start,
         duration: clip.duration,
         gradeDoc: null,
+        trimStartSec: edit.trimStartSec,
+        gainDb: edit.gainDb,
+        fadeInSec: edit.fadeInSec,
+        fadeOutSec: edit.fadeOutSec,
       });
     }
   }
-  if (audioClipCount > 0) warnings.push({ kind: "audio_not_mixed", clipCount: audioClipCount });
 
   const durationSec = video.reduce((sum, s) => sum + s.duration, 0);
   return { timelineId: timeline.id, fps, video, audio, durationSec, warnings };

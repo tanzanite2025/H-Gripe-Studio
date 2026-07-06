@@ -46,7 +46,7 @@ describe("buildRenderPlan", () => {
     ]);
   });
 
-  it("skips video clips with a warning and reports unmixed audio", () => {
+  it("skips video clips with a warning and collects audio segments", () => {
     const assets = [
       asset("v1", "video", "C:/clip.mp4"),
       asset("s1", "image", "C:/still.png"),
@@ -56,7 +56,31 @@ describe("buildRenderPlan", () => {
     const plan = buildRenderPlan(timeline, assets);
     expect(plan.video).toHaveLength(1);
     expect(plan.audio).toHaveLength(1);
-    expect(plan.warnings.map((w) => w.kind)).toEqual(["video_clip_skipped", "audio_not_mixed"]);
+    expect(plan.warnings.map((w) => w.kind)).toEqual(["video_clip_skipped"]);
+  });
+
+  it("carries each audio clip's edit into its segment, defaulting when absent", () => {
+    const assets = [asset("m1", "audio", "C:/music.mp3"), asset("m2", "audio", "C:/voice.wav")];
+    const { timeline, clipIds } = withClips(assets);
+    const edit = { trimStartSec: 1.5, trimEndSec: null, gainDb: -6, fadeInSec: 0.5, fadeOutSec: 1 };
+    const plan = buildRenderPlan(timeline, assets, {
+      clipAudioEdit: (clipId) => (clipId === clipIds[0] ? edit : null),
+    });
+    expect(plan.audio).toHaveLength(2);
+    expect(plan.audio[0]).toMatchObject({
+      path: "C:/music.mp3",
+      trimStartSec: 1.5,
+      gainDb: -6,
+      fadeInSec: 0.5,
+      fadeOutSec: 1,
+    });
+    expect(plan.audio[1]).toMatchObject({
+      path: "C:/voice.wav",
+      trimStartSec: 0,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+    });
   });
 
   it("reports gaps between still segments", () => {
