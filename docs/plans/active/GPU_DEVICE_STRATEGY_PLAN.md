@@ -459,7 +459,11 @@ This should be a settings surface, not a required setup wizard.
     `device: gpu` request tries the first compiled-in hardware H.264 encoder
     and falls back to the software baseline with the failure reason kept
     visible on the node report (`device: ffmpeg_hw` only on success);
-    `auto`/`cpu` stay on the software baseline. Timeline export joins later.
+    `auto`/`cpu` stay on the software baseline. Timeline export joined too:
+    the export dialog's device select passes through `timeline_export` into
+    the `videoAssemble` executor and the result surfaces `encode_device` /
+    `encode_fallback_reason` (hardware note on success, fallback warning on
+    an unmet gpu request).
 13. Build cross-kernel device registry later.
 14. Build GPU queue/memory policy only after timeline/export workloads demand it.
 
