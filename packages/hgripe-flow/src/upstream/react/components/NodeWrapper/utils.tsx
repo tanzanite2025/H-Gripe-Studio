@@ -1,10 +1,11 @@
 import type { XYPosition } from '@xyflow/system';
 
-import { InputNode } from '../Nodes/InputNode';
-import { DefaultNode } from '../Nodes/DefaultNode';
-import { GroupNode } from '../Nodes/GroupNode';
-import { OutputNode } from '../Nodes/OutputNode';
 import type { InternalNode, Node, NodeTypes } from '../../types';
+
+// H-Gripe fork: the generic built-in node components (input / output /
+// default / group) are removed. All product nodes come from the nodeTypes
+// map passed to HgripeFlow; an unknown type renders nothing.
+const NullNode = () => null;
 
 export const arrowKeyDiffs: Record<string, XYPosition> = {
   ArrowUp: { x: 0, y: -1 },
@@ -14,10 +15,7 @@ export const arrowKeyDiffs: Record<string, XYPosition> = {
 };
 
 export const builtinNodeTypes: NodeTypes = {
-  input: InputNode,
-  default: DefaultNode,
-  output: OutputNode,
-  group: GroupNode,
+  default: NullNode,
 };
 
 export function getNodeInlineStyleDimensions<NodeType extends Node = Node>(
