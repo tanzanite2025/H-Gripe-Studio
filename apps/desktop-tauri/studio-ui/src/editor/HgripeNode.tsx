@@ -490,6 +490,18 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
           <div className="inline-field-grid">{inlineParams.map(renderInlineParam)}</div>
         ) : null}
 
+        {spec.kind === "promptOptimize" && editing?.openAssistant ? (
+          <div className="subject-mask-actions nodrag">
+            <button
+              type="button"
+              title={t("assistant.openFromCardTitle")}
+              onClick={() => editing.openAssistant?.(id)}
+            >
+              {t("assistant.openFromCard")}
+            </button>
+          </div>
+        ) : null}
+
         {spec.kind === "subjectMask" ? (
           <div className="subject-mask">
             {d.maskPath ? (
