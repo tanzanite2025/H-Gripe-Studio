@@ -17,10 +17,7 @@ export const messages = {
   "status.autosaved": { en: "● autosaved", zh: "● 已自动保存" },
   "status.saving": { en: "○ saving…", zh: "○ 保存中…" },
   "status.untitled": { en: "untitled", zh: "未命名" },
-  "status.untitledTitle": {
-    en: "untitled (not yet saved to a file)",
-    zh: "未命名（尚未保存到文件）",
-  },
+  "status.untitledTitle": { en: "untitled (not yet saved to a file)", zh: "未命名（尚未保存到文件）" },
   "canvasTabs.new": { en: "New canvas", zh: "新建画布" },
   "canvasTabs.close": { en: "Close canvas", zh: "关闭画布" },
   "canvasTabs.save": { en: "Save", zh: "保存" },
@@ -45,10 +42,7 @@ export const messages = {
     en: "Close this canvas and discard its unsaved changes?",
     zh: "关闭此画布并丢弃未保存的更改？",
   },
-  "canvasTabs.restored": {
-    en: "restored open canvases",
-    zh: "已恢复打开的画布",
-  },
+  "canvasTabs.restored": { en: "restored open canvases", zh: "已恢复打开的画布" },
   "canvasTabs.runProject": { en: "Run all canvases", zh: "运行全部画布" },
   "canvasTabs.runProjectTitle": {
     en: "project-level batch: run every open canvas in order (results land on the active canvas only)",
@@ -60,21 +54,12 @@ export const messages = {
   },
 
   "btn.undo": { en: "Undo", zh: "撤销" },
-  "btn.undoTitle": {
-    en: "Undo — step back (Ctrl+Z)",
-    zh: "撤销 — 后退一步 (Ctrl+Z)",
-  },
+  "btn.undoTitle": { en: "Undo — step back (Ctrl+Z)", zh: "撤销 — 后退一步 (Ctrl+Z)" },
   "btn.redo": { en: "Forward", zh: "前进" },
-  "btn.redoTitle": {
-    en: "Forward — reapply the undone step (Ctrl+Shift+Z)",
-    zh: "前进 — 恢复刚撤销的一步 (Ctrl+Shift+Z)",
-  },
+  "btn.redoTitle": { en: "Forward — reapply the undone step (Ctrl+Shift+Z)", zh: "前进 — 恢复刚撤销的一步 (Ctrl+Shift+Z)" },
   "btn.project": { en: "Project", zh: "项目" },
   "btn.hideProject": { en: "Hide Project", zh: "隐藏项目" },
-  "btn.projectTitle": {
-    en: "toggle the project folder browser",
-    zh: "切换项目文件夹浏览器",
-  },
+  "btn.projectTitle": { en: "toggle the project folder browser", zh: "切换项目文件夹浏览器" },
   "btn.snapshots": { en: "Snapshots", zh: "快照" },
   "btn.hideSnapshots": { en: "Hide Snapshots", zh: "隐藏快照" },
   "btn.snapshotsTitle": {
@@ -88,23 +73,14 @@ export const messages = {
   },
   "btn.open": { en: "Open…", zh: "打开…" },
   "btn.load": { en: "Load", zh: "载入" },
-  "btn.openTitle": {
-    en: "open a workflow file (Ctrl/Cmd+O)",
-    zh: "打开工作流文件 (Ctrl/Cmd+O)",
-  },
-  "btn.loadTitle": {
-    en: "load workflow.json (Ctrl/Cmd+O)",
-    zh: "载入 workflow.json (Ctrl/Cmd+O)",
-  },
+  "btn.openTitle": { en: "open a workflow file (Ctrl/Cmd+O)", zh: "打开工作流文件 (Ctrl/Cmd+O)" },
+  "btn.loadTitle": { en: "load workflow.json (Ctrl/Cmd+O)", zh: "载入 workflow.json (Ctrl/Cmd+O)" },
   "btn.save": { en: "Save", zh: "保存" },
   "btn.saveTitleDesktop": {
     en: "save to the current file (Save As… if none) — Ctrl/Cmd+S",
     zh: "保存到当前文件（无则另存为）— Ctrl/Cmd+S",
   },
-  "btn.saveTitleWeb": {
-    en: "download workflow.json (Ctrl/Cmd+S)",
-    zh: "下载 workflow.json (Ctrl/Cmd+S)",
-  },
+  "btn.saveTitleWeb": { en: "download workflow.json (Ctrl/Cmd+S)", zh: "下载 workflow.json (Ctrl/Cmd+S)" },
   "btn.saveAs": { en: "Save As…", zh: "另存为…" },
   "btn.saveAsTitle": {
     en: "save to a new file via the native dialog (Ctrl/Cmd+Shift+S)",
@@ -128,10 +104,7 @@ export const messages = {
     en: "No runs yet — past runs are recorded here.",
     zh: "暂无运行记录 — 历史运行会记录在这里。",
   },
-  "runhistory.noLog": {
-    en: "No log lines for this run.",
-    zh: "此次运行没有日志。",
-  },
+  "runhistory.noLog": { en: "No log lines for this run.", zh: "此次运行没有日志。" },
   "btn.imageEdit": { en: "Image Editor", zh: "图片编辑" },
   "btn.drawer": { en: "Edit / Grade", zh: "剪辑调色" },
   "btn.drawerTitle": {
@@ -146,20 +119,14 @@ export const messages = {
     en: "open the image editor — uses the selected image card, or pick a file",
     zh: "打开图片编辑弹窗 — 选中图片卡片则自动带入，否则自行选择文件",
   },
-  "imageEdit.pickTitle": {
-    en: "Choose an image to edit",
-    zh: "选择要编辑的图片",
-  },
+  "imageEdit.pickTitle": { en: "Choose an image to edit", zh: "选择要编辑的图片" },
   "imageEdit.selectFirst": {
     en: "Select an image card first (the browser preview has no native file picker).",
     zh: "请先选中一个图片卡片（浏览器预览无法打开系统文件选择框）。",
   },
   "canvasTabs.newBlank": { en: "New blank canvas", zh: "新建空白画布" },
   "canvasTabs.openFile": { en: "Open file…", zh: "打开文件…" },
-  "btn.tidyTitle": {
-    en: "arrange nodes on a grid by DAG depth",
-    zh: "按 DAG 深度在网格上排列节点",
-  },
+  "btn.tidyTitle": { en: "arrange nodes on a grid by DAG depth", zh: "按 DAG 深度在网格上排列节点" },
   "btn.log": { en: "Log", zh: "日志" },
   "btn.hideLog": { en: "Hide Log", zh: "隐藏日志" },
   "btn.logTitle": {
@@ -168,19 +135,13 @@ export const messages = {
   },
   "btn.run": { en: "Run", zh: "运行" },
   "btn.running": { en: "Running…", zh: "运行中…" },
-  "btn.runTitle": {
-    en: "execute the graph (Ctrl/Cmd+Enter)",
-    zh: "执行图 (Ctrl/Cmd+Enter)",
-  },
+  "btn.runTitle": { en: "execute the graph (Ctrl/Cmd+Enter)", zh: "执行图 (Ctrl/Cmd+Enter)" },
   "btn.cancel": { en: "Cancel", zh: "取消" },
   "btn.cancelTitle": {
     en: "request cancellation before the next node starts",
     zh: "在下一个节点开始前请求取消",
   },
-  "btn.runBatchTitle": {
-    en: "run the graph once per batch item",
-    zh: "对每个批处理项各运行一次",
-  },
+  "btn.runBatchTitle": { en: "run the graph once per batch item", zh: "对每个批处理项各运行一次" },
   "btn.runSelected": { en: "Run selected", zh: "运行所选" },
   "btn.runSelectedTitle": {
     en: "run the selected nodes plus their upstream dependencies",
@@ -192,20 +153,11 @@ export const messages = {
   "hud.scopeFullCanvas": { en: "Full canvas", zh: "全画布" },
   "hud.scopeSelection": { en: "Selection + upstream", zh: "所选及上游" },
   "hud.scopeSelectionOnly": { en: "Selection only", zh: "仅所选" },
-  "hud.willRun": {
-    en: "will run {count} node(s)",
-    zh: "将运行 {count} 个节点",
-  },
+  "hud.willRun": { en: "will run {count} node(s)", zh: "将运行 {count} 个节点" },
   "hud.confirmTitle": { en: "This run will execute:", zh: "本次将运行：" },
   "hud.totalNodes": { en: "{count} node(s) total", zh: "共 {count} 个节点" },
-  "hud.runSelectedOnly": {
-    en: "Run selected ({count})",
-    zh: "只运行所选（{count}）",
-  },
-  "hud.nothingToRun": {
-    en: "nothing to run in this scope",
-    zh: "该范围内没有可运行的节点",
-  },
+  "hud.runSelectedOnly": { en: "Run selected ({count})", zh: "只运行所选（{count}）" },
+  "hud.nothingToRun": { en: "nothing to run in this scope", zh: "该范围内没有可运行的节点" },
   "hud.blockedByIssues": {
     en: "fix {count} validation issue(s) before running",
     zh: "运行前请先修复 {count} 个校验问题",
@@ -231,30 +183,18 @@ export const messages = {
   "issues.many": { en: "issues", zh: "个问题" },
 
   "search.placeholder": { en: "Find node…", zh: "查找节点…" },
-  "search.title": {
-    en: "find a node by id, type or title",
-    zh: "按 id、类型或标题查找节点",
-  },
+  "search.title": { en: "find a node by id, type or title", zh: "按 id、类型或标题查找节点" },
   "search.noMatch": { en: "no matching nodes", zh: "没有匹配的节点" },
 
   "snap.heading": { en: "Snapshots", zh: "快照" },
   "snap.hide": { en: "Hide", zh: "隐藏" },
   "snap.hideTitle": { en: "hide the snapshots panel", zh: "隐藏快照面板" },
   "snap.take": { en: "+ Take snapshot", zh: "+ 拍摄快照" },
-  "snap.takeTitle": {
-    en: "save the current workflow as a named snapshot",
-    zh: "将当前工作流保存为命名快照",
-  },
+  "snap.takeTitle": { en: "save the current workflow as a named snapshot", zh: "将当前工作流保存为命名快照" },
   "snap.auto": { en: "Auto-snapshot before run", zh: "运行前自动快照" },
-  "snap.autoTitle": {
-    en: "capture a snapshot automatically before each run",
-    zh: "每次运行前自动拍摄快照",
-  },
+  "snap.autoTitle": { en: "capture a snapshot automatically before each run", zh: "每次运行前自动拍摄快照" },
   "snap.empty": { en: "no snapshots yet", zh: "暂无快照" },
-  "snap.diffTitle": {
-    en: "compare with the current graph",
-    zh: "与当前图对比",
-  },
+  "snap.diffTitle": { en: "compare with the current graph", zh: "与当前图对比" },
   "snap.renameTitle": { en: "rename", zh: "重命名" },
   "snap.deleteTitle": { en: "delete", zh: "删除" },
   "snap.diffVs": { en: "vs", zh: "对比" },
@@ -270,7 +210,16 @@ export const messages = {
   // ---- desktop shell (Dashboard / PSD Studio / Run / History / PSD tabs),
   // merged in from the former dependency-free shell-ui. ----
 
+
+
+
   "common.loadingShort": { en: "loading…", zh: "加载中…" },
+
+
+
+
+
+
 
   // ---- node cards (HgripeNode) — hardcoded card chrome around the localized
   // NODE_SPECS strings (titles / params / ports live in nodeSpecsI18n.ts). ----
@@ -310,14 +259,8 @@ export const messages = {
     en: "Preview the current mask / cutout (review gate)",
     zh: "预览当前蒙版 / 抠像（审阅关卡）",
   },
-  "canvas.dropImages": {
-    en: "added {n} image card(s)",
-    zh: "已添加 {n} 张图片卡",
-  },
-  "canvas.dropVideos": {
-    en: "added {n} video card(s)",
-    zh: "已添加 {n} 张视频卡",
-  },
+  "canvas.dropImages": { en: "added {n} image card(s)", zh: "已添加 {n} 张图片卡" },
+  "canvas.dropVideos": { en: "added {n} video card(s)", zh: "已添加 {n} 张视频卡" },
   "canvas.dropMedia": {
     en: "added {images} image + {videos} video card(s)",
     zh: "已添加 {images} 张图片卡、{videos} 张视频卡",
@@ -338,10 +281,7 @@ export const messages = {
   },
   "mediaEdit.editor": { en: "image editor", zh: "图片编辑器" },
   "preview.imageTitle": { en: "Image preview", zh: "图片预览" },
-  "node.thumbPreviewTitle": {
-    en: "Double-click to preview",
-    zh: "双击打开预览",
-  },
+  "node.thumbPreviewTitle": { en: "Double-click to preview", zh: "双击打开预览" },
   "preview.openImageEditor": { en: "Image editor", zh: "图片编辑器" },
   "preview.openImageEditorTitle": {
     en: "open this node's result in the standalone image editor",
@@ -369,10 +309,7 @@ export const messages = {
   "crop.title": { en: "Crop", zh: "裁剪" },
   "crop.modeManual": { en: "Manual box", zh: "手动框" },
   "crop.modeAuto": { en: "Auto (to subject)", zh: "自动（到主体）" },
-  "crop.modeManualTitle": {
-    en: "Drag a crop box on the image",
-    zh: "在图像上拖出裁剪框",
-  },
+  "crop.modeManualTitle": { en: "Drag a crop box on the image", zh: "在图像上拖出裁剪框" },
   "crop.modeAutoTitle": {
     en: "Crop to the detected subject on run",
     zh: "运行时裁剪到检测出的主体",
@@ -389,10 +326,7 @@ export const messages = {
     en: "Save the current width × height as a reusable size template",
     zh: "把当前宽×高像素保存为可复用的尺寸模板",
   },
-  "crop.applyTitle2": {
-    en: "Apply the crop to the document",
-    zh: "将裁剪应用到文档",
-  },
+  "crop.applyTitle2": { en: "Apply the crop to the document", zh: "将裁剪应用到文档" },
   "crop.cancel": { en: "Cancel crop", zh: "取消裁剪" },
   "crop.margin": { en: "Subject margin %", zh: "主体边距 %" },
   "crop.reset": { en: "Reset box", zh: "重置框" },
@@ -402,36 +336,18 @@ export const messages = {
   },
   "crop.boxLabel": { en: "Box", zh: "框" },
   "crop.apply": { en: "Apply", zh: "应用" },
-  "crop.applyTitle": {
-    en: "Apply the crop to the node and show the result",
-    zh: "将裁剪应用到节点并显示结果",
-  },
-  "crop.closeTitle": {
-    en: "Close without applying (Esc)",
-    zh: "不应用直接关闭（Esc）",
-  },
+  "crop.applyTitle": { en: "Apply the crop to the node and show the result", zh: "将裁剪应用到节点并显示结果" },
+  "crop.closeTitle": { en: "Close without applying (Esc)", zh: "不应用直接关闭（Esc）" },
   "crop.drawHint": {
     en: "Drag to draw a crop box; drag inside to move, corners to resize.",
     zh: "拖动绘制裁剪框；框内拖动移动，拖角缩放。",
   },
   "grade.title": { en: "Grade", zh: "调色" },
   "grade.apply": { en: "Apply", zh: "应用" },
-  "grade.applyTitle": {
-    en: "Apply the grade to the node and show the result",
-    zh: "将调色应用到节点并显示结果",
-  },
-  "grade.closeTitle": {
-    en: "Close without applying (Esc)",
-    zh: "不应用直接关闭（Esc）",
-  },
-  "grade.openTitle": {
-    en: "Open the grading dialog (op stack + live preview)",
-    zh: "打开调色对话框（op 栈 + 实时预览）",
-  },
-  "grade.editHint": {
-    en: "Open the grading dialog to author the op stack.",
-    zh: "打开调色对话框以编排 op 栈。",
-  },
+  "grade.applyTitle": { en: "Apply the grade to the node and show the result", zh: "将调色应用到节点并显示结果" },
+  "grade.closeTitle": { en: "Close without applying (Esc)", zh: "不应用直接关闭（Esc）" },
+  "grade.openTitle": { en: "Open the grading dialog (op stack + live preview)", zh: "打开调色对话框（op 栈 + 实时预览）" },
+  "grade.editHint": { en: "Open the grading dialog to author the op stack.", zh: "打开调色对话框以编排 op 栈。" },
   "grade.previewHint": {
     en: "Live preview via the grading kernel; adjust ops to update.",
     zh: "通过调色内核实时预览；调整 op 即更新。",
@@ -576,14 +492,8 @@ export const messages = {
   "palette.catOutput": { en: "Exports", zh: "导出" },
   "palette.containers": { en: "Containers", zh: "容器" },
   "palette.group": { en: "Group", zh: "分组" },
-  "palette.noMatch": {
-    en: "No nodes match “{query}”.",
-    zh: "没有匹配「{query}」的节点。",
-  },
-  "palette.hint": {
-    en: "Drag onto the canvas, or click to add.",
-    zh: "拖到画布上，或点击添加。",
-  },
+  "palette.noMatch": { en: "No nodes match “{query}”.", zh: "没有匹配「{query}」的节点。" },
+  "palette.hint": { en: "Drag onto the canvas, or click to add.", zh: "拖到画布上，或点击添加。" },
   "palette.canvasControls": { en: "Canvas controls", zh: "画布控制" },
   "canvas.zoomIn": { en: "Zoom in", zh: "放大" },
   "canvas.zoomOut": { en: "Zoom out", zh: "缩小" },
@@ -603,16 +513,10 @@ export const messages = {
   "mask.clearTitle": { en: "Discard all edits", zh: "丢弃全部编辑" },
   "mask.showImage": { en: "Show image", zh: "显示图像" },
   "mask.maskOnly": { en: "Mask only", zh: "仅蒙版" },
-  "mask.togglePreviewTitle": {
-    en: "Toggle transparency preview",
-    zh: "切换透明度预览",
-  },
+  "mask.togglePreviewTitle": { en: "Toggle transparency preview", zh: "切换透明度预览" },
   "mask.apply": { en: "Apply", zh: "应用" },
   "mask.applyTitle": { en: "Apply edits to the node", zh: "将编辑应用到节点" },
-  "mask.closeTitle": {
-    en: "Close without applying (Esc)",
-    zh: "不应用直接关闭（Esc）",
-  },
+  "mask.closeTitle": { en: "Close without applying (Esc)", zh: "不应用直接关闭（Esc）" },
   "mask.comingSoon": { en: "coming soon", zh: "即将推出" },
   "mask.soon": { en: "soon", zh: "即将" },
   "mask.brushSize": { en: "Brush size", zh: "笔刷大小" },
@@ -623,25 +527,16 @@ export const messages = {
   "mask.targetLayer": { en: "Active layer", zh: "当前图层" },
   "mask.targetMatte": { en: "Matting band", zh: "抠像带" },
   "mask.quickMask": { en: "Quick mask", zh: "快速蒙版" },
-  "mask.quickMaskTitle": {
-    en: "Toggle the quick-mask (ruby) overlay (Q)",
-    zh: "切换快速蒙版（宝石红）叠加（Q）",
-  },
+  "mask.quickMaskTitle": { en: "Toggle the quick-mask (ruby) overlay (Q)", zh: "切换快速蒙版（宝石红）叠加（Q）" },
   "mask.amount": { en: "Amount (px)", zh: "数量（px）" },
   "mask.wandTolerance": { en: "Wand tolerance", zh: "魔棒容差" },
   "mask.sampledColor": { en: "Sampled colour", zh: "取样颜色" },
   "mask.sampledNone": { en: "click to sample", zh: "点击取样" },
   "mask.samplerTitle": { en: "Colour samples", zh: "颜色取样" },
-  "mask.samplerEmpty": {
-    en: "click to pin up to four readouts",
-    zh: "点击画布固定最多四个颜色读数",
-  },
+  "mask.samplerEmpty": { en: "click to pin up to four readouts", zh: "点击画布固定最多四个颜色读数" },
   "mask.samplerClear": { en: "Clear samples", zh: "清除取样" },
   "mask.rulerTitle": { en: "Measurement", zh: "测量" },
-  "mask.rulerEmpty": {
-    en: "drag on the canvas to measure",
-    zh: "在画布上拖拽进行测量",
-  },
+  "mask.rulerEmpty": { en: "drag on the canvas to measure", zh: "在画布上拖拽进行测量" },
   "mask.rulerClear": { en: "Clear measurement", zh: "清除测量" },
   "mask.pathEditToolHint": {
     en: "Click a committed path outline to select it, then drag to move (whole path, or single anchors with direct selection). Done commits.",
@@ -667,21 +562,12 @@ export const messages = {
     zh: "实时代理预览 —— 调整数量后点应用；最终蒙版由后端渲染。",
   },
   "mask.history": { en: "History ({count})", zh: "历史记录（{count}）" },
-  "mask.historyEmpty": {
-    en: "none — paint or pick a tool",
-    zh: "无 —— 涂抹或选择工具",
-  },
+  "mask.historyEmpty": { en: "none — paint or pick a tool", zh: "无 —— 涂抹或选择工具" },
   "mask.stepEnable": { en: "Enable this step", zh: "启用该步" },
-  "mask.stepDisable": {
-    en: "Disable this step (kept in history)",
-    zh: "停用该步（保留在历史中）",
-  },
+  "mask.stepDisable": { en: "Disable this step (kept in history)", zh: "停用该步（保留在历史中）" },
   "mask.stepDelete": { en: "Delete this step", zh: "删除该步" },
   "mask.stepAmount": { en: "Revise the amount (px)", zh: "回改数量（px）" },
-  "mask.stepEditAnchors": {
-    en: "Re-edit the path anchors (A)",
-    zh: "重新编辑路径锚点（A）",
-  },
+  "mask.stepEditAnchors": { en: "Re-edit the path anchors (A)", zh: "重新编辑路径锚点（A）" },
   "mask.anchorEditing": { en: "Editing path anchors", zh: "正在编辑路径锚点" },
   "mask.anchorDone": { en: "Done", zh: "完成" },
   "mask.anchorCancel": { en: "Cancel", zh: "取消" },
@@ -692,10 +578,7 @@ export const messages = {
   "mask.panelAdjustments": { en: "Adjustments", zh: "调整" },
   "mask.panelChannels": { en: "Channels", zh: "通道" },
   "mask.panelPaths": { en: "Paths", zh: "路径" },
-  "mask.adjPlanned": {
-    en: "Planned — not wired to the mask engine yet",
-    zh: "规划中——尚未接入蒙版引擎",
-  },
+  "mask.adjPlanned": { en: "Planned — not wired to the mask engine yet", zh: "规划中——尚未接入蒙版引擎" },
   "mask.adjPickHint": {
     en: "Click an adjustment — its controls open in a floating popup.",
     zh: "点击调整项——其参数会以小弹窗打开。",
@@ -717,10 +600,7 @@ export const messages = {
   "mask.adjToColor": { en: "Replacement color", zh: "替换为" },
   "mask.adjFuzziness": { en: "Fuzziness", zh: "容差" },
   "mask.adjStrength": { en: "Strength", zh: "强度" },
-  "mask.adjPickFromImage": {
-    en: "Pick from the image (next canvas click samples)",
-    zh: "从图像中吸取（下一次点击画布取色）",
-  },
+  "mask.adjPickFromImage": { en: "Pick from the image (next canvas click samples)", zh: "从图像中吸取（下一次点击画布取色）" },
   "mask.adjPicking": { en: "Click the image…", zh: "点击图像取色…" },
   "mask.adjEyedropper": { en: "Eyedropper", zh: "吸管" },
   "mask.replaceColorHint": {
@@ -748,30 +628,12 @@ export const messages = {
   "mask.pathRow": { en: "Path {index}", zh: "路径 {index}" },
   "mask.colorSwap": { en: "Swap paint polarity", zh: "互换前景/背景" },
   "mask.colorReset": { en: "Default polarity", zh: "默认前景/背景" },
-  "mask.colorAdd": {
-    en: "Painting adds to the mask",
-    zh: "当前绘制为添加蒙版",
-  },
-  "mask.colorSubtract": {
-    en: "Painting erases the mask",
-    zh: "当前绘制为擦除蒙版",
-  },
-  "mask.colorFrontWell": {
-    en: "Foreground color (click to pick)",
-    zh: "前景色（点击设置）",
-  },
-  "mask.colorBackWell": {
-    en: "Background color (click to pick)",
-    zh: "背景色（点击设置）",
-  },
-  "mask.pickerTitleFg": {
-    en: "Color Picker (Foreground Color)",
-    zh: "拾色器（前景色）",
-  },
-  "mask.pickerTitleBg": {
-    en: "Color Picker (Background Color)",
-    zh: "拾色器（背景色）",
-  },
+  "mask.colorAdd": { en: "Painting adds to the mask", zh: "当前绘制为添加蒙版" },
+  "mask.colorSubtract": { en: "Painting erases the mask", zh: "当前绘制为擦除蒙版" },
+  "mask.colorFrontWell": { en: "Foreground color (click to pick)", zh: "前景色（点击设置）" },
+  "mask.colorBackWell": { en: "Background color (click to pick)", zh: "背景色（点击设置）" },
+  "mask.pickerTitleFg": { en: "Color Picker (Foreground Color)", zh: "拾色器（前景色）" },
+  "mask.pickerTitleBg": { en: "Color Picker (Background Color)", zh: "拾色器（背景色）" },
   "mask.pickerNew": { en: "new", zh: "新的" },
   "mask.pickerCurrent": { en: "current", zh: "当前" },
   "mask.pickerOk": { en: "OK", zh: "确定" },
@@ -780,10 +642,7 @@ export const messages = {
     en: "Select an adjustment layer to edit its parameters.",
     zh: "选择一个调整图层以编辑其参数。",
   },
-  "mask.railResize": {
-    en: "Drag to resize the panel rail",
-    zh: "拖动调整面板栏宽度",
-  },
+  "mask.railResize": { en: "Drag to resize the panel rail", zh: "拖动调整面板栏宽度" },
   "mask.fillDialog": { en: "Fill", zh: "填充" },
   "mask.fillAdd": { en: "Add", zh: "添加" },
   "mask.fillSubtract": { en: "Subtract", zh: "减去" },
@@ -806,32 +665,20 @@ export const messages = {
     en: "Moves / scales / rotates the mask about its centre — recorded as a revisable step.",
     zh: "围绕中心移动 / 缩放 / 旋转蒙版——记录为可随时改参的一步。",
   },
-  "mask.stepEditTransform": {
-    en: "Re-edit this transform (Ctrl+T)",
-    zh: "重新编辑该变换（Ctrl+T）",
-  },
+  "mask.stepEditTransform": { en: "Re-edit this transform (Ctrl+T)", zh: "重新编辑该变换（Ctrl+T）" },
   "mask.anchorHint": {
     en: "Drag the squares to move anchors; Enter commits, Esc cancels.",
     zh: "拖动方块移动锚点；Enter 提交，Esc 取消。",
   },
   "mask.layers": { en: "Layers ({count})", zh: "图层（{count}）" },
   "mask.layerAdd": { en: "New layer", zh: "新建图层" },
-  "mask.layerAddTitle": {
-    en: "Add an empty layer above the stack",
-    zh: "在栈顶新建空图层",
-  },
-  "mask.layerDuplicate": {
-    en: "Duplicate the active layer (Ctrl+J)",
-    zh: "复制当前图层（Ctrl+J）",
-  },
+  "mask.layerAddTitle": { en: "Add an empty layer above the stack", zh: "在栈顶新建空图层" },
+  "mask.layerDuplicate": { en: "Duplicate the active layer (Ctrl+J)", zh: "复制当前图层（Ctrl+J）" },
   "mask.layerDelete": { en: "Delete this layer", zh: "删除该图层" },
   "mask.layerMerge": { en: "Merge layers", zh: "合并图层" },
   "mask.layerMergeDown": { en: "Merge down", zh: "向下合并" },
   "mask.layerActionInvert": { en: "inv", zh: "反相" },
-  "mask.layerInvertTitle": {
-    en: "Invert the active layer",
-    zh: "反相当前图层",
-  },
+  "mask.layerInvertTitle": { en: "Invert the active layer", zh: "反相当前图层" },
   "mask.layerActionLink": { en: "link", zh: "链接" },
   "mask.layerActionAdj": { en: "adj", zh: "调整" },
   "mask.layerActionDup": { en: "dup", zh: "复制" },
@@ -839,15 +686,9 @@ export const messages = {
   "mask.layerBadgeLink": { en: "link", zh: "链" },
   "mask.layerBadgeLock": { en: "lock", zh: "锁" },
   "mask.marqueeSizeTitle": { en: "Selection size", zh: "选区大小" },
-  "mask.marqueeEmpty": {
-    en: "No selection yet — drag on the canvas or enter a size below.",
-    zh: "暂无选区——在画布上拖曳，或在下方输入尺寸。",
-  },
+  "mask.marqueeEmpty": { en: "No selection yet — drag on the canvas or enter a size below.", zh: "暂无选区——在画布上拖曳，或在下方输入尺寸。" },
   "mask.marqueeApply": { en: "Set selection", zh: "建立选区" },
-  "mask.marqueeHint": {
-    en: "The marquee stays visible after the drag; enter an exact width × height to set it numerically.",
-    zh: "拖曳完成后选框保持显示；也可输入精确的宽 × 高来设置选区。",
-  },
+  "mask.marqueeHint": { en: "The marquee stays visible after the drag; enter an exact width × height to set it numerically.", zh: "拖曳完成后选框保持显示；也可输入精确的宽 × 高来设置选区。" },
   "mask.imageSize": { en: "Image Size", zh: "图像大小" },
   "mask.imageSizeCurrent": { en: "Current size", zh: "当前尺寸" },
   "mask.imageSizeWidth": { en: "Width (px)", zh: "宽度（像素）" },
@@ -855,10 +696,7 @@ export const messages = {
   "mask.imageSizeLink": { en: "Constrain aspect ratio", zh: "约束长宽比例" },
   "mask.imageSizeResample": { en: "Resample", zh: "重新采样" },
   "mask.imageSizeResampleAuto": { en: "Automatic", zh: "自动" },
-  "mask.imageSizeResampleNearest": {
-    en: "Nearest neighbor",
-    zh: "邻近（硬边缘）",
-  },
+  "mask.imageSizeResampleNearest": { en: "Nearest neighbor", zh: "邻近（硬边缘）" },
   "mask.imageSizeResampleBilinear": { en: "Bilinear", zh: "两次线性" },
   "mask.imageSizeResampleBicubic": { en: "Bicubic", zh: "两次立方" },
   "mask.imageSizeApply": { en: "OK", zh: "确定" },
@@ -876,10 +714,7 @@ export const messages = {
   "mask.layerLock": { en: "Lock the active layer", zh: "锁定当前图层" },
   "mask.layerUnlock": { en: "Unlock the active layer", zh: "解锁当前图层" },
   "mask.layerLocked": { en: "Locked", zh: "已锁定" },
-  "mask.layerLink": {
-    en: "Link the active layer (linked layers move together)",
-    zh: "链接当前图层（链接的图层一起移动）",
-  },
+  "mask.layerLink": { en: "Link the active layer (linked layers move together)", zh: "链接当前图层（链接的图层一起移动）" },
   "mask.layerUnlink": { en: "Unlink the active layer", zh: "取消链接当前图层" },
   "mask.layerLinked": { en: "Linked", zh: "已链接" },
   "mask.adjustmentBadge": { en: "adjustment", zh: "调整" },
@@ -894,10 +729,7 @@ export const messages = {
   },
   "mask.adjLevels": { en: "Levels", zh: "色阶" },
   "mask.adjCurve": { en: "Curve", zh: "曲线" },
-  "mask.adjBrightnessContrast": {
-    en: "Brightness/Contrast",
-    zh: "亮度/对比度",
-  },
+  "mask.adjBrightnessContrast": { en: "Brightness/Contrast", zh: "亮度/对比度" },
   "mask.adjInBlack": { en: "Input black", zh: "输入黑场" },
   "mask.adjInWhite": { en: "Input white", zh: "输入白场" },
   "mask.adjGamma": { en: "Gamma", zh: "灰度系数" },
@@ -920,10 +752,7 @@ export const messages = {
     en: "none — pick Point (SAM 2) and click the subject",
     zh: "无 —— 选择 点 (SAM 2) 并点击主体",
   },
-  "mask.notePrefix": {
-    en: "Edits ({count}) are recorded as ",
-    zh: "编辑（{count}）记录为 ",
-  },
+  "mask.notePrefix": { en: "Edits ({count}) are recorded as ", zh: "编辑（{count}）记录为 " },
   "mask.noteSuffix": {
     en: " and applied by the backend on run. Point (SAM 2) prompts route auto modes to the SAM 2 segmenter — left-click includes, right-click excludes; Matting paints the trimap unknown band (resolved to soft alpha by ViTMatte / the builtin guided filter); Pen/Lasso paths are rasterised and boolean-combined (add/subtract/intersect).",
     zh: "，在运行时由后端应用。点 (SAM 2) 提示会把 auto 模式路由到 SAM 2 分割器——左键包含、右键排除；抠像 在三分图未知带上涂抹（由 ViTMatte / 内置引导滤波解算为软 alpha）；钢笔/套索 路径会被栅格化并布尔合并（添加/减去/交集）。",
@@ -935,10 +764,7 @@ export const messages = {
     en: "open the production drawer (edit / timeline and grade)",
     zh: "打开制作抽屉（剪辑 / 时间线与调色）",
   },
-  "drawer.collapseTitle": {
-    en: "collapse the production drawer to a rail",
-    zh: "将制作抽屉折叠为把手",
-  },
+  "drawer.collapseTitle": { en: "collapse the production drawer to a rail", zh: "将制作抽屉折叠为把手" },
   "drawer.halfTitle": { en: "half-height drawer", zh: "半高抽屉" },
   "drawer.fullTitle": { en: "full-height drawer", zh: "全高抽屉" },
   "drawer.assetCount": { en: "{n} assets", zh: "{n} 个素材" },
@@ -956,10 +782,7 @@ export const messages = {
     en: "register the selected media node's file in the workspace bin (references only, nothing is copied)",
     zh: "把所选媒体节点的文件登记到素材工作区（仅引用，不复制文件）",
   },
-  "drawer.removeTitle": {
-    en: "remove this asset reference from the bin",
-    zh: "从素材区移除该引用",
-  },
+  "drawer.removeTitle": { en: "remove this asset reference from the bin", zh: "从素材区移除该引用" },
   "drawer.kindImage": { en: "image", zh: "图片" },
   "drawer.kindVideo": { en: "video", zh: "视频" },
   "drawer.kindAudio": { en: "audio", zh: "音频" },
@@ -973,7 +796,7 @@ export const messages = {
     zh: "把所选素材追加为兼容轨道末尾的 clip（图片成为静帧 clip）",
   },
   "drawer.timelineEmpty": {
-    en: 'Empty timeline — select a bin asset and use "Add to timeline" to place it as a clip.',
+    en: "Empty timeline — select a bin asset and use \"Add to timeline\" to place it as a clip.",
     zh: "时间线为空——选中素材后用「加入时间线」放置为 clip。",
   },
   "drawer.monitorTitle": { en: "Monitor", zh: "监视器" },
@@ -1001,15 +824,9 @@ export const messages = {
   "drawer.trackVideo": { en: "V", zh: "视" },
   "drawer.trackAudio": { en: "A", zh: "音" },
   "drawer.addVideoTrack": { en: "+V", zh: "+视频轨" },
-  "drawer.addVideoTrackTitle": {
-    en: "add a video track",
-    zh: "新增一条视频轨",
-  },
+  "drawer.addVideoTrackTitle": { en: "add a video track", zh: "新增一条视频轨" },
   "drawer.addAudioTrack": { en: "+A", zh: "+音频轨" },
-  "drawer.addAudioTrackTitle": {
-    en: "add an audio track",
-    zh: "新增一条音频轨",
-  },
+  "drawer.addAudioTrackTitle": { en: "add an audio track", zh: "新增一条音频轨" },
   "drawer.addToTrackTitle": {
     en: "append the selected bin asset at the end of this track",
     zh: "将选中的素材追加到该轨道末尾",
@@ -1018,14 +835,8 @@ export const messages = {
     en: "remove this track and its clips (the last track stays)",
     zh: "删除该轨道及其上的 clip（最后一条轨道不可删）",
   },
-  "drawer.removeClipTitle": {
-    en: "remove this clip from the timeline",
-    zh: "从时间线移除该 clip",
-  },
-  "drawer.imageEditHint": {
-    en: "right-click to open the image editor",
-    zh: "右键打开图片编辑",
-  },
+  "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
+  "drawer.imageEditHint": { en: "right-click to open the image editor", zh: "右键打开图片编辑" },
   "drawer.imageEditNoSource": {
     en: "this asset's source node is gone — image editing needs its canvas card",
     zh: "该素材的来源节点已不存在——图片编辑需要其画布卡片",
@@ -1049,7 +860,7 @@ export const messages = {
     zh: "本地改写（离线）",
   },
   "assistant.backendGone": {
-    en: 'API profile "{ref}" is no longer in the model manager — pick another backend.',
+    en: "API profile \"{ref}\" is no longer in the model manager — pick another backend.",
     zh: "API 档案“{ref}”已不在模型管理器中，请换一个后端。",
   },
   "assistant.apiError": {
@@ -1102,10 +913,7 @@ export const messages = {
   },
   "audioEdit.title": { en: "audio edit", zh: "音频编辑" },
   "audioEdit.apply": { en: "apply", zh: "应用" },
-  "audioEdit.applyTitle": {
-    en: "save trim / gain / fades to this clip",
-    zh: "将裁剪 / 增益 / 淡入淡出保存到该 clip",
-  },
+  "audioEdit.applyTitle": { en: "save trim / gain / fades to this clip", zh: "将裁剪 / 增益 / 淡入淡出保存到该 clip" },
   "audioEdit.closeTitle": { en: "close without saving", zh: "关闭且不保存" },
   "audioEdit.trimStart": { en: "trim start (s)", zh: "裁剪起点（秒）" },
   "audioEdit.trimEnd": { en: "trim end (s)", zh: "裁剪终点（秒）" },
@@ -1116,26 +924,17 @@ export const messages = {
     en: "plays {len}s · source {start}s → {end}s",
     zh: "播放 {len} 秒 · 源 {start} 秒 → {end} 秒",
   },
-  "audioEdit.envelopeLabel": {
-    en: "gain and fade envelope",
-    zh: "增益与淡入淡出包络",
-  },
+  "audioEdit.envelopeLabel": { en: "gain and fade envelope", zh: "增益与淡入淡出包络" },
   "audioEdit.waveformHint": {
     en: "schematic envelope — the sample waveform arrives with the audio decoder",
     zh: "示意包络——采样波形将随音频解码器一起加入",
   },
   "drawer.export": { en: "export", zh: "导出" },
-  "drawer.exportTitle": {
-    en: "open the timeline export dialog",
-    zh: "打开时间线导出弹窗",
-  },
+  "drawer.exportTitle": { en: "open the timeline export dialog", zh: "打开时间线导出弹窗" },
   "export.title": { en: "timeline export", zh: "时间线导出" },
   "export.run": { en: "export", zh: "导出" },
   "export.running": { en: "encoding…", zh: "编码中…" },
-  "export.runTitle": {
-    en: "encode the still segments to a video via FFmpeg",
-    zh: "通过 FFmpeg 将静帧段编码为视频",
-  },
+  "export.runTitle": { en: "encode the still segments to a video via FFmpeg", zh: "通过 FFmpeg 将静帧段编码为视频" },
   "export.closeTitle": { en: "close", zh: "关闭" },
   "export.summary": {
     en: "{clips} still segment(s) · {len}s at {fps} fps",
@@ -1148,18 +947,12 @@ export const messages = {
     en: "gpu tries a hardware H.264 encoder and falls back to software encode with a visible reason",
     zh: "gpu 会尝试硬件 H.264 编码器，失败时回退软件编码并显示原因",
   },
-  "export.hwEncodeNote": {
-    en: "hardware encode (ffmpeg_hw)",
-    zh: "硬件编码（ffmpeg_hw）",
-  },
+  "export.hwEncodeNote": { en: "hardware encode (ffmpeg_hw)", zh: "硬件编码（ffmpeg_hw）" },
   "export.encodeFallback": {
     en: "software encode fallback: {reason}",
     zh: "已回退软件编码：{reason}",
   },
-  "export.outputNamePlaceholder": {
-    en: "assembled-<time>.mp4",
-    zh: "assembled-<时间>.mp4",
-  },
+  "export.outputNamePlaceholder": { en: "assembled-<time>.mp4", zh: "assembled-<时间>.mp4" },
   "export.emptyPlan": {
     en: "nothing to encode — add still-image clips to the video track first",
     zh: "没有可编码的内容——请先向视频轨添加静帧 clip",
@@ -1184,10 +977,7 @@ export const messages = {
     en: "no encoder in browser preview — export runs on the desktop build",
     zh: "浏览器预览没有编码器——请在桌面版中导出",
   },
-  "export.done": {
-    en: "exported {len}s → {path}",
-    zh: "已导出 {len} 秒 → {path}",
-  },
+  "export.done": { en: "exported {len}s → {path}", zh: "已导出 {len} 秒 → {path}" },
   "export.gradedNote": {
     en: "{n} frames graded ({backend})",
     zh: "已调色 {n} 帧（{backend}）",
@@ -1205,10 +995,7 @@ export const messages = {
 
   // ---- layer review panel (layered image asset candidates) ----
   "layers.title": { en: "Layers", zh: "图层" },
-  "layers.wholeAsset": {
-    en: "whole asset (composite)",
-    zh: "整个资产（合成）",
-  },
+  "layers.wholeAsset": { en: "whole asset (composite)", zh: "整个资产（合成）" },
   "layers.compositeBadge": { en: "composite", zh: "合成" },
   "layers.selectAssetTitle": {
     en: "target the whole layered image (composite preview)",
@@ -1234,10 +1021,7 @@ export const messages = {
     en: "the split report suggests reviewing this layer before production use",
     zh: "拆分报告建议在生产使用前审阅该图层",
   },
-  "layers.visibilityTitle": {
-    en: "toggle layer visibility",
-    zh: "切换图层可见性",
-  },
+  "layers.visibilityTitle": { en: "toggle layer visibility", zh: "切换图层可见性" },
   "layers.previewLayer": { en: "layer", zh: "图层" },
   "layers.previewMask": { en: "mask", zh: "蒙版" },
   "layers.previewToggleTitle": {
@@ -1268,10 +1052,7 @@ export const messages = {
     zh: "打开系统模型管理器（API 配置与本地模型绑定）",
   },
   "models.title": { en: "Models / APIs", zh: "模型 / API" },
-  "models.selector.label": {
-    en: "Backend (API profile)",
-    zh: "后端（API 配置）",
-  },
+  "models.selector.label": { en: "Backend (API profile)", zh: "后端（API 配置）" },
   "models.selector.pick": { en: "— pick a profile —", zh: "— 选择配置 —" },
   "models.selector.manage": { en: "Manage…", zh: "管理…" },
   "models.selector.hint": {
@@ -1286,14 +1067,8 @@ export const messages = {
     en: "saved ref no longer exists in the manager",
     zh: "保存的引用在管理器中已不存在",
   },
-  "models.selector.localLabel": {
-    en: "Backend (local model)",
-    zh: "后端（本地模型）",
-  },
-  "models.selector.pickLocal": {
-    en: "— pick a local model —",
-    zh: "— 选择本地模型 —",
-  },
+  "models.selector.localLabel": { en: "Backend (local model)", zh: "后端（本地模型）" },
+  "models.selector.pickLocal": { en: "— pick a local model —", zh: "— 选择本地模型 —" },
   "models.selector.localHint": {
     en: "capability-filtered from the Models / APIs manager; fills device / precision",
     zh: "来自「模型 / API」管理器的能力过滤列表；自动填充设备 / 精度",
@@ -1302,39 +1077,21 @@ export const messages = {
     en: "no local model declares this capability — open Manage… and add one",
     zh: "没有本地模型声明此能力——点「管理…」新增并勾选能力",
   },
-  "models.selector.promptNone": {
-    en: "— none (pass through) —",
-    zh: "— 不优化（直通） —",
-  },
-  "models.selector.builtinLocal": {
-    en: "Built-in local presets",
-    zh: "内置本地优化",
-  },
+  "models.selector.promptNone": { en: "— none (pass through) —", zh: "— 不优化（直通） —" },
+  "models.selector.builtinLocal": { en: "Built-in local presets", zh: "内置本地优化" },
   "models.selector.groupLocal": { en: "Local models", zh: "本地模型" },
   "models.selector.groupApi": { en: "API profiles", zh: "API 配置" },
-  "models.selector.rowEnhance": {
-    en: "Enhance: local model",
-    zh: "增强：本地模型",
-  },
+  "models.selector.rowEnhance": { en: "Enhance: local model", zh: "增强：本地模型" },
   "models.selector.rowMask": { en: "Mask: local model", zh: "蒙版：本地模型" },
-  "models.selector.rowRepairApi": {
-    en: "Repair: API profile",
-    zh: "修复：API 配置",
-  },
-  "models.selector.rowRepairLocal": {
-    en: "Repair: local model",
-    zh: "修复：本地模型",
-  },
+  "models.selector.rowRepairApi": { en: "Repair: API profile", zh: "修复：API 配置" },
+  "models.selector.rowRepairLocal": { en: "Repair: local model", zh: "修复：本地模型" },
   "inspector.advanced": { en: "Advanced / legacy fields", zh: "高级 / 旧字段" },
   "models.tabApi": { en: "API Profiles", zh: "API 配置" },
   "models.tabLocal": { en: "Local Models", zh: "本地模型" },
   "models.closeTitle": { en: "Close (Esc)", zh: "关闭 (Esc)" },
   "models.addProfile": { en: "Add profile", zh: "新增配置" },
   "models.addModel": { en: "Add local model", zh: "新增本地模型" },
-  "models.importLegacy": {
-    en: "Import H-Gripe profiles",
-    zh: "导入 H-Gripe 配置",
-  },
+  "models.importLegacy": { en: "Import H-Gripe profiles", zh: "导入 H-Gripe 配置" },
   "models.importLegacyTitle": {
     en: "seed the manager from the existing H-Gripe provider profiles",
     zh: "从现有的 H-Gripe provider 配置初始化管理器",
@@ -1365,10 +1122,7 @@ export const messages = {
   },
   "models.defaultModel": { en: "Default model", zh: "默认模型" },
   "models.knownModels": { en: "Known models", zh: "已知模型" },
-  "models.knownModelsHint": {
-    en: "comma-separated model ids",
-    zh: "逗号分隔的模型 id",
-  },
+  "models.knownModelsHint": { en: "comma-separated model ids", zh: "逗号分隔的模型 id" },
   "models.capabilities": { en: "Capabilities", zh: "能力" },
   "models.engine": { en: "Engine", zh: "引擎" },
   "models.weightsPath": { en: "Weights path", zh: "权重路径" },
@@ -1394,34 +1148,22 @@ export const messages = {
   },
   "models.reachable": { en: "endpoint reachable", zh: "端点可达" },
   "models.unreachable": { en: "endpoint unreachable", zh: "端点不可达" },
-  "models.noBaseUrl": {
-    en: "no base URL to test",
-    zh: "没有可测试的 Base URL",
-  },
+  "models.noBaseUrl": { en: "no base URL to test", zh: "没有可测试的 Base URL" },
   "models.noWeightsPath": { en: "no weights path bound", zh: "未绑定权重路径" },
   "models.desktopOnlyTest": {
     en: "weights probing needs the desktop runtime",
     zh: "权重检测需要桌面运行时",
   },
   "models.weightsFound": { en: "weights present", zh: "权重已就位" },
-  "models.weightsMissing": {
-    en: "weights missing at that path",
-    zh: "该路径下没有权重",
-  },
+  "models.weightsMissing": { en: "weights missing at that path", zh: "该路径下没有权重" },
   "models.health.untested": { en: "untested", zh: "未测试" },
   "models.health.valid": { en: "valid", zh: "有效" },
   "models.health.missing_key": { en: "missing key", zh: "缺少密钥" },
   "models.health.unreachable": { en: "unreachable", zh: "不可达" },
-  "models.health.capability_mismatch": {
-    en: "capability mismatch",
-    zh: "能力不匹配",
-  },
+  "models.health.capability_mismatch": { en: "capability mismatch", zh: "能力不匹配" },
   "models.health.installed": { en: "installed", zh: "已安装" },
   "models.health.missing_weights": { en: "missing weights", zh: "缺少权重" },
-  "models.health.unsupported_runtime": {
-    en: "unsupported runtime",
-    zh: "运行时不支持",
-  },
+  "models.health.unsupported_runtime": { en: "unsupported runtime", zh: "运行时不支持" },
   "models.health.device_fallback": { en: "device fallback", zh: "设备回退" },
 } satisfies Record<string, { en: string; zh: string }>;
 
@@ -1441,9 +1183,7 @@ export function translate(
   let text = m ? m[lang] : (key as string);
   if (vars) {
     text = text.replace(/\{(\w+)\}/g, (match, name: string) =>
-      Object.prototype.hasOwnProperty.call(vars, name)
-        ? String(vars[name])
-        : match,
+      Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match,
     );
   }
   return text;
@@ -1457,10 +1197,7 @@ export function loadLang(): Lang {
   } catch {
     /* storage disabled */
   }
-  if (
-    typeof navigator !== "undefined" &&
-    navigator.language?.toLowerCase().startsWith("zh")
-  ) {
+  if (typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("zh")) {
     return "zh";
   }
   return "en";
@@ -1479,11 +1216,7 @@ export function saveLang(lang: Lang): void {
 export const LangContext = createContext<Lang>("en");
 
 /** Hook returning a `t(key, vars?)` translator bound to the current language. */
-export function useT(): (
-  key: MsgKey,
-  vars?: Record<string, string | number>,
-) => string {
+export function useT(): (key: MsgKey, vars?: Record<string, string | number>) => string {
   const lang = useContext(LangContext);
-  return (key: MsgKey, vars?: Record<string, string | number>) =>
-    translate(lang, key, vars);
+  return (key: MsgKey, vars?: Record<string, string | number>) => translate(lang, key, vars);
 }

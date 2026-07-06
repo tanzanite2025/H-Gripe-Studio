@@ -5,26 +5,9 @@
 // `psdTemplate`, `number`) are pure value providers; `save` is a sink. This
 // wires the renderer-agnostic DAG runtime to real backend capability.
 
-import {
-  analyzePsdContext,
-  composePsd,
-  compositeRepaint,
-  detectQualityIssues,
-  enhanceImage,
-  getOutputDir,
-  localRepaintRegions,
-  matchLightColor,
-  prepareRepaintRegions,
-  refineMaskEdge,
-  runTaskJson,
-} from "../bridge/tauri";
+import { analyzePsdContext, composePsd, compositeRepaint, detectQualityIssues, enhanceImage, getOutputDir, localRepaintRegions, matchLightColor, prepareRepaintRegions, refineMaskEdge, runTaskJson } from "../bridge/tauri";
 import type { RepaintedCrop } from "../bridge/tauri";
-import type {
-  Bounds,
-  QualityReport,
-  RepaintReport,
-  VisualContext,
-} from "../types/production";
+import type { Bounds, QualityReport, RepaintReport, VisualContext } from "../types/production";
 import {
   findLayer,
   layeredAssetManifest,
@@ -90,9 +73,7 @@ export const defaultExecutors: ExecutorRegistry = {
 
     if (mode === "api") {
       if (!raw.trim()) return { text: raw };
-      const provider =
-        String(ctx.params.provider ?? "openai_compatible") ||
-        "openai_compatible";
+      const provider = String(ctx.params.provider ?? "openai_compatible") || "openai_compatible";
       if (!promptOptimizeProviderSupported(provider)) {
         throw new Error(
           `Provider "${provider}" can't optimize prompts (no text.generate support). ` +
@@ -107,11 +88,7 @@ export const defaultExecutors: ExecutorRegistry = {
       // Optional sampling controls (forwarded to the chat call when set).
       for (const key of ["temperature", "max_tokens", "seed"] as const) {
         const num = Number(ctx.params[key]);
-        if (
-          ctx.params[key] !== undefined &&
-          ctx.params[key] !== "" &&
-          Number.isFinite(num)
-        ) {
+        if (ctx.params[key] !== undefined && ctx.params[key] !== "" && Number.isFinite(num)) {
           params[key] = num;
         }
       }
@@ -150,17 +127,11 @@ export const defaultExecutors: ExecutorRegistry = {
     return { item: items[index] ?? items[0] ?? "" };
   },
 
-  imageSource: async (ctx) => ({
-    image: String(ctx.params.path ?? "") || null,
-  }),
+  imageSource: async (ctx) => ({ image: String(ctx.params.path ?? "") || null }),
 
-  videoSource: async (ctx) => ({
-    video: String(ctx.params.path ?? "") || null,
-  }),
+  videoSource: async (ctx) => ({ video: String(ctx.params.path ?? "") || null }),
 
-  psdTemplate: async (ctx) => ({
-    template: String(ctx.params.path ?? "") || null,
-  }),
+  psdTemplate: async (ctx) => ({ template: String(ctx.params.path ?? "") || null }),
 
   number: async (ctx) => ({ value: Number(ctx.params.value ?? 0) }),
 
@@ -178,12 +149,7 @@ export const defaultExecutors: ExecutorRegistry = {
     const an = Number(a);
     const bn = Number(b);
     const numeric =
-      a !== "" &&
-      a != null &&
-      b !== "" &&
-      b != null &&
-      !Number.isNaN(an) &&
-      !Number.isNaN(bn);
+      a !== "" && a != null && b !== "" && b != null && !Number.isNaN(an) && !Number.isNaN(bn);
     const sa = String(a ?? "");
     const sb = String(b ?? "");
     const op = String(ctx.params.op ?? "==");
@@ -244,9 +210,7 @@ export const defaultExecutors: ExecutorRegistry = {
   // `cond` input (truthiness) wins over the param fallback.
   if: async (ctx) => {
     const active =
-      "cond" in ctx.inputs
-        ? !!ctx.inputs.cond
-        : String(ctx.params.cond ?? "true") === "true";
+      "cond" in ctx.inputs ? !!ctx.inputs.cond : String(ctx.params.cond ?? "true") === "true";
     const value = ctx.inputs.value ?? null;
     return active ? { true: value } : { false: value };
   },
@@ -254,12 +218,8 @@ export const defaultExecutors: ExecutorRegistry = {
   // Multi-way router. Emits `value` on the port matching `index` (0/1/2), else
   // on `default`; all other ports stay empty so their branches are pruned.
   switch: async (ctx) => {
-    const idx =
-      "index" in ctx.inputs
-        ? Number(ctx.inputs.index)
-        : Number(ctx.params.index ?? 0);
-    const port =
-      idx === 0 ? "0" : idx === 1 ? "1" : idx === 2 ? "2" : "default";
+    const idx = "index" in ctx.inputs ? Number(ctx.inputs.index) : Number(ctx.params.index ?? 0);
+    const port = idx === 0 ? "0" : idx === 1 ? "1" : idx === 2 ? "2" : "default";
     return { [port]: ctx.inputs.value ?? null };
   },
 
@@ -313,27 +273,18 @@ export const defaultExecutors: ExecutorRegistry = {
     if (!image && video) {
       throw new Error("video frame splitting runs in the desktop runtime only");
     }
-    if (!image)
-      throw new Error(
-        "Smart Layer Split needs a connected image or video input",
-      );
-    const asset = stubLayeredImageAsset({
-      imagePath: image,
-      nodeId: ctx.nodeId,
-    });
+    if (!image) throw new Error("Smart Layer Split needs a connected image or video input");
+    const asset = stubLayeredImageAsset({ imagePath: image, nodeId: ctx.nodeId });
     const selectedKind = String(ctx.params.selected_kind ?? "subject");
     const selected =
       selectedKind === "original"
         ? findLayer(asset, STUB_ORIGINAL_LAYER_ID)
-        : (asset.layers.find((layer) => layer.kind === selectedKind) ?? null);
+        : asset.layers.find((layer) => layer.kind === selectedKind) ?? null;
     return {
       layered_asset: asset,
       composite_preview: asset.preview_composite.path,
       selected_layer: selected?.rgba?.path ?? asset.base_image.path,
-      masks: asset.layers.map((layer) => ({
-        layer_id: layer.id,
-        mask: layer.mask.path,
-      })),
+      masks: asset.layers.map((layer) => ({ layer_id: layer.id, mask: layer.mask.path })),
       split_report: asset.split_report,
     };
   },
@@ -369,8 +320,7 @@ export const defaultExecutors: ExecutorRegistry = {
       );
     }
 
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const references = String(ctx.params.reference_layers ?? "")
       .split("\n")
       .map((s) => s.trim())
@@ -378,10 +328,8 @@ export const defaultExecutors: ExecutorRegistry = {
 
     const context = await analyzePsdContext({
       template,
-      backgroundLayer:
-        String(ctx.params.background_layer ?? "").trim() || undefined,
-      targetPlaceholder:
-        String(ctx.params.target_placeholder ?? "").trim() || undefined,
+      backgroundLayer: String(ctx.params.background_layer ?? "").trim() || undefined,
+      targetPlaceholder: String(ctx.params.target_placeholder ?? "").trim() || undefined,
       referenceLayers: references.length > 0 ? references : undefined,
       outputDir: outputDir || undefined,
     });
@@ -400,17 +348,14 @@ export const defaultExecutors: ExecutorRegistry = {
   // the match report, and a prompt suffix.
   matchLightColor: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
-    if (!image)
-      throw new Error("Light & Color Match needs a connected image input");
+    if (!image) throw new Error("Light & Color Match needs a connected image input");
 
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const result = await matchLightColor({
       image,
       background: (ctx.inputs.background as string | undefined) || undefined,
       mask: (ctx.inputs.mask as string | undefined) || undefined,
-      context:
-        (ctx.inputs.visual_context as VisualContext | undefined) ?? undefined,
+      context: (ctx.inputs.visual_context as VisualContext | undefined) ?? undefined,
       mode: String(ctx.params.mode ?? "color_transfer") || undefined,
       strength: Number(ctx.params.strength ?? 0.6),
       shadowStrength: Number(ctx.params.shadow_strength ?? 0),
@@ -418,8 +363,7 @@ export const defaultExecutors: ExecutorRegistry = {
       protectSaturation: Boolean(ctx.params.protect_saturation ?? false),
       protectBrandColor: Boolean(ctx.params.protect_brand_color ?? true),
       engine: String(ctx.params.engine ?? "cpu") || undefined,
-      device:
-        String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -436,17 +380,14 @@ export const defaultExecutors: ExecutorRegistry = {
   // command, exposing the refined image, refined mask, and an edge report.
   refineMaskEdge: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
-    if (!image)
-      throw new Error("Mask Edge Refine needs a connected image input");
+    if (!image) throw new Error("Mask Edge Refine needs a connected image input");
 
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const result = await refineMaskEdge({
       image,
       mask: (ctx.inputs.mask as string | undefined) || undefined,
       background: (ctx.inputs.background as string | undefined) || undefined,
-      placeholderMask:
-        (ctx.inputs.placeholder_mask as string | undefined) || undefined,
+      placeholderMask: (ctx.inputs.placeholder_mask as string | undefined) || undefined,
       trimap: (ctx.inputs.trimap as string | undefined) || undefined,
       preset: String(ctx.params.preset ?? "natural") || undefined,
       erodePx: Number(ctx.params.erode_px ?? 1),
@@ -454,12 +395,9 @@ export const defaultExecutors: ExecutorRegistry = {
       featherPx: Number(ctx.params.feather_px ?? 4),
       guidedRadius: Number(ctx.params.guided_radius ?? 8),
       edgeDecontaminate: Boolean(ctx.params.edge_decontaminate ?? true),
-      backgroundBlendStrength: Number(
-        ctx.params.background_blend_strength ?? 0.4,
-      ),
+      backgroundBlendStrength: Number(ctx.params.background_blend_strength ?? 0.4),
       engine: String(ctx.params.engine ?? "cpu").trim() || undefined,
-      device:
-        String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -478,12 +416,10 @@ export const defaultExecutors: ExecutorRegistry = {
     const image = (ctx.inputs.image as string | undefined) ?? null;
     if (!image) throw new Error("Image Enhance needs a connected image input");
 
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const result = await enhanceImage({
       image,
-      targetBounds:
-        (ctx.inputs.target_bounds as Bounds | undefined) || undefined,
+      targetBounds: (ctx.inputs.target_bounds as Bounds | undefined) || undefined,
       mode: String(ctx.params.mode ?? "conservative") || undefined,
       targetWidth: Number(ctx.params.target_width ?? 0),
       targetHeight: Number(ctx.params.target_height ?? 0),
@@ -494,8 +430,7 @@ export const defaultExecutors: ExecutorRegistry = {
       textureStrength: Number(ctx.params.texture_strength ?? 0.25),
       preserveTextLogo: Boolean(ctx.params.preserve_text_logo ?? true),
       engine: String(ctx.params.engine ?? "cpu") || undefined,
-      device:
-        String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       precision: String(ctx.params.precision ?? "auto").trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
@@ -514,22 +449,17 @@ export const defaultExecutors: ExecutorRegistry = {
   // quality report, an optional issue overlay, and watchdog diagnostics.
   detailWatchdog: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
-    if (!image)
-      throw new Error("Detail Watchdog needs a connected image input");
+    if (!image) throw new Error("Detail Watchdog needs a connected image input");
 
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const result = await detectQualityIssues({
       image,
-      visualContext:
-        (ctx.inputs.visual_context as VisualContext | undefined) || undefined,
-      targetBounds:
-        (ctx.inputs.target_bounds as Bounds | undefined) || undefined,
+      visualContext: (ctx.inputs.visual_context as VisualContext | undefined) || undefined,
+      targetBounds: (ctx.inputs.target_bounds as Bounds | undefined) || undefined,
       watchTargets: String(ctx.params.watch_targets ?? "").trim() || undefined,
       mode: String(ctx.params.mode ?? "balanced") || undefined,
       engine: String(ctx.params.engine ?? "rules").trim() || undefined,
-      device:
-        String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
+      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -551,14 +481,11 @@ export const defaultExecutors: ExecutorRegistry = {
     const image = (ctx.inputs.image as string | undefined) ?? null;
     if (!image) throw new Error("Detail Repaint needs a connected image input");
 
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const prepared = await prepareRepaintRegions({
       image,
-      qualityReport:
-        (ctx.inputs.quality_report as QualityReport | undefined) ?? undefined,
-      repaintActions:
-        String(ctx.params.repaint_actions ?? "").trim() || undefined,
+      qualityReport: (ctx.inputs.quality_report as QualityReport | undefined) ?? undefined,
+      repaintActions: String(ctx.params.repaint_actions ?? "").trim() || undefined,
       minConfidence: Number(ctx.params.min_confidence ?? 0),
       padding: Number(ctx.params.region_padding ?? 24),
       maxRegions: Number(ctx.params.max_regions ?? 8),
@@ -588,17 +515,19 @@ export const defaultExecutors: ExecutorRegistry = {
     let localUsed = false;
     // Local-engine telemetry to fold into the report, so the UI can show which
     // engine ran and why it fell back to the provider path (when it did).
-    let engineTelemetry: Pick<
-      RepaintReport,
-      | "engine"
-      | "engine_requested"
-      | "engine_fallback_reason"
-      | "backend_model"
-      | "device"
-      | "precision"
-      | "precision_requested"
-      | "controlnet_requested"
-    > | null = null;
+    let engineTelemetry:
+      | Pick<
+          RepaintReport,
+          | "engine"
+          | "engine_requested"
+          | "engine_fallback_reason"
+          | "backend_model"
+          | "device"
+          | "precision"
+          | "precision_requested"
+          | "controlnet_requested"
+        >
+      | null = null;
     if (engine !== "provider") {
       const promptMap: Record<string, string> = {};
       for (const region of prepared.regions) {
@@ -649,20 +578,12 @@ export const defaultExecutors: ExecutorRegistry = {
           id: `studio-${ctx.nodeId}-r${region.index}-${Date.now()}`,
           provider,
           operation,
-          inputs: {
-            image_path: region.crop_path,
-            mask_path: region.mask_path,
-            prompt,
-          },
+          inputs: { image_path: region.crop_path, mask_path: region.mask_path, prompt },
           params: { ...params, save_outputs: true },
           credentials_ref: credentialsRef,
           output_type: "image",
           cache_policy: { enabled: false, ttl_seconds: null, key: null },
-          retry_policy: {
-            max_attempts: 1,
-            backoff_ms: 200,
-            timeout_ms: 120000,
-          },
+          retry_policy: { max_attempts: 1, backoff_ms: 200, timeout_ms: 120000 },
         };
         const result = await runTaskJson(task);
         // A per-region provider failure leaves that region unrepainted rather
@@ -701,22 +622,15 @@ export const defaultExecutors: ExecutorRegistry = {
     const wired = ctx.inputs.frames;
     const frames = Array.isArray(wired)
       ? wired.map((f) => String(f ?? "").trim()).filter((f) => f.length > 0)
-      : batchItems(
-          typeof wired === "string" && wired.trim() ? wired : ctx.params.frames,
-        );
+      : batchItems(typeof wired === "string" && wired.trim() ? wired : ctx.params.frames);
     if (frames.length === 0) {
-      throw new Error(
-        "Video Assemble needs at least one frame (connect frames or set the frames param)",
-      );
+      throw new Error("Video Assemble needs at least one frame (connect frames or set the frames param)");
     }
     const fps = Math.max(1, Number(ctx.params.fps ?? 24) || 24);
     const codec = String(ctx.params.codec ?? "libx264").trim() || "libx264";
     const outputDir =
-      String(ctx.params.output_dir ?? "").trim() ||
-      (await getOutputDir()) ||
-      "/mock/outputs";
-    const name =
-      String(ctx.params.output_name ?? "").trim() || `assembled-${Date.now()}`;
+      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir()) || "/mock/outputs";
+    const name = String(ctx.params.output_name ?? "").trim() || `assembled-${Date.now()}`;
     const video = `${outputDir.replace(/\/$/, "")}/${name.includes(".") ? name : `${name}.mp4`}`;
     return {
       video,
@@ -733,12 +647,9 @@ export const defaultExecutors: ExecutorRegistry = {
   videoTrim: async (ctx) => {
     const wired = ctx.inputs.video;
     const video =
-      (typeof wired === "string" && wired.trim()) ||
-      String(ctx.params.video ?? "").trim();
+      (typeof wired === "string" && wired.trim()) || String(ctx.params.video ?? "").trim();
     if (!video) {
-      throw new Error(
-        "Video Trim needs a video (connect a video input or set the video param)",
-      );
+      throw new Error("Video Trim needs a video (connect a video input or set the video param)");
     }
     const startSec = Math.max(0, Number(ctx.params.start_sec ?? 0) || 0);
     const endRaw = Number(ctx.params.end_sec ?? 0) || 0;
@@ -748,11 +659,8 @@ export const defaultExecutors: ExecutorRegistry = {
     }
     const codec = String(ctx.params.codec ?? "libx264").trim() || "libx264";
     const outputDir =
-      String(ctx.params.output_dir ?? "").trim() ||
-      (await getOutputDir()) ||
-      "/mock/outputs";
-    const name =
-      String(ctx.params.output_name ?? "").trim() || `trimmed-${Date.now()}`;
+      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir()) || "/mock/outputs";
+    const name = String(ctx.params.output_name ?? "").trim() || `trimmed-${Date.now()}`;
     const out = `${outputDir.replace(/\/$/, "")}/${name.includes(".") ? name : `${name}.mp4`}`;
     const fps = 24;
     const durationSec = endSec !== null ? endSec - startSec : 1;
@@ -760,13 +668,7 @@ export const defaultExecutors: ExecutorRegistry = {
       video: out,
       frame_count: Math.max(1, Math.round(durationSec * fps)),
       duration_sec: durationSec,
-      trim_report: {
-        fps,
-        codec,
-        start_sec: startSec,
-        end_sec: endSec,
-        mock: true,
-      },
+      trim_report: { fps, codec, start_sec: startSec, end_sec: endSec, mock: true },
     };
   },
 
@@ -776,23 +678,17 @@ export const defaultExecutors: ExecutorRegistry = {
   psdExport: async (ctx) => {
     // A connected layered asset stands in for the flat image via its composite
     // preview, and its layer manifest is recorded in the exported metadata.
-    const layeredAsset =
-      (ctx.inputs.layered_asset as LayeredImageAsset | undefined) ?? null;
+    const layeredAsset = (ctx.inputs.layered_asset as LayeredImageAsset | undefined) ?? null;
     const image =
       (ctx.inputs.image as string | undefined) ??
       layeredAsset?.preview_composite.path ??
       null;
     const template = (ctx.inputs.template as string | undefined) ?? null;
-    if (!image)
-      throw new Error(
-        "PSD Export needs a connected image or layered asset input",
-      );
-    if (!template)
-      throw new Error("PSD Export needs a connected PSD template input");
+    if (!image) throw new Error("PSD Export needs a connected image or layered asset input");
+    if (!template) throw new Error("PSD Export needs a connected PSD template input");
 
     // Fall back to the configured output directory when none is set on the node.
-    const outputDir =
-      String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
+    const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     if (!outputDir) throw new Error("PSD Export needs an output directory");
 
     const placeholderName = String(ctx.params.placeholder ?? "").trim();
@@ -814,10 +710,7 @@ export const defaultExecutors: ExecutorRegistry = {
           base = metadataInput as Record<string, unknown>;
         }
       }
-      metadata = JSON.stringify({
-        ...base,
-        layered_asset: layeredAssetManifest(layeredAsset),
-      });
+      metadata = JSON.stringify({ ...base, layered_asset: layeredAssetManifest(layeredAsset) });
     } else {
       metadata =
         metadataInput != null
@@ -832,13 +725,9 @@ export const defaultExecutors: ExecutorRegistry = {
       mask,
       outputDir,
       filename: String(ctx.params.filename ?? "final") || "final",
-      placeholder: placeholderName
-        ? JSON.stringify({ name: placeholderName })
-        : undefined,
-      fitMode: String(ctx.params.fit_mode ?? "contain") as
-        "contain" | "cover" | "stretch",
-      smartObjectMode: String(ctx.params.smart_object_mode ?? "disable") as
-        "disable" | "replace_content",
+      placeholder: placeholderName ? JSON.stringify({ name: placeholderName }) : undefined,
+      fitMode: (String(ctx.params.fit_mode ?? "contain") as "contain" | "cover" | "stretch"),
+      smartObjectMode: (String(ctx.params.smart_object_mode ?? "disable") as "disable" | "replace_content"),
       metadata,
     });
     if (result.status !== "succeeded") {
