@@ -8,6 +8,7 @@ import {
   type DeviceReport,
 } from "../runtime/deviceReport";
 import { useGradeViewport } from "../viewport/useGradeViewport";
+import { computeScopes, computeScopesFromRgba8, GradeScopes, type ScopeData } from "./GradeScopes";
 import { useViewControls } from "../viewport/useViewControls";
 import { useT, type MsgKey } from "../i18n";
 import {
@@ -171,9 +172,15 @@ function docFromOps(ops: GradeOp[]): GradeDoc {
 /** Identity document: grading it renders the ungraded base frame. */
 const EMPTY_DOC: GradeDoc = docFromOps([]);
 
+interface MirrorFrame {
+  dataUrl: string;
+  /** The graded, display-clamped surface — the scope input on this path. */
+  surface: { w: number; h: number; data: Float32Array; space: "srgb" };
+}
+
 // Run the TS mirror over a data-URL underlay: decode to canvas pixels, grade
 // the f32 sRGB surface in place, re-encode. The browser-preview / error path.
-async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<string | null> {
+async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<MirrorFrame | null> {
   const img = new Image();
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve();
@@ -189,13 +196,14 @@ async function mirrorPreview(underlay: string, doc: GradeDoc): Promise<string | 
   const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = new Float32Array(pixels.data.length);
   for (let i = 0; i < pixels.data.length; i++) data[i] = pixels.data[i] / 255;
-  applyDoc(doc, { w: canvas.width, h: canvas.height, data, space: "srgb" });
+  const surface = { w: canvas.width, h: canvas.height, data, space: "srgb" as const };
+  applyDoc(doc, surface);
   for (let i = 0; i < pixels.data.length; i++) {
     data[i] = Math.min(Math.max(data[i], 0), 1);
     pixels.data[i] = Math.round(data[i] * 255);
   }
   ctx.putImageData(pixels, 0, 0);
-  return canvas.toDataURL("image/png");
+  return { dataUrl: canvas.toDataURL("image/png"), surface };
 }
 
 export function GradePanel({
@@ -228,6 +236,12 @@ export function GradePanel({
   // the host restarts the chain on a seek or source change.
   const [temporalDenoise, setTemporalDenoise] = useState(0);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  // Scopes surface (WGPU plan: scopes on top of the viewport presentation).
+  // Data comes from explicit pixel readback of the displayed frame on
+  // desktop, or the mirror's graded surface in the browser preview; computed
+  // only while the section is open.
+  const [scopesOpen, setScopesOpen] = useState(false);
+  const [scopes, setScopes] = useState<ScopeData | null>(null);
   // Monotonic preview sequence: only the latest request may publish a frame.
   const previewSeq = useRef(0);
   // Graded frames render through a grade_preview viewport (WGPU migration
@@ -236,7 +250,7 @@ export function GradePanel({
   // mirror fallback stays. The stage anchors the native surface window
   // (surface swap): slider ticks then present with no PNG hop.
   const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
-  const renderGraded = useGradeViewport(
+  const { renderGraded, readPixels } = useGradeViewport(
     { imagePath, videoPath, videoTimestampSec, nodeId },
     1280,
     underlayAnchorRef,
@@ -288,6 +302,13 @@ export function GradePanel({
             setPresented(result.presented);
             setPreview(result.presented ? null : result.data_url);
             setBackend(deviceReportFromViewportBackend(result.backend));
+            if (scopesOpen) {
+              // Readback only when needed (surface swap Phase S4): scopes
+              // measure the displayed frame, never the per-frame path.
+              const px = await readPixels().catch(() => null);
+              if (previewSeq.current !== seq) return;
+              if (px) setScopes(computeScopesFromRgba8(px.pixels, px.width, px.height));
+            }
             return;
           }
         } catch (err) {
@@ -300,15 +321,27 @@ export function GradePanel({
         const mirrored = await mirrorPreview(underlay, doc);
         if (previewSeq.current !== seq) return;
         if (mirrored) {
-          setPreview(mirrored);
+          setPreview(mirrored.dataUrl);
           setBackend("mirror");
+          if (scopesOpen) setScopes(computeScopes(mirrored.surface));
         }
       } catch {
         /* keep the previous frame */
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [doc, view, imagePath, videoPath, videoTimestampSec, underlay, renderGraded, temporalDenoise]);
+  }, [
+    doc,
+    view,
+    imagePath,
+    videoPath,
+    videoTimestampSec,
+    underlay,
+    renderGraded,
+    readPixels,
+    temporalDenoise,
+    scopesOpen,
+  ]);
 
   const updateOp = useCallback((index: number, next: GradeOp) => {
     setOps((prev) => prev.map((op, i) => (i === index ? next : op)));
@@ -627,7 +660,17 @@ export function GradePanel({
             </span>
           ) : null}
           {view.zoom > 1 ? <> · {Math.round(view.zoom * 100)}%</> : null}
+          {" · "}
+          <button
+            type="button"
+            className="grade-scopes-toggle"
+            title={t("grade.scopesTitle")}
+            onClick={() => setScopesOpen((open) => !open)}
+          >
+            {t("grade.scopes")} {scopesOpen ? "▾" : "▸"}
+          </button>
         </small>
+        {scopesOpen && scopes ? <GradeScopes scopes={scopes} /> : null}
       </div>
 
       <div className="mask-edit-controls grade-edit-controls">

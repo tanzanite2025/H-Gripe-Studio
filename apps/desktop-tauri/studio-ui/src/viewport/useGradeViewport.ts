@@ -8,7 +8,11 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { tauriInvoke } from "../bridge/core";
 import { registerResource } from "../bridge/files";
-import { registerNodeOutput, type ViewportFrame } from "../bridge/viewport";
+import {
+  registerNodeOutput,
+  type ViewportFrame,
+  type ViewportPixels,
+} from "../bridge/viewport";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { useViewportPlacement } from "./useViewportPlacement";
 import { WgpuViewportHost } from "./WgpuViewportHost";
@@ -36,15 +40,27 @@ interface OpenGradeViewport {
   view: ViewportViewState;
 }
 
-/**
- * Returns `renderGraded(doc, view?, temporalDenoise?)`: apply `doc` to the
- * target and render one graded frame of the (optionally zoomed/panned) view
- * window through the host. `temporalDenoise` (`0..=1`, video targets only)
- * blends graded frames against the previous graded frame during continuous
- * playback — the host restarts the chain on a seek or source change.
- * Resolves to `null` outside Tauri (browser preview), where callers keep
- * their in-webview mirror fallback.
- */
+export interface GradeViewportApi {
+  /** Apply `doc` to the target and render one graded frame of the
+   * (optionally zoomed/panned) view window through the host.
+   * `temporalDenoise` (`0..=1`, video targets only) blends graded frames
+   * against the previous graded frame during continuous playback — the host
+   * restarts the chain on a seek or source change. Resolves to `null`
+   * outside Tauri (browser preview), where callers keep their in-webview
+   * mirror fallback. */
+  renderGraded: (
+    doc: unknown,
+    view?: ViewportViewState,
+    temporalDenoise?: number,
+  ) => Promise<ViewportFrame | null>;
+  /** Explicit pixel readback of the last rendered frame (scopes, colour
+   * picking — surface swap Phase S4), never the per-frame path. `null`
+   * before the first render or outside Tauri, where callers answer from
+   * their mirror surface instead. */
+  readPixels: () => Promise<ViewportPixels | null>;
+}
+
+/** The grading dialog's viewport boundary: see [`GradeViewportApi`]. */
 export function useGradeViewport(
   target: GradeViewportTarget,
   size = 1280,
@@ -52,11 +68,7 @@ export function useGradeViewport(
    * placement is tracked for the host's lifetime and rendered frames present
    * on the surface — callers skip their `<img>` when `frame.presented`. */
   placementRef: RefObject<HTMLElement | null> | null = null,
-): (
-  doc: unknown,
-  view?: ViewportViewState,
-  temporalDenoise?: number,
-) => Promise<ViewportFrame | null> {
+): GradeViewportApi {
   const { imagePath, videoPath, videoTimestampSec = 0, nodeId } = target;
   const path = videoPath ?? imagePath ?? undefined;
   const isVideo = Boolean(videoPath);
@@ -82,7 +94,7 @@ export function useGradeViewport(
     };
   }, [path, isVideo, nodeRef, size]);
 
-  return useCallback(
+  const renderGraded = useCallback(
     async (
       doc: unknown,
       view?: ViewportViewState,
@@ -142,4 +154,12 @@ export function useGradeViewport(
     },
     [path, isVideo, nodeRef, size],
   );
+
+  const readPixels = useCallback(async (): Promise<ViewportPixels | null> => {
+    const open = await hostRef.current;
+    if (!open || !open.host.isOpen) return null;
+    return open.host.readPixels();
+  }, []);
+
+  return { renderGraded, readPixels };
 }
