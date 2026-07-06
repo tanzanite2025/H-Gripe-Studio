@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useViewControls } from "../viewport/useViewControls";
+import { useSettledView, useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 
@@ -28,6 +28,9 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
   // Presented through the viewport host (image_edit viewport, CPU transport):
   // stays null in browser preview, where we degrade to a path-only card.
   const { view, stageProps } = useViewControls(isImage);
+  // Full-detail re-renders wait for the view to settle; the live view rides
+  // the surface's GPU crop fast path per tick below.
+  const settledView = useSettledView(view);
   // Native surface presentation (surface swap): the frame presents on a
   // surface window placed at the stage's rect; actual-size mode scrolls the
   // frame, which the aspect-fit surface cannot represent, so it stays on the
@@ -37,10 +40,13 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
     "image_edit",
     isImage ? path : undefined,
     1280,
-    view,
+    settledView,
     null,
     underlayAnchorRef,
     !actualSize,
+    null,
+    undefined,
+    view,
   );
   const src = viewport.underlay;
   const presented = viewport.presented;

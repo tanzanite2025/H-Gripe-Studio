@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { probeImageDims } from "../bridge/files";
-import { useViewControls } from "../viewport/useViewControls";
+import { useSettledView, useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 import { useT } from "../i18n";
@@ -83,6 +83,9 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
   // Zoom/pan is viewport state shared across layer flips, so flipping
   // image / mask / cutout compares the same region.
   const { view, stageProps } = useViewControls(isImage);
+  // Full-detail re-renders wait for the view to settle; the live view rides
+  // the surface's GPU crop fast path per tick below.
+  const settledView = useSettledView(view);
   // Presented through the viewport host (image_edit viewport); null in
   // browser preview, where we degrade to a path-only card. Native surface
   // presentation (surface swap): the frame presents on a surface window
@@ -92,9 +95,13 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
     "image_edit",
     path && isImage ? path : undefined,
     1280,
-    view,
+    settledView,
     null,
     underlayAnchorRef,
+    true,
+    null,
+    undefined,
+    view,
   );
   // A zoomed frame is the `1/zoom` window of the source, so its natural size
   // shrinks with each zoom tick. Present it in the identity frame's box
