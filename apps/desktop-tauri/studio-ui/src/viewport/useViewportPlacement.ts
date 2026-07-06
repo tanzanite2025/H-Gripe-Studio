@@ -6,8 +6,8 @@
 // plumbing: when the host reports fallback (browser preview, no adapter) the
 // PNG transport stays authoritative and this hook is inert bookkeeping.
 
-import { useEffect, type RefObject } from "react";
-import type { ViewportPlacement } from "../bridge/viewport";
+import { useEffect, useRef, type RefObject } from "react";
+import type { ViewportPlacement, ViewportPlacementReport } from "../bridge/viewport";
 import type { WgpuViewportHost } from "./WgpuViewportHost";
 
 /** The element's placement in the webview: border-box rect in logical CSS
@@ -39,12 +39,19 @@ function samePlacement(a: ViewportPlacement | null, b: ViewportPlacement): boole
  * `enabled: false` hides the surface and stops tracking without unmounting
  * the presenter — for states the surface cannot represent (a rotated view,
  * transparency preview). Re-enabling resends the placement, which re-shows.
+ *
+ * `onPlaced` receives the host's placement report (fallback contract):
+ * callers that presented their first frame before the surface window existed
+ * re-render on `presented: true` so the frame moves off the PNG transport.
  */
 export function useViewportPlacement(
   host: WgpuViewportHost | null,
   ref: RefObject<HTMLElement | null>,
   enabled = true,
+  onPlaced?: (report: ViewportPlacementReport) => void,
 ): void {
+  const onPlacedRef = useRef(onPlaced);
+  onPlacedRef.current = onPlaced;
   useEffect(() => {
     const el = ref.current;
     if (!host || !host.isOpen || !el) return;
@@ -69,8 +76,9 @@ export function useViewportPlacement(
       if (samePlacement(sent, placement)) return;
       inFlight = true;
       try {
-        await host.command({ kind: "set_placement", placement });
+        const report = await host.place(placement);
         sent = placement;
+        if (!cancelled) onPlacedRef.current?.(report);
       } catch {
         /* keep the previous placement; the PNG transport still presents */
       } finally {
