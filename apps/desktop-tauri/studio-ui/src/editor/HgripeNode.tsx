@@ -14,7 +14,6 @@ import {
 } from "../bridge/tauri";
 import { subscribeIngest } from "../runtime/ingestStore";
 import { ParamField } from "./ParamField";
-import { PromptModelSelect } from "../models/PromptModelSelect";
 import { useNodeEditing } from "./editingContext";
 import { psdTemplatePathWarning } from "./psdcheck";
 import { NodeCardShell } from "./NodeCardShell";
@@ -425,20 +424,12 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const renderInlineParam = (p: (typeof spec.params)[number]) => (
     <label key={p.key} className={`inline-field inline-field-${p.control}`}>
       <span>{p.label}</span>
-      {p.control === "model" ? (
-        <PromptModelSelect
-          params={d.params}
-          setParam={(key, v) => editing?.onParamChange(id, key, v)}
-          compact
-        />
-      ) : (
-        <ParamField
-          spec={p}
-          value={d.params[p.key]}
-          onChange={(v) => editing?.onParamChange(id, p.key, v)}
-          compact
-        />
-      )}
+      <ParamField
+        spec={p}
+        value={d.params[p.key]}
+        onChange={(v) => editing?.onParamChange(id, p.key, v)}
+        compact
+      />
       {p.control === "path" && d.params[p.key] ? (
         <small className="path">{basename(String(d.params[p.key]))}</small>
       ) : null}

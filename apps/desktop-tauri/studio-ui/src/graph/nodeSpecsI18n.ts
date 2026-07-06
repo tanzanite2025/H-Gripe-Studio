@@ -39,10 +39,6 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "送入生成节点的文本提示词。可选择一个模型对其优化——内置本地预设，或来自「模型 / API」管理器的本地模型 / API 配置。模型留空则直接输出原文。",
     params: {
       text: { label: "提示词", hint: "初始提示词（连接的 `text` 输入会覆盖它）" },
-      model_select: {
-        label: "模型",
-        hint: "留空 = 直通 · 可选管理器中的本地模型或 API 配置",
-      },
       mode: { label: "优化", hint: "off = 直通 · local = 规则化 · api = 经档案走 LLM（由模型下拉框设置）" },
       preset: { label: "本地预设", hint: "`local` 模式使用：去重 + 追加增强标签" },
       api_profile_ref: {
