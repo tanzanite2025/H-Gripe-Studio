@@ -2123,6 +2123,24 @@ button:disabled { opacity: 0.6; cursor: default; }
   min-height: 0;
 }
 .production-track { display: flex; align-items: stretch; gap: 6px; }
+/* Video / audio group boundary, like Premiere's split between V1 and A1. */
+.production-track-group-start {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+/* Fixed-width track header column so every lane starts at the same x. */
+.production-track-head {
+  width: 88px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
 .production-track-controls {
   flex: none;
   display: flex;
@@ -2135,16 +2153,19 @@ button:disabled { opacity: 0.6; cursor: default; }
   line-height: 16px;
 }
 .production-track-label {
-  width: 22px;
+  width: 24px;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 10px;
+  line-height: 18px;
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+.production-track-label.track-video { background: #2c3444; color: var(--text); }
+.production-track-label.track-audio { background: #2e3a33; color: var(--text); }
 .production-track-lane {
   position: relative;
   flex: 1;
