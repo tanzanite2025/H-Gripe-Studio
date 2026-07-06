@@ -1,9 +1,10 @@
 # WGPU Heavy Viewport Migration Plan
 
-> Status: active planning document. This is the near-term direction for heavy
-> visual surfaces. It does not require rewriting the whole React UI, but it does
-> require starting the WGPU viewport boundary now so image edit, grading, and
-> video preview do not become throwaway DOM/canvas implementations.
+> Status: complete. Phases 0–5 and the entire "remaining work" list below
+> (surface swap, host-side overlays, scopes/safe-area, shared `DeviceReport`
+> wiring) have landed; heavy pixels present through WGPU viewports with the
+> PNG/blob transport as the browser-preview and no-adapter fallback. Kept as
+> the reference for the viewport host boundary and presentation contracts.
 
 ## Status Snapshot (2026-07)
 
@@ -12,9 +13,9 @@ complete.** Every heavy surface (image edit, grade preview, video preview,
 program monitor, layer review, mask editor) presents through the viewport
 host by reference; all target kinds resolve Rust-side; frames cross the IPC
 boundary as binary payloads; and the mask editor's selection tint composites
-host-side at the view window's detail. What remains is the presentation-layer
-endgame (a real WGPU surface swap) and overlay surfaces — both isolated
-behind the host command protocol, so no product-layer rework is pending.
+host-side at the view window's detail. The presentation-layer endgame (the
+WGPU surface swap) and the overlay surfaces have since landed too — see the
+checked-off "remaining work" list below.
 
 Implemented (PRs #329-400):
 
@@ -177,7 +178,7 @@ WGPU owns the surfaces where pixels move, composite, preview, or scrub.
 
 This document is the near-term implementation authority for heavy visual
 surfaces. It must be read together with
-[`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md), but it should not
+[`GPU_DEVICE_STRATEGY_PLAN.md`](../active/GPU_DEVICE_STRATEGY_PLAN.md), but it should not
 wait for a full global GPU scheduler.
 
 The relationship is:
@@ -407,7 +408,7 @@ fallback reason: optional text
 Fallback is not failure. It is a reportable runtime decision.
 
 This fallback report should use the shared device vocabulary from
-[`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md). The WGPU viewport
+[`GPU_DEVICE_STRATEGY_PLAN.md`](../active/GPU_DEVICE_STRATEGY_PLAN.md). The WGPU viewport
 does not own cross-kernel scheduling, but it must report enough truth for the
 future scheduler and diagnostics to consume.
 

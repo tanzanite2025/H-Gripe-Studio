@@ -1,6 +1,6 @@
 # Unified Production Drawer Plan
 
-> Status: **第一阶段（下方 1–9）已全部落地**（PR #294–#300）：底部抽屉、
+> Status: complete（已归档）。**第一阶段（下方 1–9）已全部落地**（PR #294–#300）：底部抽屉、
 > `ProductionTarget`、Edit/Timeline 工作区、多轨模型、可嵌入 `GradePanel`
 > （image + video_clip）、图片/音频右键按需编辑、timeline render plan +
 > FFmpeg 导出弹窗。后续方向（音频混音/封装、视频 clip 参与导出、keyframe
@@ -297,7 +297,7 @@ Export command:
 
 ## 与现有文档的关系
 
-### [`DUAL_DOCK_WORKSPACE_PLAN.md`](../completed/DUAL_DOCK_WORKSPACE_PLAN.md)
+### [`DUAL_DOCK_WORKSPACE_PLAN.md`](DUAL_DOCK_WORKSPACE_PLAN.md)
 
 保留其中关于：
 

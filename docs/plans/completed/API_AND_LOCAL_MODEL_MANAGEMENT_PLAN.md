@@ -1,6 +1,9 @@
 # API And Local Model Management Plan
 
-> Status: active.
+> Status: complete. Migration steps 1–8 landed (#393–#397, #522–#523): the
+> managers, capability-filtered selectors, card refs, and the Prompt
+> Assistant all consume `ModelBackendRef`. Kept as the reference contract for
+> future model/API-consuming cards and capability rows.
 > Purpose: define the shared configuration layer for API providers, credentials,
 > model profiles, local model paths, capability checks, and card references.
 
@@ -47,17 +50,16 @@ The manager and card-selector foundation has landed:
 
 Completed detail plans:
 
-- [`../completed/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md`](../completed/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md)
-- [`../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](../completed/NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md)
+- [`SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md`](SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md)
+- [`NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md)
+- [`PROMPT_ASSISTANT_SYSTEM_PLAN.md`](PROMPT_ASSISTANT_SYSTEM_PLAN.md) — the
+  assistant and Prompt card optimization consume `ModelBackendRef`.
 
-Remaining active work:
+Standing guidance for future work:
 
-- Prompt Assistant should consume the same `ModelBackendRef` contract.
-- Prompt card optimization should use manager-backed refs instead of local raw
-  fields.
 - Future audio/video/model-assisted cards should use the same manager selectors.
 - Backend/device reports should continue aligning with
-  [`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md).
+  [`GPU_DEVICE_STRATEGY_PLAN.md`](../active/GPU_DEVICE_STRATEGY_PLAN.md).
 
 ## API Manager
 

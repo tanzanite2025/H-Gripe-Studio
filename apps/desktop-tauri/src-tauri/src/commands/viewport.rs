@@ -1,5 +1,5 @@
 //! WGPU viewport host lifecycle (migration Phase 1, see
-//! `docs/plans/active/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`).
+//! `docs/plans/completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`).
 //!
 //! The product layer talks to viewports only through these commands:
 //! create → set_target / resize → render_frame → destroy. Nothing here runs at
