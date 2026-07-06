@@ -6,6 +6,7 @@ import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../
 import { listProfiles } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
 import { summarizeCapabilities, summarizeDeviceRegistry } from "../runtime/capabilitySummary";
+import { getGpuMaxJobs, setGpuMaxJobs, MAX_GPU_JOBS } from "../bridge/scheduler";
 import {
   DEVICE_PREFERENCES,
   getDevicePreference,
@@ -119,6 +120,9 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   const [devicePreference, setDevicePreferenceState] = useState<DevicePreference>(() =>
     getDevicePreference(),
   );
+  // GPU lane width (GPU plan long-term step 5): applied to the Rust
+  // scheduler on change; running jobs are never interrupted.
+  const [gpuMaxJobs, setGpuMaxJobsState] = useState<number>(() => getGpuMaxJobs());
 
   const handleProbe = useCallback(() => {
     setProbing(true);
@@ -424,6 +428,28 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     ))}
                   </select>
                   <span className="muted">{t("models.devicePreferenceHint")}</span>
+                </div>
+                <div className="model-manager-list-actions">
+                  <span className="muted">{t("models.gpuMaxJobsTitle")}</span>
+                  <select
+                    value={gpuMaxJobs}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setGpuMaxJobsState(next);
+                      setGpuMaxJobs(next)
+                        .then((applied) => {
+                          if (applied !== null) setGpuMaxJobsState(applied);
+                        })
+                        .catch((err) => setMessage(String(err)));
+                    }}
+                  >
+                    {Array.from({ length: MAX_GPU_JOBS }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="muted">{t("models.gpuMaxJobsHint")}</span>
                 </div>
                 <div className="model-manager-list-actions">
                   <span className="muted">{t("models.capabilityTitle")}</span>

@@ -127,6 +127,6 @@ pub(crate) use history::*;
 pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
 pub(crate) use persist::*;
-pub(crate) use schedule::StudioScheduler;
+pub(crate) use schedule::{set_gpu_max_jobs, StudioScheduler};
 pub(crate) use subject_model::set_resource_dir as set_subject_model_resource_dir;
 pub(crate) use timeline_export::*;

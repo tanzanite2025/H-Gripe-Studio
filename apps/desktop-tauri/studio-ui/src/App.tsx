@@ -105,6 +105,7 @@ import {
   setClipGradeDoc,
   useProductionState,
 } from "./production/productionStore";
+import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
 import { unregisterNodeOutput } from "./bridge/viewport";
 import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
@@ -583,6 +584,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       },
     });
   });
+
+  // Re-apply the persisted GPU lane width once on mount (GPU plan long-term
+  // step 5): the scheduler starts at 1; a stored wider setting is best-effort.
+  useEffect(() => {
+    const stored = getGpuMaxJobs();
+    if (stored > 1) applyGpuMaxJobs(stored).catch(() => {});
+  }, []);
 
   // Restore the persisted project manifest (open canvas tabs) once on mount
   // (multi-canvas plan Phase 4). When a manifest exists it wins over the

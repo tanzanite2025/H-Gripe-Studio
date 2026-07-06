@@ -433,7 +433,12 @@ Only after the manager exists, consider a settings surface:
   a dedicated settings surface can wait.
 - disable unstable hardware encode — hardware encode is already opt-in per
   request (`device: gpu`); a global kill switch waits for real demand.
-- max concurrent GPU jobs
+- ✅ max concurrent GPU jobs — a "Max concurrent GPU jobs" select next to the
+  default-device control (`bridge/scheduler.ts`, localStorage-backed,
+  re-applied on app start). The Rust `StudioScheduler`'s GPU semaphore is
+  resizable (`set_gpu_limit`, clamped `1..=MAX_GPU_JOBS`): widening adds
+  permits immediately, narrowing retires permits as running jobs finish —
+  work is never interrupted.
 - prefer preview speed vs export fidelity
 
 This should be a settings surface, not a required setup wizard.
