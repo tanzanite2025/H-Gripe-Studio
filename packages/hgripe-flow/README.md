@@ -2,10 +2,9 @@
 
 Local graph adapter for H-Gripe Studio.
 
-This package is the first soft-cut away from direct `@xyflow/react` imports.
-It exposes a narrow app-facing surface over `@xyflow/react@12.3.5`, so the
-Studio app can compile while old upstream edge styles are not part of the
-product API.
+This package owns the node-graph layer. The upstream React Flow source is
+vendored into `src/upstream` (no `@xyflow/*` npm dependency), and the app
+consumes it only through the narrow `@hgripe/flow` adapter API.
 
 ## Boundary
 
@@ -34,12 +33,19 @@ It must not own heavy media pixels:
 
 Those stay in the Rust / WGPU / media-kernel layers.
 
-## Current Upstream
+## Upstream Provenance
 
-- Package: `@xyflow/react`
-- Version: `12.3.5`
-- Current phase: narrow adapter with H-Gripe edge ownership and downstream edge
-  creation helpers
+- Vendored from: `github.com/xyflow/xyflow`, tag `@xyflow/react@12.3.5`
+  (`packages/react/src` → `src/upstream/react`, `packages/system/src`
+  (`@xyflow/system@0.0.46`) → `src/upstream/system`; MIT, see
+  `src/upstream/LICENSE`).
+- `src/upstream/style.css` is the built upstream stylesheet of the same
+  version (the upstream postcss pipeline is not reproduced here).
+- Runtime deps stay on npm and are pinned in the app: `classcat`, `zustand`,
+  `d3-drag`, `d3-selection`, `d3-transition`, `d3-zoom`.
+- Local changes to `src/upstream` are allowed — this is a fork, not a mirror.
+  Keep the `@hgripe/flow` adapter API stable when changing upstream internals.
 
-Next phase: vendor the required upstream source into this package while keeping
-the exported app-facing API stable.
+Current phase: vendored source with adapter parity. Next phase: product
+trimming (delete unused upstream components after measuring usage) per
+`docs/plans/active/LOCAL_REACT_FLOW_FORK_PLAN.md`.

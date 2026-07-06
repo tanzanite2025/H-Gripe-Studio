@@ -292,6 +292,24 @@ prove the app still works.
 ## Implementation Status
 
 - `packages/hgripe-flow` exists as the local graph adapter package.
+- Step 5 (local source import) is done: the upstream source of
+  `@xyflow/react@12.3.5` and `@xyflow/system@0.0.46` is vendored into
+  `packages/hgripe-flow/src/upstream` and the `@xyflow/*` npm dependency is
+  removed. Provenance and fork rules live in the package README.
+- Runtime deps (`classcat`, `zustand`, `d3-drag`, `d3-selection`,
+  `d3-transition`, `d3-zoom`) stay on npm, pinned in the studio-ui app.
+- Known trim candidates measured against current app usage (delete in the
+  product-trimming phase, each with a typecheck/test pass):
+  - `upstream/react/additional-components/Background` — the product removed
+    the dot-grid background entirely.
+  - `upstream/react/additional-components/Controls` — Studio renders its own
+    canvas controls.
+  - `upstream/react/additional-components/NodeToolbar` — unused.
+  - Built-in edge components (bezier / step / smoothstep / straight) once
+    `EdgeWrapper`'s `builtinEdgeTypes` fallback is narrowed to the chamfer
+    edge family.
+  - Built-in node components (input / output / default / group) once
+    `NodeWrapper`'s `builtinNodeTypes` fallback is narrowed to Studio types.
 - Studio imports must route through `@hgripe/flow`, not directly through
   `@xyflow/react`.
 - The adapter is no longer a blanket re-export. It exposes only the React Flow

@@ -12,9 +12,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@xyflow/react": "12.3.5",
+    "@types/d3-drag": "3.0.7",
+    "@types/d3-selection": "3.0.11",
+    "@types/d3-transition": "3.0.9",
+    "@types/d3-zoom": "3.0.8",
+    "classcat": "5.0.5",
+    "d3-drag": "3.0.0",
+    "d3-selection": "3.0.0",
+    "d3-transition": "3.0.1",
+    "d3-zoom": "3.0.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "zustand": "4.5.7"
   },
   "devDependencies": {
     "@testing-library/react": "16.0.1",
