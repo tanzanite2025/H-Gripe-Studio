@@ -227,6 +227,24 @@ describe("summarizeDeviceRegistry", () => {
     });
   });
 
+  it("keeps the last uncaptured GPU error visible as a warn line", () => {
+    const lines = summarizeDeviceRegistry({
+      ...base,
+      viewport_surface: { available: true, detail: "NVIDIA GeForce RTX 4090 (Dx12)" },
+      viewport_surface_last_error:
+        "wgpu uncaptured out-of-memory error: not enough memory left",
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["viewport surface last GPU error"]).toEqual({
+      label: "viewport surface last GPU error",
+      value: "wgpu uncaptured out-of-memory error: not enough memory left",
+      tone: "warn",
+    });
+    // Absent error records no line.
+    const withoutError = summarizeDeviceRegistry(base);
+    expect(withoutError.some((l) => l.label === "viewport surface last GPU error")).toBe(false);
+  });
+
   it("marks accelerated onnx providers as ok", () => {
     const lines = summarizeDeviceRegistry({ ...base, onnx_providers: ["cpu", "cuda"] });
     const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));

@@ -55,6 +55,49 @@ pub(crate) fn device_lost_reason() -> Option<String> {
     DEVICE_LOST.lock().ok().and_then(|guard| guard.clone())
 }
 
+/// The last uncaptured GPU error on the shared device (out of memory,
+/// validation, internal), recorded by the handler registered at device
+/// creation. wgpu's default handler panics on uncaptured errors; the shared
+/// device instead records the classified error and keeps the app alive —
+/// the failing present falls back to the PNG transport and the device
+/// registry keeps the error visible.
+#[cfg(feature = "viewport-surface")]
+static LAST_GPU_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+/// The last recorded uncaptured GPU error, if any.
+pub(crate) fn last_uncaptured_error() -> Option<String> {
+    #[cfg(feature = "viewport-surface")]
+    {
+        LAST_GPU_ERROR.lock().ok().and_then(|guard| guard.clone())
+    }
+    #[cfg(not(feature = "viewport-surface"))]
+    {
+        None
+    }
+}
+
+/// The recorded detail line for an uncaptured GPU error: the structured
+/// error class plus the driver's description, so the fallback stays
+/// diagnosable.
+#[cfg(feature = "viewport-surface")]
+fn uncaptured_error_detail(error: &wgpu::Error) -> String {
+    let class = match error {
+        wgpu::Error::OutOfMemory { .. } => "out-of-memory",
+        wgpu::Error::Validation { .. } => "validation",
+        wgpu::Error::Internal { .. } => "internal",
+    };
+    format!("wgpu uncaptured {class} error: {error}")
+}
+
+#[cfg(feature = "viewport-surface")]
+fn record_uncaptured_error(error: wgpu::Error) {
+    let detail = uncaptured_error_detail(&error);
+    eprintln!("[viewport] {detail} — the failing present falls back to the PNG transport");
+    if let Ok(mut guard) = LAST_GPU_ERROR.lock() {
+        *guard = Some(detail);
+    }
+}
+
 /// The recorded detail line for a device loss: the structured reason class
 /// plus the driver's message, so the fallback stays diagnosable.
 #[cfg(feature = "viewport-surface")]
@@ -91,6 +134,7 @@ fn init_shared_gpu() -> Result<Arc<SharedGpu>, String> {
     }))
     .map_err(|e| format!("device request failed: {e}"))?;
     device.set_device_lost_callback(record_device_lost);
+    device.on_uncaptured_error(Arc::new(record_uncaptured_error));
     eprintln!("[viewport] shared wgpu device initialised: {adapter_summary}");
     Ok(Arc::new(SharedGpu {
         instance,
@@ -288,6 +332,17 @@ mod tests {
             Ok(detail) => assert!(!detail.is_empty()),
             Err(reason) => assert!(!reason.is_empty()),
         }
+    }
+
+    #[cfg(feature = "viewport-surface")]
+    #[test]
+    fn uncaptured_error_detail_keeps_class_and_description() {
+        let detail = uncaptured_error_detail(&wgpu::Error::Validation {
+            source: "texture size exceeds limit".into(),
+            description: "texture size exceeds limit".to_string(),
+        });
+        assert!(detail.contains("validation"), "{detail}");
+        assert!(detail.contains("texture size exceeds limit"), "{detail}");
     }
 
     #[cfg(feature = "viewport-surface")]

@@ -146,6 +146,13 @@ export function summarizeDeviceRegistry(snapshot: DeviceRegistrySnapshot): Capab
   ];
   for (const [label, entry] of entries) {
     lines.push({ label, value: entry.detail, tone: entry.available ? "ok" : "warn" });
+    if (label === "viewport surface" && snapshot.viewport_surface_last_error) {
+      lines.push({
+        label: "viewport surface last GPU error",
+        value: snapshot.viewport_surface_last_error,
+        tone: "warn",
+      });
+    }
   }
   lines.push({
     label: "ffmpeg hw encoders",

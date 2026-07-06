@@ -357,8 +357,15 @@ Do not over-engineer this before video/timeline/export are real product paths.
 
 Add structured fallback for:
 
-- out of memory
-- unsupported shader/model op
+- ✅ out of memory / unsupported op on the shared surface device — the shared
+  viewport surface device registers `on_uncaptured_error` at creation
+  (`wgpu_device.rs`): wgpu's default handler panics on uncaptured GPU errors,
+  the shared device instead records the classified error (out-of-memory /
+  validation / internal + driver description) and keeps the app alive — the
+  failing present falls back to the PNG transport, and the device registry
+  keeps the last error visible (`viewport_surface_last_error`, a warn line in
+  the Model Manager). The grade kernel's own device already scopes these per
+  run (`GpuError`).
 - unsupported codec
 - ✅ driver/device lost — the shared viewport surface device registers a
   `set_device_lost_callback` at creation (`wgpu_device.rs`); a loss records

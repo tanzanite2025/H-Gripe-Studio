@@ -31,6 +31,8 @@ export interface DeviceRegistrySnapshot {
   grade_wgpu: RegistryEntry;
   /** Shared viewport surface device (cached state; never initialised by a snapshot). */
   viewport_surface: RegistryEntry;
+  /** Last uncaptured GPU error on the surface device (out of memory, validation, internal). */
+  viewport_surface_last_error?: string | null;
   /** Vendored FFmpeg software baseline. */
   ffmpeg: RegistryEntry;
   /** Hardware encoder names compiled into the vendored libav. */
