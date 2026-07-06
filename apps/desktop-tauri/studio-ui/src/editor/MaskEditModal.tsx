@@ -1965,7 +1965,6 @@ export function MaskEditModal({
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
       <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
-        {headerTabs ? <div className="media-viewer-tabs-row">{headerTabs}</div> : null}
         <div className="media-viewer-bar">
           {headerLeft}
           {hideTitle ? null : (
@@ -2005,6 +2004,7 @@ export function MaskEditModal({
             ) : null}
           </div>
         </div>
+        {headerTabs ? <div className="media-viewer-tabs-row">{headerTabs}</div> : null}
 
         <div className="mask-edit-body" style={{ "--mask-rail-w": `${dock.layout.railWidth}px` } as CSSProperties}>
           <MaskToolbar
