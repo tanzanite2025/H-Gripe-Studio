@@ -26,6 +26,32 @@
 .media-viewer-backdrop:has(> .crop-edit) {
   padding: 0;
 }
+/* The editor shell slides up from the bottom on open and back down on close
+   (a document-tab switch remounts the shell without replaying the entrance). */
+@keyframes mask-edit-slide-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes mask-edit-slide-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+.media-viewer.mask-edit.mask-edit-entering {
+  animation: mask-edit-slide-in 0.28s ease-out;
+}
+.media-viewer.mask-edit.mask-edit-leaving {
+  animation: mask-edit-slide-out 0.24s ease-in forwards;
+}
+.media-viewer-backdrop.mask-edit-backdrop-leaving {
+  background: transparent;
+  transition: background 0.24s ease-in;
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-viewer.mask-edit.mask-edit-entering,
+  .media-viewer.mask-edit.mask-edit-leaving {
+    animation-duration: 0.01s;
+  }
+}
 .mask-edit-body {
   flex: 1;
   min-height: 0;

@@ -105,8 +105,10 @@ interface MaskEditModalProps {
   headerExtra?: ReactNode;
   /** Leftmost bar slot (e.g. the image editor's save light). */
   headerLeft?: ReactNode;
-  /** Bar content centred over the whole bar (e.g. the collapse arrow). */
-  headerCenter?: ReactNode;
+  /** Bar content centred over the whole bar (e.g. the collapse arrow). A
+   * function form receives `requestClose`, which plays the slide-out
+   * animation before the host's `onClose`. */
+  headerCenter?: ReactNode | ((requestClose: () => void) => ReactNode);
   /** A full-width row under the bar (e.g. the open-document tab strip). */
   headerTabs?: ReactNode;
   /** Editor name shown after the title (defaults to "mask editor"). */
@@ -157,6 +159,13 @@ function loadCropTemplates(): { w: number; h: number }[] {
 
 let strokeSeq = 0;
 const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
+
+// The editor shell slides up from the bottom only on a fresh open. A
+// document-tab switch remounts the shell (the host keys it per document), so
+// an unmount stamps a handoff window during which the next mount skips the
+// entrance animation.
+let shellHandoffAt = 0;
+const SHELL_HANDOFF_MS = 300;
 
 // Ops an active marquee selection does NOT confine: whole-mask reshapes keep
 // their global meaning even while a selection is up (PS transforms / crops
@@ -221,6 +230,25 @@ export function MaskEditModal({
   workspace = "mask",
 }: MaskEditModalProps) {
   const t = useT();
+  // Slide-up entrance / slide-down exit. `entering`/`closing` gate the native
+  // surface presentation off while the shell moves (the PNG transport slides
+  // with the DOM; the native surface window would not).
+  const [animateEnter] = useState(() => Date.now() - shellHandoffAt > SHELL_HANDOFF_MS);
+  const [entering, setEntering] = useState(animateEnter);
+  const [closing, setClosing] = useState(false);
+  const requestClose = useCallback(() => setClosing(true), []);
+  useEffect(() => {
+    return () => {
+      shellHandoffAt = Date.now();
+    };
+  }, []);
+  useEffect(() => {
+    // Safety valve: if the entrance animation never fires (e.g. reduced
+    // motion), still land the shell so presentation can start.
+    if (!entering) return;
+    const timer = window.setTimeout(() => setEntering(false), 600);
+    return () => window.clearTimeout(timer);
+  }, [entering]);
   const [state, rawDispatch] = useReducer(maskEditReducer, initial, initEditState);
   // Mirror the in-progress document out to the host so it survives remounts
   // (e.g. the image editor's document-tab switches).
@@ -467,7 +495,7 @@ export function MaskEditModal({
   }, [workspace, state]);
   // Grading needs frame pixels, so it forces the PNG transport (a natively
   // presented surface frame has no readable data URL).
-  const presentEnabled = !overlayOnly && !view.rotate && !gradePreview;
+  const presentEnabled = !overlayOnly && !view.rotate && !gradePreview && !entering && !closing;
   const viewport = useViewportUnderlay(
     "image_edit",
     source,
@@ -1004,7 +1032,7 @@ export function MaskEditModal({
       else if (toolId === "rotate_view" && viewRef.current.rotate) setView((v) => rotateTo(v, 0));
       // The image editor closes only via the header's collapse arrow;
       // Escape never dismisses it (the mask editor keeps PS behaviour).
-      else if (workspace !== "image") onClose();
+      else if (workspace !== "image") requestClose();
     },
     toggle_overlay: () => setOverlayOnly((v) => !v),
   };
@@ -1963,8 +1991,16 @@ export function MaskEditModal({
   };
 
   return (
-    <div className="media-viewer-backdrop" onClick={onClose}>
-      <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
+    <div className={`media-viewer-backdrop${closing ? " mask-edit-backdrop-leaving" : ""}`} onClick={requestClose}>
+      <div
+        className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}${animateEnter ? " mask-edit-entering" : ""}${closing ? " mask-edit-leaving" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        onAnimationEnd={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.animationName === "mask-edit-slide-out") onClose();
+          else if (e.animationName === "mask-edit-slide-in") setEntering(false);
+        }}
+      >
         <div className="media-viewer-bar">
           {headerLeft}
           {hideTitle ? null : (
@@ -1973,7 +2009,11 @@ export function MaskEditModal({
             </span>
           )}
           {headerExtra}
-          {headerCenter ? <div className="media-viewer-bar-center">{headerCenter}</div> : null}
+          {headerCenter ? (
+            <div className="media-viewer-bar-center">
+              {typeof headerCenter === "function" ? headerCenter(requestClose) : headerCenter}
+            </div>
+          ) : null}
           <div className="media-viewer-actions">
             <button disabled={!canUndo(state)} onClick={() => dispatch({ type: "undo" })} title={t("mask.undoTitle")}>
               ↶ {t("mask.undo")}
@@ -1981,26 +2021,24 @@ export function MaskEditModal({
             <button disabled={!canRedo(state)} onClick={() => dispatch({ type: "redo" })} title={t("mask.redoTitle")}>
               ↷ {t("mask.redo")}
             </button>
-            <button disabled={count === 0} onClick={() => dispatch({ type: "clear" })} title={t("mask.clearTitle")}>
-              {t("mask.clear")}
-            </button>
             {workspace === "mask" ? (
               <>
+                <button disabled={count === 0} onClick={() => dispatch({ type: "clear" })} title={t("mask.clearTitle")}>
+                  {t("mask.clear")}
+                </button>
                 <button className={overlayOnly ? "active" : ""} onClick={() => setOverlayOnly((v) => !v)} title={t("mask.togglePreviewTitle")}>
                   {overlayOnly ? t("mask.showImage") : t("mask.maskOnly")}
                 </button>
                 <button className={quickMask ? "active" : ""} onClick={() => setQuickMask((v) => !v)} title={t("mask.quickMaskTitle")}>
                   {t("mask.quickMask")}
                 </button>
+                <button className="primary" onClick={() => { onCommit(state.current); requestClose(); }} title={t("mask.applyTitle")}>
+                  {t("mask.apply")}
+                </button>
+                <button onClick={requestClose} title={t("mask.closeTitle")}>
+                  ✕
+                </button>
               </>
-            ) : null}
-            <button className="primary" onClick={() => { onCommit(state.current); onClose(); }} title={t("mask.applyTitle")}>
-              {t("mask.apply")}
-            </button>
-            {workspace === "mask" ? (
-              <button onClick={onClose} title={t("mask.closeTitle")}>
-                ✕
-              </button>
             ) : null}
           </div>
         </div>
