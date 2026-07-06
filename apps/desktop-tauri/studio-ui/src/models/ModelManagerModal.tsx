@@ -14,6 +14,12 @@ import {
   type DevicePreference,
 } from "../runtime/devicePreference";
 import {
+  PREVIEW_QUALITIES,
+  getPreviewQuality,
+  setPreviewQuality,
+  type PreviewQuality,
+} from "../runtime/previewQuality";
+import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
   duplicateLocalModel,
@@ -119,6 +125,11 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   // unset `device` params; explicit per-node choices always win.
   const [devicePreference, setDevicePreferenceState] = useState<DevicePreference>(() =>
     getDevicePreference(),
+  );
+  // Preview speed vs export fidelity (GPU plan long-term step 5): picks the
+  // grade preview proxy size only; exports always run at full fidelity.
+  const [previewQuality, setPreviewQualityState] = useState<PreviewQuality>(() =>
+    getPreviewQuality(),
   );
   // GPU lane width (GPU plan long-term step 5): applied to the Rust
   // scheduler on change; running jobs are never interrupted.
@@ -428,6 +439,24 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     ))}
                   </select>
                   <span className="muted">{t("models.devicePreferenceHint")}</span>
+                </div>
+                <div className="model-manager-list-actions">
+                  <span className="muted">{t("models.previewQualityTitle")}</span>
+                  <select
+                    value={previewQuality}
+                    onChange={(e) => {
+                      const next = e.target.value as PreviewQuality;
+                      setPreviewQuality(next);
+                      setPreviewQualityState(next);
+                    }}
+                  >
+                    {PREVIEW_QUALITIES.map((quality) => (
+                      <option key={quality} value={quality}>
+                        {t(`models.previewQuality.${quality}` as MsgKey)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="muted">{t("models.previewQualityHint")}</span>
                 </div>
                 <div className="model-manager-list-actions">
                   <span className="muted">{t("models.gpuMaxJobsTitle")}</span>

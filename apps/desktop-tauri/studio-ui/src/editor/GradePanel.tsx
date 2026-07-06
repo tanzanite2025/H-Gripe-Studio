@@ -11,6 +11,7 @@ import { useGradeViewport } from "../viewport/useGradeViewport";
 import { computeScopes, computeScopesFromRgba8, GradeScopes, type ScopeData } from "./GradeScopes";
 import { useViewControls } from "../viewport/useViewControls";
 import { useT, type MsgKey } from "../i18n";
+import { previewProxyMaxDim } from "../runtime/previewQuality";
 import {
   applyDoc,
   MAX_BLUR_SIGMA,
@@ -252,7 +253,7 @@ export function GradePanel({
   const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
   const { renderGraded, readPixels } = useGradeViewport(
     { imagePath, videoPath, videoTimestampSec, nodeId },
-    1280,
+    previewProxyMaxDim(),
     underlayAnchorRef,
   );
 
