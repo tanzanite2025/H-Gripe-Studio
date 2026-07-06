@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { probeImageDims } from "../bridge/files";
 import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
-import type { ViewportViewState } from "../viewport/view";
 import { useT } from "../i18n";
 
 // Shared "review gate" modal.
@@ -47,38 +46,6 @@ interface PreviewModalProps {
   onClose: () => void;
 }
 
-function PreviewImage({ path, view }: { path: string; view: ViewportViewState }) {
-  // Presented through the viewport host (image_edit viewport, CPU transport);
-  // null in browser preview, where we degrade to a path-only card.
-  const viewport = useViewportUnderlay("image_edit", path, 1280, view);
-
-  // A zoomed frame is the `1/zoom` window of the source, so its natural size
-  // shrinks with each zoom tick. Present it in the identity frame's box
-  // (`dims`, stable across zoom) so the window magnifies instead of the
-  // element shrinking in step — otherwise the on-screen scale never changes.
-  const dims = viewport.dims;
-  const zoomedStyle =
-    view.zoom > 1 && dims
-      ? { width: dims.w, height: dims.h, objectFit: "contain" as const }
-      : undefined;
-
-  if (viewport.underlay)
-    return (
-      <>
-        <img
-          className="media-viewer-img"
-          src={viewport.underlay}
-          alt={basename(path)}
-          draggable={false}
-          style={zoomedStyle}
-        />
-        <ViewportBackendBadge backend={viewport.backend} />
-      </>
-    );
-  if (viewport.settled) return <p className="muted">preview unavailable (backend mocked)</p>;
-  return <p className="muted">loading…</p>;
-}
-
 export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor, onClose }: PreviewModalProps) {
   const t = useT();
   // Default to the first layer that actually has a path, else the first layer.
@@ -116,6 +83,27 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
   // Zoom/pan is viewport state shared across layer flips, so flipping
   // image / mask / cutout compares the same region.
   const { view, stageProps } = useViewControls(isImage);
+  // Presented through the viewport host (image_edit viewport); null in
+  // browser preview, where we degrade to a path-only card. Native surface
+  // presentation (surface swap): the frame presents on a surface window
+  // placed at the stage's rect, with the PNG transport as the fallback.
+  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  const viewport = useViewportUnderlay(
+    "image_edit",
+    path && isImage ? path : undefined,
+    1280,
+    view,
+    null,
+    underlayAnchorRef,
+  );
+  // A zoomed frame is the `1/zoom` window of the source, so its natural size
+  // shrinks with each zoom tick. Present it in the identity frame's box
+  // (`dims`, stable across zoom) so the window magnifies instead of the
+  // element shrinking in step — otherwise the on-screen scale never changes.
+  const zoomedStyle =
+    view.zoom > 1 && viewport.dims
+      ? { width: viewport.dims.w, height: viewport.dims.h, objectFit: "contain" as const }
+      : undefined;
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
@@ -154,13 +142,32 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
             </button>
           </div>
         </div>
-        <div className="media-viewer-stage fit" {...stageProps}>
+        <div
+          className={`media-viewer-stage fit${viewport.presented ? " presented" : ""}`}
+          {...stageProps}
+        >
+          <div ref={underlayAnchorRef} className="media-viewer-underlay-anchor" />
           {!path ? (
             <p className="muted">No “{layer?.label}” produced yet — run the node to generate it.</p>
           ) : !isImage ? (
             <p className="muted">No inline preview for this file type.</p>
+          ) : viewport.underlay ? (
+            <>
+              <img
+                className="media-viewer-img"
+                src={viewport.underlay}
+                alt={basename(path)}
+                draggable={false}
+                style={zoomedStyle}
+              />
+              <ViewportBackendBadge backend={viewport.backend} />
+            </>
+          ) : viewport.presented ? (
+            <ViewportBackendBadge backend={viewport.backend} />
+          ) : viewport.settled ? (
+            <p className="muted">preview unavailable (backend mocked)</p>
           ) : (
-            <PreviewImage path={path} view={view} />
+            <p className="muted">loading…</p>
           )}
         </div>
         {path ? (

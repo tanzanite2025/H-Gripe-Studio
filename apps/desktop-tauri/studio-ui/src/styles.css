@@ -703,6 +703,16 @@ button:disabled { opacity: 0.6; cursor: default; }
   background: #0c0e14;
   padding: 12px;
 }
+/* Placement anchor for the native surface (surface swap): sized to the
+   stage, painted by nothing — the surface below shows through. */
+.media-viewer-underlay-anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* Frame on the native surface window below the webview: drop the stage
+   background so the hole stays see-through. */
+.media-viewer-stage.presented { background: transparent; }
 /* Shared viewport backend badge (shared DeviceReport vocabulary): pinned to
    the presenting stage's bottom-right corner, like the program monitor's. */
 .viewport-backend-badge {

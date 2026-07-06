@@ -423,7 +423,14 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 module: &module,
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
-                targets: &[Some(format.into())],
+                // Straight-alpha blending: RGBA frames (cutouts, transparent
+                // sources) composite over the cleared app background, matching
+                // the PNG transport's `<img>` over the stage colour.
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,

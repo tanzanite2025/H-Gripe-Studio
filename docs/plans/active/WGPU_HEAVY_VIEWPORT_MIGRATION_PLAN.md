@@ -94,9 +94,15 @@ Remaining work (next stage), roughly in priority order:
    (`set_placement` / `presented` frames), and readback happens only when
    needed (export, scopes, colour picking). All viewport consumers present
    natively on desktop — the mask editor underlay, the crop editor underlay,
-   the program monitor, and the grade preview (grade panel slider ticks
-   re-run only the grade pass + blit, zero pixel IPC). The PNG/blob
-   transport stays as the browser-preview and no-adapter fallback path.
+   the program monitor, the grade preview (grade panel slider ticks
+   re-run only the grade pass + blit, zero pixel IPC), the media viewer
+   (fit mode; actual-size scrolling stays on the PNG transport), and the
+   preview gate (`PreviewModal`). The surface blit alpha-blends straight-alpha
+   frames over the cleared app background, so RGBA cutouts read like the
+   PNG transport's `<img>`. The PNG/blob transport stays as the
+   browser-preview and no-adapter fallback path; the layer-review panel
+   stays on it deliberately — its checkerboard stage conveys layer
+   transparency, which the opaque surface clear cannot represent.
 2. ✅ Interactive overlays on the live surface: the mask editor's committed
    overlays render host-side through `viewport_set_overlay_scene` — marquee
    marching ants, vector paths, brush/matte stroke bands, the ruler line,
