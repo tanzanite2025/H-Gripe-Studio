@@ -1715,8 +1715,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   max-height: 100%;
   touch-action: none;
   cursor: crosshair;
-  background:
-    repeating-conic-gradient(#1a1d26 0% 25%, #11131a 0% 50%) 50% / 24px 24px;
+  background: #11131a;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -1741,7 +1740,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   pointer-events: none;
 }
 /* Frame on the native surface window below the webview: drop the stage
-   checkerboard so the hole stays see-through. */
+   background so the hole stays see-through. */
 .crop-edit-stage.presented { background: transparent; }
 .crop-box {
   position: absolute;
@@ -2171,9 +2170,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   justify-content: center;
   min-height: 72px;
   max-height: 160px;
-  background:
-    repeating-conic-gradient(rgba(128, 128, 128, 0.18) 0% 25%, transparent 0% 50%)
-    0 0 / 16px 16px;
+  background: #11131a;
 }
 .layer-review-preview-img {
   max-width: 100%;

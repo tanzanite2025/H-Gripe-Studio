@@ -195,8 +195,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background:
-    repeating-conic-gradient(#1a1d26 0% 25%, var(--ps-tab-strip) 0% 50%) 50% / 24px 24px;
+  background: var(--ps-tab-strip);
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -221,7 +220,7 @@
   pointer-events: none;
 }
 /* Frame on the native surface window below the webview: drop the stage
-   checkerboard so the hole stays see-through. */
+   background so the hole stays see-through. */
 .mask-edit-stage.presented { background: transparent; }
 /* PS-style brush cursor: a ring of the brush tip's true diameter, centred on
    the pointer (left/top set imperatively). The dark outline keeps the white
@@ -857,8 +856,7 @@
   justify-content: center;
   font-size: 13px;
   color: var(--muted);
-  background:
-    repeating-conic-gradient(#3a3d46 0% 25%, #23252d 0% 50%) 50% / 10px 10px;
+  background: #23252d;
   border: 1px solid #4a4d57;
 }
 .mask-layer-name {
