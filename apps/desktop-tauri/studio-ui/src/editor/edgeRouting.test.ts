@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { chamferPath, chamferPoints, pointsToPath } from "@hgripe/flow";
+import {
+  cachedChamferPath,
+  chamferPath,
+  chamferPoints,
+  EDGE_LOD_ZOOM_THRESHOLD,
+  isEdgeLodActive,
+  pointsToPath,
+} from "@hgripe/flow";
 
 const s = { x: 0, y: 0 };
 
@@ -28,5 +35,28 @@ describe("chamferPoints / path", () => {
 
   it("uses a straight segment when the ports are already aligned", () => {
     expect(chamferPath(s, { x: 200, y: 0 })).toBe("M 0,0 L 200,0");
+  });
+});
+
+describe("cachedChamferPath", () => {
+  it("matches the uncached path and reuses the built string", () => {
+    const t = { x: 200, y: 50 };
+    const first = cachedChamferPath(s, t);
+    expect(first).toBe(chamferPath(s, t));
+    expect(cachedChamferPath(s, t)).toBe(first);
+    expect(cachedChamferPath({ x: 0, y: 0 }, { x: 200, y: 50 })).toBe(first);
+  });
+});
+
+describe("isEdgeLodActive", () => {
+  it("is active (simplified) below the threshold only", () => {
+    expect(isEdgeLodActive(EDGE_LOD_ZOOM_THRESHOLD - 0.1)).toBe(true);
+    expect(isEdgeLodActive(EDGE_LOD_ZOOM_THRESHOLD)).toBe(false);
+    expect(isEdgeLodActive(1)).toBe(false);
+  });
+
+  it("honours a custom threshold", () => {
+    expect(isEdgeLodActive(0.8, 0.9)).toBe(true);
+    expect(isEdgeLodActive(0.8, 0.5)).toBe(false);
   });
 });

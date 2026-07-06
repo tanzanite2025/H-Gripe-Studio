@@ -3,6 +3,7 @@ import {
   addEdge,
   BaseEdge,
   ReactFlow,
+  useStore,
   type Connection,
   type ConnectionLineComponentProps,
   type Edge,
@@ -10,13 +11,19 @@ import {
   type Node,
   type ReactFlowProps,
 } from "@xyflow/react";
-import { chamferPath } from "./edgeRouting";
+import { cachedChamferPath, chamferPath } from "./edgeRouting";
 import {
   EDGE_ARROW_MARKER,
   EDGE_STROKE_WIDTH,
   EDGE_STROKE_WIDTH_SELECTED,
   edgeMarkerId,
+  isEdgeLodActive,
 } from "./edgeVisual";
+
+// Boolean zoom selector: edges re-render only when crossing the LOD
+// threshold, not on every zoom tick.
+const selectEdgeLod = (s: { transform: [number, number, number] }) =>
+  isEdgeLodActive(s.transform[2]);
 
 export const HGRIPE_DATA_EDGE_TYPE = "chamfer";
 export const HGRIPE_BINDING_EDGE_TYPE = "binding";
@@ -142,7 +149,8 @@ export const ChamferEdge = memo(function ChamferEdge({
   selected,
   style,
 }: EdgeProps) {
-  const path = chamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const lod = useStore(selectEdgeLod) && !selected;
+  const path = cachedChamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
   const markerId = customStroke
     ? edgeMarkerId(DATA_ARROW_ID, id)
@@ -152,7 +160,7 @@ export const ChamferEdge = memo(function ChamferEdge({
 
   return (
     <>
-      {customStroke ? (
+      {customStroke && !lod ? (
         <defs>
           <ArrowMarker id={markerId} fill={customStroke} />
         </defs>
@@ -160,7 +168,7 @@ export const ChamferEdge = memo(function ChamferEdge({
       <BaseEdge
         id={id}
         path={path}
-        markerEnd={`url(#${markerId})`}
+        markerEnd={lod ? undefined : `url(#${markerId})`}
         style={{
           stroke: selected ? EDGE_STROKE_SELECTED : EDGE_STROKE,
           strokeWidth: selected ? EDGE_STROKE_WIDTH_SELECTED : EDGE_STROKE_WIDTH,
@@ -182,7 +190,8 @@ export const BindingEdge = memo(function BindingEdge({
   selected,
   style,
 }: EdgeProps) {
-  const path = chamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const lod = useStore(selectEdgeLod) && !selected;
+  const path = cachedChamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
   const markerId = customStroke
     ? edgeMarkerId(BINDING_ARROW_ID, id)
@@ -192,7 +201,7 @@ export const BindingEdge = memo(function BindingEdge({
 
   return (
     <>
-      {customStroke ? (
+      {customStroke && !lod ? (
         <defs>
           <ArrowMarker id={markerId} fill={customStroke} />
         </defs>
@@ -200,7 +209,7 @@ export const BindingEdge = memo(function BindingEdge({
       <BaseEdge
         id={id}
         path={path}
-        markerEnd={`url(#${markerId})`}
+        markerEnd={lod ? undefined : `url(#${markerId})`}
         style={{
           stroke: selected ? BINDING_STROKE_SELECTED : BINDING_STROKE,
           strokeWidth: selected ? EDGE_STROKE_WIDTH_SELECTED : EDGE_STROKE_WIDTH,

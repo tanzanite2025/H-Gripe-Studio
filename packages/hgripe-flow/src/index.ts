@@ -12,11 +12,13 @@ export {
 } from "@xyflow/react";
 
 export {
+  cachedChamferPath,
   chamferPath,
   chamferPoints,
   pointsToPath,
   type Pt,
 } from "./hgripe/edgeRouting";
+export { EDGE_LOD_ZOOM_THRESHOLD, isEdgeLodActive } from "./hgripe/edgeVisual";
 export {
   addHgripeDataEdge,
   HgripeFlow,

@@ -15,7 +15,7 @@ import {
 } from "@hgripe/flow";
 import "@hgripe/flow/style.css";
 
-import { useGraphEdges, useGraphHelperLines, useGraphNodes } from "./graphStore";
+import { useGraphEdges, useGraphHelperLines, useGraphNodes, useGraphView } from "./graphStore";
 import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
@@ -78,6 +78,9 @@ export function FlowCanvas({
   const nodes = useGraphNodes();
   const edges = useGraphEdges();
   const helperLines = useGraphHelperLines();
+  // Drag-aware view: referentially stable across in-drag position frames, so
+  // connection-validation structures below don't rebuild on every drag frame.
+  const graphView = useGraphView();
 
   // Restore the pane viewport when the shown canvas document changes (tab
   // switch). Skips the initial mount so `fitView` keeps framing the graph.
@@ -90,20 +93,25 @@ export function FlowCanvas({
     if (viewportRef.current) void setViewport(viewportRef.current);
   }, [viewportKey, setViewport]);
 
+  const viewNodes = graphView.nodes;
   const portType = useCallback(
     (nodeId: string | null, handleId: string | null | undefined, dir: "in" | "out") => {
-      const node = nodes.find((n) => n.id === nodeId);
+      const node = viewNodes.find((n) => n.id === nodeId);
       if (!node) return undefined;
       const spec = nodeSpec((node.data as { kind: string }).kind);
       const ports = dir === "in" ? spec.inputs : spec.outputs;
       return ports.find((p) => p.id === handleId)?.type;
     },
-    [nodes],
+    [viewNodes],
   );
 
   // Typed-port + acyclic connection validation. The cycle check's graph is
-  // memoized per nodes/edges revision, not rebuilt per hovered handle.
-  const workflowGraph = useMemo(() => toWorkflowGraph(nodes, edges), [nodes, edges]);
+  // memoized per *structural* revision (drag-aware view), so it is neither
+  // rebuilt per hovered handle nor per node-drag frame.
+  const workflowGraph = useMemo(
+    () => toWorkflowGraph(graphView.nodes, graphView.edges),
+    [graphView],
+  );
   const isValidConnection: IsValidConnection = useCallback(
     (c: Connection | Edge) => {
       const sourceType = portType(c.source, c.sourceHandle, "out");

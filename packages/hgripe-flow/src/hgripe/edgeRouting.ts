@@ -37,6 +37,22 @@ export function chamferPath(s: Pt, t: Pt): string {
   return pointsToPath(chamferPoints(s, t));
 }
 
+// Bounded memo over endpoint coordinates. Edge components re-render (and
+// remount, with viewport culling) far more often than their geometry changes,
+// so identical endpoint pairs reuse the built path string.
+const PATH_CACHE_LIMIT = 4096;
+const pathCache = new Map<string, string>();
+
+export function cachedChamferPath(s: Pt, t: Pt): string {
+  const key = `${s.x},${s.y},${t.x},${t.y}`;
+  const hit = pathCache.get(key);
+  if (hit !== undefined) return hit;
+  const path = chamferPath(s, t);
+  if (pathCache.size >= PATH_CACHE_LIMIT) pathCache.clear();
+  pathCache.set(key, path);
+  return path;
+}
+
 function round(n: number): number {
   return Math.round(n * 100) / 100;
 }

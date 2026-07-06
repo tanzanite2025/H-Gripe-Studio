@@ -4,6 +4,7 @@ import { nodeSpec } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";
 import { isLodActive } from "./lod";
+import { connectedInputPorts } from "./connectedPorts";
 import type { NodeStatus } from "../runtime/dag";
 import {
   generateThumbnail,
@@ -409,13 +410,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   });
   // Which input ports of this node currently have an incoming edge — used to
   // surface "image/template connected" hints on the PSD sink cards.
-  const connectedPorts = useStore((s) =>
-    s.edges
-      .filter((e) => e.target === id)
-      .map((e) => e.targetHandle ?? "")
-      .sort()
-      .join(","),
-  );
+  const connectedPorts = useStore((s) => connectedInputPorts(s.edges, id));
   const isConnected = (port: string) => connectedPorts.split(",").includes(port);
   // Params flagged `inline` are edited directly on the card.
   // `imageSource`/`psdTemplate` paths get a basename caption so
