@@ -32,7 +32,7 @@ import { getHelperLines } from "./editor/helperLines";
 import { setGraphHelperLines } from "./editor/graphStore";
 import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
-import type { WorkflowGraph } from "./graph/model";
+import { deserializeGraph, type WorkflowGraph } from "./graph/model";
 import { canvasDocumentTitle } from "./editor/canvasDocument";
 import { ProjectPanel } from "./editor/ProjectPanel";
 import { RedoIcon, Toolbar, UndoIcon } from "./editor/Toolbar";
@@ -58,6 +58,7 @@ import { validateGraph } from "./runtime/dag";
 import {
   isTauri,
   listenFileDrop,
+  readStudioAutosave,
   readStudioProjectManifest,
   writeStudioProjectManifest,
   mergeLayerMasks,
@@ -501,11 +502,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [selectedNode, layeredAsset, setNodes, setMessage],
   );
 
+  // The active graph in the renderer-agnostic model, shared by validation and
+  // the run HUD preview so each edit converts once.
+  const workflowGraph = useMemo(() => toWorkflowGraph(nodes, edges), [nodes, edges]);
+
   // Static validation surfaced in the toolbar (type mismatches, cycles, …).
-  const issues = useMemo(
-    () => validateGraph(toWorkflowGraph(nodes, edges)),
-    [nodes, edges],
-  );
+  const issues = useMemo(() => validateGraph(workflowGraph), [workflowGraph]);
 
   // File/persistence layer: workspace autosave, explicit save/open into a
   // project folder, recent files, and the project-scoped snapshot history. The
@@ -521,7 +523,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setMessage,
     sampleNodes: initialNodes,
     sampleEdges: initialEdges,
-    restoredOnMount: restoredOnMount.current,
     openInCanvasTab: useCallback(
       (graph: WorkflowGraph, path: string | null) => {
         const { nodes, edges } = fromWorkflowGraph(graph);
@@ -531,7 +532,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     ),
   });
   const {
-    saved,
     currentFile,
     fileDirty,
     projectDir,
@@ -570,7 +570,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     autoSnapshotBeforeRun,
     suppressNextDirty,
     adoptFileState,
-    autosaveRestoreDone,
   } = file;
 
   // Tab switches park/rebind the controller-owned file state (path + dirty);
@@ -592,19 +591,19 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     if (stored > 1) applyGpuMaxJobs(stored).catch(() => {});
   }, []);
 
-  // Restore the persisted project manifest (open canvas tabs) once on mount
-  // (multi-canvas plan Phase 4). When a manifest exists it wins over the
-  // legacy single-graph autosave the file controller restores.
+  // Restore the persisted project manifest (open canvas tabs) once on mount.
+  // The manifest is the workspace autosave; workspaces that predate it fall
+  // back to the legacy single-graph autosave once (desktop) or the
+  // localStorage graph already seeded into the initial canvas (browser).
   const manifestRestored = useRef(false);
   // Persisting is held until the restore settles, so a fresh session never
   // overwrites the previous session's manifest with its initial single tab.
   const [manifestReady, setManifestReady] = useState(false);
   useEffect(() => {
-    // Wait for the legacy restore to settle so the manifest applies on top.
-    if (!autosaveRestoreDone || manifestRestored.current) return;
+    if (manifestRestored.current) return;
     manifestRestored.current = true;
     const apply = (manifest: ProjectManifest | null) => {
-      if (!manifest) return;
+      if (!manifest) return false;
       canvas.restoreCanvases(
         manifest.activeCanvasId,
         manifest.canvases.map((c) => {
@@ -622,10 +621,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         }),
       );
       setMessage(t("canvasTabs.restored"));
+      return true;
     };
     if (isDesktop) {
       void readStudioProjectManifest()
-        .then((raw) => apply(parseProjectManifest(raw)))
+        .then(async (raw) => {
+          if (apply(parseProjectManifest(raw))) return;
+          const legacy = await readStudioAutosave();
+          if (!legacy) return;
+          const restored = fromWorkflowGraph(deserializeGraph(legacy));
+          suppressNextDirty();
+          setNodes(restored.nodes);
+          setEdges(restored.edges);
+          setSelectedId(null);
+          setMessage("restored desktop workflow");
+        })
         .catch((err) => setMessage(`project manifest restore failed: ${String(err)}`))
         .finally(() => setManifestReady(true));
     } else {
@@ -633,12 +643,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       setManifestReady(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autosaveRestoreDone]);
+  }, []);
 
   // Persist the project manifest (debounced) so the tab set survives a
-  // restart. Runs alongside the legacy single-graph autosave.
+  // restart; this is the workspace autosave, and `saved` drives the
+  // status-bar autosave indicator.
+  const [saved, setSaved] = useState(true);
   useEffect(() => {
     if (!manifestReady) return;
+    setSaved(false);
+    let cancelled = false;
     const timer = setTimeout(() => {
       const { activeCanvasId, canvases } = canvas.exportCanvases({
         path: currentFile,
@@ -658,14 +672,22 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         })),
       };
       if (isDesktop) {
-        void writeStudioProjectManifest(serializeProjectManifest(manifest)).catch((err) =>
-          setMessage(`project manifest save failed: ${String(err)}`),
-        );
+        void writeStudioProjectManifest(serializeProjectManifest(manifest))
+          .then(() => {
+            if (!cancelled) setSaved(true);
+          })
+          .catch((err) => {
+            if (!cancelled) setMessage(`project manifest save failed: ${String(err)}`);
+          });
       } else {
         saveLocalProjectManifest(manifest);
+        setSaved(true);
       }
     }, 500);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [manifestReady, canvas, nodes, edges, selectedId, currentFile, fileDirty, isDesktop, setMessage]);
 
   // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
@@ -1698,8 +1720,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 onPaneContextMenu={openPaneMenu}
               />
               <RunHud
-                nodes={nodes}
-                edges={edges}
+                graph={workflowGraph}
                 running={running}
                 canCancel={canCancel}
                 issueCount={issues.length}

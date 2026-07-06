@@ -1,10 +1,6 @@
-// Canvas document shell (multi-canvas workspace plan, Phase 2): the graph the
-// editor shows is one document inside a project, not the app's whole state.
-// Wrapping the current single canvas in a `CanvasDocument` gives tabs (Phase 3)
-// and the project manifest (Phase 4) a stable shape without changing the
-// persisted workflow format.
-
-import type { Edge, Node } from "@hgripe/flow";
+// Canvas document identity and title helpers (multi-canvas workspace): each
+// canvas tab carries a stable document id (also the undo/snapshot scope key)
+// and a path-derived display title.
 
 /** React Flow pane viewport (flow-space translate + zoom). */
 export interface CanvasViewport {
@@ -14,27 +10,6 @@ export interface CanvasViewport {
 }
 
 export const DEFAULT_CANVAS_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 };
-
-export type CanvasRunState = "idle" | "running" | "failed" | "complete";
-
-/** One canvas tab: a workflow graph plus its own view/selection/file state. */
-export interface CanvasDocument {
-  id: string;
-  /** Display title: the backing file's base name, or the untitled label. */
-  title: string;
-  /** On-disk workflow backing the canvas (null = untitled). */
-  path: string | null;
-  kind: "workflow";
-  nodes: Node[];
-  edges: Edge[];
-  /** Unsaved edits against `path` (separate from workspace autosave). */
-  dirty: boolean;
-  selectedNodeId: string | null;
-  viewport: CanvasViewport;
-  /** Undo/snapshot scope key so one canvas never overwrites another's stack. */
-  historyScopeId: string;
-  runState: CanvasRunState;
-}
 
 export function newCanvasDocumentId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();

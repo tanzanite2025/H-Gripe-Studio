@@ -62,7 +62,6 @@ function setup(nodes: Node[], edges: Edge[] = []) {
     setMessage,
     sampleNodes,
     sampleEdges,
-    restoredOnMount: false,
   };
   return { options, setNodes, setEdges, setSelectedId, takeSnapshot, setMessage };
 }

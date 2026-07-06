@@ -26,7 +26,7 @@ import {
   type Snapshot,
 } from "./snapshots";
 import { useProjectScopedStore } from "./useProjectScopedStore";
-import { clearPersistedGraph, persistGraph } from "./persist";
+import { clearPersistedGraph } from "./persist";
 import { deserializeGraph, serializeGraph, type WorkflowGraph } from "../graph/model";
 import {
   clearStudioAutosave,
@@ -37,12 +37,10 @@ import {
   pickProjectFolder,
   pickWorkflowOpenPath,
   pickWorkflowSavePath,
-  readStudioAutosave,
   readStudioRecents,
   readStudioSnapshots,
   readStudioWorkflow,
   renameStudioWorkflow,
-  writeStudioAutosave,
   writeStudioRecents,
   writeStudioSnapshots,
   writeStudioWorkflow,
@@ -64,8 +62,6 @@ export interface StudioFileControllerOptions {
   /** Pre-wired sample graph, restored by "reset to sample". */
   sampleNodes: Node[];
   sampleEdges: Edge[];
-  /** Whether a persisted workflow was restored on mount (seeds `saved`). */
-  restoredOnMount: boolean;
   /**
    * Open a loaded workflow in a new canvas tab instead of replacing the
    * active graph (multi-canvas workspace plan: "Open Workflow" imports into
@@ -78,14 +74,10 @@ export interface StudioFileControllerOptions {
 }
 
 export interface StudioFileController {
-  // --- workspace autosave ---
-  /** True once the latest edit has been autosaved to the workspace. */
-  saved: boolean;
-
   // --- explicit save/open + project folder ---
   /** On-disk workflow backing the editor (null = untitled). */
   currentFile: string | null;
-  /** Unsaved edits against `currentFile` (separate from autosave). */
+  /** Unsaved edits against `currentFile` (separate from the workspace autosave). */
   fileDirty: boolean;
   projectDir: string | null;
   workflowFiles: StudioWorkflowFile[];
@@ -134,16 +126,14 @@ export interface StudioFileController {
   suppressNextDirty: () => void;
   /** Rebind the file state (path + dirty) when the active canvas changes. */
   adoptFileState: (path: string | null, dirty: boolean) => void;
-  /** True once the desktop autosave restore settled (immediately in browser). */
-  autosaveRestoreDone: boolean;
 }
 
-// Owns the studio's file/persistence layer: workspace autosave, explicit
-// save/open into a project folder, the recent-files list, and the project-
-// scoped snapshot history. The graph editor (node/edge mutation, selection,
-// undo history) stays in the caller and is reached through the supplied
-// setters; this hook only swaps whole graphs in/out and tracks their on-disk
-// state. Run/log/history live in useStudioRunController.
+// Owns the studio's file layer: explicit save/open into a project folder,
+// the recent-files list, and the project-scoped snapshot history. The graph
+// editor (node/edge mutation, selection, undo history) stays in the caller
+// and is reached through the supplied setters; this hook only swaps whole
+// graphs in/out and tracks their on-disk state. The workspace autosave is
+// the project manifest (App). Run/log/history live in useStudioRunController.
 export function useStudioFileController({
   nodes,
   edges,
@@ -154,13 +144,9 @@ export function useStudioFileController({
   setMessage,
   sampleNodes,
   sampleEdges,
-  restoredOnMount,
   openInCanvasTab,
 }: StudioFileControllerOptions): StudioFileController {
   const isDesktop = isTauri();
-
-  const [saved, setSaved] = useState(restoredOnMount);
-  const [desktopAutosaveReady, setDesktopAutosaveReady] = useState(!isDesktop);
 
   const [projectDir, setProjectDir] = useState<string | null>(null);
   const [workflowFiles, setWorkflowFiles] = useState<StudioWorkflowFile[]>([]);
@@ -202,33 +188,6 @@ export function useStudioFileController({
     },
     [setNodes, setEdges, setSelectedId],
   );
-
-  // Restore the last autosaved desktop workflow on mount.
-  useEffect(() => {
-    if (!isDesktop) return;
-    let cancelled = false;
-    void readStudioAutosave()
-      .then((raw) => {
-        if (cancelled || !raw) return;
-        const graph = deserializeGraph(raw);
-        const next = fromWorkflowGraph(graph);
-        skipDirty.current = true;
-        setNodes(next.nodes);
-        setEdges(next.edges);
-        setSelectedId(null);
-        setSaved(true);
-        setMessage("restored desktop workflow");
-      })
-      .catch((err) => {
-        if (!cancelled) setMessage(`desktop autosave restore failed: ${String(err)}`);
-      })
-      .finally(() => {
-        if (!cancelled) setDesktopAutosaveReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isDesktop, setNodes, setEdges, setSelectedId, setMessage]);
 
   // Project-scoped snapshot store: persisted into the selected project folder
   // on desktop (so it travels with the project), else to localStorage.
@@ -649,39 +608,8 @@ export function useStudioFileController({
     return () => window.removeEventListener("beforeunload", handler);
   }, [fileDirty]);
 
-  // Autosave to the workspace (debounced). Desktop builds persist through the
-  // Rust backend; browser preview falls back to localStorage.
-  useEffect(() => {
-    if (isDesktop && !desktopAutosaveReady) return;
-    setSaved(false);
-    let cancelled = false;
-    const t = setTimeout(() => {
-      const graph = toWorkflowGraph(nodes, edges);
-      if (isDesktop) {
-        void writeStudioAutosave(graph)
-          .then(() => {
-            if (!cancelled) setSaved(true);
-          })
-          .catch((err) => {
-            if (!cancelled) {
-              setSaved(false);
-              setMessage(`autosave failed: ${String(err)}`);
-            }
-          });
-      } else {
-        persistGraph(graph);
-        setSaved(true);
-      }
-    }, 500);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [nodes, edges, desktopAutosaveReady, isDesktop, setMessage]);
-
   return useMemo(
     () => ({
-      saved,
       currentFile,
       fileDirty,
       projectDir,
@@ -721,10 +649,8 @@ export function useStudioFileController({
       autoSnapshotBeforeRun,
       suppressNextDirty,
       adoptFileState,
-      autosaveRestoreDone: desktopAutosaveReady,
     }),
     [
-      saved,
       currentFile,
       fileDirty,
       projectDir,
@@ -760,7 +686,6 @@ export function useStudioFileController({
       autoSnapshotBeforeRun,
       suppressNextDirty,
       adoptFileState,
-      desktopAutosaveReady,
     ],
   );
 }

@@ -230,22 +230,4 @@ describe("useCanvasDocument tabs", () => {
     expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
     expect(file.set).toHaveBeenLastCalledWith("C:/flows/a.json", false);
   });
-
-  it("describe reports the wrapper plus controller-owned state", () => {
-    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
-    const doc = result.current.describe({
-      path: "C:/flows/hero.json",
-      dirty: true,
-      runState: "running",
-      untitledLabel: "untitled",
-    });
-    expect(doc).toMatchObject({
-      id: result.current.documentId,
-      title: "hero.json",
-      kind: "workflow",
-      dirty: true,
-      runState: "running",
-      historyScopeId: result.current.documentId,
-    });
-  });
 });

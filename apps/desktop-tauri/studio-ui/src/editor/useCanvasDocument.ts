@@ -19,14 +19,7 @@ import {
   useGraphView,
   type GraphUpdater,
 } from "./graphStore";
-import {
-  canvasDocumentTitle,
-  DEFAULT_CANVAS_VIEWPORT,
-  newCanvasDocumentId,
-  type CanvasDocument,
-  type CanvasRunState,
-  type CanvasViewport,
-} from "./canvasDocument";
+import { DEFAULT_CANVAS_VIEWPORT, newCanvasDocumentId, type CanvasViewport } from "./canvasDocument";
 
 /** Parked (inactive) canvas state, restored verbatim on tab activation. */
 interface StoredCanvas {
@@ -107,13 +100,6 @@ export interface UseCanvasDocument {
   };
   /** Replace all open canvases with a restored set (startup restore). */
   restoreCanvases: (activeCanvasId: string, canvases: CanvasSnapshotState[]) => void;
-  /** Assemble the full document with controller-owned file/run state. */
-  describe: (state: {
-    path: string | null;
-    dirty: boolean;
-    runState: CanvasRunState;
-    untitledLabel: string;
-  }) => CanvasDocument;
 }
 
 export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): UseCanvasDocument {
@@ -301,33 +287,6 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
     [loadCanvas],
   );
 
-  const describe = useCallback(
-    ({
-      path,
-      dirty,
-      runState,
-      untitledLabel,
-    }: {
-      path: string | null;
-      dirty: boolean;
-      runState: CanvasRunState;
-      untitledLabel: string;
-    }): CanvasDocument => ({
-      id: documentId,
-      title: canvasDocumentTitle(path, untitledLabel),
-      path,
-      kind: "workflow",
-      nodes,
-      edges,
-      dirty,
-      selectedNodeId: selectedId,
-      viewport,
-      historyScopeId: documentId,
-      runState,
-    }),
-    [documentId, nodes, edges, selectedId, viewport],
-  );
-
   return useMemo(
     () => ({
       nodes,
@@ -350,7 +309,6 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       renameCanvas,
       exportCanvases,
       restoreCanvases,
-      describe,
     }),
     [
       nodes,
@@ -367,7 +325,6 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       renameCanvas,
       exportCanvases,
       restoreCanvases,
-      describe,
     ],
   );
 }
