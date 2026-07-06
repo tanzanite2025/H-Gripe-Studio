@@ -3,16 +3,13 @@
 import type { CSSProperties, HTMLAttributes, ReactNode, MouseEvent as ReactMouseEvent, ComponentType } from 'react';
 import type {
   EdgeBase,
-  BezierPathOptions,
   Position,
-  SmoothStepPathOptions,
   DefaultEdgeOptionsBase,
   HandleType,
   Connection,
   ConnectionLineType,
   Handle,
   EdgePosition,
-  StepPathOptions,
   OnError,
   FinalConnectionState,
 } from '@xyflow/system';
@@ -42,25 +39,6 @@ export type Edge<
     reconnectable?: boolean | HandleType;
     focusable?: boolean;
   };
-
-type SmoothStepEdge<EdgeData extends Record<string, unknown> = Record<string, unknown>> = Edge<
-  EdgeData,
-  'smoothstep'
-> & {
-  pathOptions?: SmoothStepPathOptions;
-};
-
-type BezierEdge<EdgeData extends Record<string, unknown> = Record<string, unknown>> = Edge<EdgeData, 'default'> & {
-  pathOptions?: BezierPathOptions;
-};
-
-type StepEdge<EdgeData extends Record<string, unknown> = Record<string, unknown>> = Edge<EdgeData, 'step'> & {
-  pathOptions?: StepPathOptions;
-};
-
-type StraightEdge<EdgeData extends Record<string, unknown> = Record<string, unknown>> = Edge<EdgeData, 'straight'>;
-
-export type BuiltInEdge = SmoothStepEdge | BezierEdge | StepEdge | StraightEdge;
 
 export type EdgeMouseHandler<EdgeType extends Edge = Edge> = (event: ReactMouseEvent, edge: EdgeType) => void;
 
@@ -159,40 +137,6 @@ export type EdgeComponentProps = EdgePosition &
     sourceHandleId?: EdgeProps['sourceHandleId'];
     targetHandleId?: EdgeProps['targetHandleId'];
   };
-
-export type EdgeComponentWithPathOptions<PathOptions> = EdgeComponentProps & {
-  pathOptions?: PathOptions;
-};
-
-/**
- * BezierEdge component props
- * @public
- */
-export type BezierEdgeProps = EdgeComponentWithPathOptions<BezierPathOptions>;
-
-/**
- * SmoothStepEdge component props
- * @public
- */
-export type SmoothStepEdgeProps = EdgeComponentWithPathOptions<SmoothStepPathOptions>;
-
-/**
- * StepEdge component props
- * @public
- */
-export type StepEdgeProps = EdgeComponentWithPathOptions<StepPathOptions>;
-
-/**
- * StraightEdge component props
- * @public
- */
-export type StraightEdgeProps = Omit<EdgeComponentProps, 'sourcePosition' | 'targetPosition'>;
-
-/**
- * SimpleBezier component props
- * @public
- */
-export type SimpleBezierEdgeProps = EdgeComponentProps;
 
 export type OnReconnect<EdgeType extends Edge = Edge> = (oldEdge: EdgeType, newConnection: Connection) => void;
 

@@ -307,9 +307,11 @@ prove the app still works.
     every product edge must come from `HgripeFlow`'s edge type map. The
     default `ConnectionLine`'s simple-bezier case now draws a bezier (the
     product always supplies a custom connection line component).
-  - Remaining candidate: built-in node components (input / output / default /
-    group) once `NodeWrapper`'s `builtinNodeTypes` fallback is narrowed to
-    Studio types.
+  - Deleted the built-in node components (input / output / default / group)
+    and the `BuiltInNode` / `BuiltInEdge` types. `builtinNodeTypes.default`
+    now renders nothing; every node must come from the `nodeTypes` map the
+    app passes to `HgripeFlow` (currently `hgripe` and `group`, both
+    Studio-owned components).
 - Studio imports must route through `@hgripe/flow`, not directly through
   `@xyflow/react`.
 - The adapter is no longer a blanket re-export. It exposes only the React Flow
