@@ -316,6 +316,17 @@ export const LAYER_BLENDS = ["normal", "multiply", "screen", "darken", "lighten"
 export type LayerBlend = (typeof LAYER_BLENDS)[number];
 
 /**
+ * Lightweight visual grouping for the layer panel. This is not a Photoshop
+ * folder and does not change stack order or compositing; it only tags layers
+ * with a stable name/colour so related layers are easier to find.
+ */
+export interface LayerGroup {
+  id: string;
+  name: string;
+  color: string;
+}
+
+/**
  * Tone-mapping kinds an adjustment layer can carry (M6). The document is
  * grayscale (mask surfaces), so the PS set maps to the greyscale tone curve:
  * `levels` (input / gamma / output), a free `curve` (control points → LUT),
@@ -435,6 +446,8 @@ export interface MaskLayer {
   locked?: boolean;
   /** PS layer link: transforms recorded on one linked layer mirror to all. */
   linked?: boolean;
+  /** Optional visual group tag; absent means the layer keeps the default row style. */
+  groupId?: string;
   /** The layer's ordered edit stack, replayed in recorded order. */
   ops: EditOp[];
   /** The tone map an `"adjustment"` layer applies (revisable at any time). */
@@ -465,6 +478,8 @@ export interface MaskDocument {
   points: PointPrompt[];
   /** Requested output size (PS Image Size); absent ⇒ keep the source size. */
   canvas?: ImageCanvasSize;
+  /** Visual layer tags. Empty means every layer keeps the default row style. */
+  layerGroups: LayerGroup[];
 }
 
 export function emptyMaskLayer(name = "Background"): MaskLayer {
@@ -489,7 +504,7 @@ export function emptyAdjustmentLayer(type: AdjustmentType, name?: string): MaskL
 }
 
 export function emptyMaskDocument(): MaskDocument {
-  return { version: 3, layers: [emptyMaskLayer()], active: 0, matte_strokes: [], points: [] };
+  return { version: 3, layers: [emptyMaskLayer()], active: 0, matte_strokes: [], points: [], layerGroups: [] };
 }
 
 /** The layer new edits are recorded onto (always present, clamped). */

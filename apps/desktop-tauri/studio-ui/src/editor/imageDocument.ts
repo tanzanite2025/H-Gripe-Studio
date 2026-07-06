@@ -14,6 +14,7 @@ import type {
   ImageCanvasSize,
   LayerAdjustment,
   LayerBlend,
+  LayerGroup,
   MaskDocument,
   MaskLayer,
 } from "../types/production";
@@ -67,6 +68,8 @@ export interface ImageLayer {
   visible: boolean;
   locked?: boolean;
   linked?: boolean;
+  /** Optional visual group tag; absent means default layer-row styling. */
+  groupId?: string;
   /** Layer mask gating the layer's effect (mask results land here). */
   mask?: ImageLayerMask;
   /** Clipping mask (Alt+Ctrl+G): composite only inside the layer below. */
@@ -89,6 +92,8 @@ export interface ImageDocument {
   matte_strokes: MaskDocument["matte_strokes"];
   /** Carried through from a bridged mask document (SAM 2 point prompts). */
   points: MaskDocument["points"];
+  /** Visual layer tags carried through the mask/document bridge. */
+  layerGroups: LayerGroup[];
 }
 
 export function emptyImageLayer(name = "Background"): ImageLayer {
@@ -103,7 +108,7 @@ export function emptyImageLayer(name = "Background"): ImageLayer {
 }
 
 export function emptyImageDocument(): ImageDocument {
-  return { version: 1, layers: [emptyImageLayer()], active: 0, matte_strokes: [], points: [] };
+  return { version: 1, layers: [emptyImageLayer()], active: 0, matte_strokes: [], points: [], layerGroups: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +131,7 @@ function fromMaskLayer(l: MaskLayer): ImageLayer {
     visible: l.visible,
     ...(l.locked !== undefined ? { locked: l.locked } : null),
     ...(l.linked !== undefined ? { linked: l.linked } : null),
+    ...(l.groupId !== undefined ? { groupId: l.groupId } : null),
   };
 }
 
@@ -138,6 +144,7 @@ export function fromMaskDocument(doc: MaskDocument): ImageDocument {
     ...(doc.canvas !== undefined ? { canvas: doc.canvas } : null),
     matte_strokes: doc.matte_strokes,
     points: doc.points,
+    layerGroups: doc.layerGroups,
   };
 }
 
@@ -158,6 +165,7 @@ function toMaskLayer(l: ImageLayer): MaskLayer | null {
     visible: l.visible,
     ...(l.locked !== undefined ? { locked: l.locked } : null),
     ...(l.linked !== undefined ? { linked: l.linked } : null),
+    ...(l.groupId !== undefined ? { groupId: l.groupId } : null),
   };
   return l.layer.kind === "adjustment"
     ? { ...base, kind: "adjustment", ops: [], ...(l.layer.adjustment !== undefined ? { adjustment: l.layer.adjustment } : null) }
@@ -185,5 +193,6 @@ export function toMaskDocument(doc: ImageDocument): MaskDocument | null {
     matte_strokes: doc.matte_strokes,
     points: doc.points,
     ...(doc.canvas !== undefined ? { canvas: doc.canvas } : null),
+    layerGroups: doc.layerGroups,
   };
 }

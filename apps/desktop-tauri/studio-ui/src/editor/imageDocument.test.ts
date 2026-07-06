@@ -16,6 +16,11 @@ import {
 
 function sampleMaskDocument(): MaskDocument {
   const doc = emptyMaskDocument();
+  doc.layerGroups = [
+    { id: "g1", name: "Subject", color: "#5aa7ff" },
+    { id: "g2", name: "Light", color: "#59c98f" },
+  ];
+  doc.layers[0].groupId = "g1";
   doc.layers[0].ops = [
     { type: "brush", points: [[1, 2]], size: 12, mode: "add" } as unknown as EditOp,
     { type: "feather", amount: 3 } as EditOp,
@@ -25,6 +30,7 @@ function sampleMaskDocument(): MaskDocument {
   top.opacity = 0.5;
   top.locked = true;
   top.linked = false;
+  top.groupId = "g2";
   const adj = emptyAdjustmentLayer("levels", "Levels 1");
   adj.adjustment = { type: "levels", in_black: 10, gamma: 1.2 };
   doc.layers.push(top, adj);
@@ -44,6 +50,8 @@ describe("imageDocument bridge", () => {
   it("maps layer kinds across the bridge", () => {
     const image = fromMaskDocument(sampleMaskDocument());
     expect(image.layers.map((l) => l.layer.kind)).toEqual(["pixel", "pixel", "adjustment"]);
+    expect(image.layers.map((l) => l.groupId)).toEqual(["g1", "g2", undefined]);
+    expect(image.layerGroups.map((group) => group.name)).toEqual(["Subject", "Light"]);
     expect(image.active).toBe(1);
     expect(image.canvas).toEqual({ w: 800, h: 600, resample: "bicubic" });
     const adj = image.layers[2].layer;

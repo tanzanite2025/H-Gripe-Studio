@@ -24,6 +24,8 @@ import {
   removeOp,
   setActiveLayer,
   setLayerBlend,
+  setLayerGroup,
+  setLayerGroups,
   setLayerOpacity,
   toggleLayerLink,
   toggleLayerLock,
@@ -119,6 +121,29 @@ describe("maskEdit normalizeEditPaths", () => {
     expect(e.layers[1].opacity).toBe(1); // clamped
     expect(e.layers[1].visible).toBe(false);
     expect(e.active).toBe(1); // clamped into range
+  });
+
+  it("normalizes visual layer groups as tags without changing stack order", () => {
+    const e = normalizeEditPaths({
+      version: 3,
+      layerGroups: [
+        { id: "g1", name: "Subject", color: "#FFAA00" },
+        { id: "bad", name: "", color: "#000000" },
+        { id: "g2", name: "Light", color: "#59c98f" },
+        { id: "bad-color", name: "Skip", color: "not-a-color" },
+      ],
+      layers: [
+        { name: "bg", groupId: "g1", ops: [] },
+        { name: "middle", groupId: "missing", ops: [] },
+        { name: "top", groupId: "g2", ops: [] },
+      ],
+    });
+    expect(e.layerGroups).toEqual([
+      { id: "g1", name: "Subject", color: "#ffaa00" },
+      { id: "g2", name: "Light", color: "#59c98f" },
+    ]);
+    expect(e.layers.map((layer) => layer.name)).toEqual(["bg", "middle", "top"]);
+    expect(e.layers.map((layer) => layer.groupId)).toEqual(["g1", undefined, "g2"]);
   });
 });
 
@@ -464,6 +489,35 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers[1].opacity).toBe(0.4);
     s = undo(s);
     expect(s.current.layers[1].opacity).toBe(1);
+  });
+
+  it("assigns optional visual layer groups without reordering layers", () => {
+    let s = initEditState();
+    s = addLayer(s, "Top");
+    s = setLayerGroups(s, [{ id: "g1", name: "Subject", color: "#5aa7ff" }]);
+    s = setLayerGroup(s, 0, "g1");
+    expect(s.current.layers.map((layer) => layer.name)).toEqual(["Background", "Top"]);
+    expect(s.current.layers[0].groupId).toBe("g1");
+    expect(s.current.layers[1].groupId).toBeUndefined();
+    s = setLayerGroup(s, 0, null);
+    expect(s.current.layers[0].groupId).toBeUndefined();
+    s = setLayerGroup(s, 1, "missing");
+    expect(s.current.layers[1].groupId).toBeUndefined();
+    s = setLayerGroup(s, 1, "g1");
+    s = setLayerGroups(s, []);
+    expect(s.current.layerGroups).toEqual([]);
+    expect(s.current.layers.map((layer) => layer.groupId)).toEqual([undefined, undefined]);
+    expect(s.current.layers.map((layer) => layer.name)).toEqual(["Background", "Top"]);
+  });
+
+  it("appends new visual layer groups instead of replacing existing tags", () => {
+    let s = initEditState();
+    s = setLayerGroups(s, [{ id: "g1", name: "2", color: "#5aa7ff" }]);
+    s = setLayerGroups(s, [
+      ...s.current.layerGroups,
+      { id: "g2", name: "我", color: "#59c98f" },
+    ]);
+    expect(s.current.layerGroups.map((group) => group.name)).toEqual(["2", "我"]);
   });
 
   it("seeds from an initial EditPaths (including a legacy version-1 value)", () => {

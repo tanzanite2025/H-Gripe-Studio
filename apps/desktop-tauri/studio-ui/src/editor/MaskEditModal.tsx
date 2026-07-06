@@ -2400,9 +2400,10 @@ export function MaskEditModal({
                   id: "layers",
                   label: t("mask.layers", { count: layers.length }),
                   content: (
-            <LayersPanel
-              layers={layers}
-              active={state.current.active}
+              <LayersPanel
+                layers={layers}
+                layerGroups={state.current.layerGroups}
+                active={state.current.active}
               dims={dims}
               imagePath={imagePath}
               workspace={workspace}

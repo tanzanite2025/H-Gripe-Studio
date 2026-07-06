@@ -21,6 +21,8 @@ import {
   setActiveLayer,
   setCanvasSize,
   setLayerBlend,
+  setLayerGroup,
+  setLayerGroups,
   setLayerOpacity,
   toggleLayerLink,
   toggleLayerLock,
@@ -43,6 +45,7 @@ import type {
   ImageCanvasSize,
   LayerAdjustment,
   LayerBlend,
+  LayerGroup,
   MaskOperation,
   PointPrompt,
 } from "../../types/production";
@@ -76,6 +79,8 @@ export type MaskEditAction =
   | { type: "layer_link"; index: number }
   | { type: "layer_opacity"; index: number; opacity: number }
   | { type: "layer_blend"; index: number; blend: LayerBlend }
+  | { type: "layer_groups"; groups: LayerGroup[] }
+  | { type: "layer_group"; index: number; groupId: string | null }
   | { type: "canvas_size"; canvas: ImageCanvasSize };
 
 export type MaskEditDispatch = (action: MaskEditAction) => void;
@@ -144,6 +149,10 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return setLayerOpacity(state, action.index, action.opacity);
     case "layer_blend":
       return setLayerBlend(state, action.index, action.blend);
+    case "layer_groups":
+      return setLayerGroups(state, action.groups);
+    case "layer_group":
+      return setLayerGroup(state, action.index, action.groupId);
     case "canvas_size":
       return setCanvasSize(state, action.canvas);
   }

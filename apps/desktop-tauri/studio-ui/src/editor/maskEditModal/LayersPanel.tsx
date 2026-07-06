@@ -1,11 +1,12 @@
 // Right rail "Layers" panel block: the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { LayerBlend, MaskLayer } from "../../types/production";
+import type { LayerBlend, LayerGroup, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
+import { LAYER_GROUP_COLORS } from "../maskEdit";
 import { buildLayerThumb } from "../maskMorphology";
 import type { MaskEditDispatch } from "./actions";
 
@@ -13,6 +14,7 @@ const LAYER_MIME = "application/x-hgripe-layer";
 
 interface LayersPanelProps {
   layers: readonly MaskLayer[];
+  layerGroups: readonly LayerGroup[];
   active: number;
   /** Image size (px); the thumbnail replay space. */
   dims: { w: number; h: number };
@@ -82,15 +84,56 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
+const GROUP_SPLIT = /[,;\n\uFF0C\uFF1B]+/;
+
+function groupNamesFromDraft(draft: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const raw of draft.split(GROUP_SPLIT)) {
+    const name = raw.trim();
+    const key = name.toLocaleLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
+function newLayerGroupId(): string {
+  return `group-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function groupsFromDraft(draft: string, current: readonly LayerGroup[]): LayerGroup[] {
+  const existingNames = new Set(current.map((group) => group.name.toLocaleLowerCase()));
+  const additions = groupNamesFromDraft(draft)
+    .filter((name) => !existingNames.has(name.toLocaleLowerCase()))
+    .map((name, index) => {
+      const colorIndex = current.length + index;
+      return {
+        id: newLayerGroupId(),
+        name,
+        color: LAYER_GROUP_COLORS[colorIndex % LAYER_GROUP_COLORS.length],
+      };
+    });
+  return [...current, ...additions];
+}
+
+function groupStyle(group: LayerGroup): CSSProperties {
+  return { "--mask-layer-group-color": group.color } as CSSProperties;
+}
+
+export function LayersPanel({ layers, layerGroups, active, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   const [renaming, setRenaming] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [groupDraft, setGroupDraft] = useState("");
   // PS multi-select: extra selected layers (by id, so reorders keep them)
   // beyond the active one; Ctrl/Alt+click toggles, Shift+click ranges.
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const groupById = useMemo(() => new Map(layerGroups.map((group) => [group.id, group])), [layerGroups]);
 
   const selectedIndices = useMemo(() => {
     const set = new Set<number>();
@@ -152,6 +195,16 @@ export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask
     setRenaming(null);
   };
 
+  const commitGroups = () => {
+    if (!groupDraft.trim()) return;
+    dispatch({ type: "layer_groups", groups: groupsFromDraft(groupDraft, layerGroups) });
+    setGroupDraft("");
+  };
+
+  const removeGroup = (groupId: string) => {
+    dispatch({ type: "layer_groups", groups: layerGroups.filter((group) => group.id !== groupId) });
+  };
+
   const allowLayerDrop = (e: DragEvent) => {
     if (e.dataTransfer.types.includes(LAYER_MIME)) e.preventDefault();
   };
@@ -202,9 +255,53 @@ export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask
         </label>
       </div>
 
+      <div className="mask-layer-groups">
+        <label className="mask-layer-groups-label">
+          <span className="muted">{t("mask.layerGroupsLabel")}</span>
+          <input
+            className="mask-layer-groups-input"
+            value={groupDraft}
+            placeholder={t("mask.layerGroupsPlaceholder")}
+            title={t("mask.layerGroupsTitle")}
+            onChange={(e) => setGroupDraft(e.target.value)}
+            onBlur={commitGroups}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === "Escape") {
+                setGroupDraft("");
+                e.currentTarget.blur();
+              }
+            }}
+          />
+        </label>
+        <div className="mask-layer-group-chips" aria-label={t("mask.layerGroupsLabel")}>
+          {layerGroups.map((group) => (
+            <span key={group.id} className="mask-layer-group-chip" style={groupStyle(group)} title={group.name}>
+              <span className="mask-layer-group-swatch" aria-hidden="true" />
+              <span className="mask-layer-group-name">{group.name}</span>
+              <button
+                className="mask-layer-group-delete"
+                title={t("mask.layerGroupDelete")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeGroup(group.id);
+                }}
+              >
+                x
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+
       <div className="mask-layer-list">
         {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
           const layer = layers[i];
+          const group = layer.groupId ? groupById.get(layer.groupId) : undefined;
           const showBaseImage = Boolean(
             imagePath &&
               i === 0 &&
@@ -237,6 +334,25 @@ export function LayersPanel({ layers, active, dims, imagePath, workspace = "mask
               >
                 {layer.visible ? "V" : ""}
               </button>
+              <span className="mask-layer-group-cell">
+                <select
+                  className={`mask-layer-group-select${group ? " has-group" : ""}`}
+                  value={group?.id ?? ""}
+                  disabled={layerGroups.length === 0}
+                  title={group ? group.name : t("mask.layerNoGroup")}
+                  style={group ? groupStyle(group) : undefined}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => dispatch({ type: "layer_group", index: i, groupId: e.target.value || null })}
+                >
+                  <option value="">{t("mask.layerNoGroupShort")}</option>
+                  {layerGroups.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </span>
               <span className="mask-layer-thumb" aria-hidden="true">
                 {showBaseImage && imagePath ? (
                   <BaseImageThumb imagePath={imagePath} />

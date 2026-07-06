@@ -10,7 +10,7 @@
 //! enriched `matte_report`. The auto-subject model modes are Phase 2 (still on
 //! the `Compute` lane, via `ort` / `candle`).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -2382,7 +2382,15 @@ fn migrate_edit_paths(value: Value) -> Value {
     };
     let version = value.get("version").and_then(Value::as_u64).unwrap_or(1);
     if version >= 3 {
-        let layers: Vec<Value> = arr("layers").into_iter().map(normalise_layer).collect();
+        let layer_groups = normalise_layer_groups(value.get("layerGroups"));
+        let group_ids: BTreeSet<String> = layer_groups
+            .iter()
+            .filter_map(|group| group.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        let layers: Vec<Value> = arr("layers")
+            .into_iter()
+            .map(|layer| normalise_layer(layer, &group_ids))
+            .collect();
         let layers = if layers.is_empty() {
             vec![empty_layer()]
         } else {
@@ -2399,6 +2407,7 @@ fn migrate_edit_paths(value: Value) -> Value {
             "active": active,
             "matte_strokes": arr("matte_strokes"),
             "points": arr("points"),
+            "layerGroups": layer_groups,
         });
         if let Some(canvas) = normalise_canvas(value.get("canvas")) {
             doc["canvas"] = canvas;
@@ -2449,6 +2458,7 @@ fn migrate_edit_paths(value: Value) -> Value {
         "active": 0,
         "matte_strokes": arr("matte_strokes"),
         "points": arr("points"),
+        "layerGroups": [],
     })
 }
 
@@ -2463,8 +2473,36 @@ fn empty_layer() -> Value {
     })
 }
 
+fn normalise_layer_groups(value: Option<&Value>) -> Vec<Value> {
+    let Some(groups) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for group in groups {
+        let Some(id) = group.get("id").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        let Some(name) = group.get("name").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        if id.is_empty() || name.is_empty() || !seen.insert(id.to_string()) {
+            continue;
+        }
+        let Some(color) = group.get("color").and_then(Value::as_str).filter(|color| {
+            color.len() == 7
+                && color.starts_with('#')
+                && color.chars().skip(1).all(|ch| ch.is_ascii_hexdigit())
+        }) else {
+            continue;
+        };
+        out.push(json!({ "id": id, "name": name, "color": color }));
+    }
+    out
+}
+
 // Fill in a stored layer's missing / malformed fields with their defaults.
-fn normalise_layer(layer: Value) -> Value {
+fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Value {
     let mut out = empty_layer();
     if let Some(id) = layer.get("id").and_then(Value::as_str) {
         out["id"] = json!(id);
@@ -2485,6 +2523,11 @@ fn normalise_layer(layer: Value) -> Value {
     if let Some(linked) = layer.get("linked").and_then(Value::as_bool) {
         if linked {
             out["linked"] = json!(true);
+        }
+    }
+    if let Some(group_id) = layer.get("groupId").and_then(Value::as_str) {
+        if group_ids.contains(group_id) {
+            out["groupId"] = json!(group_id);
         }
     }
     if let Some(opacity) = layer.get("opacity").and_then(Value::as_f64) {
@@ -3836,6 +3879,43 @@ mod tests {
         // Malformed / absent canvas is dropped (keep the source size).
         let migrated = migrate_edit_paths(json!({ "version": 3, "canvas": { "w": 0, "h": 10 } }));
         assert!(migrated.get("canvas").is_none());
+    }
+
+    #[test]
+    fn migrate_edit_paths_preserves_layer_group_metadata() {
+        let doc = json!({
+            "version": 3,
+            "layerGroups": [
+                { "id": "g1", "name": "Subject", "color": "#5aa7ff" },
+                { "id": "skip-empty-name", "name": "", "color": "#000000" },
+                { "id": "skip-bad-color", "name": "Bad", "color": "bad" },
+                { "id": "g2", "name": "Light", "color": "#59c98f" }
+            ],
+            "layers": [
+                { "name": "Background", "ops": [], "groupId": "g1" },
+                { "name": "Top", "ops": [], "groupId": "g2" }
+            ],
+            "active": 1
+        });
+        let migrated = migrate_edit_paths(doc);
+        assert_eq!(
+            migrated["layerGroups"],
+            json!([
+                { "id": "g1", "name": "Subject", "color": "#5aa7ff" },
+                { "id": "g2", "name": "Light", "color": "#59c98f" }
+            ])
+        );
+        assert_eq!(migrated["layers"][0]["groupId"], json!("g1"));
+        assert_eq!(migrated["layers"][1]["groupId"], json!("g2"));
+        assert_eq!(
+            migrated["layers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|layer| layer["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["Background", "Top"]
+        );
     }
 
     #[test]

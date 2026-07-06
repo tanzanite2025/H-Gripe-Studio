@@ -17,6 +17,7 @@ import type {
   EditPathPoint,
   ImageCanvasSize,
   ImageResample,
+  LayerGroup,
   LayerAdjustment,
   LayerBlend,
   MaskDocument,
@@ -44,6 +45,7 @@ export interface EditState {
 }
 
 const MAX_HISTORY = 100;
+export const LAYER_GROUP_COLORS = ["#5aa7ff", "#59c98f", "#f0b84f", "#ff7f66", "#a68cff", "#48c7d9"] as const;
 
 export function initEditState(initial?: unknown): EditState {
   return { current: normalizeEditPaths(initial), past: [], future: [] };
@@ -66,6 +68,7 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     ops?: unknown;
     paths?: unknown;
     brush_strokes?: unknown;
+    layerGroups?: unknown;
     matte_strokes?: unknown;
     operations?: unknown;
     points?: unknown;
@@ -76,10 +79,20 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     : [];
   const canvas = normalizeCanvas(v.canvas);
   if (Array.isArray(v.layers)) {
-    const layers = v.layers.map(normalizeLayer).filter((l): l is MaskLayer => l !== null);
+    const layerGroups = normalizeLayerGroups(v.layerGroups);
+    const groupIds = new Set(layerGroups.map((g) => g.id));
+    const layers = v.layers.map((layer) => normalizeLayer(layer, groupIds)).filter((l): l is MaskLayer => l !== null);
     if (layers.length === 0) layers.push(emptyMaskLayer());
     const active = typeof v.active === "number" ? Math.min(Math.max(Math.trunc(v.active), 0), layers.length - 1) : 0;
-    return { version: 3, layers, active, matte_strokes, points, ...(canvas ? { canvas } : {}) };
+    return {
+      version: 3,
+      layers,
+      active,
+      matte_strokes,
+      points,
+      ...(canvas ? { canvas } : {}),
+      layerGroups,
+    };
   }
   const ops: EditOp[] = Array.isArray(v.ops)
     ? v.ops.filter(isEditOp)
@@ -97,10 +110,11 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     active: 0,
     matte_strokes,
     points,
+    layerGroups: [],
   };
 }
 
-function normalizeLayer(value: unknown): MaskLayer | null {
+function normalizeLayer(value: unknown, validGroupIds?: ReadonlySet<string>): MaskLayer | null {
   if (!value || typeof value !== "object") return null;
   const v = value as {
     id?: unknown;
@@ -111,6 +125,7 @@ function normalizeLayer(value: unknown): MaskLayer | null {
     visible?: unknown;
     locked?: unknown;
     linked?: unknown;
+    groupId?: unknown;
     ops?: unknown;
     adjustment?: unknown;
   };
@@ -126,9 +141,36 @@ function normalizeLayer(value: unknown): MaskLayer | null {
     visible: v.visible !== false,
     ...(v.locked === true ? { locked: true } : null),
     ...(v.linked === true ? { linked: true } : null),
+    ...(typeof v.groupId === "string" && (!validGroupIds || validGroupIds.has(v.groupId))
+      ? { groupId: v.groupId }
+      : null),
     ops: Array.isArray(v.ops) ? v.ops.filter(isEditOp) : [],
     ...(isAdjustment ? { adjustment } : null),
   };
+}
+
+function normalizeLayerGroups(value: unknown): LayerGroup[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const groups: LayerGroup[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const group = item as { id?: unknown; name?: unknown; color?: unknown };
+    const id = typeof group.id === "string" ? group.id.trim() : "";
+    const name = typeof group.name === "string" ? group.name.trim() : "";
+    if (
+      !id ||
+      !name ||
+      seen.has(id) ||
+      typeof group.color !== "string" ||
+      !/^#[0-9a-f]{6}$/i.test(group.color)
+    ) {
+      continue;
+    }
+    seen.add(id);
+    groups.push({ id, name, color: group.color.toLowerCase() });
+  }
+  return groups;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["levels", "curve", "brightness_contrast"];
@@ -364,6 +406,53 @@ function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): 
   return commit(state, {
     ...state.current,
     layers: state.current.layers.map((l, i) => (i === index ? { ...l, ...patch } : l)),
+  });
+}
+
+function sameLayerGroups(a: readonly LayerGroup[], b: readonly LayerGroup[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((group, index) => {
+      const next = b[index];
+      return group.id === next.id && group.name === next.name && group.color === next.color;
+    })
+  );
+}
+
+function withoutLayerGroupId(layer: MaskLayer): MaskLayer {
+  const next = { ...layer };
+  delete next.groupId;
+  return next;
+}
+
+/** Replace the document's visual layer-group tags without changing stack order. */
+export function setLayerGroups(state: EditState, groups: LayerGroup[]): EditState {
+  const nextGroups = normalizeLayerGroups(groups);
+  const valid = new Set(nextGroups.map((g) => g.id));
+  let changed = !sameLayerGroups(state.current.layerGroups, nextGroups);
+  const layers = state.current.layers.map((layer) => {
+    if (!layer.groupId || valid.has(layer.groupId)) return layer;
+    changed = true;
+    return withoutLayerGroupId(layer);
+  });
+  if (!changed) return state;
+  return commit(state, {
+    ...state.current,
+    layers,
+    layerGroups: nextGroups,
+  });
+}
+
+/** Assign or clear one layer's visual group tag. Ungrouped layers keep default styling. */
+export function setLayerGroup(state: EditState, index: number, groupId: string | null): EditState {
+  const layer = state.current.layers[index];
+  const nextId = groupId || undefined;
+  if (!layer || layer.groupId === nextId) return state;
+  if (nextId && !state.current.layerGroups.some((group) => group.id === nextId)) return state;
+  const nextLayer = nextId ? { ...layer, groupId: nextId } : withoutLayerGroupId(layer);
+  return commit(state, {
+    ...state.current,
+    layers: state.current.layers.map((l, i) => (i === index ? nextLayer : l)),
   });
 }
 
