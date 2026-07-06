@@ -312,6 +312,19 @@ prove the app still works.
     now renders nothing; every node must come from the `nodeTypes` map the
     app passes to `HgripeFlow` (currently `hgripe` and `group`, both
     Studio-owned components).
+- Second (measured) product-trimming pass is done:
+  - Measured first: production bundle before/after (`vite build`, main chunk
+    706.4 kB → 705.4 kB, gzip 221.5 kB → 221.2 kB). Tree-shaking already
+    excluded most dead exports, so this pass mainly shrinks the maintained
+    source surface, not the bundle.
+  - Deleted unused public hooks `useOnViewportChange`, `useNodesInitialized`,
+    `useHandleConnections`, `useNodesData`, and the unused `ViewportPortal` /
+    `EdgeLabelRenderer` components.
+  - Deleted SVG edge labels: `EdgeText` and `BaseEdge`'s label branch are
+    removed (product edges never carry labels; edge chrome lives on cards).
+  - Kept: `NodeResizer`/`xyresizer` (group cards resize), `MiniMap`, `Panel`,
+    A11y descriptions, and the `system` bezier/step/straight path builders
+    (still used by the upstream `ConnectionLine` fallback).
 - Studio imports must route through `@hgripe/flow`, not directly through
   `@xyflow/react`.
 - The adapter is no longer a blanket re-export. It exposes only the React Flow

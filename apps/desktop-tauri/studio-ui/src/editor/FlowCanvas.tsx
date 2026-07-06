@@ -25,6 +25,7 @@ import { nodeSpec } from "../graph/nodeSpecs";
 import { arePortsCompatible } from "../graph/model";
 import { toWorkflowGraph } from "./adapter";
 import { wouldCreateCycle } from "../runtime/dag";
+import { useGpuBusy } from "../runtime/gpuLoad";
 
 interface FlowCanvasProps {
   onNodesChange: OnNodesChange;
@@ -81,6 +82,10 @@ export function FlowCanvas({
   // Drag-aware view: referentially stable across in-drag position frames, so
   // connection-validation structures below don't rebuild on every drag frame.
   const graphView = useGraphView();
+  // While heavy GPU work runs (a graph run), a `gpu-busy` class drops the
+  // canvas's cosmetic CSS transitions so WebView compositing stays cheap and
+  // doesn't compete with the wgpu kernels. Flips twice per run.
+  const gpuBusy = useGpuBusy();
 
   // Restore the pane viewport when the shown canvas document changes (tab
   // switch). Skips the initial mount so `fitView` keeps framing the graph.
@@ -188,6 +193,7 @@ export function FlowCanvas({
 
   return (
     <HgripeFlow
+      className={gpuBusy ? "gpu-busy" : undefined}
       nodes={nodes}
       edges={edges}
       nodeTypes={NODE_TYPES}

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type { CSSProperties, HTMLAttributes, ReactNode, MouseEvent as ReactMouseEvent, ComponentType } from 'react';
+import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent, ComponentType } from 'react';
 import type {
   EdgeBase,
   Position,
@@ -70,12 +70,6 @@ export type EdgeWrapperProps<EdgeType extends Edge = Edge> = {
 };
 
 export type DefaultEdgeOptions = DefaultEdgeOptionsBase<Edge>;
-
-export type EdgeTextProps = HTMLAttributes<SVGElement> &
-  EdgeLabelOptions & {
-    x: number;
-    y: number;
-  };
 
 /**
  * Custom edge component props
