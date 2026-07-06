@@ -2143,8 +2143,8 @@ mod tests {
         // Disc pin: centre (15.5, 7.5) -> the interior is green-filled.
         let pin = ((7 * 32 + 15) * 4) as usize;
         assert!(surface.data[pin + 1] > 0.9, "disc must be filled");
-        // Cross: horizontal arm through (7.5, 23.5) is white.
-        let arm = ((23 * 32 + 5) * 4) as usize;
+        // Cross: horizontal arm through (7.5, 23.5) rounds to row 24, white.
+        let arm = ((24 * 32 + 5) * 4) as usize;
         assert!(
             surface.data[arm] > 0.9 && surface.data[arm + 2] > 0.9,
             "cross arm must be stroked"

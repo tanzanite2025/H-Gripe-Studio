@@ -1831,18 +1831,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   border-bottom: 1px solid var(--border);
 }
 .production-drawer-head .spacer { flex: 1; }
-.production-drawer-tabs { display: flex; gap: 4px; }
-.production-drawer-tabs button {
-  border-radius: 6px 6px 0 0;
-  border-bottom: none;
-  opacity: 0.75;
-}
-.production-drawer-tabs button.active {
-  opacity: 1;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
+.production-drawer-title { font-size: 12px; font-weight: 600; }
 .production-drawer-target {
   font-size: 11px;
   color: var(--muted);
@@ -1851,6 +1840,38 @@ button:disabled { opacity: 0.6; cursor: default; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* clip right-click menu (grade / edit / remove) */
+.production-clip-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+.production-clip-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  min-width: 140px;
+  background: #1a1d26;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.production-clip-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.production-clip-menu button:hover { background: #2a2f3d; }
 .production-drawer-body {
   flex: 1;
   min-height: 0;
@@ -2049,24 +2070,6 @@ button:disabled { opacity: 0.6; cursor: default; }
   color: var(--muted);
 }
 .production-bin-remove:hover { color: var(--text); }
-.production-grade {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-.production-grade-empty {
-  margin: auto;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-  padding: 0 24px;
-}
-.production-grade .grade-panel {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  grid-template-columns: 1fr 300px;
-}
 .grade-apply-row { display: flex; justify-content: flex-end; }
 .production-timeline {
   flex: 1;

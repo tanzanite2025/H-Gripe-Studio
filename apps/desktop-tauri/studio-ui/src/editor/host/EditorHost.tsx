@@ -31,6 +31,8 @@ const MediaEditModal = lazy(() =>
 export interface EditorTarget {
   /** Backing image path (best-effort underlay); may be missing in preview. */
   imagePath: string | null;
+  /** Backing video path, for grade targets that grade a video frame. */
+  videoPath?: string | null;
   /** Display title for the editor chrome. */
   title: string;
   /** Node whose output backs the target, when it is a node output: lets the
@@ -125,6 +127,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
         <GradeEditModal
           title={request.target.title}
           imagePath={request.target.imagePath}
+          videoPath={request.target.videoPath}
           nodeId={request.target.nodeId}
           initialDoc={request.initialDoc}
           onCommit={request.onCommit}

@@ -1,16 +1,18 @@
+import { useState } from "react";
+
 import { useT, type MsgKey } from "../i18n";
-import { GradePanel } from "../editor/GradePanel";
-import type { DrawerMode, DrawerTab } from "./drawerState";
+import type { DrawerMode } from "./drawerState";
 import { LayerReviewPanel } from "./LayerReviewPanel";
 import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 import { ProgramMonitor } from "./ProgramMonitor";
-import { targetKey, type ProductionTarget } from "./productionTarget";
+import type { ProductionTarget } from "./productionTarget";
 import {
   clipKindForAsset,
   timelineDuration,
   trackEnd,
   trackKindForClip,
+  type ClipKind,
   type TimelineModel,
   type TrackKind,
 } from "./timeline";
@@ -24,8 +26,6 @@ export interface AddableAsset {
 export interface ProductionDrawerProps {
   mode: DrawerMode;
   onSetMode: (mode: DrawerMode) => void;
-  tab: DrawerTab;
-  onSetTab: (tab: DrawerTab) => void;
   /** Current unified production selection (drawer + on-demand editors). */
   target: ProductionTarget | null;
   assets: MediaAsset[];
@@ -52,17 +52,10 @@ export interface ProductionDrawerProps {
   onOpenImageEdit: (assetId: string) => void;
   /** Right-click on an audio clip: open the minimal trim/gain/fade editor. */
   onOpenAudioEdit: (clipId: string) => void;
+  /** Clip context menu “grade”: open the grade modal for a still / video clip. */
+  onOpenClipGrade: (clipId: string) => void;
   /** Export command: open the on-demand export dialog for the timeline. */
   onOpenExport: () => void;
-  /** Image path the Grade tab previews for the current target, when resolvable. */
-  gradeImagePath: string | null;
-  /** Video whose frame the Grade tab previews for video-clip targets. */
-  gradeVideoPath: string | null;
-  /** Node whose output the Grade tab previews, for node-output targets. */
-  gradeNodeId: string | null;
-  /** The current target's stored grade doc (JSON string), if any. */
-  gradeDoc: string | null;
-  onGradeCommit: (gradeDoc: string) => void;
   /** A clip's stored grade doc (JSON string), for the program monitor. */
   clipGradeDoc?: (clipId: string) => string | null;
   /** Layered asset of the selected split node, when one is targeted. */
@@ -86,16 +79,14 @@ function kindKey(kind: MediaAssetKind): MsgKey {
 
 /**
  * Bottom production drawer (UNIFIED_PRODUCTION_DRAWER_PLAN.md): the resident
- * edit/grade workspace under the node canvas. Only two first-level tabs live
- * here — Edit / Timeline and Grade; image / audio / export editors open on
- * demand from the workspace selection instead of mounting with the drawer.
- * Collapses to a slim rail so the canvas keeps its space when unused.
+ * Edit / Timeline workspace under the node canvas. Image / audio / grade /
+ * export editors open on demand from the workspace selection (clip context
+ * menu) instead of mounting with the drawer. Collapses to a slim rail so the
+ * canvas keeps its space when unused.
  */
 export function ProductionDrawer({
   mode,
   onSetMode,
-  tab,
-  onSetTab,
   target,
   assets,
   activeAssetId,
@@ -113,12 +104,8 @@ export function ProductionDrawer({
   onRemoveClip,
   onOpenImageEdit,
   onOpenAudioEdit,
+  onOpenClipGrade,
   onOpenExport,
-  gradeImagePath,
-  gradeVideoPath,
-  gradeNodeId,
-  gradeDoc,
-  onGradeCommit,
   clipGradeDoc,
   layeredAsset,
   selectedLayerId,
@@ -130,6 +117,14 @@ export function ProductionDrawer({
   onToggleProtected,
 }: ProductionDrawerProps) {
   const t = useT();
+  // Clip context menu: right-click a clip for grade / edit / remove actions.
+  const [clipMenu, setClipMenu] = useState<{
+    x: number;
+    y: number;
+    clipId: string;
+    assetId: string;
+    kind: ClipKind;
+  } | null>(null);
 
   if (mode === "collapsed") {
     return (
@@ -191,24 +186,7 @@ export function ProductionDrawer({
   return (
     <div className={`production-drawer production-drawer-${mode}`}>
       <div className="production-drawer-head">
-        <div className="production-drawer-tabs" role="tablist">
-          <button
-            role="tab"
-            aria-selected={tab === "edit"}
-            className={tab === "edit" ? "active" : ""}
-            onClick={() => onSetTab("edit")}
-          >
-            {t("drawer.tabEdit")}
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "grade"}
-            className={tab === "grade" ? "active" : ""}
-            onClick={() => onSetTab("grade")}
-          >
-            {t("drawer.tabGrade")}
-          </button>
-        </div>
+        <span className="production-drawer-title">{t("drawer.tabEdit")}</span>
         <span className="production-drawer-target" title={targetLabel}>
           {targetLabel}
         </span>
@@ -224,8 +202,7 @@ export function ProductionDrawer({
         </button>
       </div>
 
-      {tab === "edit" ? (
-        <div className="production-drawer-body production-edit">
+      <div className="production-drawer-body production-edit">
           {layeredAsset ? (
             <LayerReviewPanel
               asset={layeredAsset}
@@ -361,13 +338,17 @@ export function ProductionDrawer({
                             }}
                             onClick={() => onSelectClip(selected ? null : clip.id)}
                             onContextMenu={(e) => {
-                              if (clip.kind === "video") return;
                               e.preventDefault();
                               onSelectClip(clip.id);
-                              if (clip.kind === "still") onOpenImageEdit(clip.assetId);
-                              else onOpenAudioEdit(clip.id);
+                              setClipMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                clipId: clip.id,
+                                assetId: clip.assetId,
+                                kind: clip.kind,
+                              });
                             }}
-                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s${clip.kind === "still" ? ` · ${t("drawer.imageEditHint")}` : clip.kind === "audio" ? ` · ${t("drawer.audioEditHint")}` : ""}`}
+                            title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s · ${t("drawer.clipMenuHint")}`}
                           >
                             <span className="production-clip-name">{clipAssetName(clip.id)}</span>
                             {selected ? (
@@ -393,22 +374,61 @@ export function ProductionDrawer({
             </div>
           </div>
         </div>
-      ) : (
-        <div className="production-drawer-body production-grade">
-          {gradeImagePath || gradeVideoPath ? (
-            <GradePanel
-              key={targetKey(target)}
-              imagePath={gradeImagePath}
-              videoPath={gradeVideoPath}
-              nodeId={gradeNodeId}
-              initialDoc={gradeDoc}
-              onCommit={(commit) => onGradeCommit(commit.gradeDoc)}
-            />
-          ) : (
-            <p className="production-grade-empty">{t("drawer.gradePlaceholder")}</p>
-          )}
+      {clipMenu ? (
+        <div
+          className="production-clip-menu-backdrop"
+          onClick={() => setClipMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setClipMenu(null);
+          }}
+        >
+          <div
+            className="production-clip-menu"
+            style={{ left: clipMenu.x, top: clipMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {clipMenu.kind !== "audio" ? (
+              <button
+                onClick={() => {
+                  onOpenClipGrade(clipMenu.clipId);
+                  setClipMenu(null);
+                }}
+              >
+                {t("drawer.menuGrade")}
+              </button>
+            ) : null}
+            {clipMenu.kind === "still" ? (
+              <button
+                onClick={() => {
+                  onOpenImageEdit(clipMenu.assetId);
+                  setClipMenu(null);
+                }}
+              >
+                {t("drawer.menuEditImage")}
+              </button>
+            ) : null}
+            {clipMenu.kind === "audio" ? (
+              <button
+                onClick={() => {
+                  onOpenAudioEdit(clipMenu.clipId);
+                  setClipMenu(null);
+                }}
+              >
+                {t("drawer.menuEditAudio")}
+              </button>
+            ) : null}
+            <button
+              onClick={() => {
+                onRemoveClip(clipMenu.clipId);
+                setClipMenu(null);
+              }}
+            >
+              {t("drawer.menuRemoveClip")}
+            </button>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

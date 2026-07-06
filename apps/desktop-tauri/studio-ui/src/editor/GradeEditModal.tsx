@@ -12,6 +12,8 @@ export type { GradeCommit };
 interface GradeEditModalProps {
   title: string;
   imagePath?: string | null;
+  /** Video whose frame is being graded (timeline video clips). */
+  videoPath?: string | null;
   /** Node whose output is being graded, for a `node_output` preview target. */
   nodeId?: string | null;
   /** The node's current `grade_doc` param (JSON string), if any. */
@@ -20,7 +22,7 @@ interface GradeEditModalProps {
   onClose: () => void;
 }
 
-export function GradeEditModal({ title, imagePath, nodeId, initialDoc, onCommit, onClose }: GradeEditModalProps) {
+export function GradeEditModal({ title, imagePath, videoPath, nodeId, initialDoc, onCommit, onClose }: GradeEditModalProps) {
   const t = useT();
 
   useEffect(() => {
@@ -46,6 +48,7 @@ export function GradeEditModal({ title, imagePath, nodeId, initialDoc, onCommit,
         </div>
         <GradePanel
           imagePath={imagePath}
+          videoPath={videoPath}
           nodeId={nodeId}
           initialDoc={initialDoc}
           onCommit={(commit) => {
