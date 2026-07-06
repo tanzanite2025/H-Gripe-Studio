@@ -360,7 +360,13 @@ Add structured fallback for:
 - out of memory
 - unsupported shader/model op
 - unsupported codec
-- driver/device lost
+- ✅ driver/device lost — the shared viewport surface device registers a
+  `set_device_lost_callback` at creation (`wgpu_device.rs`); a loss records
+  the structured reason class + driver message once, `shared_gpu()` then
+  reports the device unavailable with that reason (every present downgrades
+  to the PNG transport, placement reports carry the reason, and the device
+  registry's viewport-surface entry shows it) instead of silently failing
+  every frame against a dead device.
 - timeout
 - worker crash
 
