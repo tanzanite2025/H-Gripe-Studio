@@ -1,4 +1,5 @@
 export const EDGE_STROKE_WIDTH = 2;
+export const EDGE_STROKE_WIDTH_SELECTED = 3;
 export const EDGE_ARROW_MARKER = {
   viewBox: "0 0 10 10",
   refX: 8,
