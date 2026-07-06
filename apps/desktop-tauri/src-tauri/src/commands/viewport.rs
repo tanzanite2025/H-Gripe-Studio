@@ -1558,6 +1558,40 @@ pub(crate) fn viewport_set_view(
     Ok(())
 }
 
+/// The zoom/pan fast path (surface swap): set the viewport's view and
+/// re-present the native surface's cached frame texture cropped to it — a
+/// pure GPU pass, no render, no upload, no pixel IPC. Returns whether the
+/// surface took it; `false` (no surface, hidden, no cached frame) is not an
+/// error — the caller keeps riding the CSS transform until the settle render.
+#[tauri::command]
+pub(crate) fn viewport_present_view(
+    viewport_id: String,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+) -> Result<bool, String> {
+    if !(zoom.is_finite() && pan_x.is_finite() && pan_y.is_finite()) {
+        return Err("view parameters must be finite".to_string());
+    }
+    if zoom <= 0.0 {
+        return Err(format!("zoom must be positive, got {zoom}"));
+    }
+    let id = parse_id(&viewport_id)?;
+    {
+        let mut map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        let state = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+        state.view = ViewportView { zoom, pan_x, pan_y };
+    }
+    Ok(crate::commands::viewport_surface::present_view(
+        &viewport_id,
+        (zoom, pan_x, pan_y),
+    ))
+}
+
 #[tauri::command]
 pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame, String> {
     rgba_to_frame(viewport_render_rgba(&viewport_id)?)
@@ -1569,6 +1603,9 @@ pub(crate) fn viewport_render_frame(viewport_id: String) -> Result<ViewportFrame
 struct RenderedRgba {
     image: Arc<RgbaImage>,
     backend: ViewportBackend,
+    /// The view window the frame was rendered for — the native surface
+    /// caches it so later views re-present as GPU crops (the fast path).
+    view: ViewportView,
 }
 
 fn grade_backend_report(backend: crate::studio::GradeBackend) -> ViewportBackend {
@@ -1755,8 +1792,12 @@ pub(crate) fn viewport_render_frame_bin(
     viewport_id: String,
 ) -> Result<tauri::ipc::Response, String> {
     let rendered = viewport_render_rgba(&viewport_id)?;
-    let presented =
-        crate::commands::viewport_surface::present_frame(&app, &viewport_id, &rendered.image);
+    let presented = crate::commands::viewport_surface::present_frame(
+        &app,
+        &viewport_id,
+        &rendered.image,
+        (rendered.view.zoom, rendered.view.pan_x, rendered.view.pan_y),
+    );
     let png = if presented {
         Vec::new()
     } else {
@@ -1911,6 +1952,7 @@ fn render_video_path(
         return Ok(RenderedRgba {
             image: Arc::new(image),
             backend: grade_backend_report(backend),
+            view,
         });
     }
     let poster_dir = crate::cache_subdir(".posters")?;
@@ -1928,6 +1970,7 @@ fn render_video_path(
     Ok(RenderedRgba {
         image: proxy,
         backend: cpu_backend(),
+        view,
     })
 }
 
@@ -1983,6 +2026,7 @@ fn render_image_path(
         return Ok(RenderedRgba {
             image: Arc::new(image),
             backend: grade_backend_report(backend),
+            view,
         });
     }
     // Plain path: the viewport's cached source proxy at the bounded size (so
@@ -1998,6 +2042,7 @@ fn render_image_path(
     Ok(RenderedRgba {
         image: proxy,
         backend: cpu_backend(),
+        view,
     })
 }
 

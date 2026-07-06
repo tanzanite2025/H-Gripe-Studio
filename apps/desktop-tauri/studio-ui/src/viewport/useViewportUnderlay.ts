@@ -108,6 +108,13 @@ export function useViewportUnderlay(
    * stage zooms/pans with a transform pass their view state here so the
    * surface window follows it. */
   placementKey: unknown = undefined,
+  /** Live (un-debounced) view for the surface fast path: every change
+   * re-presents the surface's cached frame texture cropped to it — a pure
+   * GPU pass, no render, no pixel IPC — so zoom/pan reflects per input tick
+   * while the debounced `view` above drives the settle re-render at full
+   * detail. Inert without a presented surface (browser preview, PNG path):
+   * the caller's CSS transform carries the motion there. */
+  liveView: ViewportViewState | null = null,
 ): ViewportUnderlay {
   const [state, setState] = useState<Omit<ViewportUnderlay, "host">>({
     underlay: null,
@@ -318,6 +325,28 @@ export function useViewportUnderlay(
       cancelled = true;
     };
   }, [presentEnabled]);
+
+  // The zoom/pan fast path: a live view change re-presents the cached frame
+  // texture as a GPU crop. The result does not change `presented`/`backend`
+  // (no frame was rendered); it only moves `frameView` so the caller's
+  // window rect tracks what the surface now shows. A `false` take (no
+  // surface, no cached frame) is a no-op — never an error.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!liveView || !host || !host.isOpen) return;
+    if (!framePresentedRef.current || !presentEnabledRef.current) return;
+    const { zoom, panX, panY } = liveView;
+    let cancelled = false;
+    runCoalesced(host, async () => {
+      const took = await host.presentView({ zoom, panX, panY });
+      if (!took || cancelled || hostRef.current !== host) return;
+      setState((s) => ({ ...s, frameView: { zoom, panX, panY } }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveView?.zoom, liveView?.panX, liveView?.panY]);
 
   useEffect(() => {
     const host = hostRef.current;

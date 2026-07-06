@@ -6,6 +6,7 @@
 import {
   createViewport,
   destroyViewport,
+  presentViewportView,
   readViewportPixels,
   renderViewportFrame,
   resizeViewport,
@@ -111,6 +112,15 @@ export class WgpuViewportHost {
    * learn whether the surface path took it (fallback contract). */
   async place(placement: ViewportPlacement): Promise<ViewportPlacementReport> {
     return setViewportPlacement(this.id(), placement);
+  }
+
+  /** The zoom/pan fast path (surface swap): set the view and re-present the
+   * native surface's cached frame texture cropped to it — a pure GPU pass,
+   * no render, no pixel transport. `false` means no presented texture took
+   * it (browser preview, hidden surface): the caller waits for the settle
+   * render instead. */
+  async presentView(view: { zoom: number; panX: number; panY: number }): Promise<boolean> {
+    return presentViewportView(this.id(), view.zoom, view.panX, view.panY);
   }
 
   async renderFrame(): Promise<ViewportFrame> {

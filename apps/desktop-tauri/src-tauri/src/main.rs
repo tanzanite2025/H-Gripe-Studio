@@ -128,6 +128,7 @@ fn main() {
             commands::viewport::viewport_set_mask_overlay,
             commands::viewport::viewport_set_overlay_scene,
             commands::viewport::viewport_set_view,
+            commands::viewport::viewport_present_view,
             commands::viewport::viewport_render_frame,
             commands::viewport::viewport_render_frame_bin,
             commands::viewport::viewport_register_layered_asset,

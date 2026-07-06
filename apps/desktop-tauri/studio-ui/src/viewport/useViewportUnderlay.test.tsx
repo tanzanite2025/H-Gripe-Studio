@@ -186,6 +186,74 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });
 
+  it("re-presents a live view change as a GPU crop when a frame is on the surface", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      return setTimeout(() => cb(0), 0) as unknown as number;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+      clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+    });
+    let placed = false;
+    vi.spyOn(WgpuViewportHost.prototype, "place").mockImplementation(async () => {
+      placed = true;
+      return { presented: true };
+    });
+    vi.spyOn(WgpuViewportHost.prototype, "renderFrame").mockImplementation(async () => ({
+      data_url: placed ? "" : "data:image/png;base64,",
+      width: 640,
+      height: 640,
+      backend: { requested: "auto" as const, actual: placed ? ("wgpu" as const) : ("cpu" as const) },
+      presented: placed,
+    }));
+    const presentView = vi
+      .spyOn(WgpuViewportHost.prototype, "presentView")
+      .mockResolvedValue(true);
+
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const { result, rerender, unmount } = renderHook(
+      ({ liveView }: { liveView: ViewportViewState | null }) =>
+        useViewportUnderlay(
+          "image_edit", "a.png", 640, IDENTITY_VIEW, null, { current: el },
+          true, null, undefined, liveView,
+        ),
+      { initialProps: { liveView: null as ViewportViewState | null } },
+    );
+    await waitFor(() => expect(result.current.presented).toBe(true));
+
+    const zoomed: ViewportViewState = { zoom: 2, panX: 0.25, panY: 0.25 };
+    await act(async () => {
+      rerender({ liveView: zoomed });
+    });
+    // The fast path presents the crop and moves `frameView` — no render.
+    await waitFor(() => expect(presentView).toHaveBeenCalledWith(zoomed));
+    await waitFor(() => expect(result.current.frameView).toEqual(zoomed));
+    unmount();
+    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+  });
+
+  it("skips the live-view fast path while no frame is on the surface", async () => {
+    const presentView = vi.spyOn(WgpuViewportHost.prototype, "presentView");
+    const zoomed: ViewportViewState = { zoom: 2, panX: 0.25, panY: 0.25 };
+    const { result, rerender, unmount } = renderHook(
+      ({ liveView }: { liveView: ViewportViewState | null }) =>
+        useViewportUnderlay(
+          "image_edit", "a.png", 640, IDENTITY_VIEW, null, null,
+          true, null, undefined, liveView,
+        ),
+      { initialProps: { liveView: null as ViewportViewState | null } },
+    );
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    await act(async () => {
+      rerender({ liveView: zoomed });
+    });
+    // PNG transport: the CSS transform carries the motion; no host call.
+    expect(presentView).not.toHaveBeenCalled();
+    expect(result.current.frameView).toEqual(IDENTITY_VIEW);
+    unmount();
+  });
+
   it("stays null and settles outside the resource registry", async () => {
     const files = await import("../bridge/files");
     vi.mocked(files.registerResource).mockResolvedValueOnce(null);
