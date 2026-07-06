@@ -430,9 +430,15 @@ This should be a settings surface, not a required setup wizard.
    a failed adapter/device init is cached with its reason, and a per-run GPU
    apply failure reports why — so `grade_report`, `GradePreviewResult`,
    viewport frames and `timeline_export` all carry
-   `backend_fallback_reason` instead of silently reporting `cpu`. Remaining
-   WGPU-surface reasons (texture too large, shader compile) land with the
-   viewport migration.
+   `backend_fallback_reason` instead of silently reporting `cpu`. The
+   remaining WGPU reasons are covered too: the grade kernel reports shader
+   compilation failures (`GpuError::ShaderCompilation`, validation error
+   scope around plan build) and oversized surfaces
+   (`GpuError::SurfaceTooLarge` against the storage-buffer limits), and the
+   viewport surface path guards frame uploads against the device's 2D
+   texture size limit (`frame_within_texture_limit`) so an oversized frame
+   downgrades to the PNG transport with its reason logged instead of
+   tripping a wgpu validation error.
 9. ✅ (subjectMask) Harden ONNX provider reporting: an `auto_*` mode's
    `matte_report` now carries engine telemetry (`engine: onnxruntime|cpu`,
    `device`, `device_requested`, `engine_fallback_reason` — CPU execution
