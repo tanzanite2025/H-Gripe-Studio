@@ -493,17 +493,19 @@ export type ViewportOverlayItem =
       fill?: [number, number, number, number];
     };
 
-/** A vector overlay the host strokes over rendered frames (image_edit
- * viewports): the mask editor's marquee marching ants, drawn host-side at
- * the view window's detail instead of on a document-size canvas. */
+/** A vector overlay the host strokes over rendered frames (image_edit and
+ * video_preview viewports): the mask editor's marquee marching ants, the
+ * program monitor's safe-area guides — drawn host-side at the view window's
+ * detail instead of on a document-size canvas. */
 export interface ViewportOverlayScene {
   items: ViewportOverlayItem[];
 }
 
 /**
- * Set (or clear) the vector overlay an image-edit viewport strokes over
- * rendered frames — selection outlines present host-side at the view
- * window's detail, one screen pixel wide at any zoom.
+ * Set (or clear) the vector overlay an image-edit or video-preview viewport
+ * strokes over rendered frames — selection outlines and safe-area guides
+ * present host-side at the view window's detail, one screen pixel wide at
+ * any zoom.
  */
 export async function setViewportOverlayScene(
   viewportId: string,
@@ -515,7 +517,7 @@ export async function setViewportOverlayScene(
     return;
   }
   const vp = mockGet(viewportId);
-  if (vp.kind !== "image_edit") {
+  if (vp.kind !== "image_edit" && vp.kind !== "video_preview") {
     throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept an overlay scene`);
   }
   if (scene) {

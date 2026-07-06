@@ -39,8 +39,9 @@ export type ViewportCommand =
    * the mask editor's selection tint, presented by the host at the view
    * window's detail. */
   | { kind: "set_mask_overlay"; overlay: ViewportMaskOverlay | null }
-  /** Vector overlay stroked over rendered frames (image_edit viewports):
-   * selection outlines drawn host-side at the view window's detail. */
+  /** Vector overlay stroked over rendered frames (image_edit and
+   * video_preview viewports): selection outlines and safe-area guides drawn
+   * host-side at the view window's detail. */
   | { kind: "set_overlay_scene"; scene: ViewportOverlayScene | null }
   /** Native surface presentation (surface swap Phase S1): the element rect
    * the host's surface window sits under, and whether it is shown at all. */

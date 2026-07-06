@@ -1406,10 +1406,11 @@ const MAX_OVERLAY_SCENE_ITEMS: usize = 256;
 /// segments sender-side, so a loop is at most a few thousand vertices.
 const MAX_OVERLAY_POLYGON_POINTS: usize = 16384;
 
-/// Set (or clear) the vector overlay an image-edit viewport strokes over
-/// rendered frames — the mask editor's marquee marching ants, presented by
-/// the host at the view window's detail instead of a document-size canvas
-/// overlay (WGPU migration: interactive overlays on the live surface).
+/// Set (or clear) the vector overlay an image-edit or video-preview viewport
+/// strokes over rendered frames — the mask editor's marquee marching ants,
+/// the program monitor's safe-area guides — presented by the host at the
+/// view window's detail instead of a document-size canvas overlay (WGPU
+/// migration: overlays on the live surface).
 #[tauri::command]
 pub(crate) fn viewport_set_overlay_scene(
     viewport_id: String,
@@ -1515,7 +1516,7 @@ pub(crate) fn viewport_set_overlay_scene(
     let state = map
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
-    if state.kind != "image_edit" {
+    if state.kind != "image_edit" && state.kind != "video_preview" {
         return Err(format!(
             "viewport {viewport_id} (kind={}) does not accept an overlay scene",
             state.kind
@@ -1665,6 +1666,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 grade_doc,
                 view,
                 temporal_denoise,
+                overlay_scene.as_deref(),
             )
         }
         #[cfg(not(feature = "native-ffmpeg"))]
@@ -1681,7 +1683,14 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             let clip = timeline_clip(&timeline_id, &clip_id)?;
             if clip.kind == "still" {
                 return render_image_path(
-                    id, &clip.path, width, height, grade_doc, view, None, None,
+                    id,
+                    &clip.path,
+                    width,
+                    height,
+                    grade_doc,
+                    view,
+                    None,
+                    overlay_scene.as_deref(),
                 );
             }
             let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
@@ -1696,6 +1705,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                     grade_doc,
                     view,
                     temporal_denoise,
+                    overlay_scene.as_deref(),
                 )
             }
             #[cfg(not(feature = "native-ffmpeg"))]
@@ -1861,9 +1871,14 @@ fn render_video_path(
     grade_doc: Option<Value>,
     view: ViewportView,
     temporal_denoise: f32,
+    overlay_scene: Option<&OverlayScene>,
 ) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
-    if grade_doc.is_some() || !view.is_identity() || temporal_denoise > 0.0 {
+    if grade_doc.is_some()
+        || !view.is_identity()
+        || temporal_denoise > 0.0
+        || overlay_scene.is_some()
+    {
         let doc = parse_grade_doc(grade_doc.as_ref())?;
         let detail = proxy_detail_size(size, view);
         let key = ProxyKey {
@@ -1882,6 +1897,10 @@ fn render_video_path(
         let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
         let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
         apply_temporal(id, path, time_sec, &mut surface, temporal_denoise)?;
+        if let Some(scene) = overlay_scene {
+            // Stroked last: guides sit above the graded frame.
+            composite_overlay_scene(&mut surface, scene, proxy.dimensions(), view);
+        }
         let image = crate::studio::surface_to_rgba(&surface)?;
         return Ok(RenderedRgba {
             image: Arc::new(image),
@@ -2042,7 +2061,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_scene_only_on_image_edit_viewports_and_validates_coordinates() {
+    fn overlay_scene_only_on_overlay_viewports_and_validates_coordinates() {
         let scene = |region: [f32; 4]| OverlayScene {
             items: vec![OverlayItem::Marquee {
                 region,
@@ -2058,6 +2077,14 @@ mod tests {
         .expect_err("grade_preview must reject an overlay scene");
         assert!(err.contains("does not accept an overlay scene"));
         viewport_destroy_inner(grade.viewport_id).expect("destroy");
+
+        let monitor = viewport_create("video_preview".to_string()).expect("create");
+        viewport_set_overlay_scene(
+            monitor.viewport_id.clone(),
+            Some(scene([0.05, 0.05, 0.95, 0.95])),
+        )
+        .expect("video_preview accepts an overlay scene (safe-area guides)");
+        viewport_destroy_inner(monitor.viewport_id).expect("destroy");
 
         let vp = viewport_create("image_edit".to_string()).expect("create");
         viewport_set_overlay_scene(vp.viewport_id.clone(), Some(scene([0.1, 0.1, 0.5, 0.5])))

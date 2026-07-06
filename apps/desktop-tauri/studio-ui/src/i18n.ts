@@ -816,6 +816,11 @@ export const messages = {
     en: "pause",
     zh: "暂停",
   },
+  "drawer.monitorSafeArea": { en: "Safe area", zh: "安全框" },
+  "drawer.monitorSafeAreaTitle": {
+    en: "Show safe-area guides (action safe 90%, title safe 80%) over the frame",
+    zh: "在画面上显示安全框参考线（动作安全 90%，字幕安全 80%）",
+  },
   "drawer.trackVideo": { en: "V", zh: "视" },
   "drawer.trackAudio": { en: "A", zh: "音" },
   "drawer.addVideoTrack": { en: "+V", zh: "+视频轨" },
