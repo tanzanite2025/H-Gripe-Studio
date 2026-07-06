@@ -1618,6 +1618,9 @@ button:disabled { opacity: 0.6; cursor: default; }
   scrollbar-width: thin;
 }
 .media-edit-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: #11131a;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -1627,9 +1630,16 @@ button:disabled { opacity: 0.6; cursor: default; }
   font-size: 12px;
   line-height: 16px;
   max-width: 180px;
+}
+.media-edit-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Per-tab save light: sized to sit inside the pill. */
+.media-edit-tab .media-edit-light {
+  width: 10px;
+  height: 10px;
 }
 .media-edit-tab:hover { background: #2a2f3d; }
 .media-edit-tab.active {

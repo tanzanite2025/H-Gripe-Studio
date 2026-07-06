@@ -417,7 +417,8 @@ export function paintShapeDraft(
   ctx.setLineDash([]);
 }
 
-/** Live marquee drag: a dashed rect / ellipse outline. */
+/** Live marquee drag: high-contrast marching ants — a solid white underlay
+ *  stroke with black dashes on top, readable over any background. */
 export function paintMarquee(
   ctx: CanvasRenderingContext2D,
   start: [number, number],
@@ -426,15 +427,21 @@ export function paintMarquee(
 ) {
   const [x1, y1] = start;
   const [x2, y2] = end;
-  ctx.strokeStyle = "rgba(86,168,255,0.9)";
+  const strokeShape = () => {
+    if (ellipse) {
+      ctx.beginPath();
+      ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+    }
+  };
   ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.setLineDash([]);
+  strokeShape();
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
   ctx.setLineDash([6, 4]);
-  if (ellipse) {
-    ctx.beginPath();
-    ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  } else {
-    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-  }
+  strokeShape();
   ctx.setLineDash([]);
 }

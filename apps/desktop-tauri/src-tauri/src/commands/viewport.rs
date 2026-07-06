@@ -391,10 +391,12 @@ pub(crate) struct OverlayScene {
 }
 
 /// Marquee outline styling, matching the editor's canvas painter
-/// (`paintMarquee`): dashed 6-on/4-off in the selection accent colour.
+/// (`paintMarquee`): high-contrast marching ants — a solid white underlay
+/// stroke with black 6-on/4-off dashes on top, readable over any background.
 const OVERLAY_DASH_ON: f32 = 6.0;
 const OVERLAY_DASH_PERIOD: f32 = 10.0;
-const OVERLAY_RGBA: [f32; 4] = [86.0 / 255.0, 168.0 / 255.0, 255.0 / 255.0, 0.9];
+const OVERLAY_ANTS_UNDER: [f32; 4] = [1.0, 1.0, 1.0, 0.95];
+const OVERLAY_ANTS_DASH: [f32; 4] = [0.0, 0.0, 0.0, 0.9];
 
 /// Stroke a polyline over a graded surface, in surface pixel coordinates,
 /// optionally dashed. The dash phase runs along the whole polyline so
@@ -530,7 +532,8 @@ fn composite_overlay_scene(
                     let (x2, y2) = (region[0].max(region[2]), region[1].max(region[3]));
                     vec![map(x1, y1), map(x2, y1), map(x2, y2), map(x1, y2), map(x1, y1)]
                 };
-                stroke_polyline(surface, &pts, OVERLAY_RGBA, true);
+                stroke_polyline(surface, &pts, OVERLAY_ANTS_UNDER, false);
+                stroke_polyline(surface, &pts, OVERLAY_ANTS_DASH, true);
             }
             OverlayItem::Polygon {
                 points,
