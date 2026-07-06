@@ -680,6 +680,7 @@ export const messages = {
   "mask.layerActionInvert": { en: "inv", zh: "反相" },
   "mask.layerInvertTitle": { en: "Invert the active layer", zh: "反相当前图层" },
   "mask.layerActionLink": { en: "link", zh: "链接" },
+  "mask.layerMaskAddTitle": { en: "Add a mask layer", zh: "添加蒙版图层" },
   "mask.layerActionAdj": { en: "adj", zh: "调整" },
   "mask.layerActionDup": { en: "dup", zh: "复制" },
   "mask.layerActionDel": { en: "del", zh: "删除" },
