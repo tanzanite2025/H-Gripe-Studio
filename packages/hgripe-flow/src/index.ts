@@ -6,8 +6,6 @@ export {
   NodeResizer,
   Position,
   ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
   useReactFlow,
   useStore,
   useStoreApi,

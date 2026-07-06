@@ -1,11 +1,10 @@
 import { useContext, useEffect, useMemo, useState } from "react";
-import type { Edge, Node } from "@hgripe/flow";
 
 import { LangContext, useT, type MsgKey } from "../i18n";
 import { NODE_SPECS } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import type { RunScope } from "../runtime/runScope";
-import { toWorkflowGraph } from "./adapter";
+import type { WorkflowGraph } from "../graph/model";
 import { buildRunPreview, type PreviewCategory } from "./runPreview";
 
 function PlayIcon() {
@@ -30,8 +29,8 @@ const CATEGORY_LABEL: Record<PreviewCategory, MsgKey> = {
 };
 
 export interface RunHudProps {
-  nodes: Node[];
-  edges: Edge[];
+  /** The active canvas in the renderer-agnostic model (memoized by the host). */
+  graph: WorkflowGraph;
   running: boolean;
   canCancel: boolean;
   /** Graph validation issues; a non-empty list disables execution. */
@@ -58,8 +57,7 @@ export interface RunHudProps {
  * replaces only the toolbar's global Run cluster.
  */
 export function RunHud({
-  nodes,
-  edges,
+  graph,
   running,
   canCancel,
   issueCount,
@@ -91,10 +89,7 @@ export function RunHud({
     return { kind: scope, canvasId: "active", nodeIds: selectedNodeIds };
   }, [scope, selectedNodeIds]);
 
-  const preview = useMemo(
-    () => buildRunPreview(toWorkflowGraph(nodes, edges), runScope),
-    [nodes, edges, runScope],
-  );
+  const preview = useMemo(() => buildRunPreview(graph, runScope), [graph, runScope]);
 
   const cardTitle = (kind: string) => {
     const spec = NODE_SPECS[kind];

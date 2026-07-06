@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   HgripeFlow,
   MiniMap,
@@ -101,19 +101,21 @@ export function FlowCanvas({
     [nodes],
   );
 
-  // Typed-port + acyclic connection validation.
+  // Typed-port + acyclic connection validation. The cycle check's graph is
+  // memoized per nodes/edges revision, not rebuilt per hovered handle.
+  const workflowGraph = useMemo(() => toWorkflowGraph(nodes, edges), [nodes, edges]);
   const isValidConnection: IsValidConnection = useCallback(
     (c: Connection | Edge) => {
       const sourceType = portType(c.source, c.sourceHandle, "out");
       const targetType = portType(c.target, c.targetHandle, "in");
       if (!sourceType || !targetType) return false;
       if (!arePortsCompatible(sourceType, targetType)) return false;
-      if (c.source && c.target && wouldCreateCycle(toWorkflowGraph(nodes, edges), c.source, c.target)) {
+      if (c.source && c.target && wouldCreateCycle(workflowGraph, c.source, c.target)) {
         return false;
       }
       return true;
     },
-    [nodes, edges, portType],
+    [workflowGraph, portType],
   );
 
   const onConnect: OnConnect = useCallback(
