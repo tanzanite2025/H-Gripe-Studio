@@ -831,6 +831,11 @@ export const messages = {
   "drawer.menuGrade": { en: "Grade…", zh: "调色…" },
   "drawer.menuEditImage": { en: "Edit image…", zh: "编辑图片…" },
   "drawer.menuEditAudio": { en: "Edit audio…", zh: "编辑音频…" },
+  "drawer.menuSplitLayers": { en: "Split to layers…", zh: "拆分为图层…" },
+  "drawer.splitLayersCreated": {
+    en: "smart layer split card added for the clip",
+    zh: "已为该剪辑添加智能拆层卡片",
+  },
   "drawer.menuRemoveClip": { en: "Remove from timeline", zh: "从时间线移除" },
   "audioEdit.title": { en: "audio edit", zh: "音频编辑" },
   "audioEdit.apply": { en: "apply", zh: "应用" },

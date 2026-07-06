@@ -54,6 +54,8 @@ export interface ProductionDrawerProps {
   onOpenAudioEdit: (clipId: string) => void;
   /** Clip context menu “grade”: open the grade modal for a still / video clip. */
   onOpenClipGrade: (clipId: string) => void;
+  /** Clip context menu “split to layers”: spawn a Smart Layer Split card for the clip. */
+  onSplitClipToLayers: (clipId: string) => void;
   /** Export command: open the on-demand export dialog for the timeline. */
   onOpenExport: () => void;
   /** A clip's stored grade doc (JSON string), for the program monitor. */
@@ -105,6 +107,7 @@ export function ProductionDrawer({
   onOpenImageEdit,
   onOpenAudioEdit,
   onOpenClipGrade,
+  onSplitClipToLayers,
   onOpenExport,
   clipGradeDoc,
   layeredAsset,
@@ -406,6 +409,16 @@ export function ProductionDrawer({
                 }}
               >
                 {t("drawer.menuEditImage")}
+              </button>
+            ) : null}
+            {clipMenu.kind !== "audio" ? (
+              <button
+                onClick={() => {
+                  onSplitClipToLayers(clipMenu.clipId);
+                  setClipMenu(null);
+                }}
+              >
+                {t("drawer.menuSplitLayers")}
               </button>
             ) : null}
             {clipMenu.kind === "audio" ? (
