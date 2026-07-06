@@ -295,5 +295,12 @@ prove the app still works.
 - Studio imports must route through `@hgripe/flow`, not directly through
   `@xyflow/react`.
 - The adapter is no longer a blanket re-export. It exposes only the React Flow
-  primitives currently used by Studio, and the graph wire system is owned by
-  H-Gripe's chamfer edge implementation.
+  primitives currently used by Studio, plus H-Gripe-owned graph helpers.
+- The raw `ReactFlow` component and upstream `addEdge` helper are not exported
+  to Studio. The canvas renders through `HgripeFlow`, and new workflow edges are
+  created through `addHgripeDataEdge` / `withHgripeDataEdge`.
+- Normal workflow wires use the H-Gripe single-cut chamfer edge with an arrow.
+  Binding wires use the same routing family with a distinct binding style.
+- App-created edges, restored graph edges, pasted edges, and media edit binding
+  edges are stamped through `@hgripe/flow` helpers. `normalizeHgripeEdges`
+  remains as a legacy/runtime guard for stale saved states.

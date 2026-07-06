@@ -30,12 +30,7 @@ export function chamferPoints(s: Pt, t: Pt): Pt[] {
   const p1 = { x: s.x + sx * lead, y: s.y };
   const p2 = { x: p1.x + sx * diagonalRun, y: s.y + sy * diagonalRun };
 
-  return [
-    s,
-    p1,
-    p2,
-    t,
-  ];
+  return [s, p1, p2, t];
 }
 
 export function chamferPath(s: Pt, t: Pt): string {

@@ -19,6 +19,12 @@ For workflow wires, the only product edge style is H-Gripe's single-cut
 chamfer line with a direction arrow. Bezier, plain elbow, and obstacle-avoid
 edge helpers are not exported from this package.
 
+Studio should render the graph with `HgripeFlow`, not raw `ReactFlow`.
+`HgripeFlow` owns the edge type map, default edge options, drag connection
+line, and stale-edge normalization. App code should create workflow edges with
+`addHgripeDataEdge` or `withHgripeDataEdge`; media edit binding edges should
+use `withHgripeBindingEdge`.
+
 It must not own heavy media pixels:
 
 - image editor rendering
@@ -32,7 +38,8 @@ Those stay in the Rust / WGPU / media-kernel layers.
 
 - Package: `@xyflow/react`
 - Version: `12.3.5`
-- Current phase: narrow adapter with H-Gripe edge ownership
+- Current phase: narrow adapter with H-Gripe edge ownership and downstream edge
+  creation helpers
 
 Next phase: vendor the required upstream source into this package while keeping
 the exported app-facing API stable.

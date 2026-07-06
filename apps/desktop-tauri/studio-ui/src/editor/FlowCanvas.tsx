@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
-  ReactFlow,
+  HgripeFlow,
   MiniMap,
-  addEdge,
+  addHgripeDataEdge,
   useReactFlow,
   type Connection,
   type Edge,
@@ -18,9 +18,6 @@ import "@hgripe/flow/style.css";
 import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
-import { ChamferEdge } from "./ChamferEdge";
-import { BindingEdge } from "./BindingEdge";
-import { DragConnectionLine } from "./DragConnectionLine";
 import { miniMapColor } from "./minimap";
 import { DND_NODE_KIND } from "./Palette";
 import { nodeSpec } from "../graph/nodeSpecs";
@@ -60,8 +57,7 @@ interface FlowCanvasProps {
 }
 
 const SNAP_GRID: [number, number] = [16, 16];
-const DATA_EDGE_TYPE = "chamfer";
-const CONNECTION_LINE_CONTAINER_STYLE = { zIndex: 1002, pointerEvents: "none" as const };
+const NODE_TYPES = { hgripe: HgripeNode, group: GroupNode };
 
 export function FlowCanvas({
   nodes,
@@ -82,18 +78,7 @@ export function FlowCanvas({
   onNodeContextMenu,
   onPaneContextMenu,
 }: FlowCanvasProps) {
-  // Declared once so React does not re-create the map each render.
-  const nodeTypes = useMemo(() => ({ hgripe: HgripeNode, group: GroupNode }), []);
-  const edgeTypes = useMemo(() => ({ chamfer: ChamferEdge, binding: BindingEdge }), []);
   const { screenToFlowPosition, setViewport } = useReactFlow();
-  const renderedEdges = useMemo(
-    () =>
-      edges.map((edge) => ({
-        ...edge,
-        type: edge.type === "binding" ? "binding" : DATA_EDGE_TYPE,
-      })),
-    [edges],
-  );
 
   // Restore the pane viewport when the shown canvas document changes (tab
   // switch). Skips the initial mount so `fitView` keeps framing the graph.
@@ -135,7 +120,7 @@ export function FlowCanvas({
   const onConnect: OnConnect = useCallback(
     (params) => {
       onBeforeConnect?.();
-      setEdges((eds) => addEdge({ ...params, type: DATA_EDGE_TYPE }, eds));
+      setEdges((eds) => addHgripeDataEdge(params, eds));
     },
     [setEdges, onBeforeConnect],
   );
@@ -147,8 +132,6 @@ export function FlowCanvas({
     const data = n.data as HgripeNodeData;
     return miniMapColor(data.status, nodeSpec(data.kind).category);
   }, []);
-
-  const defaultEdgeOptions = useMemo(() => ({ type: DATA_EDGE_TYPE }), []);
 
   const handleNodeContextMenu = useCallback(
     (e: React.MouseEvent, node: Node) => {
@@ -182,19 +165,15 @@ export function FlowCanvas({
   );
 
   return (
-    <ReactFlow
+    <HgripeFlow
       nodes={nodes}
-      edges={renderedEdges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
+      edges={edges}
+      nodeTypes={NODE_TYPES}
       onNodeContextMenu={handleNodeContextMenu}
       onPaneContextMenu={handlePaneContextMenu}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
-      connectionLineComponent={DragConnectionLine}
-      connectionLineContainerStyle={CONNECTION_LINE_CONTAINER_STYLE}
-      defaultEdgeOptions={defaultEdgeOptions}
       onNodeDragStop={(_, node) => onNodeDragStop?.(node)}
       onMoveEnd={(_, viewport) => onViewportChange?.(viewport)}
       snapToGrid={snapToGrid}
@@ -220,6 +199,6 @@ export function FlowCanvas({
         />
       )}
       <HelperLineOverlay horizontal={helperLines?.horizontal} vertical={helperLines?.vertical} />
-    </ReactFlow>
+    </HgripeFlow>
   );
 }

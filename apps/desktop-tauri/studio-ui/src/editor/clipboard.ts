@@ -1,7 +1,7 @@
 // Copy/paste helpers for the node graph. Pure functions so they are
 // unit-testable without a renderer.
 
-import type { Edge, Node } from "@hgripe/flow";
+import { normalizeHgripeEdges, type Edge, type Node } from "@hgripe/flow";
 import { orderNodes } from "./grouping";
 import type { HgripeNodeData } from "./HgripeNode";
 
@@ -61,15 +61,17 @@ export function buildPaste(
   for (const node of nodes) {
     if (node.parentId && idMap.has(node.parentId)) node.parentId = idMap.get(node.parentId);
   }
-  const edges = clip.edges
-    .filter((e) => idMap.has(e.source) && idMap.has(e.target))
-    .map((e, i) => ({
-      ...e,
-      id: `e-${idMap.get(e.source)}-${idMap.get(e.target)}-${i}`,
-      source: idMap.get(e.source) as string,
-      target: idMap.get(e.target) as string,
-      selected: true,
-    }));
+  const edges = normalizeHgripeEdges(
+    clip.edges
+      .filter((e) => idMap.has(e.source) && idMap.has(e.target))
+      .map((e, i) => ({
+        ...e,
+        id: `e-${idMap.get(e.source)}-${idMap.get(e.target)}-${i}`,
+        source: idMap.get(e.source) as string,
+        target: idMap.get(e.target) as string,
+        selected: true,
+      })),
+  );
   // Group frames must precede their children for React Flow.
   return { nodes: orderNodes(nodes), edges };
 }

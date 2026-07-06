@@ -1,11 +1,8 @@
 export {
-  addEdge,
-  BaseEdge,
   Handle,
   MiniMap,
   NodeResizer,
   Position,
-  ReactFlow,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
@@ -13,6 +10,23 @@ export {
   useStore,
   useStoreApi,
 } from "@xyflow/react";
+
+export {
+  chamferPath,
+  chamferPoints,
+  pointsToPath,
+  type Pt,
+} from "./hgripe/edgeRouting";
+export {
+  addHgripeDataEdge,
+  HgripeFlow,
+  HGRIPE_BINDING_EDGE_TYPE,
+  HGRIPE_DATA_EDGE_TYPE,
+  normalizeHgripeEdges,
+  withHgripeBindingEdge,
+  withHgripeDataEdge,
+  type HgripeFlowProps,
+} from "./hgripe/edges";
 
 export type {
   Connection,
@@ -26,6 +40,7 @@ export type {
   OnConnect,
   OnEdgesChange,
   OnNodesChange,
+  ReactFlowProps,
   ReactFlowState,
   Viewport,
   XYPosition,

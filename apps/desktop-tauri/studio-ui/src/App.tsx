@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlowProvider,
+  withHgripeDataEdge,
   useReactFlow,
   type Edge,
   type Node,
@@ -152,7 +153,13 @@ const initialNodes: Node[] = [
   makeNode("generate-1", "generate", 360, 80),
 ];
 const initialEdges: Edge[] = [
-  { id: "e1", source: "prompt-1", sourceHandle: "text", target: "generate-1", targetHandle: "prompt" },
+  withHgripeDataEdge({
+    id: "e1",
+    source: "prompt-1",
+    sourceHandle: "text",
+    target: "generate-1",
+    targetHandle: "prompt",
+  }),
 ];
 
 function Studio({ onToggleLang }: { onToggleLang: () => void }) {
@@ -919,13 +926,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       });
       setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...created]);
       setEdges((es) =>
-        es.concat({
-          id: `edge-${splitId}`,
-          source: sourceId,
-          sourceHandle: handle,
-          target: splitId,
-          targetHandle: handle,
-        }),
+        es.concat(
+          withHgripeDataEdge({
+            id: `edge-${splitId}`,
+            source: sourceId,
+            sourceHandle: handle,
+            target: splitId,
+            targetHandle: handle,
+          }),
+        ),
       );
       handleCanvasSelect(splitId);
       setMessage(t("drawer.splitLayersCreated"));
@@ -996,13 +1005,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         ),
       );
       setEdges((es) =>
-        es.concat({
-          id: `edge-${id}`,
-          source: id,
-          sourceHandle: "text",
-          target: target.id,
-          targetHandle: "prompt",
-        }),
+        es.concat(
+          withHgripeDataEdge({
+            id: `edge-${id}`,
+            source: id,
+            sourceHandle: "text",
+            target: target.id,
+            targetHandle: "prompt",
+          }),
+        ),
       );
       setMessage(t("assistant.insertedWired"));
     },

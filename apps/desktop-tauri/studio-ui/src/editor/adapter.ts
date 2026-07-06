@@ -2,7 +2,13 @@
 // WorkflowGraph model. Keeping this conversion in one place is what lets us
 // swap renderers later without touching the runtime or serialization.
 
-import type { Edge, Node } from "@hgripe/flow";
+import {
+  HGRIPE_BINDING_EDGE_TYPE,
+  withHgripeBindingEdge,
+  withHgripeDataEdge,
+  type Edge,
+  type Node,
+} from "@hgripe/flow";
 import type { GraphEdge, GraphNode, WorkflowGraph } from "../graph/model";
 import { GRAPH_VERSION } from "../graph/model";
 import { defaultParams } from "../graph/nodeSpecs";
@@ -68,7 +74,7 @@ export function fromWorkflowGraph(graph: WorkflowGraph): { nodes: Node[]; edges:
   });
 
   const edges: Edge[] = graph.edges.map((e) => {
-    const edge: Edge = {
+    const edge = {
       id: e.id,
       source: e.source,
       sourceHandle: e.sourcePort || null,
@@ -76,10 +82,11 @@ export function fromWorkflowGraph(graph: WorkflowGraph): { nodes: Node[]; edges:
       targetHandle: e.targetPort || null,
     };
     // Binding edges (media source -> bound edit node) are rendered with the
-    // distinct `binding` style. The graph model carries no edge type, so we
+    // distinct binding style. The graph model carries no edge type, so we
     // restore it from the `binding-` id prefix `addBoundEdit` stamps on them.
-    if (e.id.startsWith("binding-")) edge.type = "binding";
-    return edge;
+    return e.id.startsWith(`${HGRIPE_BINDING_EDGE_TYPE}-`)
+      ? withHgripeBindingEdge(edge)
+      : withHgripeDataEdge(edge);
   });
 
   // Group frames must precede their children for React Flow.

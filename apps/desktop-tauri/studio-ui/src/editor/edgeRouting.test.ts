@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chamferPath, chamferPoints, pointsToPath } from "./edgeRouting";
+import { chamferPath, chamferPoints, pointsToPath } from "@hgripe/flow";
 
 const s = { x: 0, y: 0 };
 

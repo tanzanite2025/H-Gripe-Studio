@@ -5,7 +5,7 @@
 // stays in the caller (App), which passes the setters in.
 
 import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { Edge, Node } from "@hgripe/flow";
+import { withHgripeBindingEdge, type Edge, type Node } from "@hgripe/flow";
 
 import { buildPaste, clipFromSelection, type Clip } from "./clipboard";
 import { detachChildren, isGroupNode, makeGroupNode, orderNodes } from "./grouping";
@@ -238,14 +238,15 @@ export function useNodeEditing({
           .concat({ ...makeNode(editId, editKind, pos.x, pos.y, opts?.params), selected: true }),
       );
       setEdges((es) =>
-        es.concat({
-          id: `binding-${editId}`,
-          source: sourceId,
-          sourceHandle: "image",
-          target: editId,
-          targetHandle: "image",
-          type: "binding",
-        }),
+        es.concat(
+          withHgripeBindingEdge({
+            id: `binding-${editId}`,
+            source: sourceId,
+            sourceHandle: "image",
+            target: editId,
+            targetHandle: "image",
+          }),
+        ),
       );
       setSelectedId(editId);
       if (opts?.openEditor !== false) {

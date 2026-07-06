@@ -250,33 +250,41 @@ Wire cleanup is a canvas affordance, not a production node.
 The first implementation can live behind `@hgripe/flow` while it still
 re-exports XYFlow.
 
-Suggested shape:
+Current shape:
 
 ```text
 packages/hgripe-flow/
   src/
+    index.ts
     hgripe/
-      edges/
-        chamferPath.ts
-        ChamferEdge.tsx
-        edgeHitArea.ts
-        edgeStates.ts
+      edgeRouting.ts
+      edgeVisual.ts
+      edges.tsx
 ```
 
 The app-facing goal is:
 
 ```text
-edge type "hgripe-chamfer"
+HgripeFlow
+  -> owns edgeTypes / defaultEdgeOptions / drag connection line
+addHgripeDataEdge / withHgripeDataEdge
+  -> stamp normal workflow edges at creation time
+withHgripeBindingEdge
+  -> stamp media-source-to-edit binding edges
+normalizeHgripeEdges
+  -> convert stale saved/runtime edge types to the H-Gripe product edge set
+edge type "chamfer"
   -> stable path generation
   -> row-port alignment
-  -> cached geometry
   -> visual states
 ```
 
 When the upstream source is vendored, the edge implementation can move deeper
 into the local graph package without changing the Studio app import boundary.
 The local package should not expose upstream Bezier, plain elbow, or
-obstacle-avoid edge APIs to Studio.
+obstacle-avoid edge APIs to Studio. The Studio app should render through
+`HgripeFlow`, not raw `ReactFlow`, so the edge configuration is not duplicated
+in downstream canvas code.
 
 ## Minimal Algorithm Sketch
 
@@ -285,20 +293,14 @@ For a left-to-right route:
 ```text
 sx, sy = source port center
 tx, ty = target port center
-lead = fixed source lead distance
-approach = fixed target approach distance
-midX = choose a lane between source and target
-chamfer = bounded diagonal length
+lead = bounded horizontal lead from the source row
+diagonalRun = min(vertical delta, remaining horizontal distance)
 
 points:
   P0 = source
   P1 = sx + lead, sy
-  P2 = midX - chamfer, sy
-  P3 = midX, sy + sign(ty - sy) * chamfer
-  P4 = midX, ty - sign(ty - sy) * chamfer
-  P5 = midX + chamfer, ty
-  P6 = tx - approach, ty
-  P7 = target
+  P2 = P1.x + diagonalRun, ty
+  P3 = target
 ```
 
 Then collapse redundant points when the vertical distance is small.
@@ -306,7 +308,7 @@ Then collapse redundant points when the vertical distance is small.
 The rendered SVG can be a single path:
 
 ```text
-M P0 L P1 L P2 L P3 L P4 L P5 L P6 L P7
+M P0 L P1 L P2 L P3
 ```
 
 No cubic curve is required.
@@ -352,10 +354,13 @@ At very low zoom:
 1. Keep the current `@hgripe/flow` adapter boundary.
 2. Add a pure path-generation function with unit tests.
 3. Add `ChamferEdge` as the only normal workflow edge type.
-4. Switch the default Studio edge type to chamfer and normalize legacy edge
-   types to chamfer at render time.
-5. Add selected / hover / running / error visual states.
-6. Add path caching based on source/target geometry.
-7. Add LOD simplification.
-8. Add explicit bend points or tidy routing only after the default route is
+4. Switch Studio to `HgripeFlow` so edge types, default edge options, and drag
+   connection rendering are owned by `@hgripe/flow`.
+5. Stamp app-created, restored, copied, and binding edges through
+   `@hgripe/flow` helpers instead of ad hoc `type` strings.
+6. Keep `normalizeHgripeEdges` only as a legacy/runtime guard for stale edges.
+7. Add selected / hover / running / error visual states.
+8. Add path caching based on source/target geometry.
+9. Add LOD simplification.
+10. Add explicit bend points or tidy routing only after the default route is
    stable.
