@@ -319,6 +319,37 @@ struct Decoder {
     avg_frame_rate: ffi::AVRational,
 }
 
+/// The structured reason when no decodable video stream is found
+/// (GPU_DEVICE_STRATEGY_PLAN long-term step 4: unsupported codec). If the
+/// container carries a video stream whose codec has no decoder compiled into
+/// the vendored libav, the reason names the codec so the fallback stays
+/// diagnosable instead of the generic "no decodable video stream".
+///
+/// # Safety
+/// `fmt` must be a valid, opened `AVFormatContext` with stream info read.
+unsafe fn undecodable_stream_reason(fmt: *mut ffi::AVFormatContext) -> String {
+    for i in 0..(*fmt).nb_streams {
+        let stream = *(*fmt).streams.add(i as usize);
+        let codecpar = (*stream).codecpar;
+        if (*codecpar).codec_type != ffi::AVMEDIA_TYPE_VIDEO {
+            continue;
+        }
+        let codec_id = (*codecpar).codec_id;
+        if ffi::avcodec_find_decoder(codec_id).is_null() {
+            let name = ffi::avcodec_get_name(codec_id);
+            let codec = if name.is_null() {
+                "unknown".to_string()
+            } else {
+                CStr::from_ptr(name).to_string_lossy().into_owned()
+            };
+            return format!(
+                "unsupported codec '{codec}': no decoder compiled into the vendored libav"
+            );
+        }
+    }
+    "no decodable video stream found".to_string()
+}
+
 impl Decoder {
     fn open(video: &Path) -> Result<Self, String> {
         Self::open_with(video, None)
@@ -346,8 +377,9 @@ impl Decoder {
             let stream_index =
                 ffi::av_find_best_stream(fmt, ffi::AVMEDIA_TYPE_VIDEO, -1, -1, &mut decoder, 0);
             if stream_index < 0 || decoder.is_null() {
+                let reason = undecodable_stream_reason(fmt);
                 ffi::avformat_close_input(&mut fmt);
-                return Err("no decodable video stream found".to_string());
+                return Err(reason);
             }
 
             let stream = *(*fmt).streams.add(stream_index as usize);
