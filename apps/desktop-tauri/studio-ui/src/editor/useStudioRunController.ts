@@ -1,4 +1,12 @@
-import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { Edge, Node } from "@hgripe/flow";
 
 import type { HgripeNodeData } from "./HgripeNode";
@@ -30,6 +38,7 @@ import { lowerWorkflowGraph, originNodeId } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
 import { parseLayeredImageAsset } from "../production/layeredImage";
 import { runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
+import { beginGpuWork } from "../runtime/gpuLoad";
 import { describeDeviceReport, deviceReportFromNodeOutputs } from "../runtime/deviceReport";
 import { describeRunScope, resolveRunScope, type RunScope } from "../runtime/runScope";
 import { batchItems, defaultExecutors } from "../runtime/executors";
@@ -176,6 +185,12 @@ export function useStudioRunController({
   projectStoreDir,
 }: StudioRunControllerOptions): StudioRunController {
   const [running, setRunning] = useState(false);
+  // While a run is in flight, flag heavy GPU work so the canvas yields
+  // (defers thumbnail decodes, drops cosmetic transitions — see gpuLoad.ts).
+  useEffect(() => {
+    if (!running) return;
+    return beginGpuWork();
+  }, [running]);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [runLog, setRunLog] = useState<RunLogEntry[]>([]);
   const [showLog, setShowLog] = useState(false);

@@ -3,7 +3,7 @@ import { useStore, type NodeProps } from "@hgripe/flow";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";
-import { isLodActive } from "./lod";
+import { lodLevel } from "./lod";
 import { connectedInputPorts } from "./connectedPorts";
 import type { NodeStatus } from "../runtime/dag";
 import {
@@ -14,6 +14,7 @@ import {
   videoProbe,
 } from "../bridge/tauri";
 import { subscribeIngest } from "../runtime/ingestStore";
+import { whenGpuIdle } from "../runtime/gpuLoad";
 import { ParamField } from "./ParamField";
 import { useNodeEditing } from "./editingContext";
 import { psdTemplatePathWarning } from "./psdcheck";
@@ -82,9 +83,12 @@ function LazyThumb({ path }: { path: string }) {
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return;
         io.disconnect();
-        generateThumbnail({ path, size: 256 })
+        // Thumbnails are cosmetic: wait out any in-flight GPU-heavy work (a
+        // graph run) before asking the backend to decode.
+        whenGpuIdle()
+          .then(() => (cancelled ? null : generateThumbnail({ path, size: 256 })))
           .then((thumb) => {
-            if (!cancelled) setSrc(thumb.data_url || null);
+            if (thumb && !cancelled) setSrc(thumb.data_url || null);
           })
           .catch(() => {
             /* leave placeholder on failure */
@@ -396,9 +400,12 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const spec = localizeSpec(nodeSpec(d.kind), lang);
   const status = d.status ?? "idle";
   const editing = useNodeEditing();
-  // Collapse to a title-only card when zoomed far out. A boolean selector means
-  // nodes only re-render when crossing the threshold, not on every zoom tick.
-  const lod = useStore((s) => isLodActive(s.transform[2]));
+  // Card detail drops with zoom: full → mid (interior hidden) → collapsed
+  // (title-only). A discrete-level selector means nodes only re-render when
+  // crossing a threshold, not on every zoom tick.
+  const lodTier = useStore((s) => lodLevel(s.transform[2]));
+  const lod = lodTier === "collapsed";
+  const slim = lodTier !== "full";
   // LOD hides the card's body for cheap rendering, but the card must keep its
   // expanded footprint — a shrunken card reads as "truncated" when zoomed out
   // and shifts the edge/handle geometry. Measure the expanded height (local,
@@ -406,7 +413,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const expandedHeight = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!lod && cardRef.current) expandedHeight.current = cardRef.current.offsetHeight;
+    if (!slim && cardRef.current) expandedHeight.current = cardRef.current.offsetHeight;
   });
   // Which input ports of this node currently have an incoming edge — used to
   // surface "image/template connected" hints on the PSD sink cards.
@@ -456,26 +463,26 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       spec={spec}
       selected={!!selected}
       status={status}
-      lod={lod}
+      lod={lodTier}
       durationMs={d.durationMs}
       deviceReport={d.deviceReport}
       titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
       onSettings={() => editing?.onCardSettings?.(id)}
-      portContent={lod ? undefined : portContent}
-      onRunRow={lod ? undefined : onRunRow}
+      portContent={slim ? undefined : portContent}
+      onRunRow={slim ? undefined : onRunRow}
       runRowTitle={t("node.runRowTitle")}
       onRunCard={lod ? undefined : onRunCard}
       runCardTitle={t("node.runCardTitle")}
       rootRef={cardRef}
-      style={lod && expandedHeight.current ? { minHeight: expandedHeight.current } : undefined}
+      style={slim && expandedHeight.current ? { minHeight: expandedHeight.current } : undefined}
     >
-      {!lod && (status === "failed" || status === "cancelled") && d.error ? (
+      {!slim && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>
           {d.error}
         </div>
       ) : null}
 
-      {!lod && <div className="node-body">
+      {!slim && <div className="node-body">
         {inlineParams.length > 0 ? (
           <div className="inline-field-grid">{inlineParams.map(renderInlineParam)}</div>
         ) : null}

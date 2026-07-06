@@ -995,6 +995,23 @@ button:disabled { opacity: 0.6; cursor: default; }
 .node.lod .port-label { display: none; }
 .node.lod .port-block { min-height: 8px; padding: 0; }
 
+/* zoom-LOD mid tier: card frame, header, and port rows stay, but the
+   interior (labels/params/thumbnails) is dropped — unreadable at this scale.
+   The pinned min-height keeps the footprint, so rows spread over it. */
+.node.lod-mid { display: flex; flex-direction: column; }
+.node.lod-mid .node-ports { flex: 1; justify-content: space-evenly; }
+.node.lod-mid .port-label { display: none; }
+.node.lod-mid .badge-time { display: none; }
+
+/* gpu-busy: while heavy GPU work is in flight (a graph run), the canvas
+   drops its cosmetic transitions so WebView compositing stays cheap and does
+   not compete with the wgpu kernels (see runtime/gpuLoad.ts). */
+.react-flow.gpu-busy .node,
+.react-flow.gpu-busy .node *,
+.react-flow.gpu-busy .react-flow__edge * {
+  transition: none !important;
+}
+
 /* palette: floating accordion cards over the canvas (no full-height rail).
  * The container is a transparent, click-through overlay; only the cards,
  * heading, and resize handle take pointer events. */

@@ -1,20 +1,12 @@
-import { isNumeric } from '@xyflow/system';
 import cc from 'classcat';
 
-import { EdgeText } from './EdgeText';
 import type { BaseEdgeProps } from '../../types';
 
+// H-Gripe trim: SVG edge labels (EdgeText) removed — product edges never
+// carry labels; edge chrome lives on the node cards instead.
 export function BaseEdge({
   id,
   path,
-  labelX,
-  labelY,
-  label,
-  labelStyle,
-  labelShowBg,
-  labelBgStyle,
-  labelBgPadding,
-  labelBgBorderRadius,
   style,
   markerEnd,
   markerStart,
@@ -41,18 +33,6 @@ export function BaseEdge({
           className="react-flow__edge-interaction"
         />
       )}
-      {label && isNumeric(labelX) && isNumeric(labelY) ? (
-        <EdgeText
-          x={labelX}
-          y={labelY}
-          label={label}
-          labelStyle={labelStyle}
-          labelShowBg={labelShowBg}
-          labelBgStyle={labelBgStyle}
-          labelBgPadding={labelBgPadding}
-          labelBgBorderRadius={labelBgBorderRadius}
-        />
-      ) : null}
     </>
   );
 }

@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode, Ref } from "react";
 import { Handle, Position } from "@hgripe/flow";
 import type { NodeSpec, PortSpec } from "../graph/nodeSpecs";
+import type { LodLevel } from "./lod";
 import type { NodeStatus } from "../runtime/dag";
 import type { DeviceReport } from "../runtime/deviceReport";
 import { NodeTypeBadge } from "./NodeTypeBadge";
@@ -15,7 +16,7 @@ export interface NodeCardShellProps {
   spec: NodeSpec;
   selected: boolean;
   status: NodeStatus;
-  lod: boolean;
+  lod: LodLevel;
   durationMs?: number;
   /** Last run's device report, rendered as a header badge when present. */
   deviceReport?: DeviceReport | null;
@@ -62,7 +63,9 @@ export function NodeCardShell({
     <div
       ref={rootRef}
       style={style}
-      className={`node ${selected ? "selected" : ""} status-${status} ${lod ? "lod" : ""}`}
+      className={`node ${selected ? "selected" : ""} status-${status} ${
+        lod === "collapsed" ? "lod" : lod === "mid" ? "lod-mid" : ""
+      }`}
     >
       <NodeTypeBadge family={spec.family} />
       <div className="node-header">
