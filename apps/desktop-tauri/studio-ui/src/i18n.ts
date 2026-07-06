@@ -760,7 +760,6 @@ export const messages = {
   "drawer.fullTitle": { en: "full-height drawer", zh: "全高抽屉" },
   "drawer.assetCount": { en: "{n} assets", zh: "{n} 个素材" },
   "drawer.tabEdit": { en: "Edit / Timeline", zh: "剪辑 / 时间线" },
-  "drawer.tabGrade": { en: "Grade", zh: "调色" },
   "drawer.targetNone": { en: "no target selected", zh: "未选择目标" },
   "drawer.targetNode": { en: "node output", zh: "节点输出" },
   "drawer.targetAsset": { en: "asset", zh: "素材" },
@@ -828,7 +827,11 @@ export const messages = {
     en: "this asset's source node is gone — image editing needs its canvas card",
     zh: "该素材的来源节点已不存在——图片编辑需要其画布卡片",
   },
-  "drawer.audioEditHint": { en: "right-click to open the audio editor", zh: "右键打开音频编辑" },
+  "drawer.clipMenuHint": { en: "right-click for actions", zh: "右键打开菜单" },
+  "drawer.menuGrade": { en: "Grade…", zh: "调色…" },
+  "drawer.menuEditImage": { en: "Edit image…", zh: "编辑图片…" },
+  "drawer.menuEditAudio": { en: "Edit audio…", zh: "编辑音频…" },
+  "drawer.menuRemoveClip": { en: "Remove from timeline", zh: "从时间线移除" },
   "audioEdit.title": { en: "audio edit", zh: "音频编辑" },
   "audioEdit.apply": { en: "apply", zh: "应用" },
   "audioEdit.applyTitle": { en: "save trim / gain / fades to this clip", zh: "将裁剪 / 增益 / 淡入淡出保存到该 clip" },
@@ -950,11 +953,6 @@ export const messages = {
     en: "preview unavailable (browser preview / backend mocked)",
     zh: "预览不可用（浏览器预览 / 后端为模拟）",
   },
-  "drawer.gradePlaceholder": {
-    en: "Select a target — a bin image asset, a timeline clip (still or video), or a node with an image output — to grade it here with the shared hgripe-grade kernel.",
-    zh: "选择一个目标——素材区的图片、时间线上的 clip（静帧或视频）或带图片输出的节点——即可在这里用同一个 hgripe-grade 内核调色。",
-  },
-
   "btn.models": { en: "Models / APIs", zh: "模型 / API" },
   "btn.modelsTitle": {
     en: "open the system model manager (API profiles and local model bindings)",

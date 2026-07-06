@@ -67,12 +67,9 @@ import {
 import { ProductionDrawer, type AddableAsset } from "./production/ProductionDrawer";
 import {
   loadDrawerMode,
-  loadDrawerTab,
   saveDrawerMode,
-  saveDrawerTab,
   toggleDrawer,
   type DrawerMode,
-  type DrawerTab,
 } from "./production/drawerState";
 import { addAsset, assetKindForNodeKind, removeAsset, type MediaAsset } from "./production/mediaBin";
 import {
@@ -185,13 +182,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // Bottom production drawer (Edit / Timeline + Grade) shell state, plus the
   // lightweight media bin and the unified production selection it consumes.
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(() => loadDrawerMode());
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>(() => loadDrawerTab());
   const [binAssets, setBinAssets] = useState<MediaAsset[]>([]);
   const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineModel>(() => createTimeline());
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  // Per-target grade documents (JSON strings) keyed by targetKey, edited by
-  // the drawer's Grade tab through the embeddable GradePanel.
+  // Clip whose grade modal is open (clip context menu → “grade”).
+  const [gradeClipId, setGradeClipId] = useState<string | null>(null);
+  // Per-target grade documents (JSON strings) keyed by targetKey, edited
+  // through the on-demand grade modal (GradeEditModal over GradePanel).
   const [gradeDocs, setGradeDocs] = useState<Record<string, string>>({});
   // Per-clip non-destructive audio edits (trim/gain/fade), plus the source
   // duration assumed when the clip was first opened (until audio probing
@@ -268,10 +266,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const changeDrawerMode = useCallback((m: DrawerMode) => {
     setDrawerMode(m);
     saveDrawerMode(m);
-  }, []);
-  const changeDrawerTab = useCallback((tab: DrawerTab) => {
-    setDrawerTab(tab);
-    saveDrawerTab(tab);
   }, []);
 
   // The selected canvas node as a bin-addable media reference (image / video
@@ -753,57 +747,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     connectedImagePath,
   } = useModals({ nodes, edges });
 
-  // What the drawer's Grade tab previews for the current target: image bin
-  // assets, still clips (over their source image) and image node outputs
-  // grade an image; video clips grade a frame of their source video.
-  const gradeSource = useMemo<{
-    imagePath: string | null;
-    videoPath: string | null;
-    nodeId: string | null;
-  }>(() => {
-    const none = { imagePath: null, videoPath: null, nodeId: null };
-    if (!productionTarget) return none;
-    switch (productionTarget.kind) {
-      case "asset": {
-        const asset = binAssets.find((a) => a.id === productionTarget.assetId);
-        return asset && asset.kind === "image"
-          ? { imagePath: asset.path, videoPath: null, nodeId: null }
-          : none;
-      }
-      case "video_clip": {
-        const found = findClip(timeline, productionTarget.clipId);
-        const asset = found ? binAssets.find((a) => a.id === found.clip.assetId) : undefined;
-        if (!found || !asset) return none;
-        return found.clip.kind === "still"
-          ? { imagePath: asset.path, videoPath: null, nodeId: null }
-          : { imagePath: null, videoPath: asset.path, nodeId: null };
-      }
-      case "node_output":
-        // The image path registers as the node's output artifact, so the
-        // preview presents a `node_output` viewport target.
-        return {
-          imagePath: connectedImagePath(productionTarget.nodeId),
-          videoPath: null,
-          nodeId: productionTarget.nodeId,
-        };
-      case "layered_image":
-        return layeredAsset && layeredAsset.id === productionTarget.assetId
-          ? { imagePath: layeredAsset.preview_composite.path, videoPath: null, nodeId: null }
-          : none;
-      case "image_layer": {
-        if (!layeredAsset || layeredAsset.id !== productionTarget.assetId) return none;
-        const layer = findLayer(layeredAsset, productionTarget.layerId);
-        return {
-          imagePath: layer?.rgba?.path ?? layeredAsset.base_image.path,
-          videoPath: null,
-          nodeId: null,
-        };
-      }
-      default:
-        return none;
-    }
-  }, [productionTarget, binAssets, timeline, connectedImagePath, layeredAsset]);
-
   // Right-click on an image bin asset / still clip: reopen the existing
   // unified image editor (mask + crop) on the asset's source node, so the
   // drawer never grows a second image-editing surface.
@@ -825,6 +768,18 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     (clipId: string) => {
       const found = findClip(timeline, clipId);
       if (found && found.clip.kind === "audio") setAudioEditClipId(clipId);
+    },
+    [timeline],
+  );
+
+  // Clip context menu “grade”: open the grade modal for a still / video clip.
+  const handleOpenClipGrade = useCallback(
+    (clipId: string) => {
+      const found = findClip(timeline, clipId);
+      if (!found || found.clip.kind === "audio") return;
+      setSelectedClipId(clipId);
+      setActiveAssetId(null);
+      setGradeClipId(clipId);
     },
     [timeline],
   );
@@ -869,13 +824,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [timeline, gradeDocs],
   );
 
-  const handleGradeCommit = useCallback(
-    (gradeDoc: string) => {
-      if (!productionTarget) return;
-      setGradeDocs((docs) => ({ ...docs, [targetKey(productionTarget)]: gradeDoc }));
-    },
-    [productionTarget],
-  );
 
   // Node/graph editing actions: add/delete/duplicate, param edits, clipboard,
   // focus/selection, tidy layout, and bound-edit spawning.
@@ -1177,7 +1125,34 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // that only see a target (image path + title) and initial edit data; this is
   // the one place that derives a request from node state and folds a commit
   // back into the graph (param update / bound-edit node) and the run pipeline.
-  const editorRequest: EditorRequest | null = maskEditNode
+  // The clip whose grade modal is open, resolved against the live timeline.
+  const gradeClip = gradeClipId ? findClip(timeline, gradeClipId) : null;
+  const gradeClipAsset = gradeClip
+    ? (binAssets.find((a) => a.id === gradeClip.clip.assetId) ?? null)
+    : null;
+
+  const editorRequest: EditorRequest | null = gradeClip
+    ? {
+        editor: "grade",
+        target: {
+          title: gradeClipAsset?.name ?? gradeClip.clip.assetId,
+          imagePath: gradeClip.clip.kind === "still" ? (gradeClipAsset?.path ?? null) : null,
+          videoPath: gradeClip.clip.kind === "video" ? (gradeClipAsset?.path ?? null) : null,
+        },
+        initialDoc: clipGradeDoc(gradeClip.clip.id),
+        onCommit: (commit) => {
+          // Store the doc under the clip's target key — the same key the
+          // program monitor reads through `clipGradeDoc`.
+          const key = targetKey({
+            kind: "video_clip",
+            timelineId: timeline.id,
+            trackId: gradeClip.track.id,
+            clipId: gradeClip.clip.id,
+          });
+          setGradeDocs((docs) => ({ ...docs, [key]: commit.gradeDoc }));
+        },
+      }
+    : maskEditNode
     ? {
         editor: "mask",
         target: {
@@ -1445,6 +1420,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   };
 
   const closeEditor = () => {
+    setGradeClipId(null);
     setMaskEditNodeId(null);
     setCropEditNodeId(null);
     setGradeEditNodeId(null);
@@ -1657,8 +1633,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         <ProductionDrawer
           mode={drawerMode}
           onSetMode={changeDrawerMode}
-          tab={drawerTab}
-          onSetTab={changeDrawerTab}
           target={productionTarget}
           assets={binAssets}
           activeAssetId={activeAssetId}
@@ -1676,12 +1650,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onRemoveClip={handleRemoveClip}
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}
+          onOpenClipGrade={handleOpenClipGrade}
           onOpenExport={() => setExportOpen(true)}
-          gradeImagePath={gradeSource.imagePath}
-          gradeVideoPath={gradeSource.videoPath}
-          gradeNodeId={gradeSource.nodeId}
-          gradeDoc={productionTarget ? (gradeDocs[targetKey(productionTarget)] ?? null) : null}
-          onGradeCommit={handleGradeCommit}
           clipGradeDoc={clipGradeDoc}
           layeredAsset={layeredAsset}
           selectedLayerId={selectedLayerId}
