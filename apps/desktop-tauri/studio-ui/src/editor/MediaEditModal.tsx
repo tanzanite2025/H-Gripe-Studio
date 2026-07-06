@@ -87,7 +87,20 @@ export function MediaEditModal({
               if (!tab.active) onSelectTab?.(tab.id);
             }}
           >
-            {tab.label}
+            {tab.active && onDocChange ? (
+              // Per-document save light: saving lives on the image's own tab,
+              // so each open image commits its draft independently.
+              <span
+                className={`media-edit-light${dirty ? " unsaved" : ""}`}
+                role="button"
+                title={dirty ? t("mediaEdit.unsaved") : t("mediaEdit.saved")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  saveDraft();
+                }}
+              />
+            ) : null}
+            <span className="media-edit-tab-label">{tab.label}</span>
           </button>
         ))}
         {onPickFile ? (
@@ -97,13 +110,6 @@ export function MediaEditModal({
         ) : null}
       </div>
     ) : null;
-  const saveLight = onDocChange ? (
-    <button
-      className={`media-edit-light${dirty ? " unsaved" : ""}`}
-      title={dirty ? t("mediaEdit.unsaved") : t("mediaEdit.saved")}
-      onClick={saveDraft}
-    />
-  ) : null;
   const collapseArrow = (
     <button className="media-edit-collapse" title={t("mediaEdit.collapse")} onClick={onClose}>
       <svg viewBox="0 0 48 8" width="48" height="8" aria-hidden="true">
@@ -122,7 +128,6 @@ export function MediaEditModal({
       onCommit={(edits: MaskDocument) => onCommitMask(fromMaskDocument(edits))}
       onClose={onClose}
       onDocChange={handleDocChange}
-      headerLeft={saveLight}
       headerCenter={collapseArrow}
       headerTabs={tabStrip}
       hideTitle

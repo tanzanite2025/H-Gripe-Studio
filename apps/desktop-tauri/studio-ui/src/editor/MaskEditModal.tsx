@@ -1002,7 +1002,9 @@ export function MaskEditModal({
       else if (imageSizeDraftRef.current) setImageSizeDraft(null);
       else if (penPendingRef.current) setPenAnchors([]);
       else if (toolId === "rotate_view" && viewRef.current.rotate) setView((v) => rotateTo(v, 0));
-      else onClose();
+      // The image editor closes only via the header's collapse arrow;
+      // Escape never dismisses it (the mask editor keeps PS behaviour).
+      else if (workspace !== "image") onClose();
     },
     toggle_overlay: () => setOverlayOnly((v) => !v),
   };
@@ -1957,11 +1959,13 @@ export function MaskEditModal({
     const y0 = Math.min(lastMarquee?.region[1] ?? 0, dims.h - ch);
     const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
     setLastMarquee({ region, ellipse });
+    forceRedraw((n) => n + 1);
   };
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
       <div className={`media-viewer mask-edit${screenMode ? ` mask-screen-${screenMode}` : ""}`} onClick={(e) => e.stopPropagation()}>
+        {headerTabs ? <div className="media-viewer-tabs-row">{headerTabs}</div> : null}
         <div className="media-viewer-bar">
           {headerLeft}
           {hideTitle ? null : (
@@ -2001,7 +2005,6 @@ export function MaskEditModal({
             ) : null}
           </div>
         </div>
-        {headerTabs ? <div className="media-viewer-tabs-row">{headerTabs}</div> : null}
 
         <div className="mask-edit-body" style={{ "--mask-rail-w": `${dock.layout.railWidth}px` } as CSSProperties}>
           <MaskToolbar
