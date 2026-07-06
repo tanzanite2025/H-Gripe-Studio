@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { timelineExport } from "../bridge/timelineExport";
 import { useT } from "../i18n";
+import type { AudioClipEdit } from "./audioEdit";
 import type { MediaAsset } from "./mediaBin";
 import type { TimelineModel } from "./timeline";
 import {
@@ -13,14 +14,17 @@ import {
 
 // On-demand export dialog (plan step 9): the drawer's export command builds
 // the timeline render plan, previews what will (and won't yet) be encoded,
-// and hands the expanded frame sequence to the backend FFmpeg encoder. Opens
-// on demand and never mounts with the drawer.
+// and hands the expanded frame sequence plus the audio segments (with their
+// trim/gain/fade edits) to the backend FFmpeg encode + mixdown/mux. Opens on
+// demand and never mounts with the drawer.
 
 interface ExportDialogProps {
   timeline: TimelineModel;
   assets: MediaAsset[];
   /** A clip's stored grade doc (JSON string), applied at encode time. */
   clipGradeDoc?: (clipId: string) => string | null;
+  /** A clip's stored audio edit, applied in the mixdown. */
+  clipAudioEdit?: (clipId: string) => AudioClipEdit | null;
   onClose: () => void;
 }
 
@@ -33,10 +37,18 @@ type ExportState =
       durationSec: number;
       gradedFrameCount: number;
       gradeBackend: "cpu" | "gpu" | null;
+      audioClipCount: number;
+      audioSkippedReason: string | null;
     }
   | { phase: "error"; message: string };
 
-export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: ExportDialogProps) {
+export function ExportDialog({
+  timeline,
+  assets,
+  clipGradeDoc,
+  clipAudioEdit,
+  onClose,
+}: ExportDialogProps) {
   const t = useT();
   const [fps, setFps] = useState(DEFAULT_EXPORT_FPS);
   const [outputName, setOutputName] = useState("");
@@ -51,8 +63,8 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
   }, [onClose]);
 
   const plan = useMemo(
-    () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc }),
-    [timeline, assets, fps, clipGradeDoc],
+    () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc, clipAudioEdit }),
+    [timeline, assets, fps, clipGradeDoc, clipAudioEdit],
   );
   const frames = useMemo(() => expandStillFrames(plan), [plan]);
   const canExport = plan.video.length > 0 && frames !== null && state.phase !== "running";
@@ -63,8 +75,6 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
         return t("export.warnMissingAsset", { id: w.assetId });
       case "video_clip_skipped":
         return t("export.warnVideoSkipped");
-      case "audio_not_mixed":
-        return t("export.warnAudioNotMixed", { n: w.clipCount });
       case "gap":
         return t("export.warnGap", { at: w.atSec.toFixed(1), len: w.lengthSec.toFixed(1) });
     }
@@ -77,6 +87,18 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
       const result = await timelineExport(frames.paths, plan.fps, {
         outputName: outputName.trim() || undefined,
         gradeDocs: frames.gradeDocs.some((d) => d !== null) ? frames.gradeDocs : undefined,
+        audio:
+          plan.audio.length > 0
+            ? plan.audio.map((s) => ({
+                path: s.path,
+                startSec: s.start,
+                durationSec: s.duration,
+                trimStartSec: s.trimStartSec,
+                gainDb: s.gainDb,
+                fadeInSec: s.fadeInSec,
+                fadeOutSec: s.fadeOutSec,
+              }))
+            : undefined,
       });
       if (!result) {
         setState({ phase: "error", message: t("export.noBackend") });
@@ -88,6 +110,8 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
         durationSec: result.duration_sec,
         gradedFrameCount: result.graded_frame_count ?? 0,
         gradeBackend: result.grade_backend ?? null,
+        audioClipCount: result.audio_clip_count ?? 0,
+        audioSkippedReason: result.audio_skipped_reason ?? null,
       });
     } catch (err) {
       setState({ phase: "error", message: String(err) });
@@ -140,6 +164,10 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
             </label>
           </div>
 
+          {plan.audio.length > 0 ? (
+            <p className="export-summary">{t("export.audioSummary", { n: plan.audio.length })}</p>
+          ) : null}
+
           {plan.video.length === 0 ? <p className="export-warning">{t("export.emptyPlan")}</p> : null}
           {frames === null ? <p className="export-warning">{t("export.tooManyFrames")}</p> : null}
           {plan.warnings.length > 0 ? (
@@ -164,6 +192,17 @@ export function ExportDialog({ timeline, assets, clipGradeDoc, onClose }: Export
                   })}
                 </>
               ) : null}
+              {state.audioClipCount > 0 ? (
+                <>
+                  {" · "}
+                  {t("export.audioNote", { n: state.audioClipCount })}
+                </>
+              ) : null}
+            </p>
+          ) : null}
+          {state.phase === "done" && state.audioSkippedReason ? (
+            <p className="export-warning">
+              {t("export.audioSkipped", { reason: state.audioSkippedReason })}
             </p>
           ) : null}
           {state.phase === "error" ? <p className="export-error">{state.message}</p> : null}

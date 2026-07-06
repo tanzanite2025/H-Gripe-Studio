@@ -783,6 +783,13 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [timeline, gradeDocs],
   );
 
+  // The export mixdown applies each audio clip's stored edit (trim / gain /
+  // fades) — the same documents the audio edit modal commits.
+  const clipAudioEdit = useCallback(
+    (clipId: string): AudioClipEdit | null => audioEdits[clipId]?.edit ?? null,
+    [audioEdits],
+  );
+
 
   // Node/graph editing actions: add/delete/duplicate, param edits, clipboard,
   // focus/selection, tidy layout, and bound-edit spawning.
@@ -1669,6 +1676,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           timeline={timeline}
           assets={binAssets}
           clipGradeDoc={clipGradeDoc}
+          clipAudioEdit={clipAudioEdit}
           onClose={() => setExportOpen(false)}
         />
       )}

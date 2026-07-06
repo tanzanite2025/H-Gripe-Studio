@@ -880,9 +880,9 @@ export const messages = {
     en: "video clips are not encoded yet — this first export covers still clips",
     zh: "视频 clip 暂未参与编码——第一版导出只覆盖静帧 clip",
   },
-  "export.warnAudioNotMixed": {
-    en: "{n} audio clip(s) are not mixed/muxed yet — the audio lane lands later",
-    zh: "{n} 个音频 clip 暂未混音/封装——音频链路稍后加入",
+  "export.audioSummary": {
+    en: "{n} audio clip(s) will be mixed down and muxed into the output",
+    zh: "{n} 个音频 clip 将混音并封装进输出文件",
   },
   "export.warnGap": {
     en: "gap at {at}s ({len}s) — segments encode back-to-back",
@@ -896,6 +896,14 @@ export const messages = {
   "export.gradedNote": {
     en: "{n} frames graded ({backend})",
     zh: "已调色 {n} 帧（{backend}）",
+  },
+  "export.audioNote": {
+    en: "{n} audio clip(s) mixed in",
+    zh: "已混入 {n} 个音频 clip",
+  },
+  "export.audioSkipped": {
+    en: "audio skipped — the export is video-only: {reason}",
+    zh: "音频已跳过——本次导出仅含视频：{reason}",
   },
   "drawer.targetLayeredImage": { en: "layered image", zh: "分层图像" },
   "drawer.targetImageLayer": { en: "image layer", zh: "图像图层" },

@@ -57,6 +57,7 @@
 //! re-exports below, so `main.rs`'s `invoke_handler` registration is unchanged.
 
 mod api_call;
+mod audio_mix;
 mod color;
 mod color_match;
 pub(crate) mod color_match_cpu;
