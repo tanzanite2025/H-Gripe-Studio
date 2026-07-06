@@ -1,13 +1,24 @@
 // Owns the canvas documents' live editor state (multi-canvas workspace plan,
-// Phase 2/3): the active canvas's graph, selection, and pane viewport live in
-// the React Flow hooks; inactive canvases are parked in an in-memory store and
-// swapped in on tab activation. File path / dirty stay owned by the file
+// Phase 2/3): the active canvas's graph lives in the external graph store
+// (graphStore.ts) so drag frames re-render the canvas layer only; selection
+// and pane viewport stay here; inactive canvases are parked in an in-memory
+// store and swapped in on tab activation. File path / dirty stay owned by the file
 // controller and are rebound through a registered bridge on each switch, so
 // persistence and the on-disk workflow format are unchanged.
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useEdgesState, useNodesState, type Edge, type Node } from "@hgripe/flow";
+import type { Edge, Node, OnEdgesChange, OnNodesChange } from "@hgripe/flow";
 
+import {
+  graphStore,
+  onGraphEdgesChange,
+  onGraphNodesChange,
+  seedGraph,
+  setGraphEdges,
+  setGraphNodes,
+  useGraphView,
+  type GraphUpdater,
+} from "./graphStore";
 import {
   canvasDocumentTitle,
   DEFAULT_CANVAS_VIEWPORT,
@@ -55,12 +66,13 @@ export interface CanvasFileBridge {
 }
 
 export interface UseCanvasDocument {
+  /** Drag-aware graph view: stable across in-drag position-only frames. */
   nodes: Node[];
-  setNodes: ReturnType<typeof useNodesState>[1];
-  onNodesChange: ReturnType<typeof useNodesState>[2];
+  setNodes: (update: GraphUpdater<Node>) => void;
+  onNodesChange: OnNodesChange;
   edges: Edge[];
-  setEdges: ReturnType<typeof useEdgesState>[1];
-  onEdgesChange: ReturnType<typeof useEdgesState>[2];
+  setEdges: (update: GraphUpdater<Edge>) => void;
+  onEdgesChange: OnEdgesChange;
   selectedId: string | null;
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
   viewport: CanvasViewport;
@@ -108,8 +120,14 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
   const initialId = useRef(newCanvasDocumentId()).current;
   const [documentId, setDocumentId] = useState(initialId);
   const [tabs, setTabs] = useState<CanvasTabInfo[]>([{ id: initialId, path: null, dirty: false }]);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
+  // Seed the external graph store with this document's graph before the
+  // first canvas render (once per mount; a remount re-seeds).
+  const seeded = useRef(false);
+  if (!seeded.current) {
+    seeded.current = true;
+    seedGraph(initial.nodes, initial.edges);
+  }
+  const { nodes, edges } = useGraphView();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<CanvasViewport>(DEFAULT_CANVAS_VIEWPORT);
 
@@ -118,9 +136,10 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
   const fileBridge = useRef<CanvasFileBridge | null>(null);
 
   // Live values in refs so tab operations read fresh state from stable
-  // callbacks (switches happen from user events, not during render).
-  const live = useRef({ documentId, nodes, edges, selectedId, viewport });
-  live.current = { documentId, nodes, edges, selectedId, viewport };
+  // callbacks (switches happen from user events, not during render). The
+  // graph itself is read from the store, which is always current.
+  const live = useRef({ documentId, selectedId, viewport });
+  live.current = { documentId, selectedId, viewport };
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
@@ -130,10 +149,8 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
 
   // Park the active canvas (graph + selection + viewport + file state).
   const parkActive = useCallback(() => {
-    const { documentId: id, nodes, edges, selectedNodeId, viewport } = {
-      ...live.current,
-      selectedNodeId: live.current.selectedId,
-    };
+    const { documentId: id, selectedId: selectedNodeId, viewport } = live.current;
+    const { nodes, edges } = graphStore.getState();
     const file = fileBridge.current?.get() ?? { path: null, dirty: false };
     store.current.set(id, { nodes, edges, selectedNodeId, viewport, path: file.path, dirty: file.dirty });
     setTabs((list) => list.map((t) => (t.id === id ? { ...t, ...file } : t)));
@@ -143,13 +160,12 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
   const loadCanvas = useCallback(
     (id: string, state: StoredCanvas) => {
       fileBridge.current?.set(state.path, state.dirty);
-      setNodes(state.nodes);
-      setEdges(state.edges);
+      seedGraph(state.nodes, state.edges);
       setSelectedId(state.selectedNodeId);
       setViewport(state.viewport);
       setDocumentId(id);
     },
-    [setNodes, setEdges],
+    [],
   );
 
   const openNewCanvas = useCallback(() => {
@@ -250,7 +266,8 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       const canvases = tabsRef.current.flatMap((tab): CanvasSnapshotState[] => {
         const name = tab.name ?? null;
         if (tab.id === live.current.documentId) {
-          const { nodes, edges, selectedId, viewport } = live.current;
+          const { selectedId, viewport } = live.current;
+          const { nodes, edges } = graphStore.getState();
           return [{ id: tab.id, ...activeFile, name, selectedNodeId: selectedId, viewport, nodes, edges }];
         }
         const parked = store.current.get(tab.id);
@@ -314,11 +331,11 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
   return useMemo(
     () => ({
       nodes,
-      setNodes,
-      onNodesChange,
+      setNodes: setGraphNodes,
+      onNodesChange: onGraphNodesChange,
       edges,
-      setEdges,
-      onEdgesChange,
+      setEdges: setGraphEdges,
+      onEdgesChange: onGraphEdgesChange,
       selectedId,
       setSelectedId,
       viewport,
@@ -337,11 +354,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
     }),
     [
       nodes,
-      setNodes,
-      onNodesChange,
       edges,
-      setEdges,
-      onEdgesChange,
       selectedId,
       viewport,
       documentId,
