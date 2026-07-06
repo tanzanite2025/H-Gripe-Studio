@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
@@ -28,8 +28,22 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
   // Presented through the viewport host (image_edit viewport, CPU transport):
   // stays null in browser preview, where we degrade to a path-only card.
   const { view, stageProps } = useViewControls(isImage);
-  const viewport = useViewportUnderlay("image_edit", isImage ? path : undefined, 1280, view);
+  // Native surface presentation (surface swap): the frame presents on a
+  // surface window placed at the stage's rect; actual-size mode scrolls the
+  // frame, which the aspect-fit surface cannot represent, so it stays on the
+  // PNG transport.
+  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  const viewport = useViewportUnderlay(
+    "image_edit",
+    isImage ? path : undefined,
+    1280,
+    view,
+    null,
+    underlayAnchorRef,
+    !actualSize,
+  );
   const src = viewport.underlay;
+  const presented = viewport.presented;
   const dims = viewport.dims;
 
   useEffect(() => {
@@ -51,7 +65,7 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
             {view.zoom > 1 ? <span className="muted"> · {Math.round(view.zoom * 100)}%</span> : null}
           </span>
           <div className="media-viewer-actions">
-            {isImage && src ? (
+            {isImage && (src || presented) ? (
               <button onClick={() => setActualSize((v) => !v)}>
                 {actualSize ? "Fit" : "100%"}
               </button>
@@ -62,14 +76,15 @@ export function MediaViewer({ path, onClose }: MediaViewerProps) {
           </div>
         </div>
         <div
-          className={`media-viewer-stage ${actualSize ? "actual" : "fit"}`}
+          className={`media-viewer-stage ${actualSize ? "actual" : "fit"}${presented ? " presented" : ""}`}
           {...stageProps}
         >
+          <div ref={underlayAnchorRef} className="media-viewer-underlay-anchor" />
           {!isImage ? (
             <p className="muted">No inline preview for this file type. Original path:</p>
           ) : src ? (
             <img className="media-viewer-img" src={src} alt={basename(path)} />
-          ) : viewport.settled ? (
+          ) : presented ? null : viewport.settled ? (
             <p className="muted">preview unavailable (backend mocked)</p>
           ) : (
             <p className="muted">loading…</p>
