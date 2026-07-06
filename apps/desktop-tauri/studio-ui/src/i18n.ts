@@ -106,6 +106,15 @@ export const messages = {
   },
   "runhistory.noLog": { en: "No log lines for this run.", zh: "此次运行没有日志。" },
   "btn.imageEdit": { en: "Image Editor", zh: "图片编辑" },
+  "btn.drawer": { en: "Edit / Grade", zh: "剪辑调色" },
+  "btn.drawerTitle": {
+    en: "open the production drawer (edit / timeline and grade)",
+    zh: "打开制作抽屉（剪辑 / 时间线与调色）",
+  },
+  "btn.drawerCloseTitle": {
+    en: "collapse the production drawer",
+    zh: "收起制作抽屉",
+  },
   "btn.imageEditTitle": {
     en: "open the image editor — uses the selected image card, or pick a file",
     zh: "打开图片编辑弹窗 — 选中图片卡片则自动带入，否则自行选择文件",

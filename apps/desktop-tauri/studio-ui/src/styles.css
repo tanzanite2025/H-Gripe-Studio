@@ -65,6 +65,7 @@ body {
 .toolbar-search .node-search > input {
   width: 100%;
 }
+.toolbar-title-status button.active { border-color: var(--accent); color: var(--accent); }
 .toolbar-title-status {
   display: inline-flex;
   flex-wrap: wrap;

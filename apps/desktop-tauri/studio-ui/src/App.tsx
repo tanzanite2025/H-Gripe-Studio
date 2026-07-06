@@ -70,6 +70,7 @@ import {
   loadDrawerTab,
   saveDrawerMode,
   saveDrawerTab,
+  toggleDrawer,
   type DrawerMode,
   type DrawerTab,
 } from "./production/drawerState";
@@ -1432,6 +1433,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onToggleLang={onToggleLang}
         onOpenModels={() => setModelsRequest({ capability: null })}
         onOpenImageEdit={openImageEditor}
+        drawerOpen={drawerMode !== "collapsed"}
+        onToggleDrawer={() => changeDrawerMode(toggleDrawer(drawerMode))}
         showProject={showProject}
         setShowProject={setShowProject}
         showSnapshots={showSnapshots}
