@@ -366,7 +366,13 @@ Add structured fallback for:
   keeps the last error visible (`viewport_surface_last_error`, a warn line in
   the Model Manager). The grade kernel's own device already scopes these per
   run (`GpuError`).
-- unsupported codec
+- ✅ unsupported codec (decode side) — when a container carries a video
+  stream whose codec has no decoder compiled into the vendored libav,
+  `Decoder::open` reports `unsupported codec '<name>': no decoder compiled
+  into the vendored libav` (`undecodable_stream_reason` in
+  `ffmpeg_native.rs`) instead of the generic "no decodable video stream
+  found"; the encode side already names the codec
+  (`assemble_rejects_unknown_codec`).
 - ✅ driver/device lost — the shared viewport surface device registers a
   `set_device_lost_callback` at creation (`wgpu_device.rs`); a loss records
   the structured reason class + driver message once, `shared_gpu()` then
