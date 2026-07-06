@@ -29,6 +29,7 @@ import {
   reparentNode,
 } from "./editor/grouping";
 import { getHelperLines } from "./editor/helperLines";
+import { setGraphHelperLines } from "./editor/graphStore";
 import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
 import type { WorkflowGraph } from "./graph/model";
@@ -191,7 +192,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   } = canvas;
   const { openNewCanvas, activateCanvas, closeCanvas, renameCanvas } = canvas;
   const [snapToGrid, setSnapToGrid] = useState(false);
-  const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
   const [showMinimap, setShowMinimap] = useState(true);
   // Bottom production drawer (Edit / Timeline + Grade) shell state, plus the
   // lightweight media bin and the unified production selection it consumes.
@@ -1118,7 +1118,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         if (helper.snapPosition.y !== undefined) change.position!.y = helper.snapPosition.y;
         lines = { horizontal: helper.horizontal, vertical: helper.vertical };
       }
-      setHelperLines(lines);
+      setGraphHelperLines(lines);
       onNodesChange(changes);
     },
     [onNodesChange, takeSnapshot, nodes, setNodes],
@@ -1682,8 +1682,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           <div className="canvas">
             <div className="canvas-flow">
               <FlowCanvas
-                nodes={nodes}
-                edges={edges}
                 onNodesChange={handleNodesChange}
                 onEdgesChange={handleEdgesChange}
                 setEdges={setEdges}
@@ -1695,7 +1693,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 viewportKey={canvas.documentId}
                 viewport={canvas.viewport}
                 snapToGrid={snapToGrid}
-                helperLines={helperLines}
                 showMinimap={showMinimap}
                 onNodeContextMenu={openNodeMenu}
                 onPaneContextMenu={openPaneMenu}

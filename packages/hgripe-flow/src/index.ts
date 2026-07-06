@@ -1,4 +1,6 @@
 export {
+  applyEdgeChanges,
+  applyNodeChanges,
   Handle,
   MiniMap,
   NodeResizer,
@@ -32,9 +34,11 @@ export type {
   Connection,
   ConnectionLineComponentProps,
   Edge,
+  EdgeChange,
   EdgeProps,
   IsValidConnection,
   Node,
+  NodeChange,
   NodePositionChange,
   NodeProps,
   OnConnect,

@@ -15,6 +15,7 @@ import {
 } from "@hgripe/flow";
 import "@hgripe/flow/style.css";
 
+import { useGraphEdges, useGraphHelperLines, useGraphNodes } from "./graphStore";
 import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
@@ -26,8 +27,6 @@ import { toWorkflowGraph } from "./adapter";
 import { wouldCreateCycle } from "../runtime/dag";
 
 interface FlowCanvasProps {
-  nodes: Node[];
-  edges: Edge[];
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
@@ -46,8 +45,6 @@ interface FlowCanvasProps {
   viewport?: Viewport;
   /** Snap node positions to a grid while dragging. */
   snapToGrid?: boolean;
-  /** Alignment guide lines (flow-space coords) to draw, if any. */
-  helperLines?: { horizontal?: number; vertical?: number };
   /** Whether to render the minimap. */
   showMinimap?: boolean;
   /** Right-click on a node (screen coords + node id). */
@@ -60,8 +57,6 @@ const SNAP_GRID: [number, number] = [16, 16];
 const NODE_TYPES = { hgripe: HgripeNode, group: GroupNode };
 
 export function FlowCanvas({
-  nodes,
-  edges,
   onNodesChange,
   onEdgesChange,
   setEdges,
@@ -73,12 +68,16 @@ export function FlowCanvas({
   viewportKey,
   viewport,
   snapToGrid = false,
-  helperLines,
   showMinimap = true,
   onNodeContextMenu,
   onPaneContextMenu,
 }: FlowCanvasProps) {
   const { screenToFlowPosition, setViewport } = useReactFlow();
+  // The canvas layer subscribes to the graph store directly, so drag /
+  // connection frames re-render this subtree only, not the app tree above.
+  const nodes = useGraphNodes();
+  const edges = useGraphEdges();
+  const helperLines = useGraphHelperLines();
 
   // Restore the pane viewport when the shown canvas document changes (tab
   // switch). Skips the initial mount so `fitView` keeps framing the graph.
@@ -211,7 +210,7 @@ export function FlowCanvas({
           bgColor="#11131a"
         />
       )}
-      <HelperLineOverlay horizontal={helperLines?.horizontal} vertical={helperLines?.vertical} />
+      <HelperLineOverlay horizontal={helperLines.horizontal} vertical={helperLines.vertical} />
     </HgripeFlow>
   );
 }
