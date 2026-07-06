@@ -1,4 +1,5 @@
 import { useT } from "../i18n";
+import { EyesIcon } from "./EyesIcon";
 
 interface ToolRailProps {
   assistantOpen: boolean;
@@ -20,7 +21,7 @@ export function ToolRail({ assistantOpen, onToggleAssistant }: ToolRailProps) {
         aria-label={t("assistant.title")}
         aria-pressed={assistantOpen}
       >
-        P
+        <EyesIcon />
       </button>
     </div>
   );

@@ -1830,6 +1830,22 @@ button:disabled { opacity: 0.6; cursor: default; }
   border-color: var(--accent);
   color: var(--accent);
 }
+.tool-rail-btn .eyes-icon {
+  display: block;
+  margin: 0 auto;
+}
+.eyes-icon-face {
+  fill: var(--text);
+}
+.eyes-icon-white {
+  fill: var(--panel-2);
+}
+.eyes-icon-pupil {
+  fill: var(--text);
+}
+.tool-rail-btn.active .eyes-icon-face {
+  fill: var(--accent);
+}
 .assistant-dock {
   position: fixed;
   right: 40px;
