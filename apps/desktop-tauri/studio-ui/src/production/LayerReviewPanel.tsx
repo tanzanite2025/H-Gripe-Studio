@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { registerLayeredAsset } from "../bridge/viewport";
+import { registerLayeredAsset, unregisterLayeredAsset } from "../bridge/viewport";
 import { useT } from "../i18n";
 import { useViewControls } from "../viewport/useViewControls";
 import {
@@ -65,6 +65,14 @@ function useRegisteredLayeredAsset(asset: LayeredImageAsset): string | null {
       cancelled = true;
     };
   }, [asset.id, layerKey]);
+  // The review panel is the asset's presenter: when it closes the host-side
+  // layer set goes with it — the next mount re-registers.
+  useEffect(() => {
+    const id = asset.id;
+    return () => {
+      unregisterLayeredAsset(id).catch(() => {});
+    };
+  }, [asset.id]);
   return registered;
 }
 

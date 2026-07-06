@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { registerTimeline, type TimelineClipRef } from "../bridge/viewport";
+import { registerTimeline, unregisterTimeline, type TimelineClipRef } from "../bridge/viewport";
 import { useT } from "../i18n";
 import { describeDeviceReport, deviceReportFromViewportBackend } from "../runtime/deviceReport";
 import { useViewControls } from "../viewport/useViewControls";
@@ -55,6 +55,15 @@ function useRegisteredTimeline(timeline: TimelineModel, assets: MediaAsset[]): s
       cancelled = true;
     };
   }, [timeline.id, key]);
+  // The monitor is the timeline's presenter: when it closes (or the timeline
+  // identity changes) the host-side clip set goes with it — the next mount
+  // re-registers.
+  useEffect(() => {
+    const id = timeline.id;
+    return () => {
+      unregisterTimeline(id).catch(() => {});
+    };
+  }, [timeline.id]);
   return registered;
 }
 

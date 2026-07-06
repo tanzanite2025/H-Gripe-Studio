@@ -71,13 +71,12 @@ import {
   toggleDrawer,
   type DrawerMode,
 } from "./production/drawerState";
-import { addAsset, assetKindForNodeKind, removeAsset, type MediaAsset } from "./production/mediaBin";
+import { assetKindForNodeKind } from "./production/mediaBin";
 import {
   assetTarget,
   imageLayerTarget,
   layeredImageTarget,
   nodeOutputTarget,
-  targetKey,
   type ProductionTarget,
 } from "./production/productionTarget";
 import {
@@ -88,24 +87,25 @@ import {
   stubLayeredImageAsset,
   type LayeredImageAsset,
 } from "./production/layeredImage";
+import { findClip, type TrackKind } from "./production/timeline";
+import { defaultAudioEdit, type AudioClipEdit } from "./production/audioEdit";
 import {
-  addTrack,
-  appendClip,
-  createTimeline,
-  findClip,
-  removeClip,
-  removeClipsForAsset,
-  removeTrack,
-  trimClip,
-  type TimelineModel,
-  type TrackKind,
-} from "./production/timeline";
-import {
-  clampAudioEdit,
-  defaultAudioEdit,
-  editedDuration,
-  type AudioClipEdit,
-} from "./production/audioEdit";
+  addAssetClip,
+  addAssetToBin,
+  addTimelineTrack,
+  clearProductionSelection,
+  clipGradeKey,
+  commitAudioEdit,
+  productionStore,
+  removeAssetFromBin,
+  removeTimelineClip,
+  removeTimelineTrack,
+  selectBinAsset,
+  selectClip,
+  setClipGradeDoc,
+  useProductionState,
+} from "./production/productionStore";
+import { unregisterNodeOutput } from "./bridge/viewport";
 import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
 import { startIngestListener } from "./runtime/ingestStore";
@@ -182,21 +182,17 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // Bottom production drawer (Edit / Timeline + Grade) shell state, plus the
   // lightweight media bin and the unified production selection it consumes.
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(() => loadDrawerMode());
-  const [binAssets, setBinAssets] = useState<MediaAsset[]>([]);
-  const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
-  const [timeline, setTimeline] = useState<TimelineModel>(() => createTimeline());
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  // The media bin, timeline, bin/clip selection, and per-clip edit documents
+  // live in the global production store (productionStore.ts): mutations that
+  // remove an entity cascade there, so edit docs never outlive their clips.
+  const binAssets = useProductionState((s) => s.binAssets);
+  const activeAssetId = useProductionState((s) => s.activeAssetId);
+  const timeline = useProductionState((s) => s.timeline);
+  const selectedClipId = useProductionState((s) => s.selectedClipId);
+  const gradeDocs = useProductionState((s) => s.gradeDocs);
+  const audioEdits = useProductionState((s) => s.audioEdits);
   // Clip whose grade modal is open (clip context menu → “grade”).
   const [gradeClipId, setGradeClipId] = useState<string | null>(null);
-  // Per-target grade documents (JSON strings) keyed by targetKey, edited
-  // through the on-demand grade modal (GradeEditModal over GradePanel).
-  const [gradeDocs, setGradeDocs] = useState<Record<string, string>>({});
-  // Per-clip non-destructive audio edits (trim/gain/fade), plus the source
-  // duration assumed when the clip was first opened (until audio probing
-  // lands, the clip's untrimmed length stands in for the media length).
-  const [audioEdits, setAudioEdits] = useState<
-    Record<string, { edit: AudioClipEdit; sourceDurationSec: number }>
-  >({});
   const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
   // Layer selection inside the targeted layered image asset (review panel):
   // the selected candidate layer id plus per-layer visibility overrides.
@@ -231,6 +227,21 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // Per-image in-progress edit documents for the unified image editor's
   // document tabs: switching tabs remounts the editor, so drafts live here.
   const mediaEditDrafts = useRef(new Map<string, ImageDocument>());
+
+  // Deleting a canvas node cascades: its in-progress image-editor draft and
+  // its host-side output registrations must not outlive it.
+  const knownNodeIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(nodes.map((n) => n.id));
+    if (knownNodeIds.current) {
+      for (const id of knownNodeIds.current) {
+        if (ids.has(id)) continue;
+        mediaEditDrafts.current.delete(id);
+        unregisterNodeOutput(id).catch(() => {});
+      }
+    }
+    knownNodeIds.current = ids;
+  }, [nodes]);
 
   const history = useHistory({ nodes, edges, setNodes, setEdges, scopeId: canvas.documentId });
   const { takeSnapshot, undo, redo } = history;
@@ -289,72 +300,43 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   }, [selectedNode, layeredAsset]);
 
   const handleAddSelectedToBin = useCallback(() => {
-    if (!addableAsset) return;
-    setBinAssets((assets) => {
-      const result = addAsset(assets, addableAsset);
-      setActiveAssetId(result.asset.id);
-      return result.assets;
-    });
+    if (addableAsset) addAssetToBin(productionStore, addableAsset);
   }, [addableAsset]);
 
   const handleRemoveBinAsset = useCallback((id: string) => {
-    setBinAssets((assets) => removeAsset(assets, id));
-    setActiveAssetId((cur) => (cur === id ? null : cur));
-    // Clips are references to bin assets, so they leave with the asset.
-    const next = removeClipsForAsset(timeline, id);
-    setTimeline(next);
-    setSelectedClipId((cur) => (cur && !findClip(next, cur) ? null : cur));
-  }, [timeline]);
-
-  const handleAddActiveToTimeline = useCallback(() => {
-    if (!activeAssetId) return;
-    const asset = binAssets.find((a) => a.id === activeAssetId);
-    if (!asset) return;
-    const result = appendClip(timeline, asset);
-    if (!result) return;
-    setTimeline(result.timeline);
-    setSelectedClipId(result.clip.id);
-  }, [activeAssetId, binAssets, timeline]);
-
-  const handleAddActiveToTrack = useCallback(
-    (trackId: string) => {
-      if (!activeAssetId) return;
-      const asset = binAssets.find((a) => a.id === activeAssetId);
-      if (!asset) return;
-      const result = appendClip(timeline, asset, { trackId });
-      if (!result || result.trackId !== trackId) return;
-      setTimeline(result.timeline);
-      setSelectedClipId(result.clip.id);
-    },
-    [activeAssetId, binAssets, timeline],
-  );
-
-  const handleAddTrack = useCallback((kind: TrackKind) => {
-    setTimeline((tl) => addTrack(tl, kind));
+    // Clips are references to bin assets, so they leave with the asset (and
+    // their edit documents cascade away with the clips).
+    removeAssetFromBin(productionStore, id);
   }, []);
 
-  const handleRemoveTrack = useCallback(
-    (trackId: string) => {
-      const next = removeTrack(timeline, trackId);
-      setTimeline(next);
-      setSelectedClipId((cur) => (cur && !findClip(next, cur) ? null : cur));
-    },
-    [timeline],
-  );
+  const handleAddActiveToTimeline = useCallback(() => {
+    const { activeAssetId: active } = productionStore.getState();
+    if (active) addAssetClip(productionStore, active);
+  }, []);
+
+  const handleAddActiveToTrack = useCallback((trackId: string) => {
+    const { activeAssetId: active } = productionStore.getState();
+    if (active) addAssetClip(productionStore, active, { trackId });
+  }, []);
+
+  const handleAddTrack = useCallback((kind: TrackKind) => {
+    addTimelineTrack(productionStore, kind);
+  }, []);
+
+  const handleRemoveTrack = useCallback((trackId: string) => {
+    removeTimelineTrack(productionStore, trackId);
+  }, []);
 
   const handleRemoveClip = useCallback((clipId: string) => {
-    setTimeline((tl) => removeClip(tl, clipId));
-    setSelectedClipId((cur) => (cur === clipId ? null : cur));
+    removeTimelineClip(productionStore, clipId);
   }, []);
 
   const handleSelectClip = useCallback((clipId: string | null) => {
-    setSelectedClipId(clipId);
-    if (clipId) setActiveAssetId(null);
+    selectClip(productionStore, clipId);
   }, []);
 
   const handleSelectBinAsset = useCallback((assetId: string | null) => {
-    setActiveAssetId(assetId);
-    if (assetId) setSelectedClipId(null);
+    selectBinAsset(productionStore, assetId);
   }, []);
 
   // Unified production selection: a timeline clip when one is selected, else
@@ -386,10 +368,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setSelectedId(id);
     setSelectedLayerId(null);
     setLayerVisibility({});
-    if (id) {
-      setActiveAssetId(null);
-      setSelectedClipId(null);
-    }
+    if (id) clearProductionSelection(productionStore);
   }, []);
 
   const handleToggleLayerVisibility = useCallback(
@@ -777,8 +756,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     (clipId: string) => {
       const found = findClip(timeline, clipId);
       if (!found || found.clip.kind === "audio") return;
-      setSelectedClipId(clipId);
-      setActiveAssetId(null);
+      selectClip(productionStore, clipId);
       setGradeClipId(clipId);
     },
     [timeline],
@@ -786,23 +764,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   const handleAudioEditCommit = useCallback(
     (edit: AudioClipEdit) => {
-      if (!audioEditClipId) return;
-      const found = findClip(timeline, audioEditClipId);
-      if (!found) {
-        setAudioEditClipId(null);
-        return;
-      }
-      const sourceDurationSec =
-        audioEdits[audioEditClipId]?.sourceDurationSec ?? found.clip.duration;
-      const clamped = clampAudioEdit(edit, sourceDurationSec);
-      setAudioEdits((prev) => ({ ...prev, [audioEditClipId]: { edit: clamped, sourceDurationSec } }));
-      // Reflect the trim on the timeline: the clip plays only the trimmed span.
-      setTimeline(
-        trimClip(timeline, audioEditClipId, { duration: editedDuration(clamped, sourceDurationSec) }),
-      );
+      // The store clamps the edit and reflects the trimmed span on the clip.
+      if (audioEditClipId) commitAudioEdit(productionStore, audioEditClipId, edit);
       setAudioEditClipId(null);
     },
-    [audioEditClipId, audioEdits, timeline],
+    [audioEditClipId],
   );
 
   const audioEditClip = audioEditClipId ? findClip(timeline, audioEditClipId) : null;
@@ -811,15 +777,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // the same per-target documents the Grade tab edits.
   const clipGradeDoc = useCallback(
     (clipId: string): string | null => {
-      const found = findClip(timeline, clipId);
-      if (!found) return null;
-      const key = targetKey({
-        kind: "video_clip",
-        timelineId: timeline.id,
-        trackId: found.track.id,
-        clipId: found.clip.id,
-      });
-      return gradeDocs[key] ?? null;
+      const key = clipGradeKey(timeline, clipId);
+      return key ? (gradeDocs[key] ?? null) : null;
     },
     [timeline, gradeDocs],
   );
@@ -1143,13 +1102,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onCommit: (commit) => {
           // Store the doc under the clip's target key — the same key the
           // program monitor reads through `clipGradeDoc`.
-          const key = targetKey({
-            kind: "video_clip",
-            timelineId: timeline.id,
-            trackId: gradeClip.track.id,
-            clipId: gradeClip.clip.id,
-          });
-          setGradeDocs((docs) => ({ ...docs, [key]: commit.gradeDoc }));
+          setClipGradeDoc(productionStore, gradeClip.clip.id, commit.gradeDoc);
         },
       }
     : maskEditNode
