@@ -840,10 +840,20 @@ export const messages = {
   "assistant.title": { en: "Prompt Assistant", zh: "提示词助手" },
   "assistant.railLabel": { en: "tool rail", zh: "工具栏" },
   "assistant.close": { en: "Close", zh: "关闭" },
-  "assistant.backend": {
-    en: "Backend: local rewriter (offline)",
-    zh: "后端：本地改写（离线）",
+  "assistant.backend": { en: "Backend", zh: "后端" },
+  "assistant.backendLocal": {
+    en: "Local rewriter (offline)",
+    zh: "本地改写（离线）",
   },
+  "assistant.backendGone": {
+    en: "API profile \"{ref}\" is no longer in the model manager — pick another backend.",
+    zh: "API 档案“{ref}”已不在模型管理器中，请换一个后端。",
+  },
+  "assistant.apiError": {
+    en: "Rewrite failed: {error}",
+    zh: "改写失败：{error}",
+  },
+  "assistant.waiting": { en: "Rewriting…", zh: "正在改写…" },
   "assistant.preset": { en: "Preset", zh: "预设" },
   "assistant.empty": {
     en: "Drafts stay local. Describe an idea and the assistant rewrites it into a prompt draft.",

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ApiProfileEntry } from "../models/backendRegistry";
 import {
+  assistantApiReply,
   emptyAssistantSession,
   latestDraft,
   loadAssistantOpen,
@@ -11,7 +13,29 @@ import {
   sendAssistantMessage,
 } from "./promptAssistantState";
 
-beforeEach(() => localStorage.clear());
+vi.mock("../bridge/run", () => ({ runTaskJson: vi.fn() }));
+import { runTaskJson } from "../bridge/run";
+const runTaskJsonMock = vi.mocked(runTaskJson);
+
+function profile(overrides: Partial<ApiProfileEntry> = {}): ApiProfileEntry {
+  return {
+    ref: "openai-main",
+    display_name: "OpenAI main",
+    provider_kind: "openai_compatible",
+    base_url: "https://api.example.test",
+    credentials_ref: "cred-1",
+    default_model: "gpt-test",
+    known_models: ["gpt-test"],
+    capabilities: ["prompt.rewrite"],
+    health: "valid",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  runTaskJsonMock.mockReset();
+});
 
 describe("sendAssistantMessage", () => {
   it("appends a user turn and a rewritten assistant draft", () => {
@@ -60,11 +84,66 @@ describe("persistence", () => {
     expect(loadAssistantSession()).toEqual(emptyAssistantSession());
   });
 
+  it("round-trips the API backend ref and drops malformed backends", () => {
+    saveAssistantSession({
+      ...emptyAssistantSession(),
+      backend: { kind: "api_profile", ref: "openai-main" },
+    });
+    expect(loadAssistantSession().backend).toEqual({
+      kind: "api_profile",
+      ref: "openai-main",
+    });
+
+    localStorage.setItem(
+      "hgripe.studio.promptAssistant.session.v1",
+      JSON.stringify({ messages: [], preset: "cleanup", backend: { kind: "api_profile" } }),
+    );
+    expect(loadAssistantSession().backend).toEqual({ kind: "local" });
+  });
+
   it("round-trips the open flag, defaulting to closed", () => {
     expect(loadAssistantOpen()).toBe(false);
     saveAssistantOpen(true);
     expect(loadAssistantOpen()).toBe(true);
     saveAssistantOpen(false);
     expect(loadAssistantOpen()).toBe(false);
+  });
+});
+
+describe("assistantApiReply", () => {
+  it("runs a text.generate broker task shaped like the promptOptimize api mode", async () => {
+    runTaskJsonMock.mockResolvedValue({
+      id: "t",
+      status: "succeeded",
+      output_json: { text: " a refined fox prompt " },
+    });
+    await expect(assistantApiReply("a fox", profile())).resolves.toBe(
+      "a refined fox prompt",
+    );
+    const task = runTaskJsonMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(task.provider).toBe("openai_compatible");
+    expect(task.operation).toBe("text.generate");
+    expect(task.inputs).toEqual({ prompt: "a fox" });
+    expect(task.params).toEqual({ model: "gpt-test" });
+    expect(task.credentials_ref).toBe("cred-1");
+  });
+
+  it("falls back to the input when the provider returns no text", async () => {
+    runTaskJsonMock.mockResolvedValue({ id: "t", status: "succeeded", output_json: {} });
+    await expect(assistantApiReply("a fox", profile())).resolves.toBe("a fox");
+  });
+
+  it("throws on failed runs and unsupported providers", async () => {
+    runTaskJsonMock.mockResolvedValue({
+      id: "t",
+      status: "failed",
+      error: { message: "rate limited" },
+    });
+    await expect(assistantApiReply("a fox", profile())).rejects.toThrow("rate limited");
+
+    await expect(
+      assistantApiReply("a fox", profile({ provider_kind: "replicate" })),
+    ).rejects.toThrow(/can't rewrite prompts/);
+    expect(runTaskJsonMock).toHaveBeenCalledTimes(1);
   });
 });

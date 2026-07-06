@@ -1,11 +1,18 @@
 // Software-level Prompt Assistant state (PROMPT_ASSISTANT_SYSTEM_PLAN): the
 // conversation lives outside the workflow graph — pure helpers + localStorage
-// persistence, kept out of the component for testing. The first version's
-// "backend" is the local rule-based rewriter shared with the `promptOptimize`
-// card's `local` mode; API profiles and local text models join through the
-// global managers in later steps.
+// persistence, kept out of the component for testing. Backends: the local
+// rule-based rewriter shared with the `promptOptimize` card's `local` mode,
+// or a `prompt.rewrite` API profile from the global model manager (the
+// session stores only the managed ref — never provider URLs or keys). Local
+// text models join through the Local Model Manager in a later step.
 
-import { optimizePromptLocally, type LocalPreset } from "../runtime/promptOptimize";
+import { runTaskJson } from "../bridge/run";
+import type { ApiProfileEntry } from "../models/backendRegistry";
+import {
+  optimizePromptLocally,
+  promptOptimizeProviderSupported,
+  type LocalPreset,
+} from "../runtime/promptOptimize";
 
 export interface PromptAssistantMessage {
   role: "user" | "assistant";
@@ -13,9 +20,15 @@ export interface PromptAssistantMessage {
   at: number;
 }
 
+/** Which rewriter answers the conversation. Only the managed ref is stored. */
+export type AssistantBackend =
+  | { kind: "local" }
+  | { kind: "api_profile"; ref: string };
+
 export interface PromptAssistantSession {
   messages: PromptAssistantMessage[];
   preset: LocalPreset;
+  backend: AssistantBackend;
 }
 
 const SESSION_KEY = "hgripe.studio.promptAssistant.session.v1";
@@ -33,8 +46,18 @@ export function isLocalPreset(v: unknown): v is LocalPreset {
   return typeof v === "string" && (PRESETS as string[]).includes(v);
 }
 
+function sanitizeBackend(raw: unknown): AssistantBackend {
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    if (o.kind === "api_profile" && typeof o.ref === "string" && o.ref) {
+      return { kind: "api_profile", ref: o.ref };
+    }
+  }
+  return { kind: "local" };
+}
+
 export function emptyAssistantSession(): PromptAssistantSession {
-  return { messages: [], preset: "cleanup" };
+  return { messages: [], preset: "cleanup", backend: { kind: "local" } };
 }
 
 /** Rewrite the user's idea into a prompt draft with the local rewriter. */
@@ -51,7 +74,20 @@ export function latestDraft(session: PromptAssistantSession): string {
   return "";
 }
 
-/** Append a user turn plus the assistant's rewrite; empty input is a no-op. */
+/** Append one turn to the transcript. */
+export function appendTurn(
+  session: PromptAssistantSession,
+  role: PromptAssistantMessage["role"],
+  text: string,
+  now: number = Date.now(),
+): PromptAssistantSession {
+  return {
+    ...session,
+    messages: [...session.messages, { role, text, at: now }],
+  };
+}
+
+/** Append a user turn plus the assistant's local rewrite; empty input is a no-op. */
 export function sendAssistantMessage(
   session: PromptAssistantSession,
   input: string,
@@ -59,14 +95,50 @@ export function sendAssistantMessage(
 ): PromptAssistantSession {
   const text = input.trim();
   if (!text) return session;
-  return {
-    ...session,
-    messages: [
-      ...session.messages,
-      { role: "user", text, at: now },
-      { role: "assistant", text: assistantReply(text, session.preset), at: now },
-    ],
+  return appendTurn(
+    appendTurn(session, "user", text, now),
+    "assistant",
+    assistantReply(text, session.preset),
+    now,
+  );
+}
+
+/**
+ * Rewrite the user's idea through a managed `prompt.rewrite` API profile
+ * (same broker task shape as the `promptOptimize` card's `api` mode). Throws
+ * with a readable message on unsupported providers or failed runs; the panel
+ * surfaces that as an assistant turn instead of touching the graph.
+ */
+export async function assistantApiReply(
+  input: string,
+  profile: ApiProfileEntry,
+): Promise<string> {
+  const provider = profile.provider_kind || "openai_compatible";
+  if (!promptOptimizeProviderSupported(provider)) {
+    throw new Error(
+      `Provider "${provider}" can't rewrite prompts (no text.generate support).`,
+    );
+  }
+  const params: Record<string, unknown> = {};
+  if (profile.default_model) params.model = profile.default_model;
+  const task = {
+    id: `assistant-${Date.now()}`,
+    provider,
+    operation: "text.generate",
+    inputs: { prompt: input },
+    params,
+    credentials_ref: profile.credentials_ref || null,
+    output_type: "text",
+    cache_policy: { enabled: true, ttl_seconds: null, key: null },
+    retry_policy: { max_attempts: 1, backoff_ms: 200, timeout_ms: 60000 },
   };
+  const result = await runTaskJson(task);
+  if (result.status === "failed") {
+    throw new Error(result.error?.message ?? "prompt rewrite failed");
+  }
+  const rewritten = (result.output_json as { text?: unknown } | null)?.text;
+  const text = typeof rewritten === "string" ? rewritten.trim() : "";
+  return text || input;
 }
 
 export function loadAssistantSession(): PromptAssistantSession {
@@ -84,7 +156,7 @@ export function loadAssistantSession(): PromptAssistantSession {
         )
       : [];
     const preset = isLocalPreset(parsed.preset) ? parsed.preset : "cleanup";
-    return { messages, preset };
+    return { messages, preset, backend: sanitizeBackend(parsed.backend) };
   } catch {
     return emptyAssistantSession();
   }

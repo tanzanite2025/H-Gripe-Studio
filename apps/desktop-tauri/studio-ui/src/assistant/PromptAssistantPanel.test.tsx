@@ -1,8 +1,34 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PromptAssistantPanel } from "./PromptAssistantPanel";
+
+vi.mock("../bridge/run", () => ({ runTaskJson: vi.fn() }));
+import { runTaskJson } from "../bridge/run";
+const runTaskJsonMock = vi.mocked(runTaskJson);
+
+function seedRegistry(): void {
+  localStorage.setItem(
+    "hgripe.studio.modelRegistry.v1",
+    JSON.stringify({
+      apiProfiles: [
+        {
+          ref: "openai-main",
+          display_name: "OpenAI main",
+          provider_kind: "openai_compatible",
+          base_url: "",
+          credentials_ref: "cred-1",
+          default_model: "gpt-test",
+          known_models: [],
+          capabilities: ["prompt.rewrite"],
+          health: "valid",
+        },
+      ],
+      localModels: [],
+    }),
+  );
+}
 
 function panelProps(overrides: Partial<Parameters<typeof PromptAssistantPanel>[0]> = {}) {
   return {
@@ -29,7 +55,10 @@ function actionButton(container: HTMLElement, label: string): HTMLButtonElement 
   return btn!;
 }
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  runTaskJsonMock.mockReset();
+});
 afterEach(() => {
   document.body.innerHTML = "";
 });
@@ -76,11 +105,50 @@ describe("PromptAssistantPanel", () => {
 
   it("clears the session but keeps the preset", () => {
     const { container } = render(<PromptAssistantPanel {...panelProps()} />);
-    const preset = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
+    const preset = container.querySelectorAll<HTMLSelectElement>(".assistant-backend select")[1]!;
     fireEvent.change(preset, { target: { value: "anime" } });
     sendMessage(container, "a fox");
     fireEvent.click(actionButton(container, "Clear session"));
     expect(container.querySelectorAll(".assistant-msg")).toHaveLength(0);
     expect(preset.value).toBe("anime");
+  });
+
+  it("lists manager prompt.rewrite profiles and answers through the API backend", async () => {
+    seedRegistry();
+    runTaskJsonMock.mockResolvedValue({
+      id: "t",
+      status: "succeeded",
+      output_json: { text: "a majestic fox, golden hour" },
+    });
+    const { container } = render(<PromptAssistantPanel {...panelProps()} />);
+    const backend = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
+    fireEvent.change(backend, { target: { value: "api:openai-main" } });
+    // The local preset row hides while an API profile is selected.
+    expect(container.querySelectorAll(".assistant-backend select")).toHaveLength(1);
+    sendMessage(container, "a fox");
+    await waitFor(() => {
+      const msgs = container.querySelectorAll(".assistant-msg");
+      expect(msgs).toHaveLength(2);
+      expect(msgs[1].textContent).toBe("a majestic fox, golden hour");
+    });
+    expect(runTaskJsonMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces API failures as an assistant turn", async () => {
+    seedRegistry();
+    runTaskJsonMock.mockResolvedValue({
+      id: "t",
+      status: "failed",
+      error: { message: "rate limited" },
+    });
+    const { container } = render(<PromptAssistantPanel {...panelProps()} />);
+    const backend = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
+    fireEvent.change(backend, { target: { value: "api:openai-main" } });
+    sendMessage(container, "a fox");
+    await waitFor(() => {
+      const msgs = container.querySelectorAll(".assistant-msg");
+      expect(msgs).toHaveLength(2);
+      expect(msgs[1].textContent).toContain("rate limited");
+    });
   });
 });
