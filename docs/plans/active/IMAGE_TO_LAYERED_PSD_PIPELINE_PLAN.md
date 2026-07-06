@@ -610,7 +610,9 @@ Reports/
   静帧写入输出目录并记录在 split report 里。
 - ✅ 对当前帧做分层：提取的静帧走完整的主体/背景/实例/文字/logo/
   阴影/反光管线，`source_asset_id` 指向源视频。
-- 结果回到 image asset 或 still clip（时间线右键入口待做）。
+- ✅ 时间线右键入口：video / still clip 的右键菜单提供 `Split to layers`，
+  在节点画布上生成接到该 clip 素材（复用来源卡片，否则按素材路径新建）的
+  Smart Layer Split 卡片并选中它，分层结果回到 Review 面板与下游节点。
 - 后续再考虑对象跟踪和跨帧 mask。
 
 成功标准：

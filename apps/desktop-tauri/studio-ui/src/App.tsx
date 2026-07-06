@@ -870,6 +870,71 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [screenToFlowPosition, setNodes, takeSnapshot, newNodeId, setMessage, t],
   );
 
+  // Timeline clip context menu “split to layers” (IMAGE_TO_LAYERED_PSD plan,
+  // Phase 5): wire the clip's media into a Smart Layer Split card on the
+  // canvas — reusing the clip's source card when it still exists, else
+  // creating one from the bin asset's path — and select the split card so the
+  // drawer's review panel targets its layers. A video clip connects to the
+  // split card's video input; the node's frame time picks the still to split.
+  const handleSplitClipToLayers = useCallback(
+    (clipId: string) => {
+      const found = findClip(timeline, clipId);
+      if (!found || found.clip.kind === "audio") return;
+      const asset = binAssets.find((a) => a.id === found.clip.assetId);
+      if (!asset || asset.kind === "audio") return;
+      takeSnapshot();
+      const existing = asset.sourceNodeId
+        ? nodes.find((n) => n.id === asset.sourceNodeId)
+        : undefined;
+      const handle = asset.kind === "video" ? "video" : "image";
+      const created: Node[] = [];
+      let sourceId: string;
+      let sourcePos: { x: number; y: number };
+      if (existing) {
+        sourceId = existing.id;
+        sourcePos = existing.position;
+      } else {
+        const sourceKind = asset.kind === "video" ? "videoSource" : "imageSource";
+        sourceId = newNodeId(sourceKind);
+        sourcePos = screenToFlowPosition({
+          x: window.innerWidth / 2 - 320,
+          y: window.innerHeight / 3,
+        });
+        created.push(makeNode(sourceId, sourceKind, sourcePos.x, sourcePos.y, { path: asset.path }));
+      }
+      const splitId = newNodeId("smartLayerSplit");
+      created.push({
+        ...makeNode(splitId, "smartLayerSplit", sourcePos.x + 320, sourcePos.y),
+        selected: true,
+      });
+      setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...created]);
+      setEdges((es) =>
+        es.concat({
+          id: `edge-${splitId}`,
+          source: sourceId,
+          sourceHandle: handle,
+          target: splitId,
+          targetHandle: handle,
+        }),
+      );
+      handleCanvasSelect(splitId);
+      setMessage(t("drawer.splitLayersCreated"));
+    },
+    [
+      timeline,
+      binAssets,
+      nodes,
+      takeSnapshot,
+      newNodeId,
+      screenToFlowPosition,
+      setNodes,
+      setEdges,
+      handleCanvasSelect,
+      setMessage,
+      t,
+    ],
+  );
+
   // Subscribe to the Tauri webview file-drop (desktop only; browser preview has
   // no native drag-drop paths). Re-subscribes if the handler identity changes.
   useEffect(() => {
@@ -1611,6 +1676,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}
           onOpenClipGrade={handleOpenClipGrade}
+          onSplitClipToLayers={handleSplitClipToLayers}
           onOpenExport={() => setExportOpen(true)}
           clipGradeDoc={clipGradeDoc}
           layeredAsset={layeredAsset}
