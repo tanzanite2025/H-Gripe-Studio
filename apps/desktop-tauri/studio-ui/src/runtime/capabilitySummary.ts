@@ -54,6 +54,13 @@ export function summarizeCapabilities(report: EngineProbeReport): CapabilityLine
   } else {
     lines.push({ label: "runtime", value: "probe did not run", tone: "warn" });
   }
+  if (report.display_adapters) {
+    lines.push({
+      label: "display adapters",
+      value: report.display_adapters.detail,
+      tone: report.display_adapters.available ? "ok" : "warn",
+    });
+  }
   if (report.wgpu) {
     lines.push({
       label: "wgpu",

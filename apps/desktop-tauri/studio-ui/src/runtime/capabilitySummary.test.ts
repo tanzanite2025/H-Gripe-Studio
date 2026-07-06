@@ -72,6 +72,10 @@ describe("summarizeCapabilities", () => {
       cards: [],
       wgpu: { available: true, detail: "NVIDIA GeForce RTX 4090 (Vulkan)" },
       ffmpeg: { available: false, detail: "native-ffmpeg feature disabled (no vendored libav decoder)" },
+      display_adapters: {
+        available: true,
+        detail: "NVIDIA GeForce RTX 4090 (Vulkan), NVIDIA GeForce RTX 4090 (Dx12)",
+      },
     });
     const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
     expect(byLabel["wgpu"]).toEqual({
@@ -82,6 +86,24 @@ describe("summarizeCapabilities", () => {
     expect(byLabel["ffmpeg"]).toEqual({
       label: "ffmpeg",
       value: "native-ffmpeg feature disabled (no vendored libav decoder)",
+      tone: "warn",
+    });
+    expect(byLabel["display adapters"]).toEqual({
+      label: "display adapters",
+      value: "NVIDIA GeForce RTX 4090 (Vulkan), NVIDIA GeForce RTX 4090 (Dx12)",
+      tone: "ok",
+    });
+  });
+
+  it("keeps a failed display-adapter probe visible as a warn line", () => {
+    const lines = summarizeCapabilities({
+      cards: [],
+      display_adapters: { available: false, detail: "no display adapters detected" },
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["display adapters"]).toEqual({
+      label: "display adapters",
+      value: "no display adapters detected",
       tone: "warn",
     });
   });

@@ -102,6 +102,8 @@ export interface EngineProbeReport {
   wgpu?: BackendProbe | null;
   /** Vendored FFmpeg decode status (software path). */
   ffmpeg?: BackendProbe | null;
+  /** Detected display adapters across every compiled wgpu backend. */
+  display_adapters?: BackendProbe | null;
 }
 
 /**

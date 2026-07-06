@@ -96,6 +96,36 @@ pub(crate) fn shared_gpu_initialised() -> bool {
     SHARED.get().is_some()
 }
 
+/// Enumerate every display adapter wgpu can see across the compiled backends,
+/// for the capability summary (GPU_DEVICE_STRATEGY_PLAN step 5: "detected
+/// display adapters"). Diagnostics only: a fresh throwaway instance per probe,
+/// never the shared device, so probing cannot trigger or skew the lazy device
+/// init. The same physical GPU may appear once per backend (e.g. Vulkan and
+/// Dx12) — that is informative, not a bug.
+#[cfg(feature = "viewport-surface")]
+pub(crate) fn display_adapters() -> Result<String, String> {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+    if adapters.is_empty() {
+        return Err("no display adapters detected".to_string());
+    }
+    let names: Vec<String> = adapters
+        .iter()
+        .map(|adapter| {
+            let info = adapter.get_info();
+            format!("{} ({:?})", info.name, info.backend)
+        })
+        .collect();
+    Ok(names.join(", "))
+}
+
+/// Feature-off build: wgpu is compiled out, so the probe reports why.
+#[cfg(not(feature = "viewport-surface"))]
+pub(crate) fn display_adapters() -> Result<String, String> {
+    Err("viewport-surface feature disabled (wgpu not compiled in)".to_string())
+}
+
 /// Resolve the surface device report, initialising the device if needed.
 #[cfg(feature = "viewport-surface")]
 #[allow(dead_code)] // wired into the viewport backend report from Phase S1
@@ -145,6 +175,15 @@ mod tests {
                 assert!(report.fallback_reason.is_some());
             }
             other => panic!("unexpected device: {}", other.as_str()),
+        }
+    }
+
+    #[test]
+    fn display_adapter_probe_is_never_silent() {
+        // Ok carries at least one adapter description; Err carries a reason.
+        match display_adapters() {
+            Ok(detail) => assert!(!detail.is_empty()),
+            Err(reason) => assert!(!reason.is_empty()),
         }
     }
 
