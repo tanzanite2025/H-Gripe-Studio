@@ -1,7 +1,7 @@
 // Default executor registry: maps node kinds to runtime behaviour.
 //
 // The `generate` node composes an ApiTask and runs it through the existing
-// H-Gripe broker (`run_task_json`). Source nodes (`prompt`, `imageSource`,
+// H-Gripe broker (`run_task_json`). Source nodes (`promptOptimize`, `imageSource`,
 // `psdTemplate`, `number`) are pure value providers; `save` is a sink. This
 // wires the renderer-agnostic DAG runtime to real backend capability.
 
@@ -55,8 +55,6 @@ export function batchItems(items: unknown): string[] {
 }
 
 export const defaultExecutors: ExecutorRegistry = {
-  prompt: async (ctx) => ({ text: String(ctx.params.text ?? "") }),
-
   // Initial text node with optional prompt optimisation. A connected `text`
   // input overrides the param. `off` passes through, `local` applies the
   // model-free preset transform, `api` rewrites via an LLM provider profile.

@@ -48,13 +48,13 @@ describe("nodeSpecs zh coverage", () => {
   });
 
   it("localizeSpec returns the English spec for en and applies zh strings for zh", () => {
-    const en = localizeSpec(NODE_SPECS.prompt, "en");
-    expect(en.title).toBe(NODE_SPECS.prompt.title);
-    const zh = localizeSpec(NODE_SPECS.prompt, "zh");
-    expect(zh.title).toBe(NODE_ZH.prompt.title);
+    const en = localizeSpec(NODE_SPECS.promptOptimize, "en");
+    expect(en.title).toBe(NODE_SPECS.promptOptimize.title);
+    const zh = localizeSpec(NODE_SPECS.promptOptimize, "zh");
+    expect(zh.title).toBe(NODE_ZH.promptOptimize.title);
     // Structure is preserved (same number of params/ports).
-    expect(zh.params.length).toBe(NODE_SPECS.prompt.params.length);
-    expect(zh.outputs.length).toBe(NODE_SPECS.prompt.outputs.length);
+    expect(zh.params.length).toBe(NODE_SPECS.promptOptimize.params.length);
+    expect(zh.outputs.length).toBe(NODE_SPECS.promptOptimize.outputs.length);
   });
 });
 

@@ -358,7 +358,7 @@ mod tests {
             &inputs,
         ));
         // Graph nodes stay non-cacheable without an explicit override.
-        assert!(!is_cacheable(&node("prompt", &[]), &inputs));
+        assert!(!is_cacheable(&node("number", &[]), &inputs));
     }
 
     #[test]

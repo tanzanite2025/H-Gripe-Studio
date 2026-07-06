@@ -9,7 +9,7 @@ const nodes: Node[] = [
     id: "prompt-1",
     type: "hgripe",
     position: { x: 10, y: 20 },
-    data: { kind: "prompt", params: { text: "hi" }, status: "idle" } satisfies HgripeNodeData,
+    data: { kind: "promptOptimize", params: { text: "hi" }, status: "idle" } satisfies HgripeNodeData,
   },
   {
     id: "generate-1",

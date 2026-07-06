@@ -33,12 +33,6 @@ export const GROUP_ZH = {
 };
 
 export const NODE_ZH: Record<string, NodeSpecZh> = {
-  prompt: {
-    title: "提示词",
-    description: "送入生成节点的文本提示词。",
-    params: { text: { label: "提示词" } },
-    ports: { text: "文本" },
-  },
   promptOptimize: {
     title: "提示词",
     description:

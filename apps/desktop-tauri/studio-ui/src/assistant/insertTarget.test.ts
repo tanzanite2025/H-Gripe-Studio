@@ -8,8 +8,8 @@ import {
 
 describe("insert targets", () => {
   it("accepts prompt-text cards and Generate cards only", () => {
-    expect(isPromptTextTarget("prompt")).toBe(true);
     expect(isPromptTextTarget("promptOptimize")).toBe(true);
+    expect(isPromptTextTarget("prompt")).toBe(false);
     expect(isPromptTextTarget("generate")).toBe(false);
     expect(isAssistantInsertTarget("generate")).toBe(true);
     expect(isAssistantInsertTarget("imageSource")).toBe(false);
@@ -18,7 +18,7 @@ describe("insert targets", () => {
 
 describe("planGenerateInsert", () => {
   const kinds: Record<string, string> = {
-    "prompt-1": "prompt",
+    "prompt-1": "promptOptimize",
     "opt-1": "promptOptimize",
     "psd-1": "psdContextAnalyze",
   };

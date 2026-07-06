@@ -308,7 +308,12 @@ Bottom drawer
    mode/ref params; this step completes the recommended card shape with the
    `Assistant` row: a card button — `editing.openAssistant` — that opens the
    software-level panel with the card selected as the insert target).
-9. Hide/migrate the old `Prompt Optimize` card from the normal palette.
+9. ✅ Remove the old prompt primitive entirely (no pre-launch backcompat
+   needed): the palette already showed a single `Prompt` entry (kind
+   `promptOptimize`); the legacy internal `prompt` kind was deleted from
+   `nodeSpecs.ts` / `defaultExecutors` / the Rust `node_registry` + graph
+   executor, and every spawner (sample workflow, assistant wire-new) now
+   creates `promptOptimize` cards.
 
 ## Success Criteria
 

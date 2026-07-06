@@ -31,8 +31,8 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
     use StudioExecutor::*;
     // Pure in-process graph logic: routing, comparisons, sources, sinks.
     let (executor, category) = match kind {
-        "prompt" | "batch" | "imageSource" | "videoSource" | "psdTemplate" | "number"
-        | "reroute" | "group" | "compare" | "logic" | "if" | "switch" | "save" => (Graph, CpuLight),
+        "batch" | "imageSource" | "videoSource" | "psdTemplate" | "number" | "reroute"
+        | "group" | "compare" | "logic" | "if" | "switch" | "save" => (Graph, CpuLight),
         // `python/bridge` CLI cards: CPU-bound subprocess work.
         "psdContextAnalyze" | "matchLightColor" | "refineMaskEdge" | "imageEnhance"
         | "detailWatchdog" | "psdExport" | "videoAssemble" | "videoTrim" => (Local, CpuBound),

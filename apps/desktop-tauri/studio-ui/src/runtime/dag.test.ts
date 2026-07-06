@@ -16,7 +16,7 @@ function graph(partial: Pick<WorkflowGraph, "nodes" | "edges">): WorkflowGraph {
 
 const chain = graph({
   nodes: [
-    { id: "prompt-1", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
+    { id: "prompt-1", kind: "promptOptimize", position: { x: 0, y: 0 }, params: { text: "hi" } },
     { id: "generate-1", kind: "generate", position: { x: 0, y: 0 }, params: { provider: "mock", operation: "echo" } },
     { id: "save-1", kind: "save", position: { x: 0, y: 0 }, params: {} },
   ],
@@ -34,8 +34,8 @@ describe("topoLevels", () => {
   it("groups independent nodes into the same level", () => {
     const g = graph({
       nodes: [
-        { id: "a", kind: "prompt", position: { x: 0, y: 0 }, params: {} },
-        { id: "b", kind: "prompt", position: { x: 0, y: 0 }, params: {} },
+        { id: "a", kind: "promptOptimize", position: { x: 0, y: 0 }, params: {} },
+        { id: "b", kind: "promptOptimize", position: { x: 0, y: 0 }, params: {} },
         { id: "gen", kind: "generate", position: { x: 0, y: 0 }, params: {} },
       ],
       edges: [
@@ -94,7 +94,7 @@ describe("runGraph", () => {
   it("threads outputs through the chain and reports statuses", async () => {
     const seen: string[] = [];
     const registry: ExecutorRegistry = {
-      prompt: async (ctx) => {
+      promptOptimize: async (ctx) => {
         seen.push(ctx.nodeId);
         return { text: String(ctx.params.text ?? "") };
       },
@@ -116,7 +116,7 @@ describe("runGraph", () => {
   it("emits per-node run telemetry (duration on success, error on failure)", async () => {
     const events = new Map<string, { status: string; durationMs?: number; error?: string }>();
     const registry: ExecutorRegistry = {
-      prompt: async () => ({ text: "x" }),
+      promptOptimize: async () => ({ text: "x" }),
       generate: async () => {
         throw new Error("boom");
       },
@@ -136,7 +136,7 @@ describe("runGraph", () => {
   it("aborts cooperatively when shouldCancel becomes true", async () => {
     const ran: string[] = [];
     const registry: ExecutorRegistry = {
-      prompt: async (ctx) => {
+      promptOptimize: async (ctx) => {
         ran.push(ctx.nodeId);
         return { text: "x" };
       },
@@ -177,7 +177,7 @@ describe("conditional branch execution", () => {
   const branched = (cond: "true" | "false") =>
     graph({
       nodes: [
-        { id: "p", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
+        { id: "p", kind: "promptOptimize", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond } },
         { id: "t", kind: "save", position: { x: 0, y: 0 }, params: {} },
         { id: "f", kind: "save", position: { x: 0, y: 0 }, params: {} },
@@ -191,7 +191,7 @@ describe("conditional branch execution", () => {
 
   // Tracks which nodes actually executed.
   const tracker = (ran: string[]): ExecutorRegistry => ({
-    prompt: async (c) => ({ text: String(c.params.text ?? "") }),
+    promptOptimize: async (c) => ({ text: String(c.params.text ?? "") }),
     save: async (c) => {
       ran.push(c.nodeId);
       return { image: c.inputs.image ?? null };
@@ -222,7 +222,7 @@ describe("conditional branch execution", () => {
   it("propagates skipping transitively down a pruned branch", async () => {
     const g = graph({
       nodes: [
-        { id: "p", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
+        { id: "p", kind: "promptOptimize", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond: "true" } },
         { id: "r", kind: "reroute", position: { x: 0, y: 0 }, params: {} },
         { id: "f", kind: "save", position: { x: 0, y: 0 }, params: {} },
@@ -253,7 +253,7 @@ describe("conditional branch execution", () => {
       nodes: [
         { id: "a", kind: "number", position: { x: 0, y: 0 }, params: { value: 5 } },
         { id: "b", kind: "number", position: { x: 0, y: 0 }, params: { value: 3 } },
-        { id: "v", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "go" } },
+        { id: "v", kind: "promptOptimize", position: { x: 0, y: 0 }, params: { text: "go" } },
         { id: "cmp", kind: "compare", position: { x: 0, y: 0 }, params: { op: ">" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond: "false" } },
         { id: "t", kind: "save", position: { x: 0, y: 0 }, params: {} },
@@ -280,7 +280,7 @@ describe("conditional branch execution", () => {
     // has one live incoming edge, so it must still run.
     const g = graph({
       nodes: [
-        { id: "p", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
+        { id: "p", kind: "promptOptimize", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "if", kind: "if", position: { x: 0, y: 0 }, params: { cond: "true" } },
         { id: "m", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
@@ -308,8 +308,8 @@ describe("ancestorSubgraph", () => {
   it("drops sibling branches that do not feed the target", () => {
     const g = graph({
       nodes: [
-        { id: "a", kind: "prompt", position: { x: 0, y: 0 }, params: {} },
-        { id: "b", kind: "prompt", position: { x: 0, y: 0 }, params: {} },
+        { id: "a", kind: "promptOptimize", position: { x: 0, y: 0 }, params: {} },
+        { id: "b", kind: "promptOptimize", position: { x: 0, y: 0 }, params: {} },
         { id: "gen", kind: "generate", position: { x: 0, y: 0 }, params: {} },
         { id: "other", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],

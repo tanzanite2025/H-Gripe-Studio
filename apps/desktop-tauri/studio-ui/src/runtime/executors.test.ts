@@ -104,7 +104,7 @@ describe("reroute", () => {
     const g: WorkflowGraph = {
       version: GRAPH_VERSION,
       nodes: [
-        { id: "prompt-1", kind: "prompt", position: { x: 0, y: 0 }, params: { text: "hi" } },
+        { id: "prompt-1", kind: "promptOptimize", position: { x: 0, y: 0 }, params: { text: "hi" } },
         { id: "reroute-1", kind: "reroute", position: { x: 0, y: 0 }, params: {} },
         { id: "save-1", kind: "save", position: { x: 0, y: 0 }, params: {} },
       ],
