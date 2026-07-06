@@ -22,8 +22,9 @@
 //! the UI thread entirely. Any decoder failure surfaces as `Err` to the caller.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -32,6 +33,12 @@ use super::frame_cache::{frame_key, FrameCache};
 /// How many decoded frames the playback thread keeps warm. Sized for scrubbing
 /// a short neighbourhood of the playhead back and forth without re-decoding.
 const SCRUB_CACHE_FRAMES: usize = 24;
+
+/// Upper bound on waiting for one scrubbed frame. A single decode is bounded
+/// (seek + at most `MAX_FRAMES_TO_TARGET` frames), so a longer silence means
+/// the worker is wedged — the caller gets a structured timeout instead of
+/// blocking a command thread forever.
+const SCRUB_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Metadata about a probed clip.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -358,13 +365,23 @@ impl PlaybackEngine {
     }
 
     /// Queue a seek and block until the decode thread answers. Returns the frame
-    /// path, or `Err` if the frame was superseded, the decode failed, or the
-    /// thread is gone.
+    /// path, or `Err` if the frame was superseded, the decode failed, the
+    /// worker crashed, or the decode did not answer within `SCRUB_TIMEOUT`.
     fn scrub_blocking(
         &self,
         video: PathBuf,
         timestamp_sec: f64,
         poster_dir: PathBuf,
+    ) -> Result<PathBuf, String> {
+        self.scrub_blocking_with_timeout(video, timestamp_sec, poster_dir, SCRUB_TIMEOUT)
+    }
+
+    fn scrub_blocking_with_timeout(
+        &self,
+        video: PathBuf,
+        timestamp_sec: f64,
+        poster_dir: PathBuf,
+        timeout: Duration,
     ) -> Result<PathBuf, String> {
         let tx = self
             .tx
@@ -378,8 +395,23 @@ impl PlaybackEngine {
             reply,
         })
         .map_err(|_| "playback engine stopped".to_string())?;
-        out.recv()
-            .map_err(|_| "playback engine dropped the request".to_string())?
+        out.recv_timeout(timeout).map_err(|e| match e {
+            RecvTimeoutError::Timeout => format!(
+                "playback engine timed out: no frame within {}s",
+                timeout.as_secs()
+            ),
+            RecvTimeoutError::Disconnected => {
+                "playback engine worker crashed: the decode thread exited without replying"
+                    .to_string()
+            }
+        })?
+    }
+
+    /// Whether the decode thread has exited while the engine still holds its
+    /// sender — the loop only ends when every sender drops, so a finished
+    /// thread here means the worker crashed (panicked mid-decode).
+    fn worker_crashed(&self) -> bool {
+        self.tx.is_some() && self.handle.as_ref().is_some_and(JoinHandle::is_finished)
     }
 }
 
@@ -416,6 +448,10 @@ pub(crate) fn scrub_frame(
     let mut guard = engine_cell()
         .lock()
         .map_err(|_| "playback engine mutex poisoned".to_string())?;
+    if guard.as_ref().is_some_and(PlaybackEngine::worker_crashed) {
+        eprintln!("[video] playback engine worker crashed — respawning the decode thread");
+        *guard = None;
+    }
     if guard.is_none() {
         let source = make_frame_source();
         *guard = Some(PlaybackEngine::spawn(source, SCRUB_CACHE_FRAMES));
@@ -520,6 +556,88 @@ mod tests {
         assert!(out2.recv().unwrap().is_err());
         // The newest was NOT answered by coalesce — the caller decodes it.
         assert!(out3.try_recv().is_err());
+    }
+
+    /// A `FrameSource` that panics on decode, standing in for a worker crash
+    /// (e.g. an FFI fault inside the decoder).
+    struct PanickingSource;
+
+    impl FrameSource for PanickingSource {
+        fn probe(&mut self, _video: &Path) -> Result<VideoMeta, String> {
+            panic!("decoder fault");
+        }
+
+        fn decode_frame(
+            &mut self,
+            _video: &Path,
+            _timestamp_sec: f64,
+            _poster_out: &Path,
+        ) -> Result<PathBuf, String> {
+            panic!("decoder fault");
+        }
+    }
+
+    /// A `FrameSource` that never answers within the caller's patience,
+    /// standing in for a wedged decode.
+    struct SlowSource;
+
+    impl FrameSource for SlowSource {
+        fn probe(&mut self, _video: &Path) -> Result<VideoMeta, String> {
+            unreachable!("probe is not used by the playback engine");
+        }
+
+        fn decode_frame(
+            &mut self,
+            _video: &Path,
+            _timestamp_sec: f64,
+            poster_out: &Path,
+        ) -> Result<PathBuf, String> {
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(poster_out.to_path_buf())
+        }
+    }
+
+    #[test]
+    fn worker_crash_is_reported_and_detected() {
+        let engine = PlaybackEngine::spawn(Box::new(PanickingSource), 8);
+        let err = engine
+            .scrub_blocking(PathBuf::from("clip.mp4"), 1.0, PathBuf::from("/posters"))
+            .unwrap_err();
+        assert!(err.contains("worker crashed"), "{err}");
+        // The reply channel drops during the unwind, so give the thread a
+        // moment to actually finish before asserting it is detected.
+        for _ in 0..100 {
+            if engine.worker_crashed() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(engine.worker_crashed());
+
+        // A healthy engine does not report a crash.
+        let healthy = PlaybackEngine::spawn(
+            Box::new(MockSource {
+                decodes: Arc::new(AtomicUsize::new(0)),
+            }),
+            8,
+        );
+        assert!(!healthy.worker_crashed());
+    }
+
+    #[test]
+    fn scrub_times_out_with_a_structured_reason() {
+        let engine = PlaybackEngine::spawn(Box::new(SlowSource), 8);
+        let err = engine
+            .scrub_blocking_with_timeout(
+                PathBuf::from("clip.mp4"),
+                1.0,
+                PathBuf::from("/posters"),
+                Duration::from_millis(50),
+            )
+            .unwrap_err();
+        assert!(err.contains("timed out"), "{err}");
+        // The worker is wedged, not crashed.
+        assert!(!engine.worker_crashed());
     }
 
     #[test]

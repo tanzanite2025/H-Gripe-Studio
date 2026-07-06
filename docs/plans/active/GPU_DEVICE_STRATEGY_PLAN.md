@@ -380,8 +380,15 @@ Add structured fallback for:
   to the PNG transport, placement reports carry the reason, and the device
   registry's viewport-surface entry shows it) instead of silently failing
   every frame against a dead device.
-- timeout
-- worker crash
+- ✅ timeout — a scrub waits at most `SCRUB_TIMEOUT` (30s) for the decode
+  thread (`scrub_blocking` uses `recv_timeout`); a wedged worker yields a
+  structured "playback engine timed out" error instead of blocking a command
+  thread forever.
+- ✅ worker crash — a decode-thread panic surfaces as "playback engine worker
+  crashed" on the waiting scrub (the reply channel drops during the unwind),
+  and `scrub_frame` detects the finished thread (`worker_crashed`) and
+  respawns the engine on the next scrub instead of returning "stopped"
+  forever.
 
 The important behavior is not "GPU always wins". The important behavior is that
 the app stays alive, reports the truth, and produces a usable result.
