@@ -7,7 +7,6 @@ import {
   type SetStateAction,
 } from "react";
 import { useReactFlow, useStore, useStoreApi } from "@hgripe/flow";
-import type { EdgeStyle } from "./FlowCanvas";
 import { paletteGroups, type NodeSpec, type PaletteCategory } from "../graph/nodeSpecs";
 import { GROUP_ZH, localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT, type MsgKey } from "../i18n";
@@ -15,9 +14,6 @@ import { LangContext, useT, type MsgKey } from "../i18n";
 interface PaletteProps {
   /** Click-to-add (node is placed at a default spot on the canvas). */
   onAdd: (kind: string) => void;
-  /** Edge rendering style shown/changed in the canvas-controls section. */
-  edgeType: EdgeStyle;
-  onChangeEdgeType: (style: EdgeStyle) => void;
   /** Labelled canvas options (own row in the canvas-controls section). */
   showMinimap: boolean;
   setShowMinimap: Dispatch<SetStateAction<boolean>>;
@@ -106,31 +102,6 @@ function LockIcon({ locked }: { locked: boolean }) {
   );
 }
 
-function CurvedEdgeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M4 19 C 11 19, 13 5, 20 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function OrthogonalEdgeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M4 19 H12 V5 H20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function SmartEdgeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M4 19 H8 V5 H20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="12" y="12" width="7" height="7" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
 export function matches(spec: { title: string; kind: string; description: string }, q: string): boolean {
   if (!q) return true;
   const hay = `${spec.title} ${spec.kind} ${spec.description}`.toLowerCase();
@@ -163,8 +134,6 @@ function loadOpenSection(): string | null {
 // canvas (drop position is honoured) or clicked to add at a default location.
 export function Palette({
   onAdd,
-  edgeType,
-  onChangeEdgeType,
   showMinimap,
   setShowMinimap,
   snapToGrid,
@@ -366,26 +335,6 @@ export function Palette({
                 >
                   <LockIcon locked={!interactive} />
                 </button>
-              </div>
-              <div className="palette-controls-row">
-                {(
-                  [
-                    { style: "default", title: t("label.edgesCurved"), icon: <CurvedEdgeIcon /> },
-                    { style: "smoothstep", title: t("label.edgesOrthogonal"), icon: <OrthogonalEdgeIcon /> },
-                    { style: "smart", title: t("label.edgesAvoid"), icon: <SmartEdgeIcon /> },
-                  ] as const
-                ).map(({ style, title, icon }) => (
-                  <button
-                    key={style}
-                    className={`palette-control-button${edgeType === style ? " active" : ""}`}
-                    onClick={() => onChangeEdgeType(style)}
-                    title={title}
-                    aria-label={title}
-                    aria-pressed={edgeType === style}
-                  >
-                    {icon}
-                  </button>
-                ))}
               </div>
               <div className="palette-controls-row palette-controls-labeled">
                 <label className="palette-control-toggle" title={t("label.mapTitle")}>

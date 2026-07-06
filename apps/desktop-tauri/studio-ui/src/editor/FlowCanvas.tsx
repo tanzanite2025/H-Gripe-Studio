@@ -4,6 +4,7 @@ import {
   MiniMap,
   addEdge,
   useReactFlow,
+  MarkerType,
   type Connection,
   type Edge,
   type Node,
@@ -18,7 +19,7 @@ import "@hgripe/flow/style.css";
 import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
-import { SmartEdge } from "./SmartEdge";
+import { ChamferEdge } from "./ChamferEdge";
 import { BindingEdge } from "./BindingEdge";
 import { miniMapColor } from "./minimap";
 import { DND_NODE_KIND } from "./Palette";
@@ -50,8 +51,6 @@ interface FlowCanvasProps {
   snapToGrid?: boolean;
   /** Alignment guide lines (flow-space coords) to draw, if any. */
   helperLines?: { horizontal?: number; vertical?: number };
-  /** Edge rendering style applied to existing + new edges. */
-  edgeType?: EdgeStyle;
   /** Whether to render the minimap. */
   showMinimap?: boolean;
   /** Right-click on a node (screen coords + node id). */
@@ -60,9 +59,13 @@ interface FlowCanvasProps {
   onPaneContextMenu?: (at: { x: number; y: number }) => void;
 }
 
-export type EdgeStyle = "default" | "smoothstep" | "smart";
-
 const SNAP_GRID: [number, number] = [16, 16];
+const DATA_EDGE_TYPE = "chamfer";
+const DATA_EDGE_MARKER = {
+  type: MarkerType.ArrowClosed,
+  width: 16,
+  height: 16,
+};
 
 export function FlowCanvas({
   nodes,
@@ -79,15 +82,23 @@ export function FlowCanvas({
   viewport,
   snapToGrid = false,
   helperLines,
-  edgeType = "default",
   showMinimap = true,
   onNodeContextMenu,
   onPaneContextMenu,
 }: FlowCanvasProps) {
   // Declared once so React does not re-create the map each render.
   const nodeTypes = useMemo(() => ({ hgripe: HgripeNode, group: GroupNode }), []);
-  const edgeTypes = useMemo(() => ({ smart: SmartEdge, binding: BindingEdge }), []);
+  const edgeTypes = useMemo(() => ({ chamfer: ChamferEdge, binding: BindingEdge }), []);
   const { screenToFlowPosition, setViewport } = useReactFlow();
+  const renderedEdges = useMemo(
+    () =>
+      edges.map((edge) => ({
+        ...edge,
+        type: edge.type === "binding" ? "binding" : DATA_EDGE_TYPE,
+        markerEnd: edge.markerEnd ?? DATA_EDGE_MARKER,
+      })),
+    [edges],
+  );
 
   // Restore the pane viewport when the shown canvas document changes (tab
   // switch). Skips the initial mount so `fitView` keeps framing the graph.
@@ -129,7 +140,9 @@ export function FlowCanvas({
   const onConnect: OnConnect = useCallback(
     (params) => {
       onBeforeConnect?.();
-      setEdges((eds) => addEdge(params, eds));
+      setEdges((eds) =>
+        addEdge({ ...params, type: DATA_EDGE_TYPE, markerEnd: DATA_EDGE_MARKER }, eds),
+      );
     },
     [setEdges, onBeforeConnect],
   );
@@ -142,7 +155,10 @@ export function FlowCanvas({
     return miniMapColor(data.status, nodeSpec(data.kind).category);
   }, []);
 
-  const defaultEdgeOptions = useMemo(() => ({ type: edgeType }), [edgeType]);
+  const defaultEdgeOptions = useMemo(
+    () => ({ type: DATA_EDGE_TYPE, markerEnd: DATA_EDGE_MARKER }),
+    [],
+  );
 
   const handleNodeContextMenu = useCallback(
     (e: React.MouseEvent, node: Node) => {
@@ -178,7 +194,7 @@ export function FlowCanvas({
   return (
     <ReactFlow
       nodes={nodes}
-      edges={edges}
+      edges={renderedEdges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodeContextMenu={handleNodeContextMenu}

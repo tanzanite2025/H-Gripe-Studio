@@ -9,7 +9,7 @@ import {
   type NodePositionChange,
 } from "@hgripe/flow";
 
-import { FlowCanvas, type EdgeStyle } from "./editor/FlowCanvas";
+import { FlowCanvas } from "./editor/FlowCanvas";
 import { RunHud, type RunHudScope } from "./editor/RunHud";
 import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
@@ -185,7 +185,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const { openNewCanvas, activateCanvas, closeCanvas, renameCanvas } = canvas;
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({});
-  const [edgeType, setEdgeType] = useState<EdgeStyle>("default");
   const [showMinimap, setShowMinimap] = useState(true);
   // Bottom production drawer (Edit / Timeline + Grade) shell state, plus the
   // lightweight media bin and the unified production selection it consumes.
@@ -1171,16 +1170,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     void runUpToNode(target);
   }, [nodes, runUpToNode]);
 
-  // Switch the rendering style of all edges (and future ones). Binding edges
   // keep their distinct style — the global edge style applies to data wires.
-  const changeEdgeType = useCallback(
-    (t: EdgeStyle) => {
-      setEdgeType(t);
-      setEdges((es) => es.map((e) => (e.id.startsWith("binding-") ? e : { ...e, type: t })));
-    },
-    [setEdges],
-  );
-
   // Toolbar selection-run command: run the selected nodes plus upstream
   // (RunScope `selection_with_upstream`; plan "Toolbar" affordances).
   const selectedNodeIds = useMemo(
@@ -1672,8 +1662,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         <div className={drawerMode === "full" ? "workspace workspace-hidden" : "workspace"}>
           <Palette
             onAdd={addNode}
-            edgeType={edgeType}
-            onChangeEdgeType={changeEdgeType}
             showMinimap={showMinimap}
             setShowMinimap={setShowMinimap}
             snapToGrid={snapToGrid}
@@ -1697,7 +1685,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 viewport={canvas.viewport}
                 snapToGrid={snapToGrid}
                 helperLines={helperLines}
-                edgeType={edgeType}
                 showMinimap={showMinimap}
                 onNodeContextMenu={openNodeMenu}
                 onPaneContextMenu={openPaneMenu}

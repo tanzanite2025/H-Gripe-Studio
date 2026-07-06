@@ -65,6 +65,7 @@ Read together with:
 - [`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md)
 - [`../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md)
 - [`NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](NODE_CARD_PRODUCT_BOUNDARY_PLAN.md)
+- [`EDGE_ROUTING_VISUAL_SYSTEM_PLAN.md`](EDGE_ROUTING_VISUAL_SYSTEM_PLAN.md)
 
 ## Why Fork Instead Of Staying Fully Upstream
 
@@ -77,6 +78,7 @@ product-owned workflow surface:
 - run-scope selection and execution affordances
 - multi-canvas project workspace behavior
 - custom edge style, hit testing, and wire cleanup
+- 45 degree chamfered edge routing as the default long-term wire style
 - canvas search / selection / snapping tuned for this product
 - strict avoidance of heavy pixel previews inside graph cards
 
@@ -156,6 +158,7 @@ Use a soft-cut sequence:
      - node LOD
      - stable node dimensions
      - row-aligned handles
+     - chamfered structured edge routing
      - edge hit-test tuning
      - less rerendering
      - selection/run-scope integration
