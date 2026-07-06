@@ -202,7 +202,7 @@ mod native {
         WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_DISABLED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
     };
 
-    use super::PlacementReport;
+    use super::{frame_within_texture_limit, PlacementReport};
     use crate::studio::wgpu_device::{shared_gpu, SharedGpu};
 
     /// One viewport's presentation window and its (re)configurable surface.
