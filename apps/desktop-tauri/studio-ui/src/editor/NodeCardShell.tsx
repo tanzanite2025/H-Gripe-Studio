@@ -21,8 +21,8 @@ export interface NodeCardShellProps {
   deviceReport?: DeviceReport | null;
   /** Extra element rendered inside the title row (e.g. the PSD tag). */
   titleExtra?: ReactNode;
-  /** Opens the on-demand right-side Inspector for this node. */
-  onOpenInspector?: () => void;
+  /** The header settings (gear) button's click handler. */
+  onSettings?: () => void;
   /** Content rendered inside an input port's block, keyed by port id (e.g. the params belonging to that block). */
   portContent?: Record<string, ReactNode>;
   /** When set, paired semantic rows show a run button that runs just that row. */
@@ -48,7 +48,7 @@ export function NodeCardShell({
   durationMs,
   deviceReport,
   titleExtra,
-  onOpenInspector,
+  onSettings,
   portContent,
   onRunRow,
   runRowTitle,
@@ -90,15 +90,15 @@ export function NodeCardShell({
             title={durationMs != null ? `${status} ${fmtDuration(durationMs)}` : status}
             aria-label={`status ${status}`}
           />
-          {onOpenInspector && (
+          {onSettings && (
             <button
               type="button"
-              className="node-inspector-btn nodrag nowheel"
-              title="Edit node settings"
+              className="node-settings-btn nodrag nowheel"
+              title="Node settings"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenInspector();
+                onSettings();
               }}
             >
               ⚙

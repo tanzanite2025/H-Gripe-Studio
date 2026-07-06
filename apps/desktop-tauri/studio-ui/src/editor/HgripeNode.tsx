@@ -387,7 +387,7 @@ function PathRow({ label, path }: { label: string; path: string }) {
 
 // Custom node is memoized (React Flow perf guidance): node drags must not
 // re-render every node. The node shows only a compact summary + a thumbnail;
-// full params live in the Inspector and full-res media is opened there.
+// full-res media opens in the standalone viewer.
 function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const d = data as HgripeNodeData;
   const lang = useContext(LangContext);
@@ -417,8 +417,8 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       .join(","),
   );
   const isConnected = (port: string) => connectedPorts.split(",").includes(port);
-  // Params flagged `inline` are edited directly on the card; the rest live in
-  // the Inspector. `imageSource`/`psdTemplate` paths get a basename caption so
+  // Params flagged `inline` are edited directly on the card.
+  // `imageSource`/`psdTemplate` paths get a basename caption so
   // the card stays readable even with a long absolute path.
   const inlineParams = spec.params.filter((p) => p.inline && !p.port);
   // Inline params bound to an input port render inside that port's function
@@ -465,7 +465,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       durationMs={d.durationMs}
       deviceReport={d.deviceReport}
       titleExtra={spec.kind === "psdTemplate" ? <span className="node-tag">PSD</span> : null}
-      onOpenInspector={() => editing?.openInspector?.(id)}
+      onSettings={() => editing?.onCardSettings?.(id)}
       portContent={lod ? undefined : portContent}
       onRunRow={lod ? undefined : onRunRow}
       runRowTitle={t("node.runRowTitle")}

@@ -448,39 +448,6 @@ export const messages = {
   "node.metaPlaceholder": { en: "placeholder", zh: "占位符" },
   "node.metaSmart": { en: "smart", zh: "智能对象" },
 
-  // ---- inspector (right-side panel) ----
-  "inspector.selectNode": {
-    en: "Select a node to edit its parameters.",
-    zh: "选择一个节点以编辑其参数。",
-  },
-  "inspector.group": { en: "Group", zh: "分组" },
-  "inspector.groupDesc": {
-    en: "A container frame. Drag nodes in/out; members move with it.",
-    zh: "容器框。将节点拖入/拖出；成员随之移动。",
-  },
-  "inspector.label": { en: "Label", zh: "标签" },
-  "inspector.engineCheck": { en: "Check engines", zh: "检测引擎" },
-  "inspector.engineChecking": { en: "Checking…", zh: "检测中…" },
-  "inspector.engineUnchecked": {
-    en: "Not checked — options come from the node's config; availability is validated on run.",
-    zh: "未检测——选项来自节点配置；可用性在运行时校验。",
-  },
-  "inspector.engineUnavailable": {
-    en: "This engine can't run on this machine — falls back to the CPU baseline.",
-    zh: "此引擎在本机无法运行——将回落到 CPU 基线。",
-  },
-  "inspector.engineGpu": {
-    en: "Runs on GPU (CUDA device detected).",
-    zh: "将在 GPU 上运行(检测到 CUDA 设备)。",
-  },
-  "inspector.engineCpuFallback": {
-    en: "No CUDA device — this engine runs on CPU (slower).",
-    zh: "无 CUDA 设备——此引擎将在 CPU 上运行(较慢)。",
-  },
-  "inspector.device": { en: "Device (last run)", zh: "设备（上次运行）" },
-  "inspector.output": { en: "Output", zh: "输出" },
-  "inspector.viewFull": { en: "View full size", zh: "查看原图" },
-
   // ---- palette (left node catalogue rail) ----
   "palette.heading": { en: "Nodes", zh: "节点" },
   "palette.searchPh": { en: "Search nodes…  ( / )", zh: "搜索节点…  ( / )" },
@@ -1086,7 +1053,6 @@ export const messages = {
   "models.selector.rowMask": { en: "Mask: local model", zh: "蒙版：本地模型" },
   "models.selector.rowRepairApi": { en: "Repair: API profile", zh: "修复：API 配置" },
   "models.selector.rowRepairLocal": { en: "Repair: local model", zh: "修复：本地模型" },
-  "inspector.advanced": { en: "Advanced / legacy fields", zh: "高级 / 旧字段" },
   "models.tabApi": { en: "API Profiles", zh: "API 配置" },
   "models.tabLocal": { en: "Local Models", zh: "本地模型" },
   "models.closeTitle": { en: "Close (Esc)", zh: "关闭 (Esc)" },

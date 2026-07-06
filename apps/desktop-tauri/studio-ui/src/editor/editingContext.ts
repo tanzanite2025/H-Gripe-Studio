@@ -5,8 +5,9 @@ import type { ModelCapability } from "../models/backendRegistry";
 export interface NodeEditing {
   /** Update a single param of a node (used by inline node-card controls). */
   onParamChange: (nodeId: string, key: string, value: unknown) => void;
-  /** Open the on-demand right-side Inspector for detailed node settings. */
-  openInspector?: (nodeId: string) => void;
+  /** The card's header settings (gear) entry point. Currently only selects
+   * the node; the settings surface it opens is to be designed. */
+  onCardSettings?: (nodeId: string) => void;
   /** Open the shared, reusable Preview (review-gate) modal for a node. */
   openPreview?: (nodeId: string) => void;
   /** Open the standalone image preview popup over a file path (double-click
