@@ -76,6 +76,10 @@ describe("summarizeCapabilities", () => {
         available: false,
         detail: "no hardware encoders in the vendored libav (software x264 only)",
       },
+      ffmpeg_hw_decode: {
+        available: false,
+        detail: "no hardware decoders in the vendored libav (software decode only)",
+      },
       display_adapters: {
         available: true,
         detail: "NVIDIA GeForce RTX 4090 (Vulkan), NVIDIA GeForce RTX 4090 (Dx12)",
@@ -102,17 +106,28 @@ describe("summarizeCapabilities", () => {
       value: "no hardware encoders in the vendored libav (software x264 only)",
       tone: "warn",
     });
+    expect(byLabel["ffmpeg hw decoders"]).toEqual({
+      label: "ffmpeg hw decoders",
+      value: "no hardware decoders in the vendored libav (software decode only)",
+      tone: "warn",
+    });
   });
 
-  it("lists compiled-in hardware encoders as an ok line", () => {
+  it("lists compiled-in hardware encoders and decoders as ok lines", () => {
     const lines = summarizeCapabilities({
       cards: [],
       ffmpeg_hw: { available: true, detail: "h264_nvenc, hevc_nvenc" },
+      ffmpeg_hw_decode: { available: true, detail: "h264_cuvid, hevc_cuvid" },
     });
     const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
     expect(byLabel["ffmpeg hw encoders"]).toEqual({
       label: "ffmpeg hw encoders",
       value: "h264_nvenc, hevc_nvenc",
+      tone: "ok",
+    });
+    expect(byLabel["ffmpeg hw decoders"]).toEqual({
+      label: "ffmpeg hw decoders",
+      value: "h264_cuvid, hevc_cuvid",
       tone: "ok",
     });
   });

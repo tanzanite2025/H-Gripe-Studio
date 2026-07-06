@@ -166,6 +166,11 @@ pub(crate) struct EngineProbeReport {
     /// session at run time, so per-run reports stay the source of truth).
     #[serde(default)]
     pub(crate) ffmpeg_hw: Option<BackendProbe>,
+    /// Hardware video decoders compiled into the vendored libav (probe only —
+    /// playback stays on the software baseline; hardware decode joins per
+    /// operation behind explicit probe/report/fallback).
+    #[serde(default)]
+    pub(crate) ffmpeg_hw_decode: Option<BackendProbe>,
     /// Detected display adapters across every compiled wgpu backend
     /// (diagnostics; the grade / viewport devices still pick their own
     /// adapter, and per-run reports remain the source of truth).
@@ -225,6 +230,9 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
         )),
         ffmpeg_hw: Some(BackendProbe::from_capability(
             crate::studio::video_engine::ffmpeg_hw_capability(),
+        )),
+        ffmpeg_hw_decode: Some(BackendProbe::from_capability(
+            crate::studio::video_engine::ffmpeg_hw_decode_capability(),
         )),
         display_adapters: Some(BackendProbe::from_capability(
             crate::studio::wgpu_device::display_adapters(),

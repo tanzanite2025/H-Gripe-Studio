@@ -104,6 +104,9 @@ export interface EngineProbeReport {
   ffmpeg?: BackendProbe | null;
   /** Hardware video encoders compiled into the vendored libav (probe only). */
   ffmpeg_hw?: BackendProbe | null;
+  /** Hardware video decoders compiled into the vendored libav (probe only —
+   * playback stays on the software baseline). */
+  ffmpeg_hw_decode?: BackendProbe | null;
   /** Detected display adapters across every compiled wgpu backend. */
   display_adapters?: BackendProbe | null;
 }
