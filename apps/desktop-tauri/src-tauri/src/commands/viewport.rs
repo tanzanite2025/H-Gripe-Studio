@@ -938,6 +938,20 @@ pub(crate) fn viewport_register_layered_asset(
     Ok(())
 }
 
+/// Drop a layered asset's registration — the asset was deleted, so its
+/// native-side entry must not outlive it. Unknown ids are a no-op so
+/// deletion cascades never fail.
+#[tauri::command]
+pub(crate) fn viewport_unregister_layered_asset(asset_id: String) -> Result<(), String> {
+    let mut reg = layered_assets()
+        .lock()
+        .map_err(|_| "layered asset registry poisoned")?;
+    if reg.map.remove(&asset_id).is_some() {
+        reg.order.retain(|id| id != &asset_id);
+    }
+    Ok(())
+}
+
 /// Cap on registered timelines, bounded like the layered asset registry.
 const MAX_TIMELINES: usize = 64;
 
@@ -1043,6 +1057,19 @@ pub(crate) fn viewport_register_timeline(
     Ok(())
 }
 
+/// Drop a timeline's registration — its presenter closed, so the clip set
+/// must not outlive it. Unknown ids are a no-op so cascades never fail.
+#[tauri::command]
+pub(crate) fn viewport_unregister_timeline(timeline_id: String) -> Result<(), String> {
+    let mut reg = timelines()
+        .lock()
+        .map_err(|_| "timeline registry poisoned")?;
+    if reg.map.remove(&timeline_id).is_some() {
+        reg.order.retain(|id| id != &timeline_id);
+    }
+    Ok(())
+}
+
 /// Cap on registered node outputs, bounded like the other target registries.
 const MAX_NODE_OUTPUTS: usize = 256;
 
@@ -1109,6 +1136,19 @@ pub(crate) fn viewport_register_node_output(
             reg.map.remove(&oldest);
         }
     }
+    Ok(())
+}
+
+/// Drop every output registration of a node (any port) — the node was
+/// deleted, so its artifacts must not outlive it. Unknown ids are a no-op
+/// so deletion cascades never fail.
+#[tauri::command]
+pub(crate) fn viewport_unregister_node_output(node_id: String) -> Result<(), String> {
+    let mut reg = node_outputs()
+        .lock()
+        .map_err(|_| "node output registry poisoned")?;
+    reg.map.retain(|(id, _), _| id != &node_id);
+    reg.order.retain(|(id, _)| id != &node_id);
     Ok(())
 }
 
@@ -3003,6 +3043,75 @@ mod tests {
         )
         .expect_err("empty layer id must be rejected");
         assert!(err.contains("empty id"), "{err}");
+    }
+
+    #[test]
+    fn unregister_removes_registry_entries_and_tolerates_unknown_ids() {
+        let path = std::env::temp_dir().join("hgripe_viewport_unregister.png");
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([10, 20, 30, 255]))
+            .save(&path)
+            .expect("write artifact");
+        let path_str = path.to_string_lossy().to_string();
+
+        // Node outputs: every port of the node drops in one call.
+        viewport_register_node_output("node-gone".to_string(), None, path_str.clone())
+            .expect("register node output");
+        viewport_register_node_output(
+            "node-gone".to_string(),
+            Some("alt".to_string()),
+            path_str.clone(),
+        )
+        .expect("register ported node output");
+        viewport_unregister_node_output("node-gone".to_string()).expect("unregister node output");
+        assert!(node_output_path("node-gone", None).is_err());
+        assert!(node_output_path("node-gone", Some("alt")).is_err());
+        {
+            let reg = node_outputs().lock().expect("lock node outputs");
+            assert!(!reg.order.iter().any(|(id, _)| id == "node-gone"));
+        }
+
+        // Layered assets.
+        viewport_register_layered_asset(
+            "layered-gone".to_string(),
+            vec![LayeredAssetLayer {
+                layer_id: "layer_1".to_string(),
+                rgba_path: path_str.clone(),
+            }],
+        )
+        .expect("register layered asset");
+        viewport_unregister_layered_asset("layered-gone".to_string())
+            .expect("unregister layered asset");
+        assert!(layered_asset_layer_path("layered-gone", "layer_1").is_err());
+        {
+            let reg = layered_assets().lock().expect("lock layered assets");
+            assert!(!reg.order.iter().any(|id| id == "layered-gone"));
+        }
+
+        // Timelines.
+        viewport_register_timeline(
+            "tl-gone".to_string(),
+            vec![TimelineClipRef {
+                clip_id: "clip-1".to_string(),
+                kind: "still".to_string(),
+                path: path_str,
+                start_sec: 0.0,
+                duration_sec: 1.0,
+            }],
+        )
+        .expect("register timeline");
+        viewport_unregister_timeline("tl-gone".to_string()).expect("unregister timeline");
+        assert!(timeline_clip("tl-gone", "clip-1").is_err());
+        {
+            let reg = timelines().lock().expect("lock timelines");
+            assert!(!reg.order.iter().any(|id| id == "tl-gone"));
+        }
+
+        // Unknown ids are a no-op, never an error.
+        viewport_unregister_node_output("node-unknown".to_string()).expect("no-op");
+        viewport_unregister_layered_asset("layered-unknown".to_string()).expect("no-op");
+        viewport_unregister_timeline("tl-unknown".to_string()).expect("no-op");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

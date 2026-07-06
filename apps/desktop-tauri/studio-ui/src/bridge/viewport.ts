@@ -240,6 +240,19 @@ export async function registerLayeredAsset(
   mockLayeredAssets.set(assetId, new Map(layers.map((l) => [l.layerId, l.rgbaPath])));
 }
 
+/**
+ * Drop a layered asset's host-side registration (the asset was deleted).
+ * Unknown ids are a no-op so deletion cascades never fail.
+ */
+export async function unregisterLayeredAsset(assetId: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_unregister_layered_asset", { assetId });
+    return;
+  }
+  mockLayeredAssets.delete(assetId);
+}
+
 /** One timeline clip, registered by media path plus its placement. */
 export interface TimelineClipRef {
   clipId: string;
@@ -270,6 +283,19 @@ export async function registerTimeline(
 }
 
 /**
+ * Drop a timeline's host-side registration (its presenter closed). Unknown
+ * ids are a no-op so cascades never fail.
+ */
+export async function unregisterTimeline(timelineId: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_unregister_timeline", { timelineId });
+    return;
+  }
+  mockTimelines.delete(timelineId);
+}
+
+/**
  * Register (or refresh) one node output's image artifact with the viewport
  * host so `node_output` targets resolve host-side, by reference. A
  * re-registration after a re-run replaces the artifact path.
@@ -287,6 +313,22 @@ export async function registerNodeOutput(
   if (!nodeId) throw new Error("node id must not be empty");
   if (outputPort === "") throw new Error(`node ${nodeId} has an empty output port`);
   mockNodeOutputs.set(nodeOutputKey(nodeId, outputPort), path);
+}
+
+/**
+ * Drop every output registration of a node — any port — with the viewport
+ * host (the node was deleted). Unknown ids are a no-op so deletion cascades
+ * never fail.
+ */
+export async function unregisterNodeOutput(nodeId: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_unregister_node_output", { nodeId });
+    return;
+  }
+  for (const key of [...mockNodeOutputs.keys()]) {
+    if (key === nodeId || key.startsWith(`${nodeId}:`)) mockNodeOutputs.delete(key);
+  }
 }
 
 export async function resizeViewport(
