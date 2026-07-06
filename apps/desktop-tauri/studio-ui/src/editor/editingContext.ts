@@ -28,6 +28,9 @@ export interface NodeEditing {
    * preselecting entries for one capability (card "Manage…" entry point).
    * A single app-level surface: card and toolbar share the same modal. */
   openModels?: (capability?: ModelCapability | null) => void;
+  /** Open the software-level Prompt Assistant panel with this Prompt card
+   * selected as the insert target (card "Assistant" row entry point). */
+  openAssistant?: (nodeId: string) => void;
   /**
    * Spawn a bound edit node of `editKind` from a media source card: create the
    * node to the right, wire a `binding` edge from the source's `image` output

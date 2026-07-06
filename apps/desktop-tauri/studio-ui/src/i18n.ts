@@ -888,6 +888,11 @@ export const messages = {
     en: "the Generate card's prompt input is already fed by {id} — edit that card instead",
     zh: "生成卡片的提示词输入已由 {id} 提供，请直接编辑该卡片",
   },
+  "assistant.openFromCard": { en: "Assistant", zh: "助手" },
+  "assistant.openFromCardTitle": {
+    en: "open the Prompt Assistant with this card as the insert target",
+    zh: "打开提示词助手，并以此卡片为插入目标",
+  },
   "assistant.created": {
     en: "prompt card created from the draft",
     zh: "已用草稿新建提示词卡片",

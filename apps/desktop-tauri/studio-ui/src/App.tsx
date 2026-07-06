@@ -1240,13 +1240,18 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       openMediaEdit,
       openModels: (capability?: ModelCapability | null) =>
         setModelsRequest({ capability: capability ?? null }),
+      openAssistant: (nodeId: string) => {
+        handleCanvasSelect(nodeId);
+        saveAssistantOpen(true);
+        setAssistantOpen(true);
+      },
       addBoundEdit,
       runUpToNode,
       runCardRow,
       runCard,
       runNodeDownstream,
     }),
-    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
+    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, handleCanvasSelect, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
   );
 
   // Canvas -> EditorHost adapter. The editors are application-level surfaces

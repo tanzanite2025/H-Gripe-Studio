@@ -301,8 +301,13 @@ Bottom drawer
    `text` param; a selected Generate card routes the draft to the Prompt card
    feeding its `prompt` input, wires in a fresh Prompt card when the input is
    free, and refuses — with a status message — when a non-prompt node owns it).
-8. Add the `Prompt` card `Optimize` row using the same manager-backed backend
-   refs.
+8. ✅ Add the `Prompt` card `Optimize` row using the same manager-backed backend
+   refs (the palette `Prompt` card — kind `promptOptimize` — already carries
+   the Optimize/Backend rows via its `model_select` control /
+   `PromptModelSelect`, which mirrors manager refs into the legacy
+   mode/ref params; this step completes the recommended card shape with the
+   `Assistant` row: a card button — `editing.openAssistant` — that opens the
+   software-level panel with the card selected as the insert target).
 9. Hide/migrate the old `Prompt Optimize` card from the normal palette.
 
 ## Success Criteria
