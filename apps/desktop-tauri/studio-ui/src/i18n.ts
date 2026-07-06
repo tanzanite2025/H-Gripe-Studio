@@ -469,6 +469,7 @@ export const messages = {
     en: "No CUDA device — this engine runs on CPU (slower).",
     zh: "无 CUDA 设备——此引擎将在 CPU 上运行(较慢)。",
   },
+  "inspector.device": { en: "Device (last run)", zh: "设备（上次运行）" },
   "inspector.output": { en: "Output", zh: "输出" },
   "inspector.viewFull": { en: "View full size", zh: "查看原图" },
 

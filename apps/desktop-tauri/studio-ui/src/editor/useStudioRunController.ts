@@ -394,17 +394,21 @@ export function useStudioRunController({
     }
   }, [pushLog, setMessage]);
 
-  // Per-node device transparency (GPU_DEVICE_STRATEGY_PLAN step 4): after a
-  // run, surface each node's requested/used device and fallback reason in the
-  // run log, normalised into the shared DeviceReport vocabulary.
+  // Per-node device transparency (GPU_DEVICE_STRATEGY_PLAN steps 4–5): after
+  // a run, surface each node's requested/used device and fallback reason in
+  // the run log, and pin the report onto the card so the header badge and
+  // Inspector show it, normalised into the shared DeviceReport vocabulary.
   const logDeviceReports = useCallback(
     (outputs: Map<string, Record<string, unknown>>) => {
       for (const [nodeId, nodeOutputs] of outputs) {
         const report = deviceReportFromNodeOutputs(nodeOutputs);
-        if (report) pushLog("info", describeDeviceReport(report), mapRunNodeId(nodeId));
+        if (!report) continue;
+        const cardId = mapRunNodeId(nodeId);
+        pushLog("info", describeDeviceReport(report), cardId);
+        patchNode(cardId, { deviceReport: report });
       }
     },
-    [pushLog, mapRunNodeId],
+    [pushLog, mapRunNodeId, patchNode],
   );
 
   // Surface output paths onto result-bearing cards. The thumbnail itself is
