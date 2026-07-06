@@ -39,6 +39,20 @@ export function resolveActiveTarget(doc: MaskDocument, ref: StudioDocumentRef): 
   return { kind: "pixel_layer", ...ref, layerId: layer.id };
 }
 
+/**
+ * A selection target: persistent id + source metadata. The selection may be
+ * temporary, but while it exists it is addressable by actions and previews
+ * (a selection is never itself a layer mask — it can be committed into one).
+ */
+export interface SelectionTarget {
+  id: string;
+  source: "pen" | "lasso" | "marquee" | "sam2" | "wand" | "mask";
+  /** Image-space `[x1, y1, x2, y2]`. */
+  bounds: [number, number, number, number];
+  maskArtifactRef?: string;
+  pathId?: string;
+}
+
 /** A stable human/log-readable id for a resolved target. */
 export function describeTarget(target: StudioTarget): string {
   switch (target.kind) {
