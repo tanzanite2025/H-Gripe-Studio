@@ -230,7 +230,7 @@ the graph-level source of prompt text.
 Implementation order:
 
 1. Build or stabilize the global API Manager and Local Model Manager described
-   in [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](../active/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
+   in [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
 2. Build the software-level Prompt Assistant panel described in this document.
 3. Update the `Prompt` card so it has one prompt text area plus an optional
    `Optimize` row.

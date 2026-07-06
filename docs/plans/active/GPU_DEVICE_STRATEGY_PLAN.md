@@ -31,7 +31,7 @@ cross-kernel scheduling work.
 ## Coordination With WGPU Migration
 
 This document must be read together with
-[`WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md).
+[`WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md).
 
 The priority order is:
 

@@ -18,8 +18,8 @@ The blocking documents are:
 
 - [`NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](NODE_CARD_PRODUCT_BOUNDARY_PLAN.md)
 - [`../../cards/generic-media-card.md`](../../cards/generic-media-card.md)
-- [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md)
-- [`WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md)
+- [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](../completed/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md)
+- [`WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md)
 
 The reason is simple: this feature belongs inside the Image Processing card's
 Mask / Matte row, not as another standalone low-level node. If the card and port
@@ -265,7 +265,7 @@ Examples:
   the editable result.
 
 The row should use managed backend refs from
-[`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md)
+[`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](../completed/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md)
 instead of raw model fields.
 
 ## WGPU Relationship
