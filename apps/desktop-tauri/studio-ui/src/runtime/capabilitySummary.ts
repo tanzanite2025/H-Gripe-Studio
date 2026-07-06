@@ -5,6 +5,7 @@
 // actually ran, because a model can still fail on GPU due to memory,
 // unsupported ops, or a specific codec.
 
+import type { DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
 import type { EngineProbeReport } from "../bridge/engineProbe";
 
 /** One diagnostic line of the capability snapshot. */
@@ -109,5 +110,57 @@ export function summarizeCapabilities(report: EngineProbeReport): CapabilityLine
       tone: missing.length === 0 ? "ok" : "warn",
     });
   }
+  return lines;
+}
+
+const GIB = 1024 * 1024 * 1024;
+
+/**
+ * Flatten a central device-registry snapshot (GPU_DEVICE_STRATEGY_PLAN step
+ * 13) into display lines: enumerated adapters with their wgpu limits first,
+ * then the compiled-in kernel backends, FFmpeg hardware codec names, and
+ * onnxruntime providers. Diagnostics only — per-run DeviceReports remain the
+ * source of truth for what actually ran.
+ */
+export function summarizeDeviceRegistry(snapshot: DeviceRegistrySnapshot): CapabilityLine[] {
+  const lines: CapabilityLine[] = [];
+  if (snapshot.adapters.length > 0) {
+    for (const adapter of snapshot.adapters) {
+      lines.push({
+        label: "adapter",
+        value: `${adapter.name} (${adapter.backend}) — max texture ${adapter.max_texture_dimension_2d}px, max buffer ${(adapter.max_buffer_size / GIB).toFixed(1)} GiB`,
+        tone: "ok",
+      });
+    }
+  } else {
+    lines.push({
+      label: "adapter",
+      value: snapshot.adapters_error ?? "no display adapters detected",
+      tone: "warn",
+    });
+  }
+  const entries: Array<[string, { available: boolean; detail: string }]> = [
+    ["grade wgpu", snapshot.grade_wgpu],
+    ["viewport surface", snapshot.viewport_surface],
+    ["ffmpeg", snapshot.ffmpeg],
+  ];
+  for (const [label, entry] of entries) {
+    lines.push({ label, value: entry.detail, tone: entry.available ? "ok" : "warn" });
+  }
+  lines.push({
+    label: "ffmpeg hw encoders",
+    value: snapshot.ffmpeg_hw_encoders.length > 0 ? snapshot.ffmpeg_hw_encoders.join(", ") : "none compiled in",
+    tone: snapshot.ffmpeg_hw_encoders.length > 0 ? "ok" : "warn",
+  });
+  lines.push({
+    label: "ffmpeg hw decoders",
+    value: snapshot.ffmpeg_hw_decoders.length > 0 ? snapshot.ffmpeg_hw_decoders.join(", ") : "none compiled in",
+    tone: snapshot.ffmpeg_hw_decoders.length > 0 ? "ok" : "warn",
+  });
+  lines.push({
+    label: "onnx providers",
+    value: snapshot.onnx_providers.join(", "),
+    tone: snapshot.onnx_providers.some((p) => p !== "cpu") ? "ok" : "warn",
+  });
   return lines;
 }

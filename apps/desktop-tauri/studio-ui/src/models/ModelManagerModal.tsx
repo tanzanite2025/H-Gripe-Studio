@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { tauriInvoke } from "../bridge/core";
+import { deviceRegistrySnapshot, type DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
 import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
 import { listProfiles } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
-import { summarizeCapabilities } from "../runtime/capabilitySummary";
+import { summarizeCapabilities, summarizeDeviceRegistry } from "../runtime/capabilitySummary";
 import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
@@ -103,12 +104,18 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   // Capability probe summary (diagnostics only, manual refresh; seeded from
   // the cached report so reopening the modal shows the last snapshot).
   const [probe, setProbe] = useState<EngineProbeReport | null>(() => lastEngineProbe());
+  // Central device registry snapshot (GPU_DEVICE_STRATEGY_PLAN step 13),
+  // fetched alongside the engine probe on the same manual refresh.
+  const [deviceRegistry, setDeviceRegistry] = useState<DeviceRegistrySnapshot | null>(null);
   const [probing, setProbing] = useState(false);
 
   const handleProbe = useCallback(() => {
     setProbing(true);
-    probeEnginesCached(true)
-      .then((report) => setProbe(report))
+    Promise.all([probeEnginesCached(true), deviceRegistrySnapshot()])
+      .then(([report, registrySnapshot]) => {
+        setProbe(report);
+        setDeviceRegistry(registrySnapshot);
+      })
       .catch((err) => setMessage(String(err)))
       .finally(() => setProbing(false));
   }, []);
@@ -406,6 +413,19 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   </ul>
                 ) : (
                   <p className="muted">{t("models.capabilityHint")}</p>
+                )}
+                {deviceRegistry && (
+                  <>
+                    <span className="muted">{t("models.deviceRegistryTitle")}</span>
+                    <ul className="model-manager-capability-lines">
+                      {summarizeDeviceRegistry(deviceRegistry).map((line, i) => (
+                        <li key={`${line.label}-${i}`} className={line.tone === "warn" ? "warn" : ""}>
+                          <code>{line.label}</code>
+                          <span className="muted"> · {line.value}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 )}
               </div>
               <ul className="model-manager-list">

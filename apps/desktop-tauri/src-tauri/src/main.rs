@@ -151,6 +151,7 @@ fn main() {
             psd::enhance_image,
             psd::detect_quality_issues,
             psd::probe_engines,
+            studio::device_registry_snapshot,
             psd::get_model_paths,
             psd::set_model_paths,
             studio::grade_preview,

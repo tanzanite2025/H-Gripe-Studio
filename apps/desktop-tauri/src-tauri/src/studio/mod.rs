@@ -66,6 +66,7 @@ mod detail_repaint;
 pub(crate) mod detail_repaint_cpu;
 mod detail_watchdog;
 pub(crate) mod detail_watchdog_cpu;
+mod device_registry;
 mod device_report;
 mod edge_refine;
 pub(crate) mod edge_refine_cpu;
@@ -119,6 +120,7 @@ pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
 // resolving from `main.rs`'s `generate_handler!`. A plain `use exec::cmd` only
 // re-exports the function, not the hidden `__cmd__cmd` helper that the Tauri
 // command macro generates beside it; the glob carries both.
+pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;
 pub(crate) use history::*;

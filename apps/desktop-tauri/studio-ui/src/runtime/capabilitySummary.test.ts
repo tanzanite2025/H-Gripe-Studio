@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
 import type { EngineProbeReport } from "../bridge/engineProbe";
-import { summarizeCapabilities } from "./capabilitySummary";
+import { summarizeCapabilities, summarizeDeviceRegistry } from "./capabilitySummary";
 
 const cudaBox: EngineProbeReport = {
   cards: [
@@ -154,5 +155,85 @@ describe("summarizeCapabilities", () => {
     });
     expect(lines[0]).toEqual({ label: "runtime", value: "probe did not run", tone: "warn" });
     expect(lines[1]).toEqual({ label: "imageEnhance", value: "bridge missing", tone: "warn" });
+  });
+});
+
+describe("summarizeDeviceRegistry", () => {
+  const base: DeviceRegistrySnapshot = {
+    adapters: [],
+    grade_wgpu: { available: true, detail: "NVIDIA GeForce RTX 4090 (Vulkan)" },
+    viewport_surface: {
+      available: false,
+      detail: "not initialised yet (initialises on the first presented viewport)",
+    },
+    ffmpeg: { available: true, detail: "vendored libav (software decode)" },
+    ffmpeg_hw_encoders: [],
+    ffmpeg_hw_decoders: [],
+    onnx_providers: ["cpu"],
+  };
+
+  it("lists adapters with their wgpu limits", () => {
+    const lines = summarizeDeviceRegistry({
+      ...base,
+      adapters: [
+        {
+          name: "NVIDIA GeForce RTX 4090",
+          backend: "Vulkan",
+          max_texture_dimension_2d: 16384,
+          max_buffer_size: 2147483648,
+        },
+      ],
+      ffmpeg_hw_encoders: ["h264_nvenc"],
+      ffmpeg_hw_decoders: ["h264_cuvid"],
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["adapter"]).toEqual({
+      label: "adapter",
+      value: "NVIDIA GeForce RTX 4090 (Vulkan) — max texture 16384px, max buffer 2.0 GiB",
+      tone: "ok",
+    });
+    expect(byLabel["grade wgpu"].tone).toBe("ok");
+    expect(byLabel["ffmpeg hw encoders"]).toEqual({
+      label: "ffmpeg hw encoders",
+      value: "h264_nvenc",
+      tone: "ok",
+    });
+    expect(byLabel["ffmpeg hw decoders"].value).toBe("h264_cuvid");
+  });
+
+  it("keeps every missing capability visible as a warn line", () => {
+    const lines = summarizeDeviceRegistry({
+      ...base,
+      adapters_error: "no display adapters detected",
+    });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["adapter"]).toEqual({
+      label: "adapter",
+      value: "no display adapters detected",
+      tone: "warn",
+    });
+    expect(byLabel["viewport surface"].tone).toBe("warn");
+    expect(byLabel["viewport surface"].value).toContain("not initialised");
+    expect(byLabel["ffmpeg hw encoders"]).toEqual({
+      label: "ffmpeg hw encoders",
+      value: "none compiled in",
+      tone: "warn",
+    });
+    expect(byLabel["ffmpeg hw decoders"].value).toBe("none compiled in");
+    expect(byLabel["onnx providers"]).toEqual({
+      label: "onnx providers",
+      value: "cpu",
+      tone: "warn",
+    });
+  });
+
+  it("marks accelerated onnx providers as ok", () => {
+    const lines = summarizeDeviceRegistry({ ...base, onnx_providers: ["cpu", "cuda"] });
+    const byLabel = Object.fromEntries(lines.map((l) => [l.label, l]));
+    expect(byLabel["onnx providers"]).toEqual({
+      label: "onnx providers",
+      value: "cpu, cuda",
+      tone: "ok",
+    });
   });
 });
