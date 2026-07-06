@@ -298,18 +298,18 @@ prove the app still works.
   removed. Provenance and fork rules live in the package README.
 - Runtime deps (`classcat`, `zustand`, `d3-drag`, `d3-selection`,
   `d3-transition`, `d3-zoom`) stay on npm, pinned in the studio-ui app.
-- Known trim candidates measured against current app usage (delete in the
-  product-trimming phase, each with a typecheck/test pass):
-  - `upstream/react/additional-components/Background` — the product removed
-    the dot-grid background entirely.
-  - `upstream/react/additional-components/Controls` — Studio renders its own
-    canvas controls.
-  - `upstream/react/additional-components/NodeToolbar` — unused.
-  - Built-in edge components (bezier / step / smoothstep / straight) once
-    `EdgeWrapper`'s `builtinEdgeTypes` fallback is narrowed to the chamfer
-    edge family.
-  - Built-in node components (input / output / default / group) once
-    `NodeWrapper`'s `builtinNodeTypes` fallback is narrowed to Studio types.
+- First product-trimming pass is done:
+  - Deleted `upstream/react/additional-components/Background` (the product
+    removed the dot-grid background entirely), `Controls`, and `NodeToolbar`
+    (plus `system/utils/node-toolbar.ts`).
+  - Deleted the built-in edge components (bezier / simplebezier / step /
+    smoothstep / straight). `builtinEdgeTypes.default` now renders nothing;
+    every product edge must come from `HgripeFlow`'s edge type map. The
+    default `ConnectionLine`'s simple-bezier case now draws a bezier (the
+    product always supplies a custom connection line component).
+  - Remaining candidate: built-in node components (input / output / default /
+    group) once `NodeWrapper`'s `builtinNodeTypes` fallback is narrowed to
+    Studio types.
 - Studio imports must route through `@hgripe/flow`, not directly through
   `@xyflow/react`.
 - The adapter is no longer a blanket re-export. It exposes only the React Flow

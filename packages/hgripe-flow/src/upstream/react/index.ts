@@ -1,11 +1,6 @@
 export { default as ReactFlow } from './container/ReactFlow';
 export { Handle, type HandleProps } from './components/Handle';
 export { EdgeText } from './components/Edges/EdgeText';
-export { StraightEdge } from './components/Edges/StraightEdge';
-export { StepEdge } from './components/Edges/StepEdge';
-export { BezierEdge } from './components/Edges/BezierEdge';
-export { SimpleBezierEdge, getSimpleBezierPath } from './components/Edges/SimpleBezierEdge';
-export { SmoothStepEdge } from './components/Edges/SmoothStepEdge';
 export { BaseEdge } from './components/Edges/BaseEdge';
 export { ReactFlowProvider } from './components/ReactFlowProvider';
 export { Panel, type PanelProps } from './components/Panel';
