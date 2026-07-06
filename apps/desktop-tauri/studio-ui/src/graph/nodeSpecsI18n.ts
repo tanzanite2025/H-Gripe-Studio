@@ -622,6 +622,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       start_sec: { label: "起始秒", hint: "剪辑起点（自开头起的秒数）" },
       end_sec: { label: "结束秒", hint: "剪辑终点秒数（0 = 到片尾）" },
       codec: { label: "编码器", hint: "重编码使用的 ffmpeg 编码器；libx264 兼容性最好" },
+      device: {
+        label: "设备",
+        hint: "gpu 会尝试硬件 H.264 编码器（nvenc/qsv/amf/mf），失败时回退软件编码并显示原因；auto/cpu 使用软件编码",
+      },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: {
         label: "输出名",

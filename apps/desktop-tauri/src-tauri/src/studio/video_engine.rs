@@ -131,6 +131,56 @@ pub(crate) fn ffmpeg_hw_capability() -> Result<String, String> {
     }
 }
 
+/// Run an encode with the shared opt-in hardware selection/fallback
+/// (GPU_DEVICE_STRATEGY_PLAN step 12): only an explicit `device: gpu` request
+/// tries the first compiled-in hardware H.264 encoder; any failure falls back
+/// to `sw_codec` with the reason kept visible. `auto` stays on the software
+/// baseline (with the standing "not enabled" reason); an honored `cpu`
+/// request is not a fallback. Returns `(output, used, requested, reason)`
+/// for the caller's `*_report` telemetry.
+#[cfg(feature = "native-ffmpeg")]
+pub(crate) fn encode_with_device<T>(
+    device: &str,
+    sw_codec: &str,
+    encode: impl Fn(&str) -> Result<T, String>,
+) -> Result<
+    (
+        T,
+        super::device_report::DeviceUsed,
+        super::device_report::DeviceRequest,
+        Option<String>,
+    ),
+    String,
+> {
+    use super::device_report::{DeviceRequest, DeviceUsed};
+    let requested = match device {
+        "gpu" => DeviceRequest::Gpu,
+        "cpu" => DeviceRequest::Cpu,
+        _ => DeviceRequest::Auto,
+    };
+    let mut fallback_reason = match requested {
+        DeviceRequest::Cpu => None,
+        _ => Some("hardware encode not enabled (vendored libav software baseline)".to_string()),
+    };
+    if requested == DeviceRequest::Gpu {
+        match super::ffmpeg_native::hardware_h264_encoder() {
+            None => {
+                fallback_reason = Some(
+                    "no hardware H.264 encoder compiled into the vendored libav".to_string(),
+                );
+            }
+            Some(hw) => match encode(&hw) {
+                Ok(out) => return Ok((out, DeviceUsed::FfmpegHw, requested, None)),
+                Err(err) => {
+                    fallback_reason = Some(format!("hardware encoder '{hw}' failed: {err}"));
+                }
+            },
+        }
+    }
+    let out = encode(sw_codec)?;
+    Ok((out, DeviceUsed::FfmpegSw, requested, fallback_reason))
+}
+
 /// Build the decoder backend: the in-process libav decoder
 /// ([`super::ffmpeg_native`]) — decode errors surface as `Err` to the caller.
 /// Without `native-ffmpeg`, a stub source whose every call errors.

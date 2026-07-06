@@ -73,17 +73,26 @@ pub(super) fn execute_studio_video_trim(
     }
     let codec = optional(studio_value_to_string(node.params.get("codec")))
         .unwrap_or_else(|| "libx264".to_string());
+    let device = optional(studio_value_to_string(node.params.get("device")))
+        .unwrap_or_else(|| "auto".to_string());
     let out_path = resolve_output_path(node)?;
 
     #[cfg(feature = "native-ffmpeg")]
     {
-        let stats = super::ffmpeg_native::trim_video(
-            Path::new(&video),
-            Path::new(&out_path),
-            start_sec,
-            end_sec,
-            &codec,
-        )?;
+        // Engine telemetry (GPU_DEVICE_STRATEGY_PLAN shared DeviceReport
+        // vocabulary): the shared opt-in hardware selection/fallback — only
+        // an explicit `device: gpu` request tries a hardware H.264 encoder,
+        // with the fallback reason kept visible on the report.
+        let (stats, device_used, requested, fallback_reason) =
+            super::video_engine::encode_with_device(&device, &codec, |codec| {
+                super::ffmpeg_native::trim_video(
+                    Path::new(&video),
+                    Path::new(&out_path),
+                    start_sec,
+                    end_sec,
+                    codec,
+                )
+            })?;
         Ok(studio_output_map([
             ("video", json!(out_path)),
             ("frame_count", json!(stats.frame_count)),
@@ -99,13 +108,17 @@ pub(super) fn execute_studio_video_trim(
                     "duration_sec": stats.duration_sec,
                     "start_sec": stats.start_sec,
                     "end_sec": stats.end_sec,
+                    "engine": "ffmpeg",
+                    "device": device_used.as_str(),
+                    "device_requested": requested.as_str(),
+                    "engine_fallback_reason": fallback_reason,
                 }),
             ),
         ]))
     }
     #[cfg(not(feature = "native-ffmpeg"))]
     {
-        let _ = (codec, out_path);
+        let _ = (codec, device, out_path);
         Err("Video Trim requires the `native-ffmpeg` build (vendored libav encoders)".to_string())
     }
 }

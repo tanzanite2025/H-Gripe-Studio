@@ -90,54 +90,15 @@ pub(super) fn execute_studio_video_assemble(
 
     #[cfg(feature = "native-ffmpeg")]
     {
-        use super::device_report::{DeviceRequest, DeviceUsed};
-
         // Engine telemetry (GPU_DEVICE_STRATEGY_PLAN shared DeviceReport
         // vocabulary). Hardware encode is strictly opt-in: only an explicit
         // `device: gpu` request tries a compiled-in hardware H.264 encoder,
         // and any failure falls back to the software baseline with the
         // reason kept visible on the report. `auto`/`cpu` stay software.
-        let requested = match device.as_str() {
-            "gpu" => DeviceRequest::Gpu,
-            "cpu" => DeviceRequest::Cpu,
-            _ => DeviceRequest::Auto,
-        };
-        let mut device_used = DeviceUsed::FfmpegSw;
-        let mut fallback_reason = match requested {
-            DeviceRequest::Cpu => None,
-            _ => Some("hardware encode not enabled (vendored libav software baseline)".to_string()),
-        };
-        let mut stats = None;
-        if requested == DeviceRequest::Gpu {
-            match super::ffmpeg_native::hardware_h264_encoder() {
-                None => {
-                    fallback_reason = Some(
-                        "no hardware H.264 encoder compiled into the vendored libav".to_string(),
-                    );
-                }
-                Some(hw) => match super::ffmpeg_native::assemble_frames(
-                    &frames,
-                    Path::new(&out_path),
-                    fps,
-                    &hw,
-                ) {
-                    Ok(hw_stats) => {
-                        device_used = DeviceUsed::FfmpegHw;
-                        fallback_reason = None;
-                        stats = Some(hw_stats);
-                    }
-                    Err(err) => {
-                        fallback_reason = Some(format!("hardware encoder '{hw}' failed: {err}"));
-                    }
-                },
-            }
-        }
-        let stats = match stats {
-            Some(stats) => stats,
-            None => {
-                super::ffmpeg_native::assemble_frames(&frames, Path::new(&out_path), fps, &codec)?
-            }
-        };
+        let (stats, device_used, requested, fallback_reason) =
+            super::video_engine::encode_with_device(&device, &codec, |codec| {
+                super::ffmpeg_native::assemble_frames(&frames, Path::new(&out_path), fps, codec)
+            })?;
         Ok(studio_output_map([
             ("video", json!(out_path)),
             ("frame_count", json!(stats.frame_count)),
