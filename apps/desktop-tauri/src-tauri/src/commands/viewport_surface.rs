@@ -48,6 +48,20 @@ fn validate_placement(x: f64, y: f64, width: f64, height: f64, dpr: f64) -> Resu
     Ok(())
 }
 
+/// Guard a frame upload against the device's 2D texture size limit: an
+/// oversized frame must downgrade to the PNG transport with a visible reason
+/// (WGPU plan fallback hardening) instead of tripping a wgpu validation
+/// error on `create_texture`.
+#[cfg_attr(not(all(windows, feature = "viewport-surface")), allow(dead_code))]
+fn frame_within_texture_limit(width: u32, height: u32, max: u32) -> Result<(), String> {
+    if width > max || height > max {
+        return Err(format!(
+            "frame {width}x{height} exceeds the device texture limit ({max}px per side)"
+        ));
+    }
+    Ok(())
+}
+
 /// Report the frontend receives from `viewport_set_placement`: whether the
 /// native surface path took the placement, in the shared fallback vocabulary.
 /// `presented: false` + a reason means the PNG transport stays authoritative.
@@ -445,6 +459,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         if iw == 0 || ih == 0 {
             return Err("empty frame".to_string());
         }
+        frame_within_texture_limit(iw, ih, gpu.device.limits().max_texture_dimension_2d)?;
         if entry.fit_buf.is_none() {
             entry.fit_buf = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("viewport-surface-fit"),
@@ -917,6 +932,15 @@ mod tests {
         );
         assert_eq!(physical_rect(3.0, 4.0, 10.0, 10.0, 0.0), (3, 4, 10, 10));
         assert_eq!(physical_rect(3.0, 4.0, 10.0, 10.0, -2.0), (3, 4, 10, 10));
+    }
+
+    #[test]
+    fn oversized_frames_downgrade_with_a_visible_reason() {
+        assert!(frame_within_texture_limit(8192, 8192, 8192).is_ok());
+        let err = frame_within_texture_limit(8193, 4096, 8192).unwrap_err();
+        assert!(err.contains("8193x4096"), "{err}");
+        assert!(err.contains("8192"), "{err}");
+        assert!(frame_within_texture_limit(4096, 8193, 8192).is_err());
     }
 
     #[test]
