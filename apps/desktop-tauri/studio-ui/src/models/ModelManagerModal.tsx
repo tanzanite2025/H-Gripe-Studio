@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { tauriInvoke } from "../bridge/core";
-import { deviceRegistrySnapshot, type DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
-import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
+import {
+  deviceRegistrySnapshot,
+  type DeviceRegistrySnapshot,
+} from "../bridge/deviceRegistry";
+import {
+  lastEngineProbe,
+  probeEnginesCached,
+  type EngineProbeReport,
+} from "../bridge/engineProbe";
 import { listProfiles } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
-import { summarizeCapabilities, summarizeDeviceRegistry } from "../runtime/capabilitySummary";
+import {
+  summarizeCapabilities,
+  summarizeDeviceRegistry,
+} from "../runtime/capabilitySummary";
+import {
+  DEVICE_PREFERENCES,
+  getDevicePreference,
+  setDevicePreference,
+  type DevicePreference,
+} from "../runtime/devicePreference";
 import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
@@ -83,7 +99,9 @@ function CapabilityPicker({
             checked={selected.includes(cap)}
             onChange={(e) =>
               onChange(
-                e.target.checked ? [...selected, cap] : selected.filter((c) => c !== cap),
+                e.target.checked
+                  ? [...selected, cap]
+                  : selected.filter((c) => c !== cap),
               )
             }
           />
@@ -94,20 +112,34 @@ function CapabilityPicker({
   );
 }
 
-export function ModelManagerModal({ capability, onClose }: ModelManagerModalProps) {
+export function ModelManagerModal({
+  capability,
+  onClose,
+}: ModelManagerModalProps) {
   const t = useT();
-  const [registry, setRegistry] = useState<BackendRegistry>(() => loadRegistry());
+  const [registry, setRegistry] = useState<BackendRegistry>(() =>
+    loadRegistry(),
+  );
   const [tab, setTab] = useState<ManagerTab>("api");
   const [editingApi, setEditingApi] = useState<ApiProfileEntry | null>(null);
-  const [editingLocal, setEditingLocal] = useState<LocalModelEntry | null>(null);
+  const [editingLocal, setEditingLocal] = useState<LocalModelEntry | null>(
+    null,
+  );
   const [message, setMessage] = useState<string>("");
   // Capability probe summary (diagnostics only, manual refresh; seeded from
   // the cached report so reopening the modal shows the last snapshot).
-  const [probe, setProbe] = useState<EngineProbeReport | null>(() => lastEngineProbe());
+  const [probe, setProbe] = useState<EngineProbeReport | null>(() =>
+    lastEngineProbe(),
+  );
   // Central device registry snapshot (GPU_DEVICE_STRATEGY_PLAN step 13),
   // fetched alongside the engine probe on the same manual refresh.
-  const [deviceRegistry, setDeviceRegistry] = useState<DeviceRegistrySnapshot | null>(null);
+  const [deviceRegistry, setDeviceRegistry] =
+    useState<DeviceRegistrySnapshot | null>(null);
   const [probing, setProbing] = useState(false);
+  // Global default device preference (GPU plan long-term step 5): only seeds
+  // unset `device` params; explicit per-node choices always win.
+  const [devicePreference, setDevicePreferenceState] =
+    useState<DevicePreference>(() => getDevicePreference());
 
   const handleProbe = useCallback(() => {
     setProbing(true);
@@ -174,9 +206,16 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   // Manual local model test: weights presence via the backend (desktop only).
   const handleTestLocal = useCallback(
     (model: LocalModelEntry) => {
-      const finish = (health: LocalModelEntry["health"], detail: string | null) =>
+      const finish = (
+        health: LocalModelEntry["health"],
+        detail: string | null,
+      ) =>
         commit(
-          upsertLocalModel(loadRegistry(), { ...model, health, health_detail: detail }),
+          upsertLocalModel(loadRegistry(), {
+            ...model,
+            health,
+            health_detail: detail,
+          }),
         );
       if (!model.weights_path.trim()) {
         finish("missing_weights", t("models.noWeightsPath"));
@@ -192,7 +231,9 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
         .then((present) => {
           if (present) finish("installed", null);
           else finish("missing_weights", model.weights_path);
-          setMessage(present ? t("models.weightsFound") : t("models.weightsMissing"));
+          setMessage(
+            present ? t("models.weightsFound") : t("models.weightsMissing"),
+          );
         })
         .catch((err) => {
           finish("untested", String(err));
@@ -203,13 +244,11 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   );
 
   const apiProfiles = useMemo(
-    () =>
-      [...registry.apiProfiles].sort((a, b) => a.ref.localeCompare(b.ref)),
+    () => [...registry.apiProfiles].sort((a, b) => a.ref.localeCompare(b.ref)),
     [registry.apiProfiles],
   );
   const localModels = useMemo(
-    () =>
-      [...registry.localModels].sort((a, b) => a.ref.localeCompare(b.ref)),
+    () => [...registry.localModels].sort((a, b) => a.ref.localeCompare(b.ref)),
     [registry.localModels],
   );
 
@@ -220,17 +259,26 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
-      <div className="media-viewer model-manager" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="media-viewer model-manager"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="media-viewer-bar">
           <span className="media-viewer-name">
             {t("models.title")}
             {capability ? <span className="muted"> · {capability}</span> : null}
           </span>
           <div className="media-viewer-actions">
-            <button className={tab === "api" ? "active" : ""} onClick={() => setTab("api")}>
+            <button
+              className={tab === "api" ? "active" : ""}
+              onClick={() => setTab("api")}
+            >
               {t("models.tabApi")}
             </button>
-            <button className={tab === "local" ? "active" : ""} onClick={() => setTab("local")}>
+            <button
+              className={tab === "local" ? "active" : ""}
+              onClick={() => setTab("local")}
+            >
               {t("models.tabLocal")}
             </button>
             <button onClick={onClose} title={t("models.closeTitle")}>
@@ -249,7 +297,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                 >
                   {t("models.addProfile")}
                 </button>
-                <button onClick={handleImportLegacy} title={t("models.importLegacyTitle")}>
+                <button
+                  onClick={handleImportLegacy}
+                  title={t("models.importLegacyTitle")}
+                >
                   {t("models.importLegacy")}
                 </button>
                 <span className="muted">{message}</span>
@@ -261,7 +312,11 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                 {apiProfiles.map((p) => (
                   <li
                     key={p.ref}
-                    className={matchesCapability(p.capabilities) ? "" : "model-manager-dim"}
+                    className={
+                      matchesCapability(p.capabilities)
+                        ? ""
+                        : "model-manager-dim"
+                    }
                   >
                     <div className="model-manager-entry">
                       <strong>{p.display_name || p.ref}</strong>
@@ -269,19 +324,35 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                       <span className="muted">
                         {p.provider_kind}
                         {p.default_model ? ` · ${p.default_model}` : ""}
-                        {p.capabilities.length ? ` · ${p.capabilities.join(", ")}` : ""}
+                        {p.capabilities.length
+                          ? ` · ${p.capabilities.join(", ")}`
+                          : ""}
                       </span>
-                      <span className={`model-manager-health health-${p.health}`}>
+                      <span
+                        className={`model-manager-health health-${p.health}`}
+                      >
                         {t(`models.health.${p.health}` as MsgKey)}
                       </span>
                     </div>
                     <div className="model-manager-entry-actions">
-                      <button onClick={() => handleTestApi(p)}>{t("models.test")}</button>
-                      <button onClick={() => setEditingApi(p)}>{t("models.edit")}</button>
-                      <button onClick={() => commit(duplicateApiProfile(registry, p.ref))}>
+                      <button onClick={() => handleTestApi(p)}>
+                        {t("models.test")}
+                      </button>
+                      <button onClick={() => setEditingApi(p)}>
+                        {t("models.edit")}
+                      </button>
+                      <button
+                        onClick={() =>
+                          commit(duplicateApiProfile(registry, p.ref))
+                        }
+                      >
                         {t("models.duplicate")}
                       </button>
-                      <button onClick={() => commit(removeApiProfile(registry, p.ref))}>
+                      <button
+                        onClick={() =>
+                          commit(removeApiProfile(registry, p.ref))
+                        }
+                      >
                         {t("models.remove")}
                       </button>
                     </div>
@@ -301,7 +372,9 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <span>{t("models.ref")}</span>
                     <input
                       value={editingApi.ref}
-                      onChange={(e) => setEditingApi({ ...editingApi, ref: e.target.value })}
+                      onChange={(e) =>
+                        setEditingApi({ ...editingApi, ref: e.target.value })
+                      }
                       required
                     />
                   </label>
@@ -310,7 +383,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <input
                       value={editingApi.display_name}
                       onChange={(e) =>
-                        setEditingApi({ ...editingApi, display_name: e.target.value })
+                        setEditingApi({
+                          ...editingApi,
+                          display_name: e.target.value,
+                        })
                       }
                     />
                   </label>
@@ -319,7 +395,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <input
                       value={editingApi.provider_kind}
                       onChange={(e) =>
-                        setEditingApi({ ...editingApi, provider_kind: e.target.value })
+                        setEditingApi({
+                          ...editingApi,
+                          provider_kind: e.target.value,
+                        })
                       }
                     />
                   </label>
@@ -327,7 +406,12 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <span>{t("models.baseUrl")}</span>
                     <input
                       value={editingApi.base_url}
-                      onChange={(e) => setEditingApi({ ...editingApi, base_url: e.target.value })}
+                      onChange={(e) =>
+                        setEditingApi({
+                          ...editingApi,
+                          base_url: e.target.value,
+                        })
+                      }
                     />
                   </label>
                   <label className="field">
@@ -335,7 +419,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <input
                       value={editingApi.credentials_ref}
                       onChange={(e) =>
-                        setEditingApi({ ...editingApi, credentials_ref: e.target.value })
+                        setEditingApi({
+                          ...editingApi,
+                          credentials_ref: e.target.value,
+                        })
                       }
                       placeholder={t("models.credentialsRefHint")}
                     />
@@ -345,7 +432,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <input
                       value={editingApi.default_model}
                       onChange={(e) =>
-                        setEditingApi({ ...editingApi, default_model: e.target.value })
+                        setEditingApi({
+                          ...editingApi,
+                          default_model: e.target.value,
+                        })
                       }
                     />
                   </label>
@@ -368,7 +458,9 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   <span className="muted">{t("models.capabilities")}</span>
                   <CapabilityPicker
                     selected={editingApi.capabilities}
-                    onChange={(caps) => setEditingApi({ ...editingApi, capabilities: caps })}
+                    onChange={(caps) =>
+                      setEditingApi({ ...editingApi, capabilities: caps })
+                    }
                   />
                   <div className="model-manager-form-actions">
                     <button type="submit" className="primary">
@@ -397,6 +489,28 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
               )}
               <div className="model-manager-capability">
                 <div className="model-manager-list-actions">
+                  <span className="muted">
+                    {t("models.devicePreferenceTitle")}
+                  </span>
+                  <select
+                    value={devicePreference}
+                    onChange={(e) => {
+                      const next = e.target.value as DevicePreference;
+                      setDevicePreference(next);
+                      setDevicePreferenceState(next);
+                    }}
+                  >
+                    {DEVICE_PREFERENCES.map((pref) => (
+                      <option key={pref} value={pref}>
+                        {t(`models.devicePreference.${pref}` as MsgKey)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="muted">
+                    {t("models.devicePreferenceHint")}
+                  </span>
+                </div>
+                <div className="model-manager-list-actions">
                   <span className="muted">{t("models.capabilityTitle")}</span>
                   <button onClick={handleProbe} disabled={probing}>
                     {probing ? t("models.probing") : t("models.probeEngines")}
@@ -405,7 +519,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                 {probe ? (
                   <ul className="model-manager-capability-lines">
                     {summarizeCapabilities(probe).map((line) => (
-                      <li key={line.label} className={line.tone === "warn" ? "warn" : ""}>
+                      <li
+                        key={line.label}
+                        className={line.tone === "warn" ? "warn" : ""}
+                      >
                         <code>{line.label}</code>
                         <span className="muted"> · {line.value}</span>
                       </li>
@@ -416,14 +533,21 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                 )}
                 {deviceRegistry && (
                   <>
-                    <span className="muted">{t("models.deviceRegistryTitle")}</span>
+                    <span className="muted">
+                      {t("models.deviceRegistryTitle")}
+                    </span>
                     <ul className="model-manager-capability-lines">
-                      {summarizeDeviceRegistry(deviceRegistry).map((line, i) => (
-                        <li key={`${line.label}-${i}`} className={line.tone === "warn" ? "warn" : ""}>
-                          <code>{line.label}</code>
-                          <span className="muted"> · {line.value}</span>
-                        </li>
-                      ))}
+                      {summarizeDeviceRegistry(deviceRegistry).map(
+                        (line, i) => (
+                          <li
+                            key={`${line.label}-${i}`}
+                            className={line.tone === "warn" ? "warn" : ""}
+                          >
+                            <code>{line.label}</code>
+                            <span className="muted"> · {line.value}</span>
+                          </li>
+                        ),
+                      )}
                     </ul>
                   </>
                 )}
@@ -432,28 +556,48 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                 {localModels.map((m) => (
                   <li
                     key={m.ref}
-                    className={matchesCapability(m.capabilities) ? "" : "model-manager-dim"}
+                    className={
+                      matchesCapability(m.capabilities)
+                        ? ""
+                        : "model-manager-dim"
+                    }
                   >
                     <div className="model-manager-entry">
                       <strong>{m.display_name || m.ref}</strong>
                       <code>{m.ref}</code>
                       <span className="muted">
                         {m.engine}
-                        {m.capabilities.length ? ` · ${m.capabilities.join(", ")}` : ""}
+                        {m.capabilities.length
+                          ? ` · ${m.capabilities.join(", ")}`
+                          : ""}
                         {` · ${m.device_policy}/${m.precision_policy}`}
                       </span>
-                      <span className={`model-manager-health health-${m.health}`}>
+                      <span
+                        className={`model-manager-health health-${m.health}`}
+                      >
                         {t(`models.health.${m.health}` as MsgKey)}
                         {m.health_detail ? ` — ${m.health_detail}` : ""}
                       </span>
                     </div>
                     <div className="model-manager-entry-actions">
-                      <button onClick={() => handleTestLocal(m)}>{t("models.test")}</button>
-                      <button onClick={() => setEditingLocal(m)}>{t("models.edit")}</button>
-                      <button onClick={() => commit(duplicateLocalModel(registry, m.ref))}>
+                      <button onClick={() => handleTestLocal(m)}>
+                        {t("models.test")}
+                      </button>
+                      <button onClick={() => setEditingLocal(m)}>
+                        {t("models.edit")}
+                      </button>
+                      <button
+                        onClick={() =>
+                          commit(duplicateLocalModel(registry, m.ref))
+                        }
+                      >
                         {t("models.duplicate")}
                       </button>
-                      <button onClick={() => commit(removeLocalModel(registry, m.ref))}>
+                      <button
+                        onClick={() =>
+                          commit(removeLocalModel(registry, m.ref))
+                        }
+                      >
                         {t("models.remove")}
                       </button>
                     </div>
@@ -473,7 +617,12 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <span>{t("models.ref")}</span>
                     <input
                       value={editingLocal.ref}
-                      onChange={(e) => setEditingLocal({ ...editingLocal, ref: e.target.value })}
+                      onChange={(e) =>
+                        setEditingLocal({
+                          ...editingLocal,
+                          ref: e.target.value,
+                        })
+                      }
                       required
                     />
                   </label>
@@ -482,7 +631,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <input
                       value={editingLocal.display_name}
                       onChange={(e) =>
-                        setEditingLocal({ ...editingLocal, display_name: e.target.value })
+                        setEditingLocal({
+                          ...editingLocal,
+                          display_name: e.target.value,
+                        })
                       }
                     />
                   </label>
@@ -490,7 +642,12 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <span>{t("models.engine")}</span>
                     <input
                       value={editingLocal.engine}
-                      onChange={(e) => setEditingLocal({ ...editingLocal, engine: e.target.value })}
+                      onChange={(e) =>
+                        setEditingLocal({
+                          ...editingLocal,
+                          engine: e.target.value,
+                        })
+                      }
                       placeholder="onnx / ort / native / external"
                     />
                   </label>
@@ -499,7 +656,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     <input
                       value={editingLocal.weights_path}
                       onChange={(e) =>
-                        setEditingLocal({ ...editingLocal, weights_path: e.target.value })
+                        setEditingLocal({
+                          ...editingLocal,
+                          weights_path: e.target.value,
+                        })
                       }
                     />
                   </label>
@@ -510,7 +670,8 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                       onChange={(e) =>
                         setEditingLocal({
                           ...editingLocal,
-                          device_policy: e.target.value as LocalModelEntry["device_policy"],
+                          device_policy: e.target
+                            .value as LocalModelEntry["device_policy"],
                         })
                       }
                     >
@@ -527,7 +688,8 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                       onChange={(e) =>
                         setEditingLocal({
                           ...editingLocal,
-                          precision_policy: e.target.value as LocalModelEntry["precision_policy"],
+                          precision_policy: e.target
+                            .value as LocalModelEntry["precision_policy"],
                         })
                       }
                     >
@@ -543,7 +705,8 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                       onChange={(e) =>
                         setEditingLocal({
                           ...editingLocal,
-                          fallback_policy: e.target.value as LocalModelEntry["fallback_policy"],
+                          fallback_policy: e.target
+                            .value as LocalModelEntry["fallback_policy"],
                         })
                       }
                     >
@@ -556,7 +719,9 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   <span className="muted">{t("models.capabilities")}</span>
                   <CapabilityPicker
                     selected={editingLocal.capabilities}
-                    onChange={(caps) => setEditingLocal({ ...editingLocal, capabilities: caps })}
+                    onChange={(caps) =>
+                      setEditingLocal({ ...editingLocal, capabilities: caps })
+                    }
                   />
                   <div className="model-manager-form-actions">
                     <button type="submit" className="primary">

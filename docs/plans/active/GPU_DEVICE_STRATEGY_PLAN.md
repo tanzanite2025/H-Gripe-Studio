@@ -423,9 +423,16 @@ the app stays alive, reports the truth, and produces a usable result.
 
 Only after the manager exists, consider a settings surface:
 
-- global default: auto / prefer GPU / prefer CPU
-- per-kernel overrides
-- disable unstable hardware encode
+- ✅ global default: auto / prefer GPU / prefer CPU — a "Default device"
+  select in the Model Manager's local tab (`runtime/devicePreference.ts`,
+  localStorage-backed). It only seeds *unset* `device` params (node executors
+  and the export dialog's initial value); an explicit per-node choice always
+  wins, and every request still goes through the same probe/report/fallback
+  paths.
+- per-kernel overrides — the per-node `device` param already is this;
+  a dedicated settings surface can wait.
+- disable unstable hardware encode — hardware encode is already opt-in per
+  request (`device: gpu`); a global kill switch waits for real demand.
 - max concurrent GPU jobs
 - prefer preview speed vs export fidelity
 

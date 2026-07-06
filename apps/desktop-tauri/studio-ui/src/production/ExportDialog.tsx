@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { timelineExport } from "../bridge/timelineExport";
 import { useT } from "../i18n";
+import { getDevicePreference } from "../runtime/devicePreference";
 import type { AudioClipEdit } from "./audioEdit";
 import type { MediaAsset } from "./mediaBin";
 import type { TimelineModel } from "./timeline";
@@ -53,7 +54,11 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const t = useT();
   const [fps, setFps] = useState(DEFAULT_EXPORT_FPS);
-  const [device, setDevice] = useState<"auto" | "cpu" | "gpu">("auto");
+  // Seeded from the global device preference (GPU plan long-term step 5);
+  // the dialog's explicit select still overrides per export.
+  const [device, setDevice] = useState<"auto" | "cpu" | "gpu">(() =>
+    getDevicePreference(),
+  );
   const [outputName, setOutputName] = useState("");
   const [state, setState] = useState<ExportState>({ phase: "idle" });
 
@@ -66,18 +71,23 @@ export function ExportDialog({
   }, [onClose]);
 
   const plan = useMemo(
-    () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc, clipAudioEdit }),
+    () =>
+      buildRenderPlan(timeline, assets, { fps, clipGradeDoc, clipAudioEdit }),
     [timeline, assets, fps, clipGradeDoc, clipAudioEdit],
   );
   const frames = useMemo(() => expandPlanFrames(plan), [plan]);
-  const canExport = plan.video.length > 0 && frames !== null && state.phase !== "running";
+  const canExport =
+    plan.video.length > 0 && frames !== null && state.phase !== "running";
 
   const warningText = (w: RenderWarning): string => {
     switch (w.kind) {
       case "missing_asset":
         return t("export.warnMissingAsset", { id: w.assetId });
       case "gap":
-        return t("export.warnGap", { at: w.atSec.toFixed(1), len: w.lengthSec.toFixed(1) });
+        return t("export.warnGap", {
+          at: w.atSec.toFixed(1),
+          len: w.lengthSec.toFixed(1),
+        });
     }
   };
 
@@ -88,7 +98,9 @@ export function ExportDialog({
       const result = await timelineExport(frames.paths, plan.fps, {
         device: device !== "auto" ? device : undefined,
         outputName: outputName.trim() || undefined,
-        gradeDocs: frames.gradeDocs.some((d) => d !== null) ? frames.gradeDocs : undefined,
+        gradeDocs: frames.gradeDocs.some((d) => d !== null)
+          ? frames.gradeDocs
+          : undefined,
         frameTimes: frames.hasVideoFrames ? frames.frameTimes : undefined,
         audio:
           plan.audio.length > 0
@@ -125,12 +137,22 @@ export function ExportDialog({
 
   return (
     <div className="media-viewer-backdrop" onClick={onClose}>
-      <div className="media-viewer export-dialog" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="media-viewer export-dialog"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="media-viewer-bar">
           <span className="media-viewer-name">{t("export.title")}</span>
           <div className="media-viewer-actions">
-            <button className="primary" onClick={runExport} disabled={!canExport} title={t("export.runTitle")}>
-              {state.phase === "running" ? t("export.running") : t("export.run")}
+            <button
+              className="primary"
+              onClick={runExport}
+              disabled={!canExport}
+              title={t("export.runTitle")}
+            >
+              {state.phase === "running"
+                ? t("export.running")
+                : t("export.run")}
             </button>
             <button onClick={onClose} title={t("export.closeTitle")}>
               ✕
@@ -155,7 +177,17 @@ export function ExportDialog({
                 min={1}
                 max={120}
                 value={fps}
-                onChange={(e) => setFps(Math.max(1, Math.min(120, Number(e.target.value) || DEFAULT_EXPORT_FPS)))}
+                onChange={(e) =>
+                  setFps(
+                    Math.max(
+                      1,
+                      Math.min(
+                        120,
+                        Number(e.target.value) || DEFAULT_EXPORT_FPS,
+                      ),
+                    ),
+                  )
+                }
               />
             </label>
             <label className="field">
@@ -163,7 +195,9 @@ export function ExportDialog({
               <select
                 value={device}
                 title={t("export.deviceTitle")}
-                onChange={(e) => setDevice(e.target.value as "auto" | "cpu" | "gpu")}
+                onChange={(e) =>
+                  setDevice(e.target.value as "auto" | "cpu" | "gpu")
+                }
               >
                 <option value="auto">auto</option>
                 <option value="cpu">cpu</option>
@@ -182,11 +216,17 @@ export function ExportDialog({
           </div>
 
           {plan.audio.length > 0 ? (
-            <p className="export-summary">{t("export.audioSummary", { n: plan.audio.length })}</p>
+            <p className="export-summary">
+              {t("export.audioSummary", { n: plan.audio.length })}
+            </p>
           ) : null}
 
-          {plan.video.length === 0 ? <p className="export-warning">{t("export.emptyPlan")}</p> : null}
-          {frames === null ? <p className="export-warning">{t("export.tooManyFrames")}</p> : null}
+          {plan.video.length === 0 ? (
+            <p className="export-warning">{t("export.emptyPlan")}</p>
+          ) : null}
+          {frames === null ? (
+            <p className="export-warning">{t("export.tooManyFrames")}</p>
+          ) : null}
           {plan.warnings.length > 0 ? (
             <ul className="export-warnings">
               {plan.warnings.map((w, i) => (
@@ -199,7 +239,10 @@ export function ExportDialog({
 
           {state.phase === "done" ? (
             <p className="export-result" title={state.videoPath}>
-              {t("export.done", { path: state.videoPath, len: state.durationSec.toFixed(1) })}
+              {t("export.done", {
+                path: state.videoPath,
+                len: state.durationSec.toFixed(1),
+              })}
               {state.gradedFrameCount > 0 && state.gradeBackend ? (
                 <>
                   {" · "}
@@ -223,9 +266,13 @@ export function ExportDialog({
               ) : null}
             </p>
           ) : null}
-          {state.phase === "done" && state.encodeFallbackReason && device === "gpu" ? (
+          {state.phase === "done" &&
+          state.encodeFallbackReason &&
+          device === "gpu" ? (
             <p className="export-warning">
-              {t("export.encodeFallback", { reason: state.encodeFallbackReason })}
+              {t("export.encodeFallback", {
+                reason: state.encodeFallbackReason,
+              })}
             </p>
           ) : null}
           {state.phase === "done" && state.audioSkippedReason ? (
@@ -233,7 +280,9 @@ export function ExportDialog({
               {t("export.audioSkipped", { reason: state.audioSkippedReason })}
             </p>
           ) : null}
-          {state.phase === "error" ? <p className="export-error">{state.message}</p> : null}
+          {state.phase === "error" ? (
+            <p className="export-error">{state.message}</p>
+          ) : null}
         </div>
       </div>
     </div>
