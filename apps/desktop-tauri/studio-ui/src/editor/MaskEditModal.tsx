@@ -544,12 +544,20 @@ export function MaskEditModal({
     const compiled = compileImageAdjustments(fromMaskDocument(state.current));
     return compiled && compiled.layers.some((l) => l.visible && l.ops.length > 0) ? compiled : null;
   }, [workspace, state]);
+  // Image workspace: the underlay frame is the background pixel layer's
+  // content, so hiding the bottom pixel layer hides the frame — the stage
+  // shows the transparency checkerboard instead (PS: hidden Background).
+  const baseHidden = useMemo(() => {
+    if (workspace !== "image") return false;
+    const base = state.current.layers.find((l) => l.kind !== "adjustment");
+    return base ? !base.visible : false;
+  }, [workspace, state]);
   // Grading needs frame pixels, so it forces the PNG transport (a natively
   // presented surface frame has no readable data URL).
   // A rotated layer transform cannot present on the axis-aligned surface
   // window (translate/scale only move and stretch its rect).
   const presentEnabled =
-    !overlayOnly && !view.rotate && (imageTransform?.rotate ?? 0) === 0 && !gradePreview && !entering && !closing;
+    !overlayOnly && !baseHidden && !view.rotate && (imageTransform?.rotate ?? 0) === 0 && !gradePreview && !entering && !closing;
   // The anchor moves under CSS transforms (view zoom/pan and the layer
   // transform) without firing the resize observer: re-measure on either.
   const placementKey = useMemo(() => ({ view, imageTransform }), [view, imageTransform]);
@@ -2133,8 +2141,9 @@ export function MaskEditModal({
             canvasRef={canvasRef}
             dims={dims}
             view={view}
-            underlay={gradedUnderlay ?? underlay}
+            underlay={baseHidden ? null : (gradedUnderlay ?? underlay)}
             presented={presented}
+            baseHidden={baseHidden}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
             imageTransform={imageTransform}

@@ -34,6 +34,9 @@ interface MaskStageProps {
   backend: ViewportBackend | null;
   /** Transparency preview: hide the underlay (the canvas paints a backdrop). */
   overlayOnly: boolean;
+  /** Image workspace: the background pixel layer is hidden — the frame
+   * shows the transparency checkerboard instead of the source frame. */
+  baseHidden?: boolean;
   spacePan: boolean;
   toolId: string;
   onPointerDown: (e: React.PointerEvent) => void;
@@ -46,7 +49,7 @@ interface MaskStageProps {
   brushCursorRef: MutableRefObject<HTMLDivElement | null>;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
   // centre (the op's scale/rotate pivot) sits at `(0.5 − pan) · zoom`.
@@ -71,7 +74,7 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
       onDragStart={(e) => e.preventDefault()}
     >
       <div
-        className="mask-edit-frame"
+        className={`mask-edit-frame${baseHidden ? " base-hidden" : ""}`}
         style={{
           aspectRatio: `${dims.w} / ${dims.h}`,
           maxWidth: `min(100%, ${dims.w}px)`,
