@@ -1,6 +1,12 @@
 # Prompt Assistant System Plan
 
-> Status: active.
+> Status: complete. All nine implementation-path steps landed (PRs #521–#526):
+> the assistant launcher (now a draggable always-on-top floating button with the
+> eyes icon, #527–#529), the draggable docked panel, local + API-profile + local
+> -model backends, target-aware insertion, the Prompt card Assistant row, and
+> the removal of the legacy `prompt` primitive. The inline card model row was
+> later removed (#530); model selection lives in the assistant panel and
+> Inspector.
 > Purpose: define the software-level assistant / prompt conversation surface so
 > prompt creation does not get trapped inside canvas node cards.
 
@@ -224,7 +230,7 @@ the graph-level source of prompt text.
 Implementation order:
 
 1. Build or stabilize the global API Manager and Local Model Manager described
-   in [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
+   in [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](../active/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
 2. Build the software-level Prompt Assistant panel described in this document.
 3. Update the `Prompt` card so it has one prompt text area plus an optional
    `Optimize` row.

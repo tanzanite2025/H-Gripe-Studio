@@ -1,6 +1,6 @@
 //! `smartLayerSplit` compute node: subject/background separation plus optional
 //! multi-object instancing, text/logo region detection and shadow/reflection
-//! candidates (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md,
+//! candidates (docs/plans/completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md,
 //! Phases 1–3), plus video-frame ingress (Phase 5): a connected video input
 //! is resolved to the still nearest `frame_sec` through the media engine
 //! before splitting.

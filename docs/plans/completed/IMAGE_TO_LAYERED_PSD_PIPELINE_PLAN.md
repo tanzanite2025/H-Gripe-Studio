@@ -1,5 +1,10 @@
 # Image to Layered PSD Pipeline Plan
 
+> Status: complete for the short-term path. Phase 0–4（协议、主体/背景、多实例、
+> 文字/logo/阴影/反光、PSD 导出子集）与 Phase 5（视频静帧提取 + 时间线右键
+> "拆分为图层"入口，PR #519）均已落地。对象跟踪 / 跨帧 mask 与"长期方向"
+> 一节保留为未来工作。
+
 ## 目标
 
 这份文档单独固定“普通图片转可编辑分层资产，再进入 PSD/节点生产链”的方向。
@@ -482,7 +487,7 @@ Reports/
 - Python 不回到核心桌面 runtime；如需研究、golden fixture 或重模型实验，
   只能作为外部工具/插件边界存在。
 
-这和 [`PYTHON_TO_RUST_MIGRATION_PLAN.md`](../completed/PYTHON_TO_RUST_MIGRATION_PLAN.md)
+这和 [`PYTHON_TO_RUST_MIGRATION_PLAN.md`](PYTHON_TO_RUST_MIGRATION_PLAN.md)
 的原则一致。
 
 ## 和 GPU / 设备策略的关系

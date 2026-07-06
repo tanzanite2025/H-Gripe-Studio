@@ -1,5 +1,5 @@
 //! Review Editor merge/split commands
-//! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 2 合并/拆分).
+//! (docs/plans/completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 2 合并/拆分).
 //!
 //! `merge_layer_masks` unions two or more layer masks of one layered image
 //! asset into a single merged layer's artifacts; `split_layer_mask` breaks one

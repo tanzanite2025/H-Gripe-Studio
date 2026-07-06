@@ -79,7 +79,7 @@ Prompt optimization is a row inside the owning `Prompt` card. The card owns:
 
 The Prompt Assistant itself is not a graph card. It is planned as a
 software-level panel/window in
-[`PROMPT_ASSISTANT_SYSTEM_PLAN.md`](PROMPT_ASSISTANT_SYSTEM_PLAN.md), and it
+[`PROMPT_ASSISTANT_SYSTEM_PLAN.md`](../completed/PROMPT_ASSISTANT_SYSTEM_PLAN.md), and it
 uses shared API/local backend refs from
 [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md).
 

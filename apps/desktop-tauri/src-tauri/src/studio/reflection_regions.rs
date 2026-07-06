@@ -1,5 +1,5 @@
 //! Heuristic reflection candidate detection for `smartLayerSplit`
-//! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 3 文字/logo/阴影).
+//! (docs/plans/completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 3 文字/logo/阴影).
 //!
 //! Deterministic, weight-free CPU detector: a reflection is a dimmer,
 //! vertically mirrored copy of the subject on the surface directly below it

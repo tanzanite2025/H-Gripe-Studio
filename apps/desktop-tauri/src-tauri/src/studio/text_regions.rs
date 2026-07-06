@@ -1,5 +1,5 @@
 //! Heuristic text and logo region detection for `smartLayerSplit`
-//! (docs/plans/active/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 3 文字/logo/阴影).
+//! (docs/plans/completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md, Phase 3 文字/logo/阴影).
 //!
 //! Deterministic, weight-free CPU detectors over the same edge machinery:
 //! text is a run of small high-contrast strokes on a locally uniform
