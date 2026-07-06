@@ -658,7 +658,10 @@ mod tests {
         let at = |sec: f64| mix[(sec * MIX_SAMPLE_RATE as f64) as usize * MIX_CHANNELS];
         assert!(at(0.0).abs() < 1e-3, "fade-in starts at 0");
         let mid = at(0.5);
-        assert!((mid - 0.5 * gain).abs() < 0.01, "peak carries the gain: {mid}");
+        assert!(
+            (mid - 0.5 * gain).abs() < 0.01,
+            "peak carries the gain: {mid}"
+        );
         assert!(at(0.999) < 0.02, "fade-out ends near 0");
     }
 
