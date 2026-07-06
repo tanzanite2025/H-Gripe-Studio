@@ -213,10 +213,15 @@ vendored/hardware status join the same summary once their probes exist.
 
 Add or refine a single capability summary that aggregates existing probes:
 
-- detected display adapters
-- wgpu adapter status
-- ONNX providers
-- FFmpeg vendored library status
+- ✅ detected display adapters — `display_adapters()` in
+  `src-tauri/src/studio/wgpu_device.rs` enumerates every adapter across the
+  compiled wgpu backends on a throwaway instance (never the shared device),
+  joins the `EngineProbeReport` as `display_adapters`, and renders as a
+  "display adapters" summary line (feature-off / no-adapter reasons stay
+  visible as warn lines).
+- ✅ wgpu adapter status
+- ✅ ONNX providers
+- ✅ FFmpeg vendored library status
 - future FFmpeg hardware encoder availability
 - external model plugin device status, when a plugin is installed
 
