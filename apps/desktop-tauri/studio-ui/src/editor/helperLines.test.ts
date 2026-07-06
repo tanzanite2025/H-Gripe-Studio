@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Node, NodePositionChange } from "@xyflow/react";
+import type { Node, NodePositionChange } from "@hgripe/flow";
 import { getHelperLines } from "./helperLines";
 
 function node(id: string, x: number, y: number, parentId?: string, width = 100): Node {

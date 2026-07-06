@@ -2,7 +2,7 @@
 // callbacks plus `canUndo`/`canRedo` flags that re-render the toolbar.
 
 import { useCallback, useReducer, useRef } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 import { createHistoryStack, type GraphSnapshot } from "./history";
 
 interface UseHistoryArgs {

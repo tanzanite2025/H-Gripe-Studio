@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Node } from "@xyflow/react";
+import type { Node } from "@hgripe/flow";
 
 import { searchNodes } from "./nodesearch";
 

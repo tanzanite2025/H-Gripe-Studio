@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 import { fromWorkflowGraph, toWorkflowGraph } from "./adapter";
 import type { HgripeNodeData } from "./HgripeNode";
 import { deserializeGraph, serializeGraph } from "../graph/model";

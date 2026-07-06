@@ -2,7 +2,7 @@
 // WorkflowGraph model. Keeping this conversion in one place is what lets us
 // swap renderers later without touching the runtime or serialization.
 
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 import type { GraphEdge, GraphNode, WorkflowGraph } from "../graph/model";
 import { GRAPH_VERSION } from "../graph/model";
 import { defaultParams } from "../graph/nodeSpecs";

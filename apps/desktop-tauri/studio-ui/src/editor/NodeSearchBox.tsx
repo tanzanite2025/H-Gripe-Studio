@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import type { Node } from "@xyflow/react";
+import type { Node } from "@hgripe/flow";
 
 import { searchNodes } from "./nodesearch";
 import { LangContext, useT } from "../i18n";

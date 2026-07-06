@@ -13,6 +13,12 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@hgripe/flow": ["../../../packages/hgripe-flow/src/index.ts"],
+      "@hgripe/flow/style.css": ["../../../packages/hgripe-flow/src/style.css"],
+      "@xyflow/react": ["node_modules/@xyflow/react/dist/esm/index.d.ts"]
+    },
 
     "strict": true,
     "noUnusedLocals": true,

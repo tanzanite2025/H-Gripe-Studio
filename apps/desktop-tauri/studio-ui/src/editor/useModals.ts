@@ -4,7 +4,7 @@
 // targets; the modal components themselves stay in App's JSX.
 
 import { useCallback, useMemo, useState } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 import type { HgripeNodeData } from "./HgripeNode";
 

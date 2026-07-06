@@ -9,7 +9,7 @@
 // another group), so a child's absolute position is just parent.position +
 // child.position.
 
-import type { Node } from "@xyflow/react";
+import type { Node } from "@hgripe/flow";
 
 export const GROUP_KIND = "group";
 export const DEFAULT_GROUP_WIDTH = 320;

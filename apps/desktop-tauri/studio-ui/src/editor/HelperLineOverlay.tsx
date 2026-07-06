@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useStore, type ReactFlowState } from "@xyflow/react";
+import { useStore, type ReactFlowState } from "@hgripe/flow";
 
 export interface HelperLineOverlayProps {
   horizontal?: number;

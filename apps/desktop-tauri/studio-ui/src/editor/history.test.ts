@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 import { createHistoryStack, findHeavyGraphData, type GraphSnapshot } from "./history";
 
 function snap(label: string): GraphSnapshot {

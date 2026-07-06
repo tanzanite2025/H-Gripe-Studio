@@ -5,7 +5,7 @@
 // stays in the caller (App), which passes the setters in.
 
 import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 import { buildPaste, clipFromSelection, type Clip } from "./clipboard";
 import { detachChildren, isGroupNode, makeGroupNode, orderNodes } from "./grouping";

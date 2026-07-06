@@ -1,5 +1,5 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-import type { Node } from "@xyflow/react";
+import type { Node } from "@hgripe/flow";
 
 import { NodeSearchBox } from "./NodeSearchBox";
 import type { ValidationIssue } from "../runtime/dag";

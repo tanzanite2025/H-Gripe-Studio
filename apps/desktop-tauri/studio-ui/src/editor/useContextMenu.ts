@@ -3,7 +3,7 @@
 // source cards additionally get the auto (computed) bound-edit entries.
 
 import { useCallback, useMemo, useState, type MutableRefObject } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 import type { MenuItem } from "./ContextMenu";
 import type { Clip } from "./clipboard";

@@ -7,7 +7,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type NodePositionChange,
-} from "@xyflow/react";
+} from "@hgripe/flow";
 
 import { FlowCanvas, type EdgeStyle } from "./editor/FlowCanvas";
 import { RunHud, type RunHudScope } from "./editor/RunHud";

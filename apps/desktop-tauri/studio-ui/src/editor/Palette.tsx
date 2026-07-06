@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
-import { useReactFlow, useStore, useStoreApi } from "@xyflow/react";
+import { useReactFlow, useStore, useStoreApi } from "@hgripe/flow";
 import type { EdgeStyle } from "./FlowCanvas";
 import { paletteGroups, type NodeSpec, type PaletteCategory } from "../graph/nodeSpecs";
 import { GROUP_ZH, localizeSpec } from "../graph/nodeSpecsI18n";

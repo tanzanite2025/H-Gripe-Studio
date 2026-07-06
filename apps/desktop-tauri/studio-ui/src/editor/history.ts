@@ -2,7 +2,7 @@
 // factory (no React) so the logic is unit-testable on its own; `useHistory`
 // wraps it for the editor.
 
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 export interface GraphSnapshot {
   nodes: Node[];

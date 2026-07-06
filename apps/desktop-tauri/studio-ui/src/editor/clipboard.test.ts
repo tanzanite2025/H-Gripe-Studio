@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 import { buildPaste, clipFromSelection } from "./clipboard";
 
 function node(id: string, kind: string, selected: boolean, params: Record<string, unknown> = {}): Node {

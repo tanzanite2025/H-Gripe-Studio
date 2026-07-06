@@ -1,0 +1,19 @@
+{
+  "name": "@hgripe/flow",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "H-Gripe Studio-owned node graph adapter. Soft-cuts the app away from direct XYFlow imports before vendoring.",
+  "sideEffects": [
+    "./src/style.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
+  },
+  "peerDependencies": {
+    "@xyflow/react": "12.3.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}

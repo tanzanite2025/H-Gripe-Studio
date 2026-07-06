@@ -1,4 +1,4 @@
-import { BaseEdge, getStraightPath, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, getStraightPath, type EdgeProps } from "@hgripe/flow";
 
 // The "binding" edge ties a media source card to an edit-result node spawned
 // from it (see docs/cards/generic-media-card.md). Unlike a normal workflow

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 import type { HgripeNodeData } from "./HgripeNode";
 import { toWorkflowGraph } from "./adapter";

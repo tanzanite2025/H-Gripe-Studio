@@ -1,5 +1,5 @@
 import { memo, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { useStore, type NodeProps } from "@xyflow/react";
+import { useStore, type NodeProps } from "@hgripe/flow";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";

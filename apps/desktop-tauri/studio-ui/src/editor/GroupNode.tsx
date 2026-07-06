@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { NodeResizer, type NodeProps } from "@xyflow/react";
+import { NodeResizer, type NodeProps } from "@hgripe/flow";
 
 // A resizable container frame. It carries no ports and does no work at run time;
 // it just visually groups the nodes parented to it (which move with it).

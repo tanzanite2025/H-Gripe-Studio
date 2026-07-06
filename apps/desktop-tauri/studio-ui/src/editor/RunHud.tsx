@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 import { LangContext, useT, type MsgKey } from "../i18n";
 import { NODE_SPECS } from "../graph/nodeSpecs";

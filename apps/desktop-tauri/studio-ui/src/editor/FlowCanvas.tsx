@@ -12,8 +12,8 @@ import {
   type OnEdgesChange,
   type IsValidConnection,
   type Viewport,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+} from "@hgripe/flow";
+import "@hgripe/flow/style.css";
 
 import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";

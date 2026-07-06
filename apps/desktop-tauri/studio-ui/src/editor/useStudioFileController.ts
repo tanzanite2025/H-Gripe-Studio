@@ -7,7 +7,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 import { fromWorkflowGraph, toWorkflowGraph } from "./adapter";
 import { baseName } from "./ProjectPanel";

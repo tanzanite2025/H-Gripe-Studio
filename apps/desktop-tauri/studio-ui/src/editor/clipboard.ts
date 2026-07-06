@@ -1,7 +1,7 @@
 // Copy/paste helpers for the node graph. Pure functions so they are
 // unit-testable without a renderer.
 
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 import { orderNodes } from "./grouping";
 import type { HgripeNodeData } from "./HgripeNode";
 

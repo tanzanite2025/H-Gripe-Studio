@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode, Ref } from "react";
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position } from "@hgripe/flow";
 import type { NodeSpec, PortSpec } from "../graph/nodeSpecs";
 import type { NodeStatus } from "../runtime/dag";
 import type { DeviceReport } from "../runtime/deviceReport";

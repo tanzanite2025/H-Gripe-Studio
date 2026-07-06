@@ -4,7 +4,7 @@
 // and the project manifest (Phase 4) a stable shape without changing the
 // persisted workflow format.
 
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node } from "@hgripe/flow";
 
 /** React Flow pane viewport (flow-space translate + zoom). */
 export interface CanvasViewport {

@@ -6,7 +6,7 @@
 // persistence and the on-disk workflow format are unchanged.
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useEdgesState, useNodesState, type Edge, type Node } from "@xyflow/react";
+import { useEdgesState, useNodesState, type Edge, type Node } from "@hgripe/flow";
 
 import {
   canvasDocumentTitle,

@@ -1,4 +1,4 @@
-import type { Node, NodePositionChange, XYPosition } from "@xyflow/react";
+import type { Node, NodePositionChange, XYPosition } from "@hgripe/flow";
 
 export interface HelperLinesResult {
   // Flow-space coordinates of the alignment guides to draw, if any.

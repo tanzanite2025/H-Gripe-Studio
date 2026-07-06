@@ -1,4 +1,4 @@
-import { BaseEdge, useStore, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, useStore, type EdgeProps } from "@hgripe/flow";
 import { avoidanceMidX, orthogonalPoints, pointsToPath, type Rect } from "./edgeRouting";
 
 // Custom edge that routes its vertical segment around other nodes. Obstacle

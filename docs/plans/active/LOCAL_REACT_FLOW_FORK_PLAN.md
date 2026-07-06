@@ -1,6 +1,6 @@
 # Local React Flow Fork Plan
 
-> Status: active planning document.
+> Status: active implementation document.
 > Purpose: define how H-Gripe Studio can take ownership of the node-graph
 > canvas layer without conflicting with WGPU viewports, AMD/GPU compatibility,
 > or the media-processing kernel roadmap.
@@ -259,7 +259,7 @@ prove the app still works.
 
 1. Document and pin the current upstream `@xyflow/react` version.
 2. Add `packages/hgripe-flow` as a re-export adapter.
-3. Move app imports from `@xyflow/react` to `hgripe-flow`.
+3. Move app imports from `@xyflow/react` to `@hgripe/flow`.
 4. Run the studio UI tests and build.
 5. Vendor or copy the needed upstream source into `hgripe-flow`.
 6. Keep API stable and run parity checks.
@@ -284,3 +284,11 @@ prove the app still works.
 - Do not build a global GPU scheduler in the graph package.
 - Do not rewrite the full app UI into a custom renderer.
 - Do not delete upstream internals before adapter parity is verified.
+
+## Implementation Status
+
+- `packages/hgripe-flow` exists as the local graph adapter package.
+- Studio imports must route through `@hgripe/flow`, not directly through
+  `@xyflow/react`.
+- The adapter still re-exports `@xyflow/react@12.3.5`; no graph behavior is
+  intentionally changed in this phase.

@@ -1,4 +1,4 @@
-import type { Node } from "@xyflow/react";
+import type { Node } from "@hgripe/flow";
 
 import type { HgripeNodeData } from "./HgripeNode";
 import { nodeSpec } from "../graph/nodeSpecs";
