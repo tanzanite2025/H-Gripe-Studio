@@ -480,6 +480,13 @@ fn apply_edit_paths(
         let ops = layer.get("ops");
         if index == 0 {
             replay_ops(image, mask, ops, default_tolerance, operations);
+        } else if ops
+            .and_then(Value::as_array)
+            .is_none_or(|list| list.is_empty())
+        {
+            // A content-less upper layer (PS: fully transparent) composites
+            // nothing; blending its empty surface would wipe the layers below.
+            continue;
         } else {
             // Upper layers replay from an empty surface, so their result is a
             // pure function of (dims, ops, tolerance[, image for wand]) and is
@@ -4340,6 +4347,22 @@ mod tests {
         apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
         assert!(mask.as_raw().iter().all(|&px| px == MASK_OFF));
         assert!(operations.is_empty());
+    }
+
+    #[test]
+    fn empty_upper_layers_leave_the_composite_untouched() {
+        // A duplicated / freshly added layer with no edits (PS: a fully
+        // transparent layer) must not wipe the composite via a normal blend.
+        let image = RgbaImage::from_pixel(4, 4, Rgba([0, 0, 0, 255]));
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [{ "type": "invert" }] },
+            { "ops": [] }
+        ]});
+        let mut mask = solid(4, 4, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+        assert!(mask.as_raw().iter().all(|&px| px == MASK_ON));
+        assert_eq!(operations.len(), 1);
     }
 
     #[test]

@@ -402,6 +402,10 @@ pub(crate) enum MarkerShape {
 #[derive(Deserialize)]
 pub(crate) struct OverlayScene {
     pub(crate) items: Vec<OverlayItem>,
+    /// Dash-phase offset in surface pixels for the marching ants — the
+    /// sender advances it over time so the ants flow along the outline.
+    #[serde(default)]
+    pub(crate) phase: f32,
 }
 
 /// Marquee outline styling, matching the editor's canvas painter
@@ -420,6 +424,7 @@ fn stroke_polyline(
     pts: &[(f32, f32)],
     rgba: [f32; 4],
     dash: bool,
+    phase: f32,
 ) {
     let (sw, sh) = (surface.w as i64, surface.h as i64);
     let alpha = rgba[3];
@@ -435,7 +440,7 @@ fn stroke_polyline(
         for i in 0..steps {
             let t = i as f32 / steps as f32;
             let d = travelled + len * t;
-            if dash && d.rem_euclid(OVERLAY_DASH_PERIOD) >= OVERLAY_DASH_ON {
+            if dash && (d + phase).rem_euclid(OVERLAY_DASH_PERIOD) >= OVERLAY_DASH_ON {
                 continue;
             }
             let xi = (ax + (bx - ax) * t).round() as i64;
@@ -552,8 +557,10 @@ fn composite_overlay_scene(
                         map(x1, y1),
                     ]
                 };
-                stroke_polyline(surface, &pts, OVERLAY_ANTS_UNDER, false);
-                stroke_polyline(surface, &pts, OVERLAY_ANTS_DASH, true);
+                stroke_polyline(surface, &pts, OVERLAY_ANTS_UNDER, false, 0.0);
+                // The ants flow: the scene's phase shifts the dash pattern
+                // backwards so dashes march forward along the outline.
+                stroke_polyline(surface, &pts, OVERLAY_ANTS_DASH, true, -scene.phase);
             }
             OverlayItem::Polygon {
                 points,
@@ -570,7 +577,7 @@ fn composite_overlay_scene(
                 }
                 // Close the loop for the outline.
                 pts.push(pts[0]);
-                stroke_polyline(surface, &pts, *stroke, *dash);
+                stroke_polyline(surface, &pts, *stroke, *dash, 0.0);
             }
             OverlayItem::Polyline {
                 points,
@@ -581,7 +588,7 @@ fn composite_overlay_scene(
                     continue;
                 }
                 let pts: Vec<(f32, f32)> = points.iter().map(|p| map(p[0], p[1])).collect();
-                stroke_polyline(surface, &pts, *stroke, *dash);
+                stroke_polyline(surface, &pts, *stroke, *dash, 0.0);
             }
             OverlayItem::Band {
                 points,
@@ -618,14 +625,32 @@ fn composite_overlay_scene(
                                 (cx + r * t.cos(), cy + r * t.sin())
                             })
                             .collect();
-                        stroke_polyline(surface, &ring, *stroke, false);
+                        stroke_polyline(surface, &ring, *stroke, false, 0.0);
                     }
                     MarkerShape::Cross => {
-                        stroke_polyline(surface, &[(cx - r, cy), (cx + r, cy)], *stroke, false);
-                        stroke_polyline(surface, &[(cx, cy - r), (cx, cy + r)], *stroke, false);
+                        stroke_polyline(
+                            surface,
+                            &[(cx - r, cy), (cx + r, cy)],
+                            *stroke,
+                            false,
+                            0.0,
+                        );
+                        stroke_polyline(
+                            surface,
+                            &[(cx, cy - r), (cx, cy + r)],
+                            *stroke,
+                            false,
+                            0.0,
+                        );
                     }
                     MarkerShape::Minus => {
-                        stroke_polyline(surface, &[(cx - r, cy), (cx + r, cy)], *stroke, false);
+                        stroke_polyline(
+                            surface,
+                            &[(cx - r, cy), (cx + r, cy)],
+                            *stroke,
+                            false,
+                            0.0,
+                        );
                     }
                 }
             }
@@ -1454,6 +1479,9 @@ pub(crate) fn viewport_set_overlay_scene(
     let parsed = match scene {
         None => None,
         Some(scene) => {
+            if !scene.phase.is_finite() {
+                return Err("overlay scene coordinates must be finite".to_string());
+            }
             if scene.items.len() > MAX_OVERLAY_SCENE_ITEMS {
                 return Err(format!(
                     "overlay scene has {} items (max {MAX_OVERLAY_SCENE_ITEMS})",
@@ -2270,6 +2298,7 @@ mod tests {
                 region,
                 ellipse: false,
             }],
+            phase: 0.0,
         };
 
         let grade = viewport_create("grade_preview".to_string()).expect("create");
@@ -2327,6 +2356,7 @@ mod tests {
                 region: [0.25, 0.25, 0.75, 0.75],
                 ellipse: false,
             }],
+            phase: 0.0,
         };
         composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
         let stroked = surface.data.chunks(4).filter(|px| px[2] > 0.5).count();
@@ -2356,6 +2386,7 @@ mod tests {
                 fill: Some([0.0, 1.0, 0.0, 0.5]),
                 dash: false,
             }],
+            phase: 0.0,
         };
         composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
         // Interior carries the fill (green over black at 0.5 alpha).
@@ -2405,6 +2436,7 @@ mod tests {
                     fill: None,
                 },
             ],
+            phase: 0.0,
         };
         composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
         // Ruler line: y = 0.5 * 32 - 0.5 = 15.5 -> row 16; x mid is red.
@@ -2439,6 +2471,7 @@ mod tests {
                 radius: 4.0 / 32.0,
                 color: [0.0, 0.0, 1.0, 0.5],
             }],
+            phase: 0.0,
         };
         composite_overlay_scene(&mut surface, &scene, (32, 32), ViewportView::IDENTITY);
         // On the centreline the band blends exactly once: 0.5 blue.
@@ -2465,6 +2498,7 @@ mod tests {
                 radius,
                 color,
             }],
+            phase: 0.0,
         };
         let err = viewport_set_overlay_scene(
             vp.viewport_id.clone(),
@@ -2503,6 +2537,7 @@ mod tests {
                 stroke,
                 fill: None,
             }],
+            phase: 0.0,
         };
         let err = viewport_set_overlay_scene(
             vp.viewport_id.clone(),
@@ -2534,6 +2569,7 @@ mod tests {
                 fill: None,
                 dash: false,
             }],
+            phase: 0.0,
         };
         let err = viewport_set_overlay_scene(
             vp.viewport_id.clone(),

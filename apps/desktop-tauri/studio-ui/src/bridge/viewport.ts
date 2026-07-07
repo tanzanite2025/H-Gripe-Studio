@@ -499,6 +499,9 @@ export type ViewportOverlayItem =
  * detail instead of on a document-size canvas. */
 export interface ViewportOverlayScene {
   items: ViewportOverlayItem[];
+  /** Dash-phase offset in surface pixels for the marching ants — the sender
+   * advances it over time so the ants flow along the outline. */
+  phase?: number;
 }
 
 /**

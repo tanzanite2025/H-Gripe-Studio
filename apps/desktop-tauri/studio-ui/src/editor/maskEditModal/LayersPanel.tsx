@@ -315,11 +315,13 @@ export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, i
         {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
           const layer = layers[i];
           const group = layer.groupId ? groupById.get(layer.groupId) : undefined;
+          // The image workspace's pixel layers draw the backing image: the
+          // bottom layer always (it *is* the image), an upper layer while its
+          // own stack is empty (a Ctrl+J copy holds the image's content).
           const showBaseImage = Boolean(
             imagePath &&
-              i === 0 &&
               layer.kind !== "adjustment" &&
-              (workspace === "image" || layer.ops.length === 0),
+              (workspace === "image" ? i === 0 || layer.ops.length === 0 : i === 0 && layer.ops.length === 0),
           );
           const displayName =
             showBaseImage && imagePath && layer.name === "Background" ? basename(imagePath) : layer.name;

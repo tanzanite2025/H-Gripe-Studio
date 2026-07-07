@@ -13,6 +13,7 @@ import type {
   AdjustmentType,
   BrushStroke,
   EditOp,
+  EditOpBase,
   EditPath,
   EditPathPoint,
   ImageCanvasSize,
@@ -678,19 +679,28 @@ export function reselect(state: EditState): EditState {
  * PS duplicate-via-copy (Ctrl+J; M9): copy the active layer (fresh id,
  * "… copy" name) directly above itself and make the copy active (undoable).
  * Adjustment layers duplicate too — the copy re-tone-maps the composite.
+ * With an active marquee `selection` this is PS Layer Via Copy: the copy
+ * carries a layer mask filled with the selection, so it holds only the
+ * selected region's content.
  */
-export function duplicateLayer(state: EditState): EditState {
+export function duplicateLayer(state: EditState, selection?: NonNullable<EditOpBase["clip"]> | null): EditState {
   const doc = state.current;
   const index = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
   const source = doc.layers[index];
+  const mask: LayerMask | null = selection
+    ? {
+        ...emptyLayerMask(),
+        ops: [{ type: selection.ellipse ? "ellipse" : "rect", region: [...selection.region] }],
+      }
+    : source.mask
+      ? { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) }
+      : null;
   const copy: MaskLayer = {
     ...source,
     id: emptyMaskLayer().id,
     name: `${source.name} copy`,
     ops: source.ops.map((op) => ({ ...op })),
-    ...(source.mask
-      ? { mask: { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) } }
-      : null),
+    ...(mask ? { mask } : null),
   };
   const layers = [...doc.layers.slice(0, index + 1), copy, ...doc.layers.slice(index + 1)];
   return commit(state, { ...doc, layers, active: index + 1 });

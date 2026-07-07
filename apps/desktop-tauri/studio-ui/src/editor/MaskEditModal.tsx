@@ -255,6 +255,15 @@ export function MaskEditModal({
   } | null>(null);
   const lastMarqueeRef = useRef(lastMarquee);
   lastMarqueeRef.current = lastMarquee;
+  // Marching ants flow (PS): while a selection is active, the dash phase
+  // advances a few times a second and the ants march along the outline —
+  // host-side over presented frames and on the canvas fallback alike.
+  const [antsPhase, setAntsPhase] = useState(0);
+  useEffect(() => {
+    if (!lastMarquee) return;
+    const timer = window.setInterval(() => setAntsPhase((p) => (p + 2) % 10), 120);
+    return () => window.clearInterval(timer);
+  }, [lastMarquee]);
   // Edits go through this wrapper, which stamps the active selection as the
   // action's `clip` so rasterisation confines the op to the selection.
   // Whole-mask reshapes (transform / crop / select-all) stay global.
@@ -329,11 +338,12 @@ export function MaskEditModal({
         doc: state.current,
         editingPath,
         lastMarquee,
+        antsPhase,
         toolId,
         rulerLine,
         colorSamples,
       }),
-    [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
+    [lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
@@ -614,7 +624,13 @@ export function MaskEditModal({
     select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
     delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
     reselect: () => dispatch({ type: "reselect" }),
-    duplicate: () => dispatch({ type: "layer_duplicate" }),
+    duplicate: () => {
+      // PS Ctrl+J: with a selection, Layer Via Copy — the new layer holds
+      // the selected region (its mask) and the marching ants drop.
+      const selection = lastMarqueeRef.current;
+      dispatch({ type: "layer_duplicate", ...(selection ? { selection } : null) });
+      if (selection) setLastMarquee(null);
+    },
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
     brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
     brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),
@@ -770,9 +786,10 @@ export function MaskEditModal({
       cropDraft,
       cropRegion,
       lastMarquee,
+      antsPhase,
       gestures,
     });
-  }, [dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee]);
+  }, [dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, antsPhase]);
 
   useEffect(() => {
     redraw();

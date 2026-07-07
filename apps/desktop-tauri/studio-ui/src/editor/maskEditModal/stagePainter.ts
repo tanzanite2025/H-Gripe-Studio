@@ -424,6 +424,7 @@ export function paintMarquee(
   start: [number, number],
   end: [number, number],
   ellipse: boolean,
+  phase = 0,
 ) {
   const [x1, y1] = start;
   const [x2, y2] = end;
@@ -442,6 +443,8 @@ export function paintMarquee(
   strokeShape();
   ctx.strokeStyle = "rgba(0,0,0,0.9)";
   ctx.setLineDash([6, 4]);
+  ctx.lineDashOffset = -phase;
   strokeShape();
   ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
 }

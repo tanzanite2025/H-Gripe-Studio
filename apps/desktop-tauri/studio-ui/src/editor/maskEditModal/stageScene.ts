@@ -51,6 +51,9 @@ export interface OverlaySceneArgs {
   /** Index of the path op being anchor-re-edited on the active layer. */
   editingPath: number | null;
   lastMarquee: MarqueeSelection | null;
+  /** Marching-ants dash phase in surface pixels; advances over time so the
+   * committed marquee's ants flow. */
+  antsPhase: number;
   toolId: string;
   rulerLine: RulerLine | null;
   colorSamples: ColorSample[];
@@ -61,7 +64,7 @@ export interface OverlaySceneArgs {
  * screen pixel wide at any zoom instead of scaling with a document-size
  * canvas. Live drags stay on the canvas for zero-latency feedback. */
 export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverlayScene | null {
-  const { frameDims, previewing, doc, editingPath, lastMarquee, toolId, rulerLine, colorSamples } = args;
+  const { frameDims, previewing, doc, editingPath, lastMarquee, antsPhase, toolId, rulerLine, colorSamples } = args;
   if (frameDims.w <= 0 || frameDims.h <= 0) return null;
   const items: ViewportOverlayItem[] = [];
   // Committed pen / lasso paths: the same loops the canvas painter fills
@@ -160,7 +163,7 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
     });
     items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3, stroke: colour, fill: colour });
   }
-  return items.length > 0 ? { items } : null;
+  return items.length > 0 ? { items, ...(lastMarquee ? { phase: antsPhase } : null) } : null;
 }
 
 export interface StagePaintArgs {
@@ -190,6 +193,7 @@ export interface StagePaintArgs {
   cropDraft: [number, number, number, number] | null;
   cropRegion: [number, number, number, number] | null;
   lastMarquee: MarqueeSelection | null;
+  antsPhase: number;
   gestures: PointerGestures;
 }
 
@@ -225,6 +229,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     cropDraft,
     cropRegion,
     lastMarquee,
+    antsPhase,
     gestures,
   } = args;
   ctx.clearRect(0, 0, dims.w, dims.h);
@@ -294,12 +299,12 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   const sd = gestures.shapeDrag;
   if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
   const mq = gestures.marquee;
-  if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
+  if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse", antsPhase);
   else if (lastMarquee && !underlay && !presented) {
     // The committed ants stroke host-side over the presented frame; the
     // canvas only draws them when no host frame presents (browser preview).
     const [x0, y0, x1, y1] = lastMarquee.region;
-    paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse);
+    paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse, antsPhase);
   }
   const pl = gestures.patchLoop;
   if (pl) {
