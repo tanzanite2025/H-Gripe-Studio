@@ -2,6 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { Node } from "@hgripe/flow";
 
 import { NodeSearchBox } from "./NodeSearchBox";
+import { WindowControls } from "./WindowControls";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
 
@@ -113,9 +114,8 @@ export function Toolbar({
 
   return (
     <header className="toolbar">
-      <div className="toolbar-title-row">
-        {/* Reserved zone for the future app-wide command system. */}
-        <div className="toolbar-command-zone" />
+      <div className="toolbar-title-row" data-tauri-drag-region>
+        <div className="toolbar-command-zone">{isDesktop && <WindowControls />}</div>
         <div className="toolbar-search">
           <NodeSearchBox nodes={nodes} onJump={onJumpToNode} />
         </div>

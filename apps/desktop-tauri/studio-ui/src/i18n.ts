@@ -119,6 +119,10 @@ export const messages = {
     en: "open the image editor — uses the selected image card, or pick a file",
     zh: "打开图片编辑弹窗 — 选中图片卡片则自动带入，否则自行选择文件",
   },
+  "win.controls": { en: "Window controls", zh: "窗口控制" },
+  "win.close": { en: "Close window", zh: "关闭窗口" },
+  "win.minimize": { en: "Minimize window", zh: "最小化窗口" },
+  "win.maximize": { en: "Maximize window", zh: "最大化窗口" },
   "imageEdit.pickTitle": { en: "Choose an image to edit", zh: "选择要编辑的图片" },
   "imageEdit.selectFirst": {
     en: "Select an image card first (the browser preview has no native file picker).",
