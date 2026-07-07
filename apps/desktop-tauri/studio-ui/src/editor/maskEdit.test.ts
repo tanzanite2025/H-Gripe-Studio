@@ -302,6 +302,21 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers).toHaveLength(1);
   });
 
+  it("layer-via-copy: a selection becomes the copy's layer mask (undoable)", () => {
+    let s = initEditState();
+    s = addOperation(s, { type: "invert" });
+    s = duplicateLayer(s, { region: [2, 3, 20, 15] });
+    expect(s.current.layers).toHaveLength(2);
+    expect(s.current.active).toBe(1);
+    expect(s.current.layers[1].ops.map((op) => op.type)).toEqual(["invert"]);
+    expect(s.current.layers[1].mask?.ops).toEqual([{ type: "rect", region: [2, 3, 20, 15] }]);
+    s = undo(s);
+    expect(s.current.layers).toHaveLength(1);
+    // An elliptical selection fills the mask elliptically.
+    s = duplicateLayer(s, { region: [0, 0, 8, 8], ellipse: true });
+    expect(s.current.layers[1].mask?.ops).toEqual([{ type: "ellipse", region: [0, 0, 8, 8] }]);
+  });
+
   it("renames a layer (undoable) and ignores blank or unchanged names", () => {
     let s = initEditState();
     const original = s.current.layers[0].name;

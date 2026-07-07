@@ -66,7 +66,7 @@ export type MaskEditAction =
   | { type: "redo" }
   | { type: "clear" }
   | { type: "reselect" }
-  | { type: "layer_duplicate" }
+  | { type: "layer_duplicate"; selection?: NonNullable<EditOpBase["clip"]> | null }
   | { type: "remove_op"; index: number }
   | { type: "toggle_op"; index: number }
   | { type: "op_amount"; index: number; amount: number }
@@ -123,7 +123,7 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
     case "reselect":
       return reselect(state);
     case "layer_duplicate":
-      return duplicateLayer(state);
+      return duplicateLayer(state, action.selection);
     case "remove_op":
       return removeOp(state, action.index);
     case "toggle_op":

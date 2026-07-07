@@ -1087,6 +1087,9 @@ export function buildProxyMask(
       mask = replayOps(mask, layer.ops, scale);
       return;
     }
+    // A content-less upper layer (PS: fully transparent) composites nothing;
+    // blending its empty surface would wipe the composite below it.
+    if (layer.ops.length === 0) return;
     const surface = replayOps(createProxyMask(w, h), layer.ops, scale);
     blendInto(mask, surface, layer.blend, layer.opacity);
   });
@@ -1293,6 +1296,7 @@ export class ProxyLayerCache {
       }
       const src = surfaces[i];
       if (!src) return;
+      if (i > 0 && layer.ops.length === 0) return;
       if (i === 0) {
         for (let y = rect.y0; y < rect.y1; y++) {
           const row = y * w;

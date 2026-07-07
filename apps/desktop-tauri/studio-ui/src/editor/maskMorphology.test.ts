@@ -504,6 +504,15 @@ describe("buildProxyMask", () => {
     expect(area(mask)).toBeGreaterThan(0);
   });
 
+  it("empty upper layers leave the composite untouched", () => {
+    // A duplicated / freshly added layer with no edits (PS: a fully
+    // transparent layer) must not wipe the composite via a normal blend.
+    const d = doc([{ type: "invert" }]);
+    d.layers.push({ ...emptyMaskDocument().layers[0], id: "copy", name: "Background copy" });
+    const { mask } = buildProxyMask(d, { w: 32, h: 32 }, { proxyWidth: 32 });
+    expect(area(mask)).toBe(32 * 32);
+  });
+
   it("skips disabled history steps on replay", () => {
     const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
     const enabled = doc([stroke]);
@@ -607,21 +616,23 @@ describe("buildProxyMask", () => {
         blend: "normal",
         opacity: 1,
         visible: true,
-        ops: [],
+        // A recorded-but-dark stack: an ops-less layer is transparent and
+        // skipped, so the blend-math cases need explicit dark content.
+        ops: [{ type: "select_all" }, { type: "delete" }],
         ...top,
       });
       return d;
     };
 
-    // normal @ 100%: the (empty) upper surface replaces the background.
+    // normal @ 100%: the (dark) upper surface replaces the background.
     const normal = buildProxyMask(layered({ blend: "normal" }), dims).mask;
     expect(area(normal)).toBe(0);
 
-    // multiply with an empty (dark) upper surface knocks everything out.
+    // multiply with a dark upper surface knocks everything out.
     const multiply = buildProxyMask(layered({ blend: "multiply" }), dims).mask;
     expect(area(multiply)).toBe(0);
 
-    // screen with an empty upper surface leaves the background untouched.
+    // screen with a dark upper surface leaves the background untouched.
     const screen = buildProxyMask(layered({ blend: "screen" }), dims).mask;
     expect(area(screen)).toBe(normal.data.length);
 
