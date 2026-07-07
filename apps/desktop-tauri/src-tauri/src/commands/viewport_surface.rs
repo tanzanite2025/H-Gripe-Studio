@@ -276,8 +276,7 @@ mod native {
     };
 
     use super::{
-        crop_uniform, frame_within_texture_limit, identity_uniform, BlitUniform, PlacementReport,
-        ViewWindow,
+        crop_uniform, frame_within_texture_limit, identity_uniform, PlacementReport, ViewWindow,
     };
     use crate::studio::wgpu_device::{shared_gpu, SharedGpu};
 
@@ -313,6 +312,41 @@ mod native {
 
     fn surfaces() -> &'static Mutex<HashMap<String, Entry>> {
         SURFACES.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// Process-wide native-surface capability fallback. If the shared WGPU
+    /// adapter cannot configure a Win32 child-window surface, retrying every
+    /// layout tick only floods the terminal; the PNG/WebView transport is the
+    /// authoritative fallback until the next app launch.
+    static SURFACE_DISABLED_REASON: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+    fn surface_disabled_reason() -> Option<String> {
+        SURFACE_DISABLED_REASON
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()
+            .and_then(|reason| reason.clone())
+    }
+
+    fn is_permanent_surface_fallback(reason: &str) -> bool {
+        let reason = reason.to_ascii_lowercase();
+        reason.contains("shared adapter")
+            || reason.contains("not supported")
+            || reason.contains("surface creation failed")
+            || reason.contains("surface window class registration failed")
+    }
+
+    fn disable_surface(reason: impl Into<String>) -> String {
+        let reason = reason.into();
+        if let Ok(mut disabled) = SURFACE_DISABLED_REASON
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+        {
+            if disabled.is_none() {
+                *disabled = Some(reason.clone());
+            }
+        }
+        reason
     }
 
     /// The registered window class atom for surface children, one per process.
@@ -837,6 +871,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         image: &image::RgbaImage,
         view: ViewWindow,
     ) -> bool {
+        if surface_disabled_reason().is_some() {
+            return false;
+        }
         let gpu = match shared_gpu() {
             Ok(gpu) => gpu,
             Err(_) => return false,
@@ -866,6 +903,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         match result {
             Ok(()) => true,
             Err(reason) => {
+                if is_permanent_surface_fallback(&reason) {
+                    let reason = disable_surface(reason);
+                    eprintln!("[viewport] native surface disabled for this session: {reason}");
+                    return false;
+                }
                 eprintln!("[viewport] surface present fell back for {viewport_id}: {reason}");
                 false
             }
@@ -875,6 +917,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     /// The zoom/pan fast path: re-present the cached frame texture cropped to
     /// `view` — one uniform write and one render pass, no render, no upload.
     pub(super) fn present_view(viewport_id: &str, view: ViewWindow) -> bool {
+        if surface_disabled_reason().is_some() {
+            return false;
+        }
         let gpu = match shared_gpu() {
             Ok(gpu) => gpu,
             Err(_) => return false,
@@ -897,6 +942,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         match clear_surface(&gpu, entry, w, h) {
             Ok(()) => true,
             Err(reason) => {
+                if is_permanent_surface_fallback(&reason) {
+                    let reason = disable_surface(reason);
+                    eprintln!("[viewport] native surface disabled for this session: {reason}");
+                    return false;
+                }
                 eprintln!("[viewport] surface view present fell back for {viewport_id}: {reason}");
                 false
             }
@@ -982,6 +1032,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         viewport_id: &str,
         rect: (i32, i32, i32, i32),
     ) -> PlacementReport {
+        if let Some(reason) = surface_disabled_reason() {
+            return PlacementReport::fallback(reason);
+        }
         let gpu = match shared_gpu() {
             Ok(gpu) => gpu,
             Err(reason) => return PlacementReport::fallback(reason),
@@ -1037,6 +1090,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 fallback_reason: None,
             },
             Ok(Err(reason)) | Err(reason) => {
+                if is_permanent_surface_fallback(&reason) {
+                    let reason = disable_surface(reason);
+                    eprintln!("[viewport] native surface disabled for this session: {reason}");
+                    return PlacementReport::fallback(reason);
+                }
                 eprintln!("[viewport] surface placement fell back for {viewport_id}: {reason}");
                 PlacementReport::fallback(reason)
             }

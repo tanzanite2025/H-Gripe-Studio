@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { IDENTITY_VIEW } from "../viewport/view";
 import type { ViewportMaskOverlay, ViewportOverlayItem, ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
@@ -276,7 +277,6 @@ export function MaskEditModal({
   const [view, setView] = useState<CanvasView>(FIT_VIEW);
   const viewRef = useRef(view);
   viewRef.current = view;
-
   // Underlay presentation goes through the viewport host (WGPU migration
   // Phase 2): the image is targeted by reference — a `node_output` target
   // when a node id is given, a registered image resource otherwise — and the
@@ -288,30 +288,6 @@ export function MaskEditModal({
   // the surface placement following it) carries the motion frame-to-frame;
   // the host re-renders the window at matching detail once the view settles,
   // instead of a full render round-trip per input event.
-  const targetViewportView = useMemo(() => {
-    const canvas = canvasRef.current;
-    // The stage rect bounds what is visible of the transformed frame; the
-    // window must cover it even when the frame's base rect is smaller.
-    const stage = canvas?.closest<HTMLElement>(".mask-edit-stage");
-    return viewWindow(
-      view,
-      canvas?.offsetWidth ?? 0,
-      canvas?.offsetHeight ?? 0,
-      stage?.clientWidth ?? 0,
-      stage?.clientHeight ?? 0,
-    );
-  }, [view]);
-  const [viewportView, setViewportView] = useState(targetViewportView);
-  useEffect(() => {
-    if (
-      targetViewportView.zoom === viewportView.zoom &&
-      targetViewportView.panX === viewportView.panX &&
-      targetViewportView.panY === viewportView.panY
-    )
-      return;
-    const timer = setTimeout(() => setViewportView(targetViewportView), VIEW_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [targetViewportView, viewportView]);
   // The selection tint (morphology preview / quick-mask ruby) composites
   // host-side over the rendered frame, so it follows the view window's
   // detail; when no host frame presents (browser preview) the canvas
@@ -499,6 +475,39 @@ export function MaskEditModal({
     }
     return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
   }, [workspace, state, moveDraft]);
+  const targetViewportView = useMemo(() => {
+    // Image-workspace layer transform (move tool / free transform): while a
+    // layer is moved/scaled, the displayed underlay must be the full layer
+    // frame. Moving a cropped viewport window creates a visible hard edge
+    // inside the stage, because that surface/PNG only contains the old view.
+    if (imageTransform) return IDENTITY_VIEW;
+    const canvas = canvasRef.current;
+    // The stage rect bounds what is visible of the transformed frame; the
+    // window must cover it even when the frame's base rect is smaller.
+    const stage = canvas?.closest<HTMLElement>(".mask-edit-stage");
+    return viewWindow(
+      view,
+      canvas?.offsetWidth ?? 0,
+      canvas?.offsetHeight ?? 0,
+      stage?.clientWidth ?? 0,
+      stage?.clientHeight ?? 0,
+    );
+  }, [view, imageTransform]);
+  const [viewportView, setViewportView] = useState(targetViewportView);
+  useEffect(() => {
+    if (
+      targetViewportView.zoom === viewportView.zoom &&
+      targetViewportView.panX === viewportView.panX &&
+      targetViewportView.panY === viewportView.panY
+    )
+      return;
+    if (imageTransform) {
+      setViewportView(targetViewportView);
+      return;
+    }
+    const timer = setTimeout(() => setViewportView(targetViewportView), VIEW_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [targetViewportView, viewportView, imageTransform]);
   // Image-workspace adjustment preview (image-kernel K2): the adjustment
   // stack compiles to a grade document and grades the displayed frame on the
   // f32 kernel — the same maths the video grade dialog runs. Null in the
@@ -518,11 +527,12 @@ export function MaskEditModal({
     return base ? !base.visible : false;
   }, [workspace, state]);
   // Grading needs frame pixels, so it forces the PNG transport (a natively
-  // presented surface frame has no readable data URL).
-  // A rotated layer transform cannot present on the axis-aligned surface
-  // window (translate/scale only move and stretch its rect).
+  // presented surface frame has no readable data URL). Any image-layer
+  // transform also uses the full-frame PNG path for now: transforming a
+  // cropped view-window texture exposes hard edges inside the visible stage.
   const presentEnabled =
-    !overlayOnly && !baseHidden && !view.rotate && (imageTransform?.rotate ?? 0) === 0 && !gradePreview && !entering && !closing;
+    !overlayOnly && !baseHidden && !view.rotate && !imageTransform && !gradePreview && !entering && !closing;
+  const underlayViewportView = imageTransform ? IDENTITY_VIEW : viewportView;
   // The anchor moves under CSS transforms (view zoom/pan and the layer
   // transform) without firing the resize observer: re-measure on either.
   const placementKey = useMemo(() => ({ view, imageTransform }), [view, imageTransform]);
@@ -530,7 +540,7 @@ export function MaskEditModal({
     "image_edit",
     source,
     1280,
-    viewportView,
+    underlayViewportView,
     viewportMaskOverlay,
     underlayAnchorRef,
     presentEnabled,
@@ -539,7 +549,7 @@ export function MaskEditModal({
     // Un-debounced view: every zoom/pan tick re-presents the surface's
     // cached frame as a GPU crop (the fast path) while `viewportView` above
     // waits for the settle re-render.
-    targetViewportView,
+    imageTransform ? null : targetViewportView,
   );
   const underlay = viewport.underlay;
   const presented = viewport.presented;

@@ -28,6 +28,18 @@ function samePlacement(a: ViewportPlacement | null, b: ViewportPlacement): boole
   );
 }
 
+function isPermanentSurfaceFallback(reason: string | undefined): boolean {
+  const text = reason?.toLowerCase() ?? "";
+  return (
+    text.includes("shared adapter") ||
+    text.includes("not supported") ||
+    text.includes("viewport-surface feature disabled") ||
+    text.includes("windows-only") ||
+    text.includes("surface creation failed") ||
+    text.includes("surface window class registration failed")
+  );
+}
+
 /**
  * Track `ref`'s element rect for the lifetime of `host` and keep the host's
  * native surface window placed under it. Re-measures on element resize,
@@ -76,9 +88,10 @@ export function useViewportPlacement(
     let sent: ViewportPlacement | null = null;
     let inFlight = false;
     let pending = false;
+    let disabledByFallback = false;
 
     const send = async () => {
-      if (cancelled || inFlight) {
+      if (cancelled || disabledByFallback || inFlight) {
         pending = pending || inFlight;
         return;
       }
@@ -88,7 +101,13 @@ export function useViewportPlacement(
       try {
         const report = await host.place(placement);
         sent = placement;
-        if (!cancelled) onPlacedRef.current?.(report);
+        if (!cancelled) {
+          onPlacedRef.current?.(report);
+          if (!report.presented && isPermanentSurfaceFallback(report.fallback_reason)) {
+            disabledByFallback = true;
+            scheduleRef.current = null;
+          }
+        }
       } catch {
         /* keep the previous placement; the PNG transport still presents */
       } finally {
@@ -101,7 +120,7 @@ export function useViewportPlacement(
     };
 
     const schedule = () => {
-      if (cancelled || frame !== null) return;
+      if (cancelled || disabledByFallback || frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
         void send();

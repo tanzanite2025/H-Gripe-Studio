@@ -95,6 +95,24 @@ describe("useViewportPlacement", () => {
     await host.close();
   });
 
+  it("stops re-placing after a permanent surface fallback", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    const place = vi.spyOn(host, "place").mockResolvedValue({
+      presented: false,
+      fallback_reason: "surface is not supported by the shared adapter",
+    });
+
+    const ref = elementRef();
+    renderHook(() => useViewportPlacement(host, ref));
+    await waitFor(() => expect(place).toHaveBeenCalledTimes(1));
+
+    rect = { ...rect, left: 80, right: 380 };
+    window.dispatchEvent(new Event("scroll"));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(place).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
   it("re-sends only when the rect actually changed", async () => {
     const host = await WgpuViewportHost.open("image_edit");
     const place = vi.spyOn(host, "place");
