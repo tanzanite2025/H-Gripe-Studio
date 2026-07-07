@@ -74,6 +74,10 @@ pub(crate) struct DeviceRegistrySnapshot {
     pub ffmpeg_hw_encoders: Vec<String>,
     /// Hardware decoder names compiled into the vendored libav.
     pub ffmpeg_hw_decoders: Vec<String>,
+    /// D3D11VA hardware decode device (the video zero-copy route, phase 1):
+    /// available proves the OS/driver accepted a D3D11 device this run — one
+    /// level past compiled-in, one short of the zero-copy texture import.
+    pub ffmpeg_d3d11va: RegistryEntry,
     /// onnxruntime execution providers compiled into this build.
     pub onnx_providers: Vec<String>,
 }
@@ -118,6 +122,9 @@ pub(crate) fn snapshot() -> DeviceRegistrySnapshot {
         ffmpeg: RegistryEntry::from_capability(super::video_engine::ffmpeg_capability()),
         ffmpeg_hw_encoders: ffmpeg_hw_encoder_names(),
         ffmpeg_hw_decoders: ffmpeg_hw_decoder_names(),
+        ffmpeg_d3d11va: RegistryEntry::from_capability(
+            super::video_engine::ffmpeg_d3d11va_capability(),
+        ),
         onnx_providers: super::onnx_pool::compiled_providers()
             .into_iter()
             .map(str::to_string)
@@ -142,7 +149,12 @@ mod tests {
         // detail either way (available summary or fallback reason).
         let snap = snapshot();
         assert!(!snap.adapters.is_empty() || snap.adapters_error.is_some());
-        for entry in [&snap.grade_wgpu, &snap.viewport_surface, &snap.ffmpeg] {
+        for entry in [
+            &snap.grade_wgpu,
+            &snap.viewport_surface,
+            &snap.ffmpeg,
+            &snap.ffmpeg_d3d11va,
+        ] {
             assert!(!entry.detail.is_empty());
         }
         assert!(!snap.onnx_providers.is_empty(), "cpu provider is always in");

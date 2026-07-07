@@ -163,6 +163,173 @@ pub(crate) fn hardware_decoders() -> Vec<String> {
         .collect()
 }
 
+/// Whether the vendored software decoder for `codec` (e.g. `h264`) carries a
+/// D3D11VA hwaccel config (`avcodec_get_hw_config` reports the
+/// `hw_device_ctx` method for `AV_HWDEVICE_TYPE_D3D11VA`). Compiled-in only:
+/// whether the OS/driver accepts a device is a per-run question
+/// ([`d3d11va_device_capability`]).
+pub(crate) fn d3d11va_supported_for_codec(codec: &str) -> bool {
+    let Ok(c) = CString::new(codec) else {
+        return false;
+    };
+    unsafe {
+        let decoder = ffi::avcodec_find_decoder_by_name(c.as_ptr());
+        !decoder.is_null() && decoder_supports_d3d11va(decoder)
+    }
+}
+
+/// # Safety
+/// `decoder` must be a valid `AVCodec` pointer.
+unsafe fn decoder_supports_d3d11va(decoder: *const ffi::AVCodec) -> bool {
+    for i in 0.. {
+        let config = ffi::avcodec_get_hw_config(decoder, i);
+        if config.is_null() {
+            return false;
+        }
+        if (*config).device_type == ffi::AV_HWDEVICE_TYPE_D3D11VA
+            && (*config).methods & ffi::AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32 != 0
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// An owned `AVBufferRef` to an `AVHWDeviceContext` (the D3D11VA device a
+/// hardware decode session runs on).
+struct HwDeviceRef(*mut ffi::AVBufferRef);
+
+impl Drop for HwDeviceRef {
+    fn drop(&mut self) {
+        unsafe { ffi::av_buffer_unref(&mut self.0) }
+    }
+}
+
+/// Create a D3D11VA hardware device on the default adapter. This is the
+/// "driver/session accepted" probe level — one step past "compiled in"
+/// (GPU_DEVICE_STRATEGY_PLAN: compiled-in, session-accepted and
+/// zero-copy-texture-path are three distinct capability levels).
+fn create_d3d11va_device() -> Result<HwDeviceRef, String> {
+    let mut device: *mut ffi::AVBufferRef = ptr::null_mut();
+    let ret = unsafe {
+        ffi::av_hwdevice_ctx_create(
+            &mut device,
+            ffi::AV_HWDEVICE_TYPE_D3D11VA,
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if ret < 0 || device.is_null() {
+        return Err(format!(
+            "av_hwdevice_ctx_create(d3d11va) failed ({ret}): no D3D11 device on this box/OS"
+        ));
+    }
+    Ok(HwDeviceRef(device))
+}
+
+/// Probe the D3D11VA *device* capability for the registry snapshot: creating
+/// the hardware device proves the OS/driver accepts a D3D11 session on this
+/// box (not just that the hwaccel is compiled in). Cached process-wide — the
+/// answer cannot change within a run and snapshots must stay cheap. This is
+/// still not the zero-copy guarantee: the texture import into WGPU is the
+/// third level and reports separately once wired.
+pub(crate) fn d3d11va_device_capability() -> Result<String, String> {
+    static PROBE: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::new();
+    PROBE
+        .get_or_init(|| {
+            create_d3d11va_device().map(|_device| {
+                "D3D11VA device created (hardware decode session accepted; \
+                 WGPU texture import pending)"
+                    .to_string()
+            })
+        })
+        .clone()
+}
+
+/// `get_format` callback for a D3D11VA decode session: pick `AV_PIX_FMT_D3D11`
+/// (GPU texture frames) when the decoder offers it, otherwise fall back to
+/// the first offered (software) format so the session still decodes.
+unsafe extern "C" fn pick_d3d11_format(
+    _ctx: *mut ffi::AVCodecContext,
+    formats: *const ffi::AVPixelFormat,
+) -> ffi::AVPixelFormat {
+    let mut cursor = formats;
+    while *cursor != ffi::AV_PIX_FMT_NONE {
+        if *cursor == ffi::AV_PIX_FMT_D3D11 {
+            return ffi::AV_PIX_FMT_D3D11;
+        }
+        cursor = cursor.add(1);
+    }
+    *formats
+}
+
+/// A decoded frame owned by this handle (`av_frame_free` on drop).
+struct OwnedFrame(*mut ffi::AVFrame);
+
+impl Drop for OwnedFrame {
+    fn drop(&mut self) {
+        unsafe { ffi::av_frame_free(&mut self.0) }
+    }
+}
+
+/// A decoded video frame that lives in GPU memory as a D3D11 texture — the
+/// zero-copy handoff unit of the video zero-copy route (vendored FFmpeg hw
+/// decode -> `AVHWFramesContext` -> D3D11 texture -> WGPU/native compositor
+/// import). The frame keeps its `hw_frames_ctx` (and through it the D3D11VA
+/// device) alive, so the texture stays valid after the decoder is dropped.
+///
+/// Phase 2 (the WGPU import) consumes [`texture_ptr`](Self::texture_ptr) /
+/// [`array_index`](Self::array_index): `data[0]` is the `ID3D11Texture2D`
+/// and `data[1]` the array slice index, per `AV_PIX_FMT_D3D11`'s contract.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct D3d11Frame {
+    frame: OwnedFrame,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl D3d11Frame {
+    /// The `ID3D11Texture2D` backing this frame, as an opaque pointer.
+    pub(crate) fn texture_ptr(&self) -> *mut std::os::raw::c_void {
+        unsafe { (*self.frame.0).data[0] as *mut std::os::raw::c_void }
+    }
+
+    /// The texture array slice holding this frame (decoders typically
+    /// allocate one array texture and hand out slices).
+    pub(crate) fn array_index(&self) -> usize {
+        unsafe { (*self.frame.0).data[1] as usize }
+    }
+
+    pub(crate) fn width(&self) -> u32 {
+        unsafe { (*self.frame.0).width.max(0) as u32 }
+    }
+
+    pub(crate) fn height(&self) -> u32 {
+        unsafe { (*self.frame.0).height.max(0) as u32 }
+    }
+}
+
+/// Decode the frame nearest `timestamp_sec` into a GPU-resident D3D11
+/// texture frame — strict: no software fallback and no readback. `Err`
+/// carries the reason the GPU path is unavailable (no D3D11 device, no
+/// hwaccel for the codec, or the session silently produced CPU frames), so
+/// callers make the fallback decision visibly.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn decode_d3d11_frame(video: &Path, timestamp_sec: f64) -> Result<D3d11Frame, String> {
+    let mut decoder = Decoder::open_d3d11va(video)?;
+    let frame = decoder.decode_frame_at(timestamp_sec)?;
+    let format = unsafe { (*frame.0).format };
+    if format != ffi::AV_PIX_FMT_D3D11 {
+        return Err(format!(
+            "D3D11VA session produced software frames (format {format}), not GPU textures"
+        ));
+    }
+    if unsafe { (*frame.0).data[0].is_null() } {
+        return Err("D3D11 frame carries no texture pointer".to_string());
+    }
+    Ok(D3d11Frame { frame })
+}
+
 /// The first hardware H.264 encoder compiled into the vendored libav, if any
 /// (the encoder an explicit `device: gpu` encode request tries before falling
 /// back to the software baseline).
@@ -251,7 +418,9 @@ pub(crate) fn probe_input_codec(video: &Path) -> Result<String, String> {
 /// `videoTrim` path). Decode-and-re-encode so the cut is frame-accurate
 /// rather than snapping to keyframes; audio is not carried over, mirroring
 /// the PyAV worker's `trim`. `decoder_name` selects a specific (hardware)
-/// decoder for the input; `None` uses the stream's default software decoder.
+/// decoder for the input; `None` uses the stream's default software decoder;
+/// the special name `"d3d11va"` keeps the stream's decoder but runs it as a
+/// D3D11VA hardware session (GPU frames, read back once for the re-encode).
 pub(crate) fn trim_video(
     video: &Path,
     out: &Path,
@@ -260,7 +429,10 @@ pub(crate) fn trim_video(
     codec: &str,
     decoder_name: Option<&str>,
 ) -> Result<VideoEncodeStats, String> {
-    let mut decoder = Decoder::open_with(video, decoder_name)?;
+    let mut decoder = match decoder_name {
+        Some(D3D11VA_DECODER) => Decoder::open_d3d11va(video)?,
+        other => Decoder::open_with(video, other)?,
+    };
     let meta = decoder.probe()?;
     let fps = meta.fps.filter(|f| *f > 0.0).unwrap_or(30.0);
     let width = (meta.width - meta.width % 2).max(2);
@@ -317,7 +489,16 @@ struct Decoder {
     stream_index: i32,
     time_base: ffi::AVRational,
     avg_frame_rate: ffi::AVRational,
+    /// The D3D11VA device this session decodes on, when opened via
+    /// [`open_d3d11va`](Self::open_d3d11va). Held so the device outlives the
+    /// codec context; dropped after it.
+    hw_device: Option<HwDeviceRef>,
 }
+
+/// The `decoder_name` sentinel selecting a D3D11VA hardware session (the
+/// stream's own decoder with a `hw_device_ctx`, unlike `h264_cuvid`-style
+/// separate decoders).
+pub(crate) const D3D11VA_DECODER: &str = "d3d11va";
 
 /// The structured reason when no decodable video stream is found
 /// (GPU_DEVICE_STRATEGY_PLAN long-term step 4: unsupported codec). If the
@@ -352,13 +533,27 @@ unsafe fn undecodable_stream_reason(fmt: *mut ffi::AVFormatContext) -> String {
 
 impl Decoder {
     fn open(video: &Path) -> Result<Self, String> {
-        Self::open_with(video, None)
+        Self::open_impl(video, None, false)
     }
 
     /// Open with a specific decoder by name (e.g. a hardware decoder such as
     /// `h264_cuvid`) instead of the stream's default software decoder. The
     /// named decoder must match the stream's codec.
     fn open_with(video: &Path, decoder_name: Option<&str>) -> Result<Self, String> {
+        Self::open_impl(video, decoder_name, false)
+    }
+
+    /// Open the stream's decoder as a D3D11VA hardware session: the codec
+    /// context gets a D3D11 `hw_device_ctx` and a `get_format` that picks
+    /// `AV_PIX_FMT_D3D11`, so decoded frames are GPU textures
+    /// (`AVHWFramesContext`-backed) instead of CPU planes. Errors name the
+    /// missing capability level (no hwaccel compiled for the codec / no
+    /// D3D11 device) so fallback stays diagnosable.
+    fn open_d3d11va(video: &Path) -> Result<Self, String> {
+        Self::open_impl(video, None, true)
+    }
+
+    fn open_impl(video: &Path, decoder_name: Option<&str>, d3d11va: bool) -> Result<Self, String> {
         let path = CString::new(video.to_string_lossy().as_bytes())
             .map_err(|_| "video path contains a NUL byte".to_string())?;
         unsafe {
@@ -409,9 +604,27 @@ impl Decoder {
                 stream_index,
                 time_base: (*stream).time_base,
                 avg_frame_rate: (*stream).avg_frame_rate,
+                hw_device: None,
             };
             if ffi::avcodec_parameters_to_context(codec_ctx, codecpar) < 0 {
                 return Err("avcodec_parameters_to_context failed".to_string());
+            }
+            if d3d11va {
+                if !decoder_supports_d3d11va(decoder) {
+                    let codec = CStr::from_ptr(ffi::avcodec_get_name((*codecpar).codec_id))
+                        .to_string_lossy()
+                        .into_owned();
+                    return Err(format!(
+                        "no D3D11VA hwaccel compiled into the vendored libav for '{codec}'"
+                    ));
+                }
+                let device = create_d3d11va_device()?;
+                (*codec_ctx).hw_device_ctx = ffi::av_buffer_ref(device.0);
+                if (*codec_ctx).hw_device_ctx.is_null() {
+                    return Err("av_buffer_ref(d3d11va device) failed".to_string());
+                }
+                (*codec_ctx).get_format = Some(pick_d3d11_format);
+                this.hw_device = Some(device);
             }
             if ffi::avcodec_open2(codec_ctx, decoder, ptr::null_mut()) < 0 {
                 return Err("avcodec_open2 failed".to_string());
@@ -526,6 +739,15 @@ impl Decoder {
     /// PNG poster path ([`decode_to_png`](Self::decode_to_png)) and the
     /// [`WorkingImage`] media/colour bridge ([`decode_frame_working`]).
     fn decode_rgba_at(&mut self, timestamp_sec: f64) -> Result<image::RgbaImage, String> {
+        let frame = self.decode_frame_at(timestamp_sec)?;
+        unsafe { self.frame_to_rgba(frame.0) }
+    }
+
+    /// Seek to the keyframe at or before `timestamp_sec`, decode forward to
+    /// the frame at or past it, and return the raw decoded frame — CPU planes
+    /// from a software session, a GPU texture frame (`AV_PIX_FMT_D3D11`) from
+    /// a D3D11VA session.
+    fn decode_frame_at(&mut self, timestamp_sec: f64) -> Result<OwnedFrame, String> {
         unsafe {
             // Target timestamp in the stream's time base: ts / (num/den).
             let q = self.time_base;
@@ -602,22 +824,36 @@ impl Decoder {
                 }
             }
 
-            let result = if got {
-                self.frame_to_rgba(frame)
-            } else {
-                Err("no frame decoded at the requested timestamp".to_string())
-            };
-
             let mut p = packet;
             ffi::av_packet_free(&mut p);
-            let mut f = frame;
-            ffi::av_frame_free(&mut f);
-            result
+            if got {
+                Ok(OwnedFrame(frame))
+            } else {
+                let mut f = frame;
+                ffi::av_frame_free(&mut f);
+                Err("no frame decoded at the requested timestamp".to_string())
+            }
         }
     }
 
-    /// Convert a decoded frame to an RGBA surface via swscale.
+    /// Convert a decoded frame to an RGBA surface via swscale. A GPU texture
+    /// frame (`AV_PIX_FMT_D3D11`) is first read back to CPU memory via
+    /// `av_hwframe_transfer_data` — the explicit GPU->CPU bridge that the
+    /// zero-copy route replaces with a WGPU texture import (phase 2); until
+    /// then hardware sessions still produce correct RGBA through here.
     unsafe fn frame_to_rgba(&self, frame: *mut ffi::AVFrame) -> Result<image::RgbaImage, String> {
+        if (*frame).format == ffi::AV_PIX_FMT_D3D11 {
+            let sw = ffi::av_frame_alloc();
+            if sw.is_null() {
+                return Err("av_frame_alloc (hw readback) failed".to_string());
+            }
+            let sw = OwnedFrame(sw);
+            let ret = ffi::av_hwframe_transfer_data(sw.0, frame, 0);
+            if ret < 0 {
+                return Err(format!("av_hwframe_transfer_data failed ({ret})"));
+            }
+            return self.frame_to_rgba(sw.0);
+        }
         let width = (*frame).width;
         let height = (*frame).height;
         if width <= 0 || height <= 0 {
@@ -1112,6 +1348,61 @@ mod tests {
         }
         let _ = std::fs::remove_file(&clip);
         let _ = std::fs::remove_file(&cut);
+    }
+
+    /// The D3D11VA capability probe is structured either way: an available
+    /// device carries the session-accepted detail, an unavailable one the
+    /// reason — never silent (and the codec-level probe rejects unknowns).
+    #[test]
+    fn d3d11va_probe_is_never_silent() {
+        match d3d11va_device_capability() {
+            Ok(detail) => assert!(detail.contains("D3D11VA device created"), "{detail}"),
+            Err(reason) => assert!(!reason.is_empty()),
+        }
+        assert!(!d3d11va_supported_for_codec("definitely_not_a_codec_zzx"));
+        assert!(!d3d11va_supported_for_codec("codec\0nul"));
+    }
+
+    /// The GPU-frame contract of the zero-copy route (phase 1): on a box
+    /// where the D3D11VA session opens, the decoded frame is a D3D11 texture
+    /// with a non-null `ID3D11Texture2D` pointer at the clip's dimensions —
+    /// the exact handle phase 2 imports into WGPU. Where the session cannot
+    /// open (no hwaccel compiled in, no D3D11 device on CI), the error names
+    /// the missing level instead of silently producing CPU frames.
+    #[test]
+    fn d3d11_frame_is_gpu_backed_or_fails_diagnosably() {
+        let dir = std::env::temp_dir();
+        let mut frames = Vec::new();
+        for i in 0..8u8 {
+            let path = dir.join(format!("hgripe_native_d3d11_frame_{i}.png"));
+            image::RgbaImage::from_pixel(64, 48, image::Rgba([i * 25, 120, 90, 255]))
+                .save(&path)
+                .unwrap();
+            frames.push(path.to_string_lossy().to_string());
+        }
+        let clip = dir.join("hgripe_native_d3d11_test.mp4");
+        assemble_frames(&frames, &clip, 6.0, "libx264").unwrap();
+
+        match decode_d3d11_frame(&clip, 0.3) {
+            Ok(frame) => {
+                assert!(!frame.texture_ptr().is_null());
+                assert_eq!((frame.width(), frame.height()), (64, 48));
+                let _ = frame.array_index(); // valid to read on any texture
+
+                // The hardware session also feeds the RGBA bridge: the
+                // readback path (av_hwframe_transfer_data) produces a frame
+                // at the same dimensions, so hw decode never breaks callers.
+                let mut decoder = Decoder::open_d3d11va(&clip).unwrap();
+                let rgba = decoder.decode_rgba_at(0.3).unwrap();
+                assert_eq!((rgba.width(), rgba.height()), (64, 48));
+            }
+            Err(reason) => assert!(!reason.is_empty(), "GPU-path failure must carry a reason"),
+        }
+
+        for frame in &frames {
+            let _ = std::fs::remove_file(frame);
+        }
+        let _ = std::fs::remove_file(&clip);
     }
 
     /// The media/colour bridge: a decoded video frame lands in the canonical

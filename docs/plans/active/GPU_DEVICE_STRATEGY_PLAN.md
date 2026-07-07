@@ -111,6 +111,16 @@ vendored FFmpeg hw decode
 If a frame has to become `RgbaImage` and then be uploaded to WGPU, that path is
 not true decode zero-copy, even if presentation afterward is native.
 
+Phase 1 of this route is in `ffmpeg_native`: a D3D11VA hardware session
+(`Decoder::open_d3d11va`, selectable per-operation as the `d3d11va` decoder
+name) decodes to `AV_PIX_FMT_D3D11` GPU texture frames, `decode_d3d11_frame`
+hands out the `ID3D11Texture2D` + array-slice handle the WGPU import will
+consume, and the registry's `ffmpeg_d3d11va` entry reports the
+"driver/session accepted" level (device created) separately from the
+compiled-in decoder list. Until the phase-2 texture import lands, hardware
+sessions read frames back once through `av_hwframe_transfer_data` — reported,
+not silent, and not claimed as zero-copy.
+
 ### Done Means
 
 Do not mark the zero-copy work complete until:
