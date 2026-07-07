@@ -11,6 +11,13 @@ import {
 import { ModelManagerModal } from "../models/ModelManagerModal";
 import type { LocalPreset } from "../runtime/promptOptimize";
 import {
+  describePageContext,
+  listPresets,
+  resolvePreset,
+  type AgentWorkspace,
+  type PageContext,
+} from "./agentPreset";
+import {
   appendTurn,
   assistantApiReply,
   emptyAssistantSession,
@@ -29,6 +36,11 @@ const PRESET_OPTIONS: LocalPreset[] = [
 ];
 
 interface PromptAssistantPanelProps {
+  /**
+   * The active workspace context; drives the page-preset mode line (auto
+   * mode follows this, the user may pin a mode temporarily).
+   */
+  pageContext?: PageContext;
   /** Title of the selected Prompt card, when one is selected on the canvas. */
   insertTargetTitle: string | null;
   onInsertIntoSelected: (text: string) => void;
@@ -41,6 +53,7 @@ interface PromptAssistantPanelProps {
 // the user inserts (the transcript never joins the DAG). Session state
 // persists in localStorage, separate from workflow persistence.
 export function PromptAssistantPanel({
+  pageContext,
   insertTargetTitle,
   onInsertIntoSelected,
   onCreatePromptNode,
@@ -51,6 +64,12 @@ export function PromptAssistantPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
+  // Page-preset mode (PAGE_CONTEXT_AGENT_PRESET_PLAN step 3): auto-follow the
+  // active workspace unless the user pins a mode for a cross-context question.
+  const [pinnedMode, setPinnedMode] = useState<AgentWorkspace | null>(null);
+  const ctx: PageContext = pageContext ?? { workspace: "canvas" };
+  const agentPreset = resolvePreset(ctx, pinnedMode ?? undefined);
+  const contextSummary = describePageContext(ctx);
   // Reloaded on every registry save so manager edits show up live.
   const [registry, setRegistry] = useState(() => loadRegistry());
   useEffect(() => {
@@ -130,6 +149,31 @@ export function PromptAssistantPanel({
         >
           ×
         </button>
+      </div>
+      <div className="assistant-mode">
+        <span>{t("assistant.mode")}</span>
+        <select
+          value={pinnedMode ?? "auto"}
+          onChange={(e) => {
+            const v = e.target.value;
+            setPinnedMode(v === "auto" ? null : (v as AgentWorkspace));
+          }}
+          aria-label={t("assistant.mode")}
+        >
+          <option value="auto">
+            {t("assistant.modeAuto", { preset: resolvePreset(ctx).label })}
+          </option>
+          {listPresets().map((p) => (
+            <option key={p.id} value={p.id.slice("preset.".length)}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        {contextSummary && (
+          <span className="assistant-note" title={agentPreset.systemPolicy}>
+            {contextSummary}
+          </span>
+        )}
       </div>
       <div className="assistant-backend">
         <span>{t("assistant.backend")}</span>
