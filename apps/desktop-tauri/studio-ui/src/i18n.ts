@@ -833,6 +833,8 @@ export const messages = {
   "assistant.railLabel": { en: "tool rail", zh: "工具栏" },
   "assistant.close": { en: "Close", zh: "关闭" },
   "assistant.backend": { en: "Backend", zh: "后端" },
+  "assistant.mode": { en: "Mode", zh: "模式" },
+  "assistant.modeAuto": { en: "Auto ({preset})", zh: "自动（{preset}）" },
   "assistant.backendLocal": {
     en: "Local rewriter (offline)",
     zh: "本地改写（离线）",

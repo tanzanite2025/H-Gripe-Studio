@@ -1880,7 +1880,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   padding: 0 4px;
 }
 .assistant-close:hover { color: var(--text); }
-.assistant-backend {
+.assistant-backend,
+.assistant-mode {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1889,7 +1890,13 @@ button:disabled { opacity: 0.6; cursor: default; }
   font-size: 11px;
   border-bottom: 1px solid var(--border);
 }
-.assistant-backend select {
+.assistant-mode .assistant-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-backend select,
+.assistant-mode select {
   background: #11131a;
   color: var(--text);
   border: 1px solid var(--border);
