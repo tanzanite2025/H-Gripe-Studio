@@ -6,6 +6,7 @@
 // asks the registry which block serves a capability id and which managed
 // backend (model manager entry) can run it.
 
+import { sam2PromptMask } from "../bridge/sam2";
 import type { ManagedBackendRef, ModelCapability } from "../models/backendRegistry";
 import type { PointPrompt } from "../types/production";
 
@@ -44,6 +45,10 @@ export interface Sam2MaskResult {
   bbox?: [number, number, number, number];
   provider: "sam2" | "builtin-cpu" | string;
   variantUsed?: string;
+  /** Fraction of selected pixels, 0..=1, when the backend reports it. */
+  coverage?: number;
+  /** The weight file(s) inference ran on, when the backend reports it. */
+  modelPath?: string;
 }
 
 /** The backend a block run was resolved to (from the model manager). */
@@ -102,4 +107,37 @@ export function sam2PointPromptBlock(run: Sam2Runner): ComputeBlock<Sam2MaskRequ
     costClass: "local_compute",
     run,
   };
+}
+
+/**
+ * The real transport: the Rust `sam2_prompt_mask` command via the Tauri
+ * bridge (the in-process ONNX SAM 2 stack; salient / builtin CPU fallback
+ * when weights are missing). Needs at least one positive point — box / path /
+ * selection prompts are later work for the Rust command.
+ */
+export const bridgeSam2Runner: Sam2Runner = async (request) => {
+  const points = request.points ?? [];
+  if (!points.some((p) => p.label === 1)) {
+    throw new Error("SAM 2 point-prompt needs at least one positive point");
+  }
+  const result = await sam2PromptMask({
+    image: request.imageRef,
+    points: points.map((p) => ({ x: p.x, y: p.y, label: p.label })),
+    variant: request.variant,
+  });
+  return {
+    maskArtifactRef: result.mask_path,
+    bbox: result.bbox ?? undefined,
+    provider: result.provider,
+    variantUsed: result.variant_requested,
+    coverage: result.coverage,
+    modelPath: result.model_path ?? undefined,
+  };
+};
+
+/** The registry preloaded with the production compute blocks. */
+export function builtinComputeBlocks(): ComputeBlockRegistry {
+  const registry = createComputeBlockRegistry();
+  registry.register(sam2PointPromptBlock(bridgeSam2Runner));
+  return registry;
 }
