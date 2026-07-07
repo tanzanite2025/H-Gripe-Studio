@@ -12,8 +12,9 @@ import { useViewControls } from "../viewport/useViewControls";
 import { useVideoPreview, type VideoPreviewTarget } from "../viewport/useVideoPreview";
 import { useViewportPlacement } from "../viewport/useViewportPlacement";
 import type { MediaAsset } from "./mediaBin";
-import { resolvePreviewFrame } from "./previewFrame";
+import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
 import { timelineDuration, type TimelineModel } from "./timeline";
+import { useSourceFps } from "./useSourceFps";
 
 /** Safe-area guides (WGPU plan item 3): action-safe 90% (solid) and
  * title-safe 80% (dashed) rectangles plus a centre cross, stroked host-side
@@ -127,9 +128,12 @@ function useRegisteredTimeline(timeline: TimelineModel, assets: MediaAsset[]): s
  * scrub slider; seek bursts are coalesced latest-wins on both sides of the
  * host boundary, so dragging never queues stale decodes.
  *
- * Playback advances the playhead wall-clock via requestAnimationFrame; frame
- * requests go through the same latest-wins queue, so the monitor shows the
- * newest frame the decoder can keep up with and never builds a backlog.
+ * Playback advances the playhead wall-clock via requestAnimationFrame, but
+ * frame requests are snapped onto the source's frame grid (`paceToFrameGrid`)
+ * so presentation follows the source fps: ticks inside the same source frame
+ * are no-ops, and the persistent hardware decode session sees strictly
+ * sequential forward steps. Requests still go through the latest-wins queue,
+ * so a decoder that cannot keep up drops frames instead of building a backlog.
  */
 export function ProgramMonitor({
   timeline,
@@ -157,9 +161,21 @@ export function ProgramMonitor({
 
   const duration = Math.max(timelineDuration(timeline), 0);
   const clampedSec = Math.min(playheadSec, duration);
-  const target = useMemo(
+  // Playback pacing (GPU_DEVICE_STRATEGY_PLAN continuous-playback route):
+  // while playing, snap the request time onto the source's frame grid so the
+  // monitor asks for exactly one frame per source frame — consecutive
+  // wall-clock ticks inside the same frame resolve to the same request and
+  // skip, and the persistent hardware session sees strictly sequential
+  // forward steps. A paused scrub keeps the exact position.
+  const playheadTarget = useMemo(
     () => resolvePreviewFrame(timeline, assets, clampedSec),
     [timeline, assets, clampedSec],
+  );
+  const sourceFps = useSourceFps(playheadTarget?.kind === "video" ? playheadTarget.path : null);
+  const requestSec = playing ? paceToFrameGrid(playheadTarget, clampedSec, sourceFps) : clampedSec;
+  const target = useMemo(
+    () => resolvePreviewFrame(timeline, assets, requestSec),
+    [timeline, assets, requestSec],
   );
 
   const registeredTimelineId = useRegisteredTimeline(timeline, assets);
@@ -175,7 +191,7 @@ export function ProgramMonitor({
             kind: "video_clip",
             timelineId: timeline.id,
             clipId: target.clipId,
-            timeSec: clampedSec,
+            timeSec: requestSec,
           }
         : target;
     showFrame({
@@ -184,7 +200,7 @@ export function ProgramMonitor({
       view,
       overlayScene: safeArea ? SAFE_AREA_SCENE : null,
     });
-  }, [target, registeredTimelineId, timeline.id, clampedSec, gradeDoc, view, safeArea, showFrame]);
+  }, [target, registeredTimelineId, timeline.id, requestSec, gradeDoc, view, safeArea, showFrame]);
 
   useEffect(() => {
     if (!playing || duration <= 0) return;

@@ -27,7 +27,7 @@ pub use composite::composite_over;
 pub use doc::apply_parallel;
 pub use doc::{apply, GradeDoc, GradeLayer};
 #[cfg(feature = "gpu")]
-pub use gpu::{GpuError, GpuGrader};
+pub use gpu::{GpuError, GpuGrader, TextureGrader};
 pub use ops::{
     apply_op, parse_cube, temporal_denoise, ColorRange, CurveChannel, GradeOp, MonotoneSpline,
     RangeAdjust, WarpPoint, MAX_BLUR_SIGMA, MAX_RADIUS,

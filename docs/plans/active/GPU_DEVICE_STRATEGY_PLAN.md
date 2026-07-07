@@ -132,18 +132,23 @@ texture path") from the recorded outcome of the first actual import — proven,
 not assumed.
 
 Phase 3 wires the import to presentation: a video viewport target that opts
-in with `decodeDevice: "gpu"` and asks for the frame ungraded (no grade, no
-denoise, no overlay) presents through
+in with `decodeDevice: "gpu"` (no denoise, no overlay) presents through
 `try_present_hw_video_frame` -> `viewport_surface::present_hw_frame` — the
 decoded D3D11 frame is imported into the shared WGPU device and blitted to
 the native surface directly, with no CPU readback, no upload, and no PNG.
 Zoom/pan views stay on this path: the imported texture covers the whole
 frame, so a non-identity view presents as a GPU crop of it (the same
-`crop_uniform` mechanism as the zoom/pan fast path).
-Any other request (a grade doc, a machine where decode or
-import refuses) falls back to the CPU render path with the reason on stderr
-and the import outcome in the registry. The opt-in default stays software;
-the CPU path remains the explicit, reported fallback.
+`crop_uniform` mechanism as the zoom/pan fast path). A grade doc stays on
+this path too: its compiled wgpu compute plan
+(`hgripe_grade::TextureGrader`) runs directly on the imported texture — an
+ingress pass loads the texels into the kernel's state buffer, the doc's
+passes run, and an egress pass stores the graded result into the texture
+the blit samples, all on the shared device with no readback and no upload.
+Any other request (temporal denoise, an overlay, a machine where decode,
+import, or the GPU grade refuses) falls back to the CPU render path with
+the reason on stderr and the import outcome in the registry. The opt-in
+default stays software; the CPU path remains the explicit, reported
+fallback.
 
 Continuous playback paces through a persistent D3D11VA session per viewport
 (`ffmpeg_native::D3d11PlaybackSession`): a small forward playhead step
@@ -152,7 +157,12 @@ reopen, no keyframe seek, no decoder flush — so the zero-copy path can hold
 a frame rate. A backwards step, a jump, or a paused re-render reads as a
 seek inside the same session; a source change replaces the session; a
 decode failure evicts it (the next request reopens fresh) and the frame
-falls back to the CPU path with the reason reported.
+falls back to the CPU path with the reason reported. Presentation follows
+the source frame rate: while the program monitor plays, each frame request
+is snapped onto the source's frame grid (`paceToFrameGrid` in
+`studio-ui/src/production/previewFrame.ts`, fps probed once per source), so
+wall-clock ticks inside the same source frame are no-ops and the session
+sees exactly one sequential decode per source frame.
 
 ### Done Means
 

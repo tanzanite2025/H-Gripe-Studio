@@ -233,15 +233,18 @@ pub(crate) fn present_frame(
 
 /// Present a decoded D3D11 hardware frame on the viewport's native surface
 /// through the WGPU import (video zero-copy phase 3): no CPU readback, no
-/// upload, no PNG. `Err` carries the reason the caller reports before
-/// running the CPU render fallback.
+/// upload, no PNG. When `grade` is set, its wgpu compute plan runs directly
+/// on the imported texture (zero-copy graded present) before the blit.
+/// `Err` carries the reason the caller reports before running the CPU
+/// render fallback.
 #[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
 pub(crate) fn present_hw_frame(
     viewport_id: &str,
     frame: &crate::studio::ffmpeg_native::D3d11Frame,
+    grade: Option<&hgripe_grade::GradeDoc>,
     view: ViewWindow,
 ) -> Result<(), String> {
-    native::present_hw_frame(viewport_id, frame, view)
+    native::present_hw_frame(viewport_id, frame, grade, view)
 }
 
 /// Re-present the surface's cached frame texture cropped to `view` — a pure
@@ -985,6 +988,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     pub(super) fn present_hw_frame(
         viewport_id: &str,
         frame: &crate::studio::ffmpeg_native::D3d11Frame,
+        grade: Option<&hgripe_grade::GradeDoc>,
         view: ViewWindow,
     ) -> Result<(), String> {
         if let Some(reason) = surface_disabled_reason() {
@@ -1011,6 +1015,16 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         }
         let format = entry.config.as_ref().expect("config checked").format;
         let texture = crate::studio::d3d11_wgpu::import_d3d11_frame(&gpu.device, frame)?;
+        // Zero-copy graded present: run the grade doc's wgpu compute plan on
+        // the imported texture and blit the graded result instead — the
+        // pixels still never visit the CPU.
+        let (texture, tex_format) = match grade {
+            Some(doc) => (
+                grade_imported_texture(&gpu, &texture, doc)?,
+                wgpu::TextureFormat::Rgba8Unorm,
+            ),
+            None => (texture, wgpu::TextureFormat::Bgra8Unorm),
+        };
         if entry.fit_buf.is_none() {
             entry.fit_buf = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("viewport-surface-fit"),
@@ -1048,7 +1062,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             height: texture.height(),
             texture,
             bind_group,
-            format: wgpu::TextureFormat::Bgra8Unorm,
+            format: tex_format,
         });
         // The imported texture always covers the whole frame (identity
         // window); a zoom/pan view presents as a GPU crop of it — the same
@@ -1065,6 +1079,64 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             (config.width, config.height)
         };
         clear_surface(&gpu, entry, w, h)
+    }
+
+    /// Run `doc`'s wgpu compute plan over the imported hardware frame on the
+    /// shared device, into a fresh `Rgba8Unorm` texture the blit then samples
+    /// (video zero-copy: graded present). Entirely GPU-side — no readback,
+    /// no upload. `Err` triggers the caller's CPU render fallback.
+    #[cfg(all(feature = "native-ffmpeg", feature = "grade-gpu"))]
+    fn grade_imported_texture(
+        gpu: &SharedGpu,
+        src: &wgpu::Texture,
+        doc: &hgripe_grade::GradeDoc,
+    ) -> Result<wgpu::Texture, String> {
+        static GRADER: OnceLock<Mutex<hgripe_grade::TextureGrader>> = OnceLock::new();
+        let (w, h) = (src.width(), src.height());
+        let dst = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport-surface-graded-frame"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let src_view = src.create_view(&wgpu::TextureViewDescriptor::default());
+        let dst_view = dst.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut grader = GRADER
+            .get_or_init(|| Mutex::new(hgripe_grade::TextureGrader::new()))
+            .lock()
+            .map_err(|_| "texture grader lock poisoned".to_string())?;
+        grader
+            .apply_texture(
+                &gpu.device,
+                &gpu.queue,
+                doc,
+                &src_view,
+                &dst_view,
+                w,
+                h,
+                hgripe_grade::GradeSpace::Srgb,
+            )
+            .map_err(|e| format!("GPU texture grade failed: {e}"))?;
+        Ok(dst)
+    }
+
+    #[cfg(all(feature = "native-ffmpeg", not(feature = "grade-gpu")))]
+    fn grade_imported_texture(
+        _gpu: &SharedGpu,
+        _src: &wgpu::Texture,
+        _doc: &hgripe_grade::GradeDoc,
+    ) -> Result<wgpu::Texture, String> {
+        Err("GPU backend not compiled in (grade-gpu feature disabled)".to_string())
     }
 
     /// The zoom/pan fast path: re-present the cached frame texture cropped to

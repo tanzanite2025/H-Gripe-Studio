@@ -10,7 +10,15 @@ import type { TimelineModel } from "./timeline";
 /** What the monitor should present at a playhead time. */
 export type PreviewFrameTarget =
   | { kind: "still"; clipId: string; path: string }
-  | { kind: "video"; clipId: string; path: string; sourceTimeSec: number };
+  | {
+      kind: "video";
+      clipId: string;
+      path: string;
+      sourceTimeSec: number;
+      /** Timeline start of the clip, for mapping between timeline and
+       * clip-local time (playback frame-grid pacing). */
+      clipStartSec: number;
+    };
 
 /**
  * Resolve the clip under `timeSec` on the first video track to its media.
@@ -39,7 +47,26 @@ export function resolvePreviewFrame(
       clipId: clip.id,
       path: asset.path,
       sourceTimeSec: Math.max(0, timeSec - clip.start),
+      clipStartSec: clip.start,
     };
   }
   return { kind: "still", clipId: clip.id, path: asset.path };
+}
+
+/**
+ * Snap a playhead time onto the source's frame grid for continuous playback
+ * pacing: consecutive wall-clock ticks inside the same source frame yield
+ * the same time, so the monitor requests (and the persistent hardware
+ * session decodes) exactly one frame per source frame — presentation follows
+ * the source fps instead of the request clock. Non-video targets and unknown
+ * frame rates pass through unchanged.
+ */
+export function paceToFrameGrid(
+  target: PreviewFrameTarget | null,
+  timeSec: number,
+  fps: number | null,
+): number {
+  if (!target || target.kind !== "video" || !fps || fps <= 0) return timeSec;
+  const local = Math.max(0, timeSec - target.clipStartSec);
+  return target.clipStartSec + Math.floor(local * fps) / fps;
 }

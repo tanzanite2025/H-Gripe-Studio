@@ -1888,14 +1888,15 @@ pub(crate) fn viewport_read_pixels(viewport_id: String) -> Result<tauri::ipc::Re
 
 /// The video zero-copy presentation fast path (GPU_DEVICE_STRATEGY_PLAN
 /// phase 3): when the viewport's video target explicitly opted in with
-/// `decodeDevice: "gpu"` and asks for the frame ungraded (no grade, no
-/// denoise, no overlay), decode it as a D3D11 GPU texture and present it on
-/// the native surface through the WGPU import — no CPU readback, no upload,
-/// no PNG. Zoom/pan views present as GPU crops of the imported texture (the
-/// same crop mechanism as the zoom/pan fast path), so a non-identity view
-/// stays on the zero-copy path. `Some((w, h))` means the frame is on the
-/// surface; `None` means the caller runs the CPU render, with the reason on
-/// stderr and the import outcome in the device registry (never silent).
+/// `decodeDevice: "gpu"` (no denoise, no overlay), decode it as a D3D11 GPU
+/// texture and present it on the native surface through the WGPU import —
+/// no CPU readback, no upload, no PNG. Zoom/pan views present as GPU crops
+/// of the imported texture (the same crop mechanism as the zoom/pan fast
+/// path), and a grade doc runs as a wgpu compute plan directly on the
+/// imported texture, so views and grades stay on the zero-copy path.
+/// `Some((w, h))` means the frame is on the surface; `None` means the
+/// caller runs the CPU render, with the reason on stderr and the import
+/// outcome in the device registry (never silent).
 #[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
 fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
     let Ok(id) = parse_id(viewport_id) else {
@@ -1935,12 +1936,16 @@ fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
         }
         _ => return None,
     };
-    // The zero-copy path presents the decoded frame ungraded: any grade,
-    // denoise, or overlay needs the CPU render. The view is not a gate —
-    // zoom/pan present as GPU crops of the imported texture.
-    if grade_doc.is_some() || temporal_denoise > 0.0 || overlay_scene.is_some() {
+    // Denoise and overlays still need the CPU render. The view and the
+    // grade doc are not gates — zoom/pan present as GPU crops of the
+    // imported texture, and the grade runs as a wgpu compute plan on it.
+    if temporal_denoise > 0.0 || overlay_scene.is_some() {
         return None;
     }
+    // An unparseable doc falls through to the CPU render, which surfaces
+    // the parse error to the caller.
+    let doc = parse_grade_doc(grade_doc.as_ref()).ok()?;
+    let grade = (!doc.layers.is_empty()).then_some(&doc);
     let result = (|| -> Result<(u32, u32), String> {
         // Continuous playback pacing: reuse the viewport's persistent decode
         // session so a forward playhead step decodes sequentially (no reopen,
@@ -1973,6 +1978,7 @@ fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
         crate::commands::viewport_surface::present_hw_frame(
             viewport_id,
             &frame,
+            grade,
             (view.zoom, view.pan_x, view.pan_y),
         )?;
         Ok(size)
