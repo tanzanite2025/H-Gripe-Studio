@@ -231,6 +231,19 @@ pub(crate) fn present_frame(
     false
 }
 
+/// Present a decoded D3D11 hardware frame on the viewport's native surface
+/// through the WGPU import (video zero-copy phase 3): no CPU readback, no
+/// upload, no PNG. `Err` carries the reason the caller reports before
+/// running the CPU render fallback.
+#[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
+pub(crate) fn present_hw_frame(
+    viewport_id: &str,
+    frame: &crate::studio::ffmpeg_native::D3d11Frame,
+    view: ViewWindow,
+) -> Result<(), String> {
+    native::present_hw_frame(viewport_id, frame, view)
+}
+
 /// Re-present the surface's cached frame texture cropped to `view` — a pure
 /// GPU pass with no render, no upload, and no pixel IPC (the zoom/pan fast
 /// path). Returns `false` when there is no presented texture to crop (never
@@ -309,6 +322,10 @@ mod native {
         bind_group: wgpu::BindGroup,
         width: u32,
         height: u32,
+        /// The texture's pixel format: `Rgba8Unorm` for CPU-uploaded frames,
+        /// `Bgra8Unorm` for imported D3D11 hardware frames. Sampling is
+        /// format-agnostic; only the raw readback needs to know.
+        format: wgpu::TextureFormat,
     }
 
     static SURFACES: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
@@ -697,6 +714,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 bind_group,
                 width: iw,
                 height: ih,
+                format: wgpu::TextureFormat::Rgba8Unorm,
             });
         }
         let tex = entry.frame_tex.as_ref().expect("texture just ensured");
@@ -956,6 +974,91 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
 
+    /// The video zero-copy presentation path (GPU_DEVICE_STRATEGY_PLAN phase
+    /// 3): import a decoded D3D11 hardware frame into the shared WGPU device
+    /// and present it on the viewport's surface — the pixels never visit the
+    /// CPU. The imported texture replaces the entry's cached frame texture,
+    /// so the zoom/pan crop fast path and the S4 readback work on it like on
+    /// an uploaded frame. Errors carry the reason the caller reports before
+    /// running the CPU fallback.
+    #[cfg(feature = "native-ffmpeg")]
+    pub(super) fn present_hw_frame(
+        viewport_id: &str,
+        frame: &crate::studio::ffmpeg_native::D3d11Frame,
+        view: ViewWindow,
+    ) -> Result<(), String> {
+        if let Some(reason) = surface_disabled_reason() {
+            return Err(format!("native surface disabled: {reason}"));
+        }
+        let gpu = match shared_gpu_cached() {
+            Some(Ok(gpu)) if gpu.surface_compatible => gpu,
+            Some(Ok(_)) => {
+                return Err(
+                    "shared WGPU device was initialised without a presentation surface".to_string(),
+                )
+            }
+            Some(Err(e)) => return Err(format!("shared WGPU device unavailable: {e}")),
+            None => return Err("shared WGPU device not initialised yet".to_string()),
+        };
+        let mut map = surfaces()
+            .lock()
+            .map_err(|_| "surface registry poisoned".to_string())?;
+        let entry = map
+            .get_mut(viewport_id)
+            .ok_or_else(|| format!("no surface window for viewport {viewport_id}"))?;
+        if !entry.presented || entry.config.is_none() {
+            return Err("viewport surface is not presented".to_string());
+        }
+        let format = entry.config.as_ref().expect("config checked").format;
+        let texture = crate::studio::d3d11_wgpu::import_d3d11_frame(&gpu.device, frame)?;
+        if entry.fit_buf.is_none() {
+            entry.fit_buf = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport-surface-fit"),
+                size: 32,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let blit = blit_pipeline(&gpu, format)?;
+        let tex_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport-surface-hw-frame"),
+            layout: &blit.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&tex_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&blit.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: entry
+                        .fit_buf
+                        .as_ref()
+                        .expect("fit buffer just ensured")
+                        .as_entire_binding(),
+                },
+            ],
+        });
+        entry.frame_tex = Some(FrameTexture {
+            width: texture.width(),
+            height: texture.height(),
+            texture,
+            bind_group,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+        });
+        entry.frame_view = view;
+        entry.crop_view = None;
+        let (w, h) = {
+            let config = entry.config.as_ref().expect("config checked");
+            (config.width, config.height)
+        };
+        clear_surface(&gpu, entry, w, h)
+    }
+
     /// The zoom/pan fast path: re-present the cached frame texture cropped to
     /// `view` — one uniform write and one render pass, no render, no upload.
     pub(super) fn present_view(viewport_id: &str, view: ViewWindow) -> bool {
@@ -1069,6 +1172,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         }
         drop(data);
         buffer.unmap();
+        if tex.format == wgpu::TextureFormat::Bgra8Unorm {
+            for px in pixels.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+        }
         Some((w, h, pixels))
     }
 

@@ -51,6 +51,10 @@ pub(crate) enum ViewportTarget {
         clip_id: String,
         #[serde(rename = "timeSec")]
         time_sec: f64,
+        /// Opt-in decode device (`"gpu"` requests the D3D11VA zero-copy
+        /// presentation path; anything else stays on the software baseline).
+        #[serde(rename = "decodeDevice", default)]
+        decode_device: Option<String>,
     },
     /// One decoded frame of a registered video file, addressed by resource
     /// reference + timestamp. The pre-timeline target for grading a raw video
@@ -60,6 +64,10 @@ pub(crate) enum ViewportTarget {
         resource_id: String,
         #[serde(rename = "timeSec")]
         time_sec: f64,
+        /// Opt-in decode device (`"gpu"` requests the D3D11VA zero-copy
+        /// presentation path; anything else stays on the software baseline).
+        #[serde(rename = "decodeDevice", default)]
+        decode_device: Option<String>,
     },
     NodeOutput {
         #[serde(rename = "nodeId")]
@@ -1697,6 +1705,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
         ViewportTarget::VideoFrame {
             resource_id,
             time_sec,
+            ..
         } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
@@ -1720,6 +1729,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             timeline_id,
             clip_id,
             time_sec,
+            ..
         } => {
             // Clips resolve through the timeline registry; the host maps the
             // timeline playhead to clip-local source time.
@@ -1791,6 +1801,16 @@ pub(crate) fn viewport_render_frame_bin(
     app: tauri::AppHandle,
     viewport_id: String,
 ) -> Result<tauri::ipc::Response, String> {
+    #[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
+    if let Some((w, h)) = try_present_hw_video_frame(&viewport_id) {
+        return Ok(tauri::ipc::Response::new(frame_bin_payload(
+            w,
+            h,
+            &surface_backend_report("gpu"),
+            true,
+            &[],
+        )?));
+    }
     let rendered = viewport_render_rgba(&viewport_id)?;
     let presented = crate::commands::viewport_surface::present_frame(
         &app,
@@ -1843,6 +1863,84 @@ pub(crate) fn viewport_read_pixels(viewport_id: String) -> Result<tauri::ipc::Re
         &rendered.backend,
         rendered.image.as_raw(),
     )?))
+}
+
+/// The video zero-copy presentation fast path (GPU_DEVICE_STRATEGY_PLAN
+/// phase 3): when the viewport's video target explicitly opted in with
+/// `decodeDevice: "gpu"` and asks for the frame verbatim (no grade, no
+/// denoise, no overlay, identity view), decode it as a D3D11 GPU texture and
+/// present it on the native surface through the WGPU import — no CPU
+/// readback, no upload, no PNG. `Some((w, h))` means the frame is on the
+/// surface; `None` means the caller runs the CPU render, with the reason on
+/// stderr and the import outcome in the device registry (never silent).
+#[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
+fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
+    let Ok(id) = parse_id(viewport_id) else {
+        return None;
+    };
+    let (target, grade_doc, view, temporal_denoise, overlay_scene) = {
+        let map = viewports().lock().ok()?;
+        let state = map.get(&id)?;
+        (
+            state.target.clone()?,
+            state.grade_doc.clone(),
+            state.view,
+            state.temporal_denoise,
+            state.overlay_scene.clone(),
+        )
+    };
+    let (path, time_sec) = match &target {
+        ViewportTarget::VideoFrame {
+            resource_id,
+            time_sec,
+            decode_device,
+        } if decode_device.as_deref() == Some("gpu") => {
+            (resource::get(resource_id)?.path.clone(), *time_sec)
+        }
+        ViewportTarget::VideoClip {
+            timeline_id,
+            clip_id,
+            time_sec,
+            decode_device,
+        } if decode_device.as_deref() == Some("gpu") => {
+            let clip = timeline_clip(timeline_id, clip_id).ok()?;
+            if clip.kind == "still" {
+                return None;
+            }
+            let source_time = (*time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
+            (clip.path.clone(), source_time)
+        }
+        _ => return None,
+    };
+    // The zero-copy path presents the decoded frame verbatim: any grade,
+    // denoise, overlay, or non-identity view needs the CPU render.
+    if grade_doc.is_some()
+        || temporal_denoise > 0.0
+        || overlay_scene.is_some()
+        || !view.is_identity()
+    {
+        return None;
+    }
+    let result = (|| -> Result<(u32, u32), String> {
+        let frame = crate::studio::ffmpeg_native::decode_d3d11_frame(
+            std::path::Path::new(&path),
+            time_sec,
+        )?;
+        let size = (frame.width(), frame.height());
+        crate::commands::viewport_surface::present_hw_frame(
+            viewport_id,
+            &frame,
+            (view.zoom, view.pan_x, view.pan_y),
+        )?;
+        Ok(size)
+    })();
+    match result {
+        Ok(size) => Some(size),
+        Err(reason) => {
+            eprintln!("[viewport] zero-copy present fell back for {viewport_id}: {reason}");
+            None
+        }
+    }
 }
 
 fn pixels_bin_payload(
@@ -2960,6 +3058,7 @@ mod tests {
         viewport_set_target(
             desc.viewport_id.clone(),
             ViewportTarget::VideoClip {
+                decode_device: None,
                 timeline_id: "tl-1".to_string(),
                 clip_id: "clip_still".to_string(),
                 time_sec: 1.5,
@@ -2974,6 +3073,7 @@ mod tests {
         let err = viewport_set_target(
             desc.viewport_id.clone(),
             ViewportTarget::VideoClip {
+                decode_device: None,
                 timeline_id: "tl-1".to_string(),
                 clip_id: "clip_missing".to_string(),
                 time_sec: 0.0,
@@ -2984,6 +3084,7 @@ mod tests {
         let err = viewport_set_target(
             desc.viewport_id.clone(),
             ViewportTarget::VideoClip {
+                decode_device: None,
                 timeline_id: "tl-missing".to_string(),
                 clip_id: "clip_still".to_string(),
                 time_sec: 0.0,
