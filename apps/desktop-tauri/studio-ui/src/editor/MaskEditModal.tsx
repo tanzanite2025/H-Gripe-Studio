@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW } from "../viewport/view";
-import type { ViewportMaskOverlay, ViewportOverlayItem, ViewportOverlayScene } from "../bridge/viewport";
+import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -19,7 +19,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEd
 import { useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, WHEEL_ZOOM_STEP, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
 import { fromMaskDocument } from "./imageDocument";
@@ -30,40 +30,18 @@ import {
   composeTransforms,
   editCount,
   initEditState,
-  layerOpStacks,
   type TransformParams,
 } from "./maskEdit";
 import type {
-  EditPathPoint,
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
 import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
-import {
-  paintAnchorDraft,
-  paintCloneSource,
-  paintColorSamples,
-  paintCropDim,
-  paintCropDraft,
-  paintDragArrow,
-  paintLassoLoop,
-  paintMarquee,
-  paintPath,
-  paintPenAnchors,
-  paintPreviewOverlay,
-  paintQuadDraft,
-  paintQuickMask,
-  paintRetouchBand,
-  paintRuler,
-  paintSamPoints,
-  paintShapeDraft,
-  paintStroke,
-  retouchBandColor,
-} from "./maskEditModal/stagePainter";
-import { catmullRomClosed, flattenEditPath } from "./maskEditModal/pathGeometry";
+import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
+import { catmullRomClosed } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap } from "./maskEditModal/magneticSnap";
-import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
+import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
 import "./maskEditModal/maskEditModal.css";
@@ -77,10 +55,13 @@ import { InfoPanel } from "./maskEditModal/InfoPanel";
 import { AdjustmentsPanel } from "./maskEditModal/AdjustmentsPanel";
 import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
-import { ColorPicker, hexToRgb } from "./maskEditModal/ColorPicker";
+import { ColorPicker } from "./maskEditModal/ColorPicker";
 import { createPointerGestures, pointerDown, pointerMove, pointerUp, type PointerEnv } from "./maskEditModal/pointerMachine";
+import { useCanvasNavigation } from "./maskEditModal/useCanvasNavigation";
 import { useCropTool } from "./maskEditModal/useCropTool";
+import { useColorTools, type ColorToolsEnv } from "./maskEditModal/useColorTools";
 import { useDialogDrafts } from "./maskEditModal/useDialogDrafts";
+import { usePathEditing } from "./maskEditModal/usePathEditing";
 import { ImageSizeDialog } from "./maskEditModal/ImageSizeDialog";
 import { CropPanel } from "./maskEditModal/CropPanel";
 import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
@@ -91,10 +72,6 @@ import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
 // them against the real image on run.
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
-
-/** Idle time after the last view change before the underlay re-renders at
- * the new window's detail; the CSS transform carries the motion until then. */
-const VIEW_SETTLE_MS = 120;
 
 interface MaskEditModalProps {
   title: string;
@@ -246,11 +223,6 @@ export function MaskEditModal({
   );
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
-  // frame — the render path and pointer→image mapping are untouched by it.
-  const [view, setView] = useState<CanvasView>(FIT_VIEW);
-  const viewRef = useRef(view);
-  viewRef.current = view;
   // Underlay presentation goes through the viewport host (WGPU migration
   // Phase 2): the image is targeted by reference — a `node_output` target
   // when a node id is given, a registered image resource otherwise — and the
@@ -283,12 +255,60 @@ export function MaskEditModal({
   } | null>(null);
   const lastMarqueeRef = useRef(lastMarquee);
   lastMarqueeRef.current = lastMarquee;
-  // Anchor re-editing (M2): index of the path op being re-edited plus a local
-  // draft of its anchors; committed as one undoable step on Done / Enter.
-  const [editingPath, setEditingPath] = useState<number | null>(null);
-  // Color sampler pins (up to four persistent readouts, PS I flyout) — a
-  // pure view read, session-local, never recorded on the document.
-  const [colorSamples, setColorSamples] = useState<ColorSample[]>([]);
+  // Edits go through this wrapper, which stamps the active selection as the
+  // action's `clip` so rasterisation confines the op to the selection.
+  // Whole-mask reshapes (transform / crop / select-all) stay global.
+  const dispatch = useCallback((action: MaskEditAction) => {
+    const lm = lastMarqueeRef.current;
+    if (lm) {
+      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
+      if (action.type === "stroke") {
+        action = { ...action, stroke: { ...action.stroke, clip } };
+      } else if (action.type === "path") {
+        action = { ...action, path: { ...action.path, clip } };
+      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
+        action = { ...action, op: { ...action.op, clip } };
+      }
+    }
+    rawDispatch(action);
+  }, []);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // Pending pen anchors and anchor re-editing (M2): the path op being
+  // re-edited plus a local draft of its anchors, committed as one undoable
+  // step on Done / Enter (see usePathEditing).
+  const pathEditing = usePathEditing(dispatch, stateRef);
+  const {
+    penAnchors,
+    setPenAnchors,
+    editingPath,
+    anchorDraft,
+    setAnchorDraft,
+    penPendingRef,
+    editingPathRef,
+    startPathEdit,
+    commitPathEdit,
+    cancelPathEdit,
+  } = pathEditing;
+  // Colour wells / picker / eyedropper sample / sampler pins and underlay
+  // pixel sampling (see useColorTools). The env ref is re-assigned every
+  // render further down, once the viewport hook has run.
+  const colorEnvRef = useRef<ColorToolsEnv | null>(null);
+  const colors = useColorTools(colorEnvRef);
+  const {
+    fgColor,
+    bgColor,
+    colorPicker,
+    setColorPicker,
+    sampledColor,
+    colorSamples,
+    setColorSamples,
+    resetColors,
+    swapColors,
+    commitPickedColor,
+    requestColorPick,
+    sampleUnderlay,
+  } = colors;
   // Ruler measurement: the last committed drag (session-local view read).
   const [rulerLine, setRulerLine] = useState<RulerLine | null>(null);
   // The committed marquee's marching ants stroke host-side over rendered
@@ -301,109 +321,20 @@ export function MaskEditModal({
   // the frame — and so `dims` — has settled).
   const frameDimsRef = useRef({ w: DEFAULT_W, h: DEFAULT_H });
   const frameDims = frameDimsRef.current;
-  const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(() => {
-    if (frameDims.w <= 0 || frameDims.h <= 0) return null;
-    const items: ViewportOverlayItem[] = [];
-    // Committed pen / lasso paths: the same loops the canvas painter fills
-    // and outlines, flattened to straight segments and normalized. While a
-    // morphology preview runs, the proxy tint already folds the paths in, so
-    // the vector overlay drops them (mirrors the canvas skip).
-    if (!previewing) {
-      const activeTarget = activeTargetKind(state.current);
-      state.current.layers.forEach((layer, li) => {
-        if (!layer.visible) return;
-        layerOpStacks(layer).forEach(({ target, ops }) => ops.forEach((op, i) => {
-          if (op.disabled || (li === state.current.active && target === activeTarget && i === editingPath)) return;
-          if (isBrushOp(op) && op.points.length > 0) {
-            // Committed brush-stroke bands, mirroring `paintStroke`: mode
-            // colour at 0.55, dimmed further by a sub-1 flow.
-            const [r, g, b] = op.mode === "subtract" ? [244, 98, 98] : [86, 168, 255];
-            const flow = op.flow ?? 1;
-            items.push({
-              kind: "band",
-              points: op.points.map(([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number]),
-              radius: Math.min(1, op.radius / frameDims.w),
-              color: [r / 255, g / 255, b / 255, 0.55 * (flow < 1 ? Math.max(0.15, flow) : 1)],
-            });
-            return;
-          }
-          if (!isPathOp(op) || op.points.length < 2) return;
-          const [r, g, b] =
-            op.mode === "subtract" ? [244, 98, 98] : op.mode === "intersect" ? [190, 120, 255] : [86, 168, 255];
-          items.push({
-            kind: "polygon",
-            points: flattenEditPath(op.points).map(
-              ([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number],
-            ),
-            stroke: [r / 255, g / 255, b / 255, 0.9],
-            fill: [r / 255, g / 255, b / 255, 0.3],
-          });
-        }));
-      });
-    }
-    // Matte strokes (amber) render whether or not a preview runs, like the
-    // canvas painter.
-    for (const s of state.current.matte_strokes) {
-      if (s.points.length === 0) continue;
-      items.push({
-        kind: "band",
-        points: s.points.map(([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number]),
-        radius: Math.min(1, s.radius / frameDims.w),
-        color: [244 / 255, 196 / 255, 84 / 255, 0.6],
-      });
-    }
-    if (lastMarquee) {
-      const [x0, y0, x1, y1] = lastMarquee.region;
-      items.push({
-        kind: "marquee",
-        region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
-        ...(lastMarquee.ellipse ? { ellipse: true } : null),
-      });
-    }
-    const norm = (x: number, y: number): [number, number] => [x / frameDims.w, y / frameDims.h];
-    // The committed ruler line (shown while the ruler tool is in hand):
-    // endpoint ticks plus the measurement line; the readout text stays on the
-    // canvas (the host strokes geometry only).
-    if (toolId === "ruler" && rulerLine) {
-      const amber: [number, number, number, number] = [1, 214 / 255, 90 / 255, 0.95];
-      items.push({
-        kind: "polyline",
-        points: [norm(...rulerLine.start), norm(...rulerLine.end)],
-        stroke: amber,
-      });
-      for (const [x, y] of [rulerLine.start, rulerLine.end]) {
-        items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3.5, stroke: amber });
-      }
-    }
-    // Colour-sampler pins: a disc filled with the sampled colour; the
-    // numbered label stays on the canvas.
-    for (const { x, y, hex } of colorSamples) {
-      const [r, g, b] = hexToRgb(hex) ?? [0, 0, 0];
-      items.push({
-        kind: "marker",
-        center: norm(x, y),
-        shape: "disc",
-        size: 6,
-        stroke: [1, 1, 1, 0.9],
-        fill: [r / 255, g / 255, b / 255, 1],
-      });
-    }
-    // SAM point prompts: `+` include / `−` exclude crosshairs with a centre
-    // dot; the numbered label stays on the canvas.
-    for (const { x, y, label } of state.current.points) {
-      const colour: [number, number, number, number] =
-        label === 0 ? [244 / 255, 98 / 255, 98 / 255, 0.95] : [120 / 255, 230 / 255, 140 / 255, 0.95];
-      items.push({
-        kind: "marker",
-        center: norm(x, y),
-        shape: label === 0 ? "minus" : "cross",
-        size: 9,
-        stroke: colour,
-      });
-      items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3, stroke: colour, fill: colour });
-    }
-    return items.length > 0 ? { items } : null;
-  }, [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples]);
+  const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(
+    () =>
+      buildViewportOverlayScene({
+        frameDims,
+        previewing,
+        doc: state.current,
+        editingPath,
+        lastMarquee,
+        toolId,
+        rulerLine,
+        colorSamples,
+      }),
+    [lastMarquee, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
+  );
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
@@ -449,39 +380,16 @@ export function MaskEditModal({
     }
     return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
   }, [workspace, state, moveDraft]);
-  const targetViewportView = useMemo(() => {
-    // Image-workspace layer transform (move tool / free transform): while a
-    // layer is moved/scaled, the displayed underlay must be the full layer
-    // frame. Moving a cropped viewport window creates a visible hard edge
-    // inside the stage, because that surface/PNG only contains the old view.
-    if (imageTransform) return IDENTITY_VIEW;
-    const canvas = canvasRef.current;
-    // The stage rect bounds what is visible of the transformed frame; the
-    // window must cover it even when the frame's base rect is smaller.
-    const stage = canvas?.closest<HTMLElement>(".mask-edit-stage");
-    return viewWindow(
-      view,
-      canvas?.offsetWidth ?? 0,
-      canvas?.offsetHeight ?? 0,
-      stage?.clientWidth ?? 0,
-      stage?.clientHeight ?? 0,
-    );
-  }, [view, imageTransform]);
-  const [viewportView, setViewportView] = useState(targetViewportView);
-  useEffect(() => {
-    if (
-      targetViewportView.zoom === viewportView.zoom &&
-      targetViewportView.panX === viewportView.panX &&
-      targetViewportView.panY === viewportView.panY
-    )
-      return;
-    if (imageTransform) {
-      setViewportView(targetViewportView);
-      return;
-    }
-    const timer = setTimeout(() => setViewportView(targetViewportView), VIEW_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [targetViewportView, viewportView, imageTransform]);
+  // All in-flight pointer gesture state (drags, picked sources, pending
+  // loops) — one plain mutable object, mutated at pointer-move rate without
+  // re-rendering. See pointerMachine.ts.
+  const gestures = useRef(createPointerGestures()).current;
+  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
+  // frame — the render path and pointer→image mapping are untouched by it —
+  // plus the derived (settle-debounced) underlay view window, Alt+wheel zoom
+  // and Space hold-to-pan (see useCanvasNavigation).
+  const nav = useCanvasNavigation(canvasRef, imageTransform, gestures);
+  const { view, setView, viewRef, viewBase, targetViewportView, viewportView, spacePan, setSpacePan } = nav;
   // Image-workspace adjustment preview (image-kernel K2): the adjustment
   // stack compiles to a grade document and grades the displayed frame on the
   // f32 kernel — the same maths the video grade dialog runs. Null in the
@@ -566,36 +474,11 @@ export function MaskEditModal({
     };
   }, [gradePreview, underlay]);
 
-  // All in-flight pointer gesture state (drags, picked sources, pending
-  // loops) — one plain mutable object, mutated at pointer-move rate without
-  // re-rendering. See pointerMachine.ts.
-  const gestures = useRef(createPointerGestures()).current;
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
-  // PS colour wells: foreground / background colours plus the open picker.
-  // The mask itself is grayscale, so a picked colour maps to paint polarity
-  // by luminance — a light foreground paints the mask in, a dark one erases.
-  const [fgColor, setFgColor] = useState("#ffffff");
-  const [bgColor, setBgColor] = useState("#000000");
-  const [colorPicker, setColorPicker] = useState<"fg" | "bg" | null>(null);
   // PS selection semantics: an active marquee is only a selection — it never
   // lands on the edit stack itself. Instead, edit steps recorded while it is
   // active carry it as their `clip`, so replay confines their effect to the
-  // selection. Whole-mask reshapes (transform / crop / select-all) stay global.
-  const dispatch = useCallback((action: MaskEditAction) => {
-    const lm = lastMarqueeRef.current;
-    if (lm) {
-      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
-      if (action.type === "stroke") {
-        action = { ...action, stroke: { ...action.stroke, clip } };
-      } else if (action.type === "path") {
-        action = { ...action, path: { ...action.path, clip } };
-      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
-        action = { ...action, op: { ...action.op, clip } };
-      }
-    }
-    rawDispatch(action);
-  }, []);
   // Floating size panel beside the selection: a local W×H draft, re-seeded
   // whenever the committed marquee changes.
   const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -611,12 +494,6 @@ export function MaskEditModal({
   // panel's controls (see useCropTool).
   const crop = useCropTool(dims, dispatch);
   const { quadDraft, setQuadDraft, cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
-  // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
-  // null until sampled (or when there is no underlay to read from).
-  const [sampledColor, setSampledColor] = useState<string | null>(null);
-  // Pending pen anchors (image-space) awaiting a close-path click.
-  const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
-  const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
   const [, forceRedraw] = useState(0);
 
   // Preview lane for morphology ops: a live, best-effort proxy render of
@@ -628,44 +505,10 @@ export function MaskEditModal({
   // rebuilds and the composite recomputes dirty tiles only, so a slider drag
   // or brush commit on a large document stays cheap.
   const proxyCache = useRef(new ProxyLayerCache());
-  // Space-hold pan (PS): any tool pans while Space is down.
-  const [spacePan, setSpacePan] = useState(false);
   // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
   const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
-
-  // The canvas's untransformed on-screen size (the clamp space for pan).
-  // `offsetWidth`/`offsetHeight` are layout sizes, unaffected by the view's
-  // CSS transform, so they stay correct under rotation.
-  const viewBase = useCallback((): [number, number] => {
-    const canvas = canvasRef.current;
-    if (!canvas) return [1, 1];
-    return [canvas.offsetWidth || 1, canvas.offsetHeight || 1];
-  }, []);
-
-  // Alt+wheel / Ctrl+wheel zooms about the cursor with any tool in hand (PS
-  // Alt+scroll). A native non-passive listener: React's synthetic `onWheel`
-  // is passive at the root, so `preventDefault` (needed to stop page scroll /
-  // browser pinch-zoom) would be ignored there.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!e.altKey && !e.ctrlKey) return;
-      e.preventDefault();
-      if (e.deltaY === 0 && e.deltaX === 0) return;
-      const rect = canvas.getBoundingClientRect();
-      const cx = e.clientX - (rect.left + rect.width / 2);
-      const cy = e.clientY - (rect.top + rect.height / 2);
-      // Alt+wheel on some platforms reports the delta on the X axis.
-      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-      const factor = delta < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
-      setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
-    };
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onWheel);
-  }, [viewBase]);
 
   // The pointer's angle (degrees) about the canvas centre on screen.
   const pointerAngle = (e: React.PointerEvent): number => {
@@ -676,52 +519,12 @@ export function MaskEditModal({
     return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
   };
 
-  // Space keyup ends the hold-to-pan (keydown arrives via the shortcut scope).
-  useEffect(() => {
-    const up = (e: KeyboardEvent) => {
-      if (e.key === " ") {
-        setSpacePan(false);
-        gestures.panDrag = null;
-      }
-    };
-    window.addEventListener("keyup", up);
-    return () => window.removeEventListener("keyup", up);
-  }, []);
   const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
 
-  const penPendingRef = useRef(false);
-  penPendingRef.current = penAnchors.length > 0;
-  const editingPathRef = useRef<number | null>(null);
-  editingPathRef.current = editingPath;
-  const anchorDraftRef = useRef<EditPathPoint[] | null>(null);
-  anchorDraftRef.current = anchorDraft;
-  const stateRef = useRef(state);
-  stateRef.current = state;
   // Dialog drafts: the free-transform panel (Ctrl+T), fill dialog (Shift+F5)
   // and Image Size dialog (Ctrl+Alt+I) clusters (see useDialogDrafts).
   const dialogs = useDialogDrafts(dims, dispatch, stateRef);
   const { transformDraft, setTransformDraft, editingTransform, closeTransformPanel, fillDraft, setFillDraft, imageSizeDraft, setImageSizeDraft } = dialogs;
-
-  const startPathEdit = (index: number) => {
-    const op = activeOps(state.current)[index];
-    if (!op || !isPathOp(op)) return;
-    setPenAnchors([]);
-    setEditingPath(index);
-    setAnchorDraft(op.points.map((p) => ({ ...p })));
-  };
-
-  const commitPathEdit = useCallback(() => {
-    if (editingPathRef.current != null && anchorDraftRef.current) {
-      dispatch({ type: "path_anchors", index: editingPathRef.current, points: anchorDraftRef.current });
-    }
-    setEditingPath(null);
-    setAnchorDraft(null);
-  }, []);
-
-  const cancelPathEdit = useCallback(() => {
-    setEditingPath(null);
-    setAnchorDraft(null);
-  }, []);
 
   // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
   // active only while this modal is mounted, shadowing the canvas shortcuts.
@@ -768,41 +571,21 @@ export function MaskEditModal({
     selectTool("move");
     dialogs.openFreeTransform();
   };
-  // PS `D` (default colours): back to the default brush / add semantics and
-  // the default white-over-black wells.
-  const resetColors = () => {
-    selectTool(DEFAULT_TOOL_ID);
-    setPathMode("add");
-    setPaintTarget("layer");
-    setFgColor("#ffffff");
-    setBgColor("#000000");
-  };
 
-  // PS `X` (swap colours): swap the wells and flip paint polarity —
-  // brush↔eraser, or a path tool's boolean mode.
-  const swapColors = () => {
-    setFgColor(bgColor);
-    setBgColor(fgColor);
-    if (toolId === "brush") setToolId("eraser");
-    else if (toolId === "eraser") setToolId("brush");
-    else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
-  };
-
-  // A picked well colour: in the grayscale mask the foreground's luminance
-  // sets the paint polarity (light paints in, dark erases — PS painting on a
-  // mask with white/black).
-  const commitPickedColor = (hex: string) => {
-    if (colorPicker === "bg") setBgColor(hex);
-    else {
-      setFgColor(hex);
-      const rgb = hexToRgb(hex);
-      if (rgb) {
-        const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
-        if (toolId === "brush" && lum < 0.5) setToolId("eraser");
-        else if (toolId === "eraser" && lum >= 0.5) setToolId("brush");
-      }
-    }
-    setColorPicker(null);
+  // The colour tools read the shell through this env at call time (see
+  // useColorTools); re-assigned every render so it always sees current values.
+  colorEnvRef.current = {
+    toolId,
+    toolKind: tool.kind,
+    selectTool,
+    setToolId,
+    setPathMode,
+    setPaintTarget,
+    underlay,
+    presented,
+    viewportHost: viewport.host,
+    frameView,
+    dims,
   };
 
   const shortcutHandlers: ShortcutHandlers = {
@@ -910,63 +693,7 @@ export function MaskEditModal({
     [dims.w, dims.h],
   );
 
-  // One-shot colour pick armed by the replace-color popup: the next canvas
-  // pointer-down samples the underlay into this callback instead of drawing.
-  const colorPickRequest = useRef<((hex: string) => void) | null>(null);
-  const requestColorPick = useCallback((cb: (hex: string) => void) => {
-    colorPickRequest.current = cb;
-  }, []);
-
-  // Eyedropper: read the underlay pixel at an image-space point by drawing
-  // the presented frame — a view window of the image — onto an offscreen
-  // canvas at the window's document size. Async (the data URL decodes first);
-  // a no-op when there is no underlay or the point is outside the window.
-  // A natively presented frame has no data URL: explicit pixel readback
-  // (`readPixels`, surface swap Phase S4) answers instead.
   const viewportHost = viewport.host;
-  const sampleUnderlay = useCallback(
-    (pt: [number, number], onSample?: (hex: string) => void) => {
-      const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
-      const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
-      const x = Math.round(pt[0] - frameView.panX * dims.w);
-      const y = Math.round(pt[1] - frameView.panY * dims.h);
-      if (x < 0 || y < 0 || x >= winW || y >= winH) return;
-      const sample = (r: number, g: number, b: number) => {
-        const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-        if (onSample) onSample(hex);
-        else setSampledColor(hex);
-      };
-      if (!underlay) {
-        if (!presented || !viewportHost || !viewportHost.isOpen) return;
-        viewportHost
-          .readPixels()
-          .then((px) => {
-            const fx = Math.min(px.width - 1, Math.floor((x / winW) * px.width));
-            const fy = Math.min(px.height - 1, Math.floor((y / winH) * px.height));
-            const i = (fy * px.width + fx) * 4;
-            sample(px.pixels[i], px.pixels[i + 1], px.pixels[i + 2]);
-          })
-          .catch(() => {
-            /* keep the previous sample */
-          });
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        const off = document.createElement("canvas");
-        off.width = winW;
-        off.height = winH;
-        const ctx = off.getContext("2d");
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, winW, winH);
-        const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-        sample(r, g, b);
-      };
-      img.src = underlay;
-    },
-    [underlay, presented, viewportHost, frameView, dims.w, dims.h],
-  );
-
   // Magnetic lasso: capture the underlay's visible window as an edge map at
   // drag start (async — the frame decodes first). The map lands in
   // `magneticEdge` for the commit-time snap; with no underlay (browser
@@ -1007,9 +734,9 @@ export function MaskEditModal({
   }, [underlay, presented, viewportHost, frameView, dims.w, dims.h]);
 
   // Redraw the overlay: committed brush strokes and the in-progress
-  // stroke/marquee. The underlay presents separately (an image layer under
-  // this canvas at the rendered window's rect), so the canvas stays
-  // transparent where the image shows through.
+  // stroke/marquee (see stageScene's paintStage). The underlay presents
+  // separately (an image layer under this canvas at the rendered window's
+  // rect), so the canvas stays transparent where the image shows through.
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1017,90 +744,34 @@ export function MaskEditModal({
     if (!ctx) return;
     canvas.width = dims.w;
     canvas.height = dims.h;
-    ctx.clearRect(0, 0, dims.w, dims.h);
-
-    if (overlayOnly) {
-      // Transparency preview: dark backdrop so the mask reads clearly.
-      ctx.fillStyle = "#0c0e14";
-      ctx.fillRect(0, 0, dims.w, dims.h);
-    }
-
-    // While previewing a morphology op, the proxy overlay already folds in the
-    // brush strokes (transformed), so skip the raw stroke overlay to avoid a
-    // confusing double-draw; matte strokes / points / marquee still render.
-    // Committed brush bands and vector paths render host-side (the viewport
-    // overlay scene); the canvas draws them only for the fallback stage.
-    if (!previewing && !underlay && !presented) {
-      const activeTarget = activeTargetKind(state.current);
-      state.current.layers.forEach((layer, li) => {
-        if (!layer.visible) return;
-        layerOpStacks(layer).forEach(({ target, ops }) => ops.forEach((op, i) => {
-          if (op.disabled || (li === state.current.active && target === activeTarget && i === editingPath)) return;
-          if (isBrushOp(op)) paintStroke(ctx, op);
-          else if (isPathOp(op)) paintPath(ctx, op);
-        }));
-      });
-    }
-    if (!underlay && !presented) {
-      state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
-    }
-    const live = gestures.drawing;
-    if (live) {
-      if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {
-        paintLassoLoop(ctx, live.points);
-      } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
-        paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, gestures.dodgeBurnMode));
-      } else {
-        const liveMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
-        paintStroke(
-          ctx,
-          { mode: tool.mode ?? "add", radius: brushSize, points: live.points, hardness: brushHardness, flow: brushFlow },
-          liveMatte ? "matte" : "paint",
-        );
-      }
-    }
-
-    if ((tool.kind === "clone" || tool.id === "healing_brush") && gestures.cloneSource) paintCloneSource(ctx, gestures.cloneSource);
-    if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, gestures.draggingAnchor);
-    if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
-    // With a host frame, sampler pins / ruler / SAM markers stroke host-side
-    // (the viewport overlay scene) — the canvas keeps only the text labels.
-    // The live ruler drag stays fully on the canvas for zero-latency feedback.
-    const hostFrame = Boolean(underlay || presented);
-    if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples, hostFrame);
-    const rl = gestures.rulerDrag ?? (tool.id === "ruler" ? rulerLine : null);
-    if (rl) paintRuler(ctx, rl, hostFrame && gestures.rulerDrag == null);
-    paintSamPoints(ctx, state.current.points, hostFrame);
-    // With a host frame — a PNG underlay or a natively presented surface —
-    // the selection tint is composited host-side (the viewport mask
-    // overlay); paint it locally only for the fallback stage.
-    if (!underlay && !presented) {
-      if (previewing && preview) paintPreviewOverlay(ctx, preview, dims.w, dims.h);
-      if (quickMask && quickProxy) paintQuickMask(ctx, quickProxy, dims.w, dims.h);
-    }
-
-    const md = gestures.moveDrag ?? gestures.gradientDrag;
-    if (md) paintDragArrow(ctx, md.start, md.end);
-    const sd = gestures.shapeDrag;
-    if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
-    const mq = gestures.marquee;
-    if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
-    else if (lastMarquee && !underlay && !presented) {
-      // The committed ants stroke host-side over the presented frame; the
-      // canvas only draws them when no host frame presents (browser preview).
-      const [x0, y0, x1, y1] = lastMarquee.region;
-      paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse);
-    }
-    const pl = gestures.patchLoop;
-    if (pl) {
-      const pd = gestures.patchDrag;
-      const [ox, oy] = pd ? [pd.end[0] - pd.start[0], pd.end[1] - pd.start[1]] : [0, 0];
-      paintLassoLoop(ctx, pd ? pl.map(([x, y]) => [x + ox, y + oy] as [number, number]) : pl, true);
-      if (pd) paintDragArrow(ctx, pd.start, pd.end);
-    }
-    if (quadDraft) paintQuadDraft(ctx, quadDraft);
-    if (cropDraft) paintCropDraft(ctx, cropDraft, dims.w, dims.h);
-    else if (cropRegion) paintCropDim(ctx, cropRegion, dims.w, dims.h);
+    paintStage(ctx, {
+      dims,
+      overlayOnly,
+      underlay,
+      presented,
+      previewing,
+      doc: state.current,
+      editingPath,
+      tool,
+      brushSize,
+      brushHardness,
+      brushFlow,
+      paintTarget,
+      penAnchors,
+      anchorDraft,
+      preview,
+      quickMask,
+      quickProxy,
+      shapeKind,
+      shapeSides,
+      colorSamples,
+      rulerLine,
+      quadDraft,
+      cropDraft,
+      cropRegion,
+      lastMarquee,
+      gestures,
+    });
   }, [dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee]);
 
   useEffect(() => {
@@ -1230,12 +901,7 @@ export function MaskEditModal({
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     // An armed replace-color eyedropper consumes the next canvas click:
     // sample the underlay into the requesting swatch, nothing else fires.
-    if (colorPickRequest.current) {
-      const cb = colorPickRequest.current;
-      colorPickRequest.current = null;
-      sampleUnderlay(toImage(e), cb);
-      return;
-    }
+    if (colors.consumeColorPick(toImage(e))) return;
     pointerDown(pointerEnv(), gestures, e);
   };
 

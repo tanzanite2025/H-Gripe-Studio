@@ -101,7 +101,7 @@ ImageDocument 调整栈 --imageCompile--> GradeDoc --applyDoc/hgripe-grade--> �
 
 ---
 
-## 六、重构进展与下一步（更新于 #592 合并后）
+## 六、重构进展与下一步（更新于对话框/颜色/导航/场景/路径拆分后）
 
 ### 已落地
 | PR | 内容 | 行数变化 |
@@ -110,12 +110,12 @@ ImageDocument 调整栈 --imageCompile--> GradeDoc --applyDoc/hgripe-grade--> �
 | #590 | 指针状态机整体搬入 `pointerMachine.ts`，壳只留三个薄 handler | 2552 → 1996 |
 | #591 | `pointerMachine` 按工具类型拆成 `pointer/` 12 个子模块（97 行分发壳） | — |
 | #592 | 裁剪工具状态簇 → `useCropTool` hook；浮动裁剪面板 / 选区尺寸面板 → `CropPanel` / `MarqueeSizePanel` 组件 | 1996 → 1772 |
+| #594 | 对话框草稿簇（Ctrl+T / Shift+F5 / Ctrl+Alt+I）→ `useDialogDrafts` hook + `ImageSizeDialog` 组件 | 1772 → 1551 |
+| 本次 | 颜色/取样簇 → `useColorTools`；视图/画布簇 → `useCanvasNavigation`；redraw 场景组装 → `stageScene`（`buildViewportOverlayScene` + `paintStage` 纯函数）；路径编辑簇 → `usePathEditing` | 1551 → 1290 |
 
 ### 下一步候选（MaskEditModal 继续瘦身，按内聚度排序）
-1. **对话框草稿簇**：`transformDraft`/`editingTransform`（Ctrl+T 自由变换）、`fillDraft`（Shift+F5）、`imageSizeDraft`（Ctrl+Alt+I）三组"草稿 + 打开/应用/关闭"逻辑及各自的 JSX 面板，拆成 hook + 组件（与 #592 的 useCropTool 同模式）。
-2. **颜色 / 取样簇**：`fgColor`/`bgColor`/`colorPicker`/`sampledColor`/`colorSamples` + `resetColors`/`swapColors`/`commitPickedColor`/`requestColorPick`/`sampleUnderlay`，拆成 `useColorTools`。
-3. **视图/画布簇**：`view`/`viewRef`/`targetViewportView`/`viewportView` 防抖、Alt+wheel 缩放监听、Space 平移，拆成 `useCanvasNavigation`。
-4. **redraw 场景组装**：`redraw` 回调（约 90 行绘制编排）与 `viewportOverlayScene` memo（约 100 行）可移到独立模块，壳只传状态。
-5. **路径编辑簇**：`editingPath`/`anchorDraft`/`penAnchors` + `startPathEdit`/`commitPathEdit`/`cancelPathEdit`/`commitPath`/`closePenPath`，拆成 `usePathEditing`。
+1. **笔刷参数簇**：`brushSize`/`brushHardness`/`brushFlow`/`brushSpacing` 与括号键快捷调整，可拆成 `useBrushParams`。
+2. **工具槽位簇**：`selectTool`/`selectSlot`/`cycleSlot`/`slotFaces`（PS 槽位字母与 Shift 轮换），可拆成 `useToolSlots`。
+3. **JSX 面板继续组件化**：右侧 dock 的面板装配（`buildPanels`）仍在壳内，可按面板逐个下沉。
 
-每步保持纯重构契约：不改行为、不改公共 API，靠现有测试（1109 个）+ typecheck 验证。
+每步保持纯重构契约：不改行为、不改公共 API，靠现有测试（1110 个）+ typecheck 验证。
