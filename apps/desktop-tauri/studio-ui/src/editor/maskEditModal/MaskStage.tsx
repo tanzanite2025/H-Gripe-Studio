@@ -7,6 +7,7 @@
 
 import type { MutableRefObject } from "react";
 import type { ViewportBackend } from "../../bridge/viewport";
+import { useT } from "../../i18n";
 import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../../viewport/view";
 import { isFitView, viewTransform, type CanvasView } from "../canvasView";
@@ -37,6 +38,9 @@ interface MaskStageProps {
   /** Image workspace: the background pixel layer is hidden — the frame
    * shows the transparency checkerboard instead of the source frame. */
   baseHidden?: boolean;
+  /** `dims` is the default fallback space (no decodable backing image):
+   * edits record in it and rasterise against the real image on run. */
+  fallbackDims?: boolean;
   spacePan: boolean;
   toolId: string;
   onPointerDown: (e: React.PointerEvent) => void;
@@ -49,7 +53,8 @@ interface MaskStageProps {
   brushCursorRef: MutableRefObject<HTMLDivElement | null>;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
+  const t = useT();
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
   // centre (the op's scale/rotate pivot) sits at `(0.5 − pan) · zoom`.
@@ -117,6 +122,11 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
           />
         ) : null}
       </div>
+      {fallbackDims ? (
+        <span className="mask-dims-fallback muted" title={t("mask.fallbackDimsTitle")}>
+          {t("mask.fallbackDims", { w: dims.w, h: dims.h })}
+        </span>
+      ) : null}
       <ViewportBackendBadge backend={backend} />
     </div>
   );

@@ -3,6 +3,7 @@ import {
   emptyImageDocument,
   emptyImageLayer,
   fromMaskDocument,
+  maskBridgeGap,
   toMaskDocument,
   type ImageDocument,
 } from "./imageDocument";
@@ -64,30 +65,39 @@ describe("imageDocument bridge", () => {
       layers: [{ ...emptyImageLayer(), layer: { kind: "group", children: [] } }],
     };
     expect(toMaskDocument(grouped)).toBeNull();
+    expect(maskBridgeGap(grouped)).toContain("layer group");
 
     const clipped: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), clipped: true }],
     };
     expect(toMaskDocument(clipped)).toBeNull();
+    expect(maskBridgeGap(clipped)).toContain("clipping mask");
 
     const masked: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), mask: { path: "m.png" } }],
     };
     expect(toMaskDocument(masked)).toBeNull();
+    expect(maskBridgeGap(masked)).toContain("baked layer mask");
 
     const gradeAdj: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), layer: { kind: "adjustment", ops: [{ type: "exposure", ev: 1 }] } }],
     };
     expect(toMaskDocument(gradeAdj)).toBeNull();
+    expect(maskBridgeGap(gradeAdj)).toContain("grade ops");
 
     const overlayBlend: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), blend: "overlay" }],
     };
     expect(toMaskDocument(overlayBlend)).toBeNull();
+    expect(maskBridgeGap(overlayBlend)).toContain('blend "overlay"');
+  });
+
+  it("reports no bridge gap for bridgeable documents", () => {
+    expect(maskBridgeGap(fromMaskDocument(sampleMaskDocument()))).toBeNull();
   });
 
   it("empty documents bridge to empty documents", () => {

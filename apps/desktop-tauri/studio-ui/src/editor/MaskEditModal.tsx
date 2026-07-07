@@ -2147,6 +2147,7 @@ export function MaskEditModal({
             underlay={baseHidden ? null : (gradedUnderlay ?? underlay)}
             presented={presented}
             baseHidden={baseHidden}
+            fallbackDims={viewport.dims == null}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
             imageTransform={imageTransform}
