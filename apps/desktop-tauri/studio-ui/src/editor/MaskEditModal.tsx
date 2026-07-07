@@ -7,7 +7,6 @@ import {
   MASK_TOOLS,
   maskTool,
   DEFAULT_TOOL_ID,
-  shapeVertices,
   type MaskTool,
   PS_SLOTS,
   psSlotOf,
@@ -19,7 +18,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEd
 import { useT, type MsgKey } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, WHEEL_ZOOM_STEP, ZOOM_STEP, panBy, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, WHEEL_ZOOM_STEP, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
 import { fromMaskDocument } from "./imageDocument";
@@ -34,7 +33,6 @@ import {
   type TransformParams,
 } from "./maskEdit";
 import type {
-  BrushStroke,
   EditPathPoint,
   ImageResample,
   LayerAdjustment,
@@ -63,9 +61,8 @@ import {
   paintStroke,
   retouchBandColor,
 } from "./maskEditModal/stagePainter";
-import { catmullRomClosed, flattenEditPath, pointInPolygon } from "./maskEditModal/pathGeometry";
-import { buildEdgeMap, snapLoopToEdges, type EdgeMap } from "./maskEditModal/magneticSnap";
-import { hitTestPathOp, translateAnchors } from "./maskEditModal/pathEditTools";
+import { catmullRomClosed, flattenEditPath } from "./maskEditModal/pathGeometry";
+import { buildEdgeMap } from "./maskEditModal/magneticSnap";
 import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
@@ -81,6 +78,7 @@ import { AdjustmentsPanel } from "./maskEditModal/AdjustmentsPanel";
 import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
 import { ColorPicker, hexToRgb } from "./maskEditModal/ColorPicker";
+import { createPointerGestures, pointerDown, pointerMove, pointerUp, type PointerEnv } from "./maskEditModal/pointerMachine";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -124,14 +122,6 @@ interface MaskEditModalProps {
   /** Product surface using this heavy pixel editor. */
   workspace?: "image" | "mask";
 }
-
-/** A crop-draft region's corners in TL, TR, BR, BL order. */
-const cropCorners = (r: readonly [number, number, number, number]): [number, number][] => [
-  [r[0], r[1]],
-  [r[2], r[1]],
-  [r[2], r[3]],
-  [r[0], r[3]],
-];
 
 /** Preset crop aspect ratios (label -> width/height). */
 const CROP_ASPECTS: [string, number][] = [
@@ -619,9 +609,10 @@ export function MaskEditModal({
     };
   }, [gradePreview, underlay]);
 
-  // In-progress freehand stroke (image-space points), null when not drawing.
-  const drawing = useRef<{ points: [number, number][] } | null>(null);
-  const marquee = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
+  // All in-flight pointer gesture state (drags, picked sources, pending
+  // loops) — one plain mutable object, mutated at pointer-move rate without
+  // re-rendering. See pointerMachine.ts.
+  const gestures = useRef(createPointerGestures()).current;
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
   // PS colour wells: foreground / background colours plus the open picker.
@@ -657,51 +648,21 @@ export function MaskEditModal({
       setMarqueeDraft({ w: Math.round(x1 - x0), h: Math.round(y1 - y0) });
     }
   }, [lastMarquee]);
-  // In-progress shape drag (image-space bounding box); committed on release
-  // as an ordinary vector path step built from the chosen shape's vertices.
-  const shapeDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   const [shapeKind, setShapeKind] = useState<ShapeKind>("polygon");
   const [shapeSides, setShapeSides] = useState(5);
-  // In-progress move-tool drag (image-space): committed as a `transform` op.
-  const moveDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
-  // Move tool over a committed marquee: drag the selection region itself
-  // (PS moves the marching ants) instead of transforming the mask.
-  const marqueeMove = useRef<{ last: [number, number]; from: [number, number, number, number] } | null>(null);
-  // In-progress gradient drag (M10): the start → end ramp vector; Alt at
-  // pointer-down records a subtract ramp.
-  const gradientDrag = useRef<{ start: [number, number]; end: [number, number]; subtract: boolean } | null>(null);
-  // Clone-stamp source point (image-space), picked by Alt+click; null until
-  // picked — painting without a source is inert (PS behaviour).
-  const cloneSource = useRef<[number, number] | null>(null);
-  // Dodge / burn direction of the in-progress stroke (Alt at pointer-down
-  // burns — darkens — instead of dodging).
-  const dodgeBurnMode = useRef<"dodge" | "burn">("dodge");
-  // Sponge direction of the in-progress stroke (Alt at pointer-down softens
-  // toward mid-grey instead of pushing toward hard on/off).
-  const spongeMode = useRef<"saturate" | "desaturate">("saturate");
-  // Magnetic lasso: an edge map over the underlay's visible window, captured
-  // at drag start so the drawn loop can snap to image edges on release.
-  const magneticEdge = useRef<EdgeMap | null>(null);
-  // Patch tool: the committed lasso loop awaiting its drop drag, and the
-  // in-progress drop drag (the loop's translation vector).
-  const patchLoop = useRef<[number, number][] | null>(null);
-  const patchDrag = useRef<{ start: [number, number]; end: [number, number] } | null>(null);
   // Perspective crop: the adjustable quad draft (TL, TR, BR, BL image-space)
   // between the box drag and the commit click, plus the corner being dragged.
   const [quadDraft, setQuadDraft] = useState<[number, number][] | null>(null);
-  const quadCorner = useRef<number | null>(null);
   // Image-workspace crop: the adjustable rect draft ([x0, y0, x1, y1]
   // image-space) between the box drag and the commit click, plus the corner
   // being dragged (TL / TR / BR / BL).
   const [cropDraft, setCropDraft] = useState<[number, number, number, number] | null>(null);
-  const cropCorner = useRef<number | null>(null);
   // Crop panel state: local W×H draft (re-seeded from the box), the selected
   // aspect preset ("" = free; manual sizing clears it), the ratio lock, and
   // the user's saved size templates.
   const [cropSizeDraft, setCropSizeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [cropAspect, setCropAspect] = useState("");
   const [cropLock, setCropLock] = useState(false);
-  const cropDragRatio = useRef<number | null>(null);
   // The ratio the lock holds. Captured when the box changes by any means
   // other than the size inputs (drag, preset, template) — not re-derived
   // from the rounded W×H on every keystroke, which would drift.
@@ -805,13 +766,9 @@ export function MaskEditModal({
   // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
   // null until sampled (or when there is no underlay to read from).
   const [sampledColor, setSampledColor] = useState<string | null>(null);
-  const rulerDrag = useRef<RulerLine | null>(null);
-  // Path-selection whole-path drag: the last pointer position (image px).
-  const wholePathDrag = useRef<[number, number] | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
-  const draggingAnchor = useRef<number | null>(null);
   const [, forceRedraw] = useState(0);
 
   // Preview lane for morphology ops: a live, best-effort proxy render of
@@ -825,10 +782,6 @@ export function MaskEditModal({
   const proxyCache = useRef(new ProxyLayerCache());
   // Space-hold pan (PS): any tool pans while Space is down.
   const [spacePan, setSpacePan] = useState(false);
-  const panDrag = useRef<{ x: number; y: number } | null>(null);
-  // In-progress rotate-view drag: the pointer's start angle about the canvas
-  // centre plus the rotation it started from.
-  const rotateDrag = useRef<{ angle: number; rotate: number } | null>(null);
   // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
   const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
@@ -880,7 +833,7 @@ export function MaskEditModal({
     const up = (e: KeyboardEvent) => {
       if (e.key === " ") {
         setSpacePan(false);
-        panDrag.current = null;
+        gestures.panDrag = null;
       }
     };
     window.addEventListener("keyup", up);
@@ -930,8 +883,8 @@ export function MaskEditModal({
     if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
     cancelPathEdit();
     if (id !== "patch") {
-      patchLoop.current = null;
-      patchDrag.current = null;
+      gestures.patchLoop = null;
+      gestures.patchDrag = null;
     }
     if (id !== "perspective_crop") setQuadDraft(null);
     setToolId(id);
@@ -1195,7 +1148,7 @@ export function MaskEditModal({
   // `magneticEdge` for the commit-time snap; with no underlay (browser
   // preview) it stays null and the lasso commits unsnapped.
   const captureEdgeMap = useCallback(() => {
-    magneticEdge.current = null;
+    gestures.magneticEdge = null;
     const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
     const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
     const offX = Math.round(frameView.panX * dims.w);
@@ -1208,7 +1161,7 @@ export function MaskEditModal({
           // The readback is at the frame's own resolution; only a readback
           // matching the window maps 1:1 onto image-space coordinates.
           if (px.width !== winW || px.height !== winH) return;
-          magneticEdge.current = buildEdgeMap(px.pixels, px.width, px.height, offX, offY);
+          gestures.magneticEdge = buildEdgeMap(px.pixels, px.width, px.height, offX, offY);
         })
         .catch(() => {
           /* leave unsnapped */
@@ -1224,7 +1177,7 @@ export function MaskEditModal({
       if (!ctx) return;
       ctx.drawImage(img, 0, 0, winW, winH);
       const { data } = ctx.getImageData(0, 0, winW, winH);
-      magneticEdge.current = buildEdgeMap(data, winW, winH, offX, offY);
+      gestures.magneticEdge = buildEdgeMap(data, winW, winH, offX, offY);
     };
     img.src = underlay;
   }, [underlay, presented, viewportHost, frameView, dims.w, dims.h]);
@@ -1267,12 +1220,12 @@ export function MaskEditModal({
     if (!underlay && !presented) {
       state.current.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
     }
-    const live = drawing.current;
+    const live = gestures.drawing;
     if (live) {
       if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {
         paintLassoLoop(ctx, live.points);
       } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
-        paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, dodgeBurnMode.current));
+        paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, gestures.dodgeBurnMode));
       } else {
         const liveMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
         paintStroke(
@@ -1283,16 +1236,16 @@ export function MaskEditModal({
       }
     }
 
-    if ((tool.kind === "clone" || tool.id === "healing_brush") && cloneSource.current) paintCloneSource(ctx, cloneSource.current);
-    if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, draggingAnchor.current);
+    if ((tool.kind === "clone" || tool.id === "healing_brush") && gestures.cloneSource) paintCloneSource(ctx, gestures.cloneSource);
+    if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, gestures.draggingAnchor);
     if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
     // With a host frame, sampler pins / ruler / SAM markers stroke host-side
     // (the viewport overlay scene) — the canvas keeps only the text labels.
     // The live ruler drag stays fully on the canvas for zero-latency feedback.
     const hostFrame = Boolean(underlay || presented);
     if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples, hostFrame);
-    const rl = rulerDrag.current ?? (tool.id === "ruler" ? rulerLine : null);
-    if (rl) paintRuler(ctx, rl, hostFrame && rulerDrag.current == null);
+    const rl = gestures.rulerDrag ?? (tool.id === "ruler" ? rulerLine : null);
+    if (rl) paintRuler(ctx, rl, hostFrame && gestures.rulerDrag == null);
     paintSamPoints(ctx, state.current.points, hostFrame);
     // With a host frame — a PNG underlay or a natively presented surface —
     // the selection tint is composited host-side (the viewport mask
@@ -1302,11 +1255,11 @@ export function MaskEditModal({
       if (quickMask && quickProxy) paintQuickMask(ctx, quickProxy, dims.w, dims.h);
     }
 
-    const md = moveDrag.current ?? gradientDrag.current;
+    const md = gestures.moveDrag ?? gestures.gradientDrag;
     if (md) paintDragArrow(ctx, md.start, md.end);
-    const sd = shapeDrag.current;
+    const sd = gestures.shapeDrag;
     if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
-    const mq = marquee.current;
+    const mq = gestures.marquee;
     if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse");
     else if (lastMarquee && !underlay && !presented) {
       // The committed ants stroke host-side over the presented frame; the
@@ -1314,9 +1267,9 @@ export function MaskEditModal({
       const [x0, y0, x1, y1] = lastMarquee.region;
       paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse);
     }
-    const pl = patchLoop.current;
+    const pl = gestures.patchLoop;
     if (pl) {
-      const pd = patchDrag.current;
+      const pd = gestures.patchDrag;
       const [ox, oy] = pd ? [pd.end[0] - pd.start[0], pd.end[1] - pd.start[1]] : [0, 0];
       paintLassoLoop(ctx, pd ? pl.map(([x, y]) => [x + ox, y + oy] as [number, number]) : pl, true);
       if (pd) paintDragArrow(ctx, pd.start, pd.end);
@@ -1390,6 +1343,61 @@ export function MaskEditModal({
     setPenAnchors([]);
   };
 
+  // Pointer gestures: the shell only captures the pointer, serves one-shot
+  // requests (the armed colour pick) and keeps the brush ring on the cursor;
+  // the whole down/move/up decision tree lives in pointerMachine.ts.
+  const pointerEnv = (): PointerEnv => ({
+    tool,
+    toolId,
+    workspace,
+    spacePan,
+    dims,
+    doc: state.current,
+    activeLayerKind,
+    lastMarquee,
+    editingPath,
+    anchorDraft,
+    penAnchors,
+    cropDraft,
+    quadDraft,
+    paintTarget,
+    tolerance,
+    brushSize,
+    brushHardness,
+    brushFlow,
+    brushSpacing,
+    pathMode,
+    shapeKind,
+    shapeSides,
+    cropLock,
+    toImage,
+    viewBase,
+    pointerAngle,
+    viewRotate: () => viewRef.current.rotate ?? 0,
+    canvasRect: () => canvasRef.current?.getBoundingClientRect() ?? null,
+    setView,
+    dispatch,
+    commitPath,
+    closePenPath,
+    setPenAnchors,
+    setAnchorDraft,
+    startPathEdit,
+    setCropDraft,
+    setCropAspect,
+    confirmCropDraft,
+    setQuadDraft,
+    setLastMarquee,
+    setMoveDraft,
+    setRulerLine,
+    setColorSamples,
+    sampleUnderlay,
+    captureEdgeMap,
+    selectOptionsTab: () => dock.onSelect("options"),
+    nextId,
+    redraw,
+    forceRedraw: () => forceRedraw((n) => n + 1),
+  });
+
   const onPointerDown = (e: React.PointerEvent) => {
     // Capture the pointer for the whole gesture: events keep flowing when it
     // leaves the canvas (a fast move drag would otherwise end at the edge),
@@ -1404,217 +1412,7 @@ export function MaskEditModal({
       sampleUnderlay(toImage(e), cb);
       return;
     }
-    // Canvas navigation (M8): hand tool / Space-hold pans; zoom tool clicks
-    // in (Alt+click out) anchored at the cursor. Neither records anything.
-    if (spacePan || tool.id === "hand") {
-      panDrag.current = { x: e.clientX, y: e.clientY };
-      return;
-    }
-    if (tool.id === "zoom") {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const cx = e.clientX - (rect.left + rect.width / 2);
-      const cy = e.clientY - (rect.top + rect.height / 2);
-      const factor = e.altKey ? 1 / ZOOM_STEP : ZOOM_STEP;
-      setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
-      return;
-    }
-    if (tool.id === "rotate_view") {
-      (e.target as Element).setPointerCapture?.(e.pointerId);
-      rotateDrag.current = { angle: pointerAngle(e), rotate: viewRef.current.rotate ?? 0 };
-      return;
-    }
-    if (editingPath != null && anchorDraft) {
-      (e.target as Element).setPointerCapture?.(e.pointerId);
-      const [x, y] = toImage(e);
-      if (tool.id === "path_select") {
-        // Path selection: any drag moves the whole selected path.
-        wholePathDrag.current = [x, y];
-        return;
-      }
-      // Anchor re-editing mode: grab the nearest anchor square, if any.
-      const grabRadius = Math.max(10, dims.w * 0.012);
-      let best = -1;
-      let bestDist = grabRadius;
-      anchorDraft.forEach((p, i) => {
-        const d = Math.hypot(p.x - x, p.y - y);
-        if (d <= bestDist) {
-          best = i;
-          bestDist = d;
-        }
-      });
-      draggingAnchor.current = best >= 0 ? best : null;
-      return;
-    }
-    if (tool.status !== "ready") return;
-    // Adjustment layers carry no edit stack — canvas edits that would record
-    // onto the active layer are ignored; document-level matte strokes / SAM
-    // points still land.
-    const activeIsAdjustment = activeLayerKind === "adjustment";
-    const toMatteTarget = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
-    if (activeIsAdjustment && tool.kind !== "point" && !toMatteTarget) return;
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    const pt = toImage(e);
-    if (tool.kind === "path_edit") {
-      // Path / direct selection: click near a committed path outline to
-      // re-open it through the ordinary anchor-edit flow (M2).
-      const hit = hitTestPathOp(activeOps(state.current), pt, Math.max(10, dims.w * 0.012));
-      if (hit >= 0) startPathEdit(hit);
-      return;
-    }
-    if (tool.kind === "path") {
-      if (tool.id === "lasso" || tool.id === "freeform_pen" || tool.id === "magnetic_lasso") {
-        if (tool.id === "magnetic_lasso") captureEdgeMap();
-        drawing.current = { points: [pt] };
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      // Anchor tools (pen / polygonal lasso / curvature pen): clicking near
-      // the first anchor closes the path.
-      const closeRadius = Math.max(8, dims.w * 0.01);
-      const first = penAnchors[0];
-      if (penAnchors.length >= 3 && first && Math.hypot(pt[0] - first[0], pt[1] - first[1]) <= closeRadius) {
-        closePenPath();
-        return;
-      }
-      setPenAnchors((prev) => [...prev, pt]);
-      return;
-    }
-    if (tool.id === "patch" || tool.id === "content_aware_move") {
-      // Patch / content-aware move: a drag from inside the pending loop
-      // drops it; anywhere else starts a fresh lasso.
-      const loop = patchLoop.current;
-      if (loop && pointInPolygon(pt, loop)) {
-        patchDrag.current = { start: pt, end: pt };
-      } else {
-        patchLoop.current = null;
-        drawing.current = { points: [pt] };
-      }
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (tool.id === "crop" && workspace === "image") {
-      // Image crop: drag a box, adjust its corners, then click inside to
-      // confirm — the crop lands on the document's edit stack (undoable via
-      // history) and the stage dims everything outside the kept region.
-      const draft = cropDraft;
-      if (draft) {
-        const grabRadius = Math.max(10, dims.w * 0.012);
-        const idx = cropCorners(draft).findIndex(
-          ([qx, qy]) => Math.hypot(qx - pt[0], qy - pt[1]) <= grabRadius,
-        );
-        if (idx >= 0) {
-          cropCorner.current = idx;
-          // Ratio lock holds the box's proportions through the corner drag;
-          // a free drag drops any picked preset.
-          const bw = Math.abs(draft[2] - draft[0]);
-          const bh = Math.abs(draft[3] - draft[1]);
-          cropDragRatio.current = cropLock && bh >= 1 ? bw / bh : null;
-          if (!cropLock) setCropAspect("");
-          return;
-        }
-        if (pt[0] >= draft[0] && pt[0] <= draft[2] && pt[1] >= draft[1] && pt[1] <= draft[3]) {
-          confirmCropDraft(draft);
-          return;
-        }
-        setCropDraft(null);
-      }
-      marquee.current = { start: pt, end: pt };
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (tool.id === "perspective_crop") {
-      // Perspective crop: drag corners of the pending quad, click inside it
-      // to commit, or drag a fresh box.
-      const quad = quadDraft;
-      if (quad) {
-        const grabRadius = Math.max(10, dims.w * 0.012);
-        const idx = quad.findIndex(([qx, qy]) => Math.hypot(qx - pt[0], qy - pt[1]) <= grabRadius);
-        if (idx >= 0) {
-          quadCorner.current = idx;
-          return;
-        }
-        setQuadDraft(null);
-        if (pointInPolygon(pt, quad)) {
-          dispatch({ type: "op", op: { type: "perspective_crop", region: quad.flat() } });
-          return;
-        }
-      }
-      marquee.current = { start: pt, end: pt };
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (tool.id === "pattern_stamp") {
-      // Pattern stamp paints the fixed checker — no source point needed.
-      drawing.current = { points: [pt] };
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (tool.kind === "clone" || tool.id === "healing_brush") {
-      // Alt+click picks the source; painting without one is inert.
-      if (e.altKey) {
-        cloneSource.current = pt;
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (!cloneSource.current) return;
-      drawing.current = { points: [pt] };
-      forceRedraw((n) => n + 1);
-    } else if (tool.kind === "paint" || tool.kind === "matte" || tool.kind === "heal" || tool.kind === "history" || tool.kind === "dodge") {
-      if (tool.id === "sponge") spongeMode.current = e.altKey ? "desaturate" : "saturate";
-      else if (tool.kind === "dodge") dodgeBurnMode.current = e.altKey ? "burn" : "dodge";
-      drawing.current = { points: [pt] };
-      forceRedraw((n) => n + 1);
-    } else if (tool.kind === "transform") {
-      const r = lastMarquee?.region;
-      if (r && pt[0] >= r[0] && pt[0] <= r[2] && pt[1] >= r[1] && pt[1] <= r[3]) {
-        marqueeMove.current = { last: pt, from: r };
-      } else {
-        moveDrag.current = { start: pt, end: pt };
-      }
-      forceRedraw((n) => n + 1);
-    } else if (tool.kind === "gradient") {
-      gradientDrag.current = { start: pt, end: pt, subtract: e.altKey };
-      forceRedraw((n) => n + 1);
-    } else if (tool.kind === "marquee") {
-      marquee.current = { start: pt, end: pt };
-      forceRedraw((n) => n + 1);
-    } else if (tool.kind === "shape") {
-      shapeDrag.current = { start: pt, end: pt };
-      forceRedraw((n) => n + 1);
-    } else if (tool.kind === "click") {
-      if (tool.id === "red_eye") {
-        // Red eye: the contiguous red-dominant region around the click
-        // floods into the mask on run.
-        dispatch({ type: "op", op: { type: "red_eye", region: pt } });
-        return;
-      }
-      // Wand-family flood fill, seeded at the click: the paint bucket adds
-      // like the wand; the magic eraser records mode "subtract" and the
-      // backend clears the flooded region instead.
-      dispatch({
-        type: "op",
-        op: { type: "wand", amount: tolerance, region: pt, ...(tool.mode === "subtract" ? { mode: "subtract" } : null) },
-      });
-    } else if (tool.kind === "sample") {
-      // Sample tools are pure view reads — nothing lands on the document.
-      if (tool.id === "ruler") {
-        rulerDrag.current = { start: pt, end: pt };
-        forceRedraw((n) => n + 1);
-      } else if (tool.id === "color_sampler") {
-        // Pin up to four persistent readouts (PS colour sampler).
-        sampleUnderlay(pt, (hex) =>
-          setColorSamples((prev) => (prev.length >= 4 ? prev : [...prev, { x: pt[0], y: pt[1], hex }])),
-        );
-      } else {
-        sampleUnderlay(pt);
-      }
-    } else if (tool.kind === "point") {
-      // SAM 2 point prompt: left button includes (positive), right button
-      // excludes (negative). Right-click's context menu is suppressed below.
-      const label = e.button === 2 ? 0 : 1;
-      dispatch({ type: "point", point: { x: pt[0], y: pt[1], label } });
-    }
+    pointerDown(pointerEnv(), gestures, e);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -1627,369 +1425,14 @@ export function MaskEditModal({
       cursorEl.style.top = `${(y / dims.h) * 100}%`;
       cursorEl.style.display = spacePan ? "none" : "";
     }
-    if (rotateDrag.current) {
-      const { angle, rotate } = rotateDrag.current;
-      setView((v) => rotateTo(v, rotate + pointerAngle(e) - angle));
-      return;
-    }
-    if (panDrag.current) {
-      const dx = e.clientX - panDrag.current.x;
-      const dy = e.clientY - panDrag.current.y;
-      panDrag.current = { x: e.clientX, y: e.clientY };
-      setView((v) => panBy(v, dx, dy, ...viewBase()));
-      return;
-    }
-    if (wholePathDrag.current) {
-      const [x, y] = toImage(e);
-      const [px, py] = wholePathDrag.current;
-      wholePathDrag.current = [x, y];
-      setAnchorDraft((prev) => (prev ? translateAnchors(prev, x - px, y - py) : prev));
-      return;
-    }
-    if (draggingAnchor.current != null) {
-      const [x, y] = toImage(e);
-      const idx = draggingAnchor.current;
-      setAnchorDraft((prev) => (prev ? prev.map((p, i) => (i === idx ? { ...p, x, y } : p)) : prev));
-      return;
-    }
-    if (rulerDrag.current) {
-      rulerDrag.current.end = toImage(e);
-      redraw();
-      return;
-    }
-    if (quadCorner.current != null) {
-      const p = toImage(e);
-      const idx = quadCorner.current;
-      setQuadDraft((prev) => (prev ? prev.map((q, i) => (i === idx ? p : q)) : prev));
-      return;
-    }
-    if (cropCorner.current != null) {
-      const p = toImage(e);
-      const idx = cropCorner.current;
-      setCropDraft((prev) => {
-        if (!prev) return prev;
-        const [x0, y0, x1, y1] = prev;
-        const next: [number, number, number, number] =
-          idx === 0
-            ? [p[0], p[1], x1, y1]
-            : idx === 1
-              ? [x0, p[1], p[0], y1]
-              : idx === 2
-                ? [x0, y0, p[0], p[1]]
-                : [p[0], y0, x1, p[1]];
-        const ratio = cropDragRatio.current;
-        if (ratio) {
-          // Locked ratio: the dragged corner's vertical edge follows the
-          // width, growing away from the fixed edge.
-          const h = Math.abs(next[2] - next[0]) / ratio;
-          if (idx === 0 || idx === 1) next[1] = y1 - h;
-          else next[3] = y0 + h;
-        }
-        return next;
-      });
-      return;
-    }
-    if (patchDrag.current) {
-      patchDrag.current.end = toImage(e);
-      redraw();
-      return;
-    }
-    if (drawing.current) {
-      drawing.current.points.push(toImage(e));
-      redraw();
-    } else if (marqueeMove.current) {
-      const pt = toImage(e);
-      const { last } = marqueeMove.current;
-      const dx = pt[0] - last[0];
-      const dy = pt[1] - last[1];
-      marqueeMove.current.last = pt;
-      setLastMarquee((prev) => {
-        if (!prev) return prev;
-        const [x0, y0, x1, y1] = prev.region;
-        const w = x1 - x0;
-        const h = y1 - y0;
-        const nx = Math.max(0, Math.min(x0 + dx, dims.w - w));
-        const ny = Math.max(0, Math.min(y0 + dy, dims.h - h));
-        return { ...prev, region: [nx, ny, nx + w, ny + h] };
-      });
-    } else if (moveDrag.current) {
-      moveDrag.current.end = toImage(e);
-      if (workspace === "image") {
-        const { start, end } = moveDrag.current;
-        setMoveDraft([end[0] - start[0], end[1] - start[1]]);
-      }
-      redraw();
-    } else if (gradientDrag.current) {
-      gradientDrag.current.end = toImage(e);
-      redraw();
-    } else if (marquee.current) {
-      marquee.current.end = toImage(e);
-      redraw();
-    } else if (shapeDrag.current) {
-      shapeDrag.current.end = toImage(e);
-      redraw();
-    }
+    pointerMove(pointerEnv(), gestures, e);
   };
 
   const onPointerUp = () => {
     // Also reached from the canvas's pointer-leave: hide the brush ring until
     // the pointer is back over the canvas.
     if (brushCursorEl.current) brushCursorEl.current.style.display = "none";
-    if (rotateDrag.current) {
-      rotateDrag.current = null;
-      return;
-    }
-    if (panDrag.current) {
-      panDrag.current = null;
-      return;
-    }
-    if (wholePathDrag.current) {
-      wholePathDrag.current = null;
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (draggingAnchor.current != null) {
-      draggingAnchor.current = null;
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (rulerDrag.current) {
-      const { start, end } = rulerDrag.current;
-      rulerDrag.current = null;
-      setRulerLine(Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1 ? { start, end } : null);
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (quadCorner.current != null) {
-      quadCorner.current = null;
-      return;
-    }
-    if (cropCorner.current != null) {
-      cropCorner.current = null;
-      cropDragRatio.current = null;
-      setCropDraft((prev) =>
-        prev
-          ? [
-              Math.min(prev[0], prev[2]),
-              Math.min(prev[1], prev[3]),
-              Math.max(prev[0], prev[2]),
-              Math.max(prev[1], prev[3]),
-            ]
-          : prev,
-      );
-      return;
-    }
-    if (patchDrag.current) {
-      const { start, end } = patchDrag.current;
-      patchDrag.current = null;
-      const loop = patchLoop.current;
-      if (loop && Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1) {
-        // Patch: covered pixel `p` refills from `p + [dx, dy]` — the drop
-        // site is the clean-texture source. Content-aware move instead
-        // moves the loop by `[dx, dy]` and heals the hole behind it.
-        dispatch({ type: "op", op: { type: tool.id === "content_aware_move" ? "content_aware_move" : "patch", points: loop, dx: end[0] - start[0], dy: end[1] - start[1] } });
-        patchLoop.current = null;
-      }
-      forceRedraw((n) => n + 1);
-      return;
-    }
-    if (drawing.current) {
-      const pts = drawing.current.points;
-      drawing.current = null;
-      if (tool.id === "lasso" || tool.id === "freeform_pen" || tool.id === "magnetic_lasso") {
-        // The magnetic lasso snaps the drawn loop to nearby image edges at
-        // commit time (the search window scales with the drawn size).
-        const edge = tool.id === "magnetic_lasso" ? magneticEdge.current : null;
-        commitPath(tool.id, edge ? snapLoopToEdges(edge, pts, Math.max(6, dims.w * 0.008)) : pts);
-        magneticEdge.current = null;
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "quick_select") {
-        // Quick selection: every stroke point seeds a tolerance flood-fill on
-        // the real image; the fills union into the mask on run.
-        dispatch({ type: "op", op: { type: "quick_select", amount: tolerance, points: pts } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "background_eraser") {
-        // Background eraser: pixels inside the brush discs matching the
-        // colour under each stamp's centre are erased on run.
-        dispatch({ type: "op", op: { type: "background_eraser", amount: brushSize, points: pts, tolerance } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "healing_brush") {
-        // Healing brush: like the clone stamp but the copied patch blends
-        // through a feathered edge (source fixed at the drag start).
-        const src = cloneSource.current;
-        if (src) {
-          const [dx, dy] = [src[0] - pts[0][0], src[1] - pts[0][1]];
-          dispatch({ type: "op", op: { type: "healing_brush", amount: brushSize, points: pts, dx, dy } });
-        }
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "sponge") {
-        dispatch({ type: "op", op: { type: "sponge", amount: brushSize, points: pts, mode: spongeMode.current } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "patch" || tool.id === "content_aware_move") {
-        // The released lasso becomes the pending loop; the next drag from
-        // inside it records the op.
-        patchLoop.current = pts.length >= 3 ? pts : null;
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "remove") {
-        // Remove (M16): the stroke seeds the segmenter; the segmented
-        // object is subtracted from the mask on run.
-        dispatch({ type: "op", op: { type: "remove", amount: brushSize, points: pts } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "pattern_stamp") {
-        // Pattern stamp (M16): covered pixels take the repeating checker
-        // pattern on replay.
-        dispatch({ type: "op", op: { type: "pattern_stamp", amount: brushSize, points: pts } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.id === "art_history_brush") {
-        // Art history brush (M16): the stroke restores the layer's initial
-        // state through a deterministic jitter on replay.
-        dispatch({ type: "op", op: { type: "art_history_brush", amount: brushSize, points: pts } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.kind === "heal") {
-        // Spot-heal (M13): the stroke records a `heal` op — the painted
-        // region is rebuilt from its surroundings on replay.
-        dispatch({ type: "op", op: { type: "heal", amount: brushSize, points: pts } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.kind === "dodge") {
-        // Dodge / burn (M13): the stroke records a `dodge_burn` op — Alt at
-        // pointer-down burns (darkens), otherwise dodges (lightens).
-        dispatch({ type: "op", op: { type: "dodge_burn", amount: brushSize, points: pts, mode: dodgeBurnMode.current } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.kind === "history") {
-        // History brush (M13): the stroke records a `history_brush` op — the
-        // painted region is restored to the layer's pre-edit state on replay.
-        dispatch({ type: "op", op: { type: "history_brush", amount: brushSize, points: pts } });
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      if (tool.kind === "clone") {
-        // Clone stamp (M13): the source offset is fixed at the drag start
-        // (PS aligned mode) — painted pixel `p` copies from `p + [dx, dy]`.
-        const src = cloneSource.current;
-        if (src) {
-          const [dx, dy] = [src[0] - pts[0][0], src[1] - pts[0][1]];
-          dispatch({ type: "op", op: { type: "clone", amount: brushSize, points: pts, dx, dy } });
-        }
-        forceRedraw((n) => n + 1);
-        return;
-      }
-      // The pencil is a brush with hardness / flow pinned to 100% (a hard
-      // aliased stamp); its strokes never record the soft-brush fields.
-      const hardTool = tool.id === "pencil";
-      const stroke: BrushStroke = {
-        id: nextId("stroke"),
-        mode: tool.mode ?? "add",
-        radius: brushSize,
-        points: pts,
-        // Soft-brush fields are recorded only for soft strokes so hard
-        // strokes keep the legacy shape (and byte-identical replay).
-        ...(!hardTool && (brushHardness < 1 || brushFlow < 1)
-          ? { hardness: brushHardness, flow: brushFlow, spacing: brushSpacing }
-          : null),
-      };
-      const toMatte = tool.kind === "matte" || (tool.kind === "paint" && paintTarget === "matte");
-      dispatch({ type: toMatte ? "matte_stroke" : "stroke", stroke });
-    } else if (marqueeMove.current) {
-      // The moved selection is already live in `lastMarquee`; nothing lands
-      // on the edit stack (the selection is not a mask edit).
-      marqueeMove.current = null;
-    } else if (moveDrag.current) {
-      const { start, end } = moveDrag.current;
-      moveDrag.current = null;
-      setMoveDraft(null);
-      const dx = end[0] - start[0];
-      const dy = end[1] - start[1];
-      if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
-        dispatch({ type: "op", op: { type: "transform", dx, dy } });
-      }
-      forceRedraw((n) => n + 1);
-    } else if (gradientDrag.current) {
-      const { start, end, subtract } = gradientDrag.current;
-      gradientDrag.current = null;
-      if (Math.hypot(end[0] - start[0], end[1] - start[1]) >= 1) {
-        dispatch({
-          type: "op",
-          op: { type: "gradient", region: [start[0], start[1], end[0], end[1]], mode: subtract ? "subtract" : "add" },
-        });
-      }
-      forceRedraw((n) => n + 1);
-    } else if (marquee.current) {
-      const { start, end } = marquee.current;
-      marquee.current = null;
-      const region = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
-      if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
-        if (tool.id === "crop" && workspace === "image") {
-          // The box becomes an adjustable rect; the commit happens on the
-          // click inside it. A fresh free-form box carries no preset.
-          setCropAspect("");
-          setCropDraft(region as [number, number, number, number]);
-        } else if (tool.id === "perspective_crop") {
-          // The box becomes an adjustable quad; the commit happens on the
-          // click inside it.
-          setQuadDraft([
-            [region[0], region[1]],
-            [region[2], region[1]],
-            [region[2], region[3]],
-            [region[0], region[3]],
-          ]);
-        } else if (tool.id === "rect" || tool.id === "ellipse") {
-          // PS marquee: the drag only defines the selection — nothing lands
-          // on the edit stack until a subsequent operation uses it.
-          setLastMarquee({
-            region: region as [number, number, number, number],
-            ellipse: tool.id === "ellipse",
-          });
-          // Surface the selection's size readout / manual inputs: they live
-          // on the 选项 tab, which may be behind another tab in its group.
-          dock.onSelect("options");
-        } else {
-          dispatch({ type: "op", op: { type: tool.id, region } });
-        }
-      } else if (tool.id === "rect" || tool.id === "ellipse") {
-        // A plain click with a marquee tool drops the selection (PS deselect).
-        setLastMarquee(null);
-      }
-      forceRedraw((n) => n + 1);
-    } else if (shapeDrag.current) {
-      const { start, end } = shapeDrag.current;
-      shapeDrag.current = null;
-      const pts = shapeVertices(shapeKind, [start[0], start[1], end[0], end[1]], shapeSides, brushSize);
-      if (pts.length >= 3) {
-        dispatch({
-          type: "path",
-          path: {
-            id: nextId("path"),
-            mode: pathMode,
-            tool: "shape",
-            closed: true,
-            points: pts.map(([x, y]) => ({ x, y })),
-          },
-        });
-      }
-      forceRedraw((n) => n + 1);
-    }
+    pointerUp(pointerEnv(), gestures);
   };
 
   // Clicking a tool: `global` tools are immediate actions (no canvas mode);
@@ -1999,8 +1442,8 @@ export function MaskEditModal({
     if (!ANCHOR_PATH_TOOLS.includes(t.id)) setPenAnchors([]);
     cancelPathEdit();
     if (t.id !== "patch" && t.id !== "content_aware_move") {
-      patchLoop.current = null;
-      patchDrag.current = null;
+      gestures.patchLoop = null;
+      gestures.patchDrag = null;
     }
     if (t.id !== "perspective_crop") setQuadDraft(null);
     if (t.id !== "crop") setCropDraft(null);
@@ -2165,7 +1608,7 @@ export function MaskEditModal({
           {/* Floating selection-size panel: centred below the marquee's
               bottom edge, clamped to the window. Screen-space so the view
               transform never scales it. */}
-          {lastMarquee && !marquee.current && tool.kind === "marquee" && canvasRef.current
+          {lastMarquee && !gestures.marquee && tool.kind === "marquee" && canvasRef.current
             ? (() => {
                 const rect = canvasRef.current.getBoundingClientRect();
                 const [x0, y0, x1, y1] = lastMarquee.region;
