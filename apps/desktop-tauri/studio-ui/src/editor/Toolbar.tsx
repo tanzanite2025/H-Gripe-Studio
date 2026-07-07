@@ -23,6 +23,27 @@ export function RedoIcon() {
   );
 }
 
+/** Image editor module: a framed photo with a sun and mountain. */
+export function ImageEditIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9" r="1.5" />
+      <path d="m4 17 5-5 4 4 3-3 4 4" />
+    </svg>
+  );
+}
+
+/** Edit / grade module: a film clapperboard for timeline editing & grading. */
+export function EditGradeIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="3" y="8" width="18" height="12" rx="2" />
+      <path d="m4 8 3-4 4 4M11 4l4 4M16 4l4 3.5" />
+    </svg>
+  );
+}
+
 export interface ToolbarProps {
   // Status
   issues: ValidationIssue[];
@@ -105,15 +126,21 @@ export function Toolbar({
               ! {issues.length} {issues.length > 1 ? t("issues.many") : t("issues.one")}
             </span>
           )}
-          <button onClick={onOpenImageEdit} title={t("btn.imageEditTitle")}>
-            {t("btn.imageEdit")}
+          <button
+            onClick={onOpenImageEdit}
+            title={t("btn.imageEditTitle")}
+            aria-label={t("btn.imageEdit")}
+            className="module-btn module-image"
+          >
+            <ImageEditIcon />
           </button>
           <button
             onClick={onToggleDrawer}
             title={drawerOpen ? t("btn.drawerCloseTitle") : t("btn.drawerTitle")}
-            className={drawerOpen ? "active" : undefined}
+            aria-label={t("btn.drawer")}
+            className={`module-btn module-grade${drawerOpen ? " active" : ""}`}
           >
-            {t("btn.drawer")}
+            <EditGradeIcon />
           </button>
           {isDesktop && (
             <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>

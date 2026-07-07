@@ -137,6 +137,51 @@ button:disabled { opacity: 0.6; cursor: default; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.toolbar-title-status .module-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #232633;
+}
+.toolbar-title-status .module-btn .toolbar-icon {
+  width: 18px;
+  height: 18px;
+}
+.toolbar-title-status .module-image {
+  border-color: rgba(91, 140, 255, 0.35);
+  background: rgba(91, 140, 255, 0.12);
+}
+.toolbar-title-status .module-image .toolbar-icon {
+  stroke: var(--t-image);
+}
+.toolbar-title-status .module-image:hover {
+  border-color: rgba(91, 140, 255, 0.7);
+  background: rgba(91, 140, 255, 0.2);
+}
+.toolbar-title-status .module-grade {
+  border-color: rgba(192, 132, 252, 0.35);
+  background: rgba(192, 132, 252, 0.12);
+}
+.toolbar-title-status .module-grade .toolbar-icon {
+  stroke: var(--t-model);
+}
+.toolbar-title-status .module-grade:hover {
+  border-color: rgba(192, 132, 252, 0.7);
+  background: rgba(192, 132, 252, 0.2);
+}
+.toolbar-title-status .module-btn.active {
+  border-color: var(--accent);
+  background: rgba(91, 140, 255, 0.18);
+  color: var(--accent);
+}
+.toolbar-title-status .module-btn.active .toolbar-icon {
+  stroke: var(--accent);
+}
 
 /* canvas tab row (multi-canvas workspace): one tab per open canvas document */
 .canvas-tabs {
