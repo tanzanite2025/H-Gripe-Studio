@@ -307,6 +307,26 @@ impl D3d11Frame {
     pub(crate) fn height(&self) -> u32 {
         unsafe { (*self.frame.0).height.max(0) as u32 }
     }
+
+    /// The `AVD3D11VADeviceContext` of the D3D11VA device this frame's
+    /// texture lives on (`hw_frames_ctx -> device_ctx -> hwctx`), as an
+    /// opaque pointer. The WGPU import (`d3d11_wgpu`) casts it to its own
+    /// mirror of the struct to reach the `ID3D11Device`/contexts and the
+    /// FFmpeg lock/unlock callbacks. Null when the frame carries no
+    /// hardware frames context.
+    pub(crate) fn device_hwctx_ptr(&self) -> *mut std::os::raw::c_void {
+        unsafe {
+            let frames_ref = (*self.frame.0).hw_frames_ctx;
+            if frames_ref.is_null() {
+                return std::ptr::null_mut();
+            }
+            let frames = (*frames_ref).data as *mut ffi::AVHWFramesContext;
+            if frames.is_null() || (*frames).device_ctx.is_null() {
+                return std::ptr::null_mut();
+            }
+            (*(*frames).device_ctx).hwctx
+        }
+    }
 }
 
 /// Decode the frame nearest `timestamp_sec` into a GPU-resident D3D11

@@ -121,6 +121,18 @@ compiled-in decoder list. Until the phase-2 texture import lands, hardware
 sessions read frames back once through `av_hwframe_transfer_data` — reported,
 not silent, and not claimed as zero-copy.
 
+Phase 2 of this route is `d3d11_wgpu`: `import_d3d11_frame` bridges a decoded
+hardware frame into the WGPU Dx12 device without CPU readback — a BGRA8
+texture created raw on WGPU's D3D12 device with `HEAP_FLAG_SHARED`, opened on
+FFmpeg's D3D11 device through an NT shared handle, filled by the D3D11 video
+processor (`VideoProcessorBlt`, fixed-function NV12->RGB on the GPU), fenced
+with a D3D11 event query, and wrapped as a `wgpu::Texture` via `wgpu-hal`.
+The registry's `d3d11_wgpu_interop` entry reports this third level ("zero-copy
+texture path") from the recorded outcome of the first actual import — proven,
+not assumed. Playback/preview integration (feeding these textures to the
+viewport surface per frame) is phase 3; the CPU readback bridge stays as the
+explicit fallback until then.
+
 ### Done Means
 
 Do not mark the zero-copy work complete until:
