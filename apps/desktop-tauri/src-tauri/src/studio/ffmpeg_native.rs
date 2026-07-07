@@ -338,6 +338,12 @@ impl D3d11Frame {
 pub(crate) fn decode_d3d11_frame(video: &Path, timestamp_sec: f64) -> Result<D3d11Frame, String> {
     let mut decoder = Decoder::open_d3d11va(video)?;
     let frame = decoder.decode_frame_at(timestamp_sec)?;
+    hw_frame(frame)
+}
+
+/// Wrap a decoded frame as a [`D3d11Frame`] — strict: the session must have
+/// produced a GPU texture frame, never CPU planes.
+fn hw_frame(frame: OwnedFrame) -> Result<D3d11Frame, String> {
     let format = unsafe { (*frame.0).format };
     if format != ffi::AV_PIX_FMT_D3D11 {
         return Err(format!(
@@ -348,6 +354,88 @@ pub(crate) fn decode_d3d11_frame(video: &Path, timestamp_sec: f64) -> Result<D3d
         return Err("D3D11 frame carries no texture pointer".to_string());
     }
     Ok(D3d11Frame { frame })
+}
+
+/// Largest forward step still decoded *sequentially* by a
+/// [`D3d11PlaybackSession`] — the continuous-playback window. Anything
+/// larger, backwards, or a repeat of the same position reads as a seek
+/// (keyframe seek + walk), exactly like [`decode_d3d11_frame`].
+const MAX_SEQUENTIAL_STEP_SEC: f64 = 0.5;
+
+/// A persistent D3D11VA decode session for continuous playback pacing
+/// (GPU_DEVICE_STRATEGY_PLAN video zero-copy route): opening a hardware
+/// session and seeking to a keyframe per presented frame cannot hold a
+/// frame rate, so playback keeps one session per viewport and advances it
+/// *sequentially* — a small forward step decodes the next frame(s) from the
+/// current position with no seek and no flush. A seek (backwards, a jump
+/// past [`MAX_SEQUENTIAL_STEP_SEC`], or a paused re-render of the same
+/// position) falls back to the keyframe-seek walk inside the same session,
+/// still without reopening the container or the decoder.
+pub(crate) struct D3d11PlaybackSession {
+    decoder: Decoder,
+    path: PathBuf,
+    /// Presentation time (stream time base) of the last frame handed out;
+    /// `None` until the first decode.
+    last_ts: Option<i64>,
+}
+
+// SAFETY: the session is only ever used behind a `Mutex` (one command call
+// at a time); libav contexts and the D3D11VA device tolerate sequential use
+// from different threads, just not concurrent use.
+unsafe impl Send for D3d11PlaybackSession {}
+
+impl D3d11PlaybackSession {
+    /// Open a hardware session on `video`. Strictness matches
+    /// [`decode_d3d11_frame`]: `Err` names the missing capability level.
+    pub(crate) fn open(video: &Path) -> Result<Self, String> {
+        Ok(Self {
+            decoder: Decoder::open_d3d11va(video)?,
+            path: video.to_path_buf(),
+            last_ts: None,
+        })
+    }
+
+    /// The video this session decodes; a different target replaces the
+    /// session.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Decode the frame at or past `timestamp_sec` as a GPU texture frame.
+    /// A continuous forward step (within [`MAX_SEQUENTIAL_STEP_SEC`] of the
+    /// last frame) decodes sequentially from the current position; anything
+    /// else seeks first.
+    pub(crate) fn frame_near(&mut self, timestamp_sec: f64) -> Result<D3d11Frame, String> {
+        let target_ts = self.decoder.target_ts(timestamp_sec);
+        let max_step = self.decoder.target_ts(MAX_SEQUENTIAL_STEP_SEC).max(1);
+        let sequential = is_sequential_step(self.last_ts, target_ts, max_step);
+        if !sequential && timestamp_sec >= 0.0 {
+            unsafe { self.decoder.seek_before(target_ts) };
+        }
+        let frame = unsafe { self.decoder.decode_forward_to(target_ts) }?;
+        let pts = unsafe {
+            let best = (*frame.0).best_effort_timestamp;
+            if best != AV_NOPTS_VALUE {
+                best
+            } else {
+                (*frame.0).pts
+            }
+        };
+        self.last_ts = if pts != AV_NOPTS_VALUE {
+            Some(pts)
+        } else {
+            Some(target_ts)
+        };
+        hw_frame(frame)
+    }
+}
+
+/// Whether a request for `target_ts` reads as a continuous forward playback
+/// step from `last_ts` (decode sequentially, no seek): strictly forward and
+/// within `max_step` ticks. A first request, a repeat of the same position,
+/// a backwards step, or a jump all read as seeks.
+fn is_sequential_step(last_ts: Option<i64>, target_ts: i64, max_step: i64) -> bool {
+    last_ts.is_some_and(|last| target_ts > last && target_ts - last <= max_step)
 }
 
 /// The first hardware H.264 encoder compiled into the vendored libav, if any
@@ -768,28 +856,49 @@ impl Decoder {
     /// from a software session, a GPU texture frame (`AV_PIX_FMT_D3D11`) from
     /// a D3D11VA session.
     fn decode_frame_at(&mut self, timestamp_sec: f64) -> Result<OwnedFrame, String> {
-        unsafe {
-            // Target timestamp in the stream's time base: ts / (num/den).
-            let q = self.time_base;
-            let target_ts = if q.num > 0 && q.den > 0 {
-                (timestamp_sec * q.den as f64 / q.num as f64).round() as i64
-            } else {
-                0
-            };
+        let target_ts = self.target_ts(timestamp_sec);
+        if timestamp_sec > 0.0 {
+            unsafe { self.seek_before(target_ts) };
+        }
+        unsafe { self.decode_forward_to(target_ts) }
+    }
 
-            if timestamp_sec > 0.0 {
-                // Seek to the keyframe at or before the target, then decode
-                // forward. Best-effort: a seek failure just decodes from where
-                // we are.
-                let _ = ffi::av_seek_frame(
-                    self.fmt,
-                    self.stream_index,
-                    target_ts,
-                    ffi::AVSEEK_FLAG_BACKWARD as i32,
-                );
-                ffi::avcodec_flush_buffers(self.codec_ctx);
-            }
+    /// The requested timestamp in the stream's time base (`ts / (num/den)`),
+    /// `0` when the time base is degenerate.
+    fn target_ts(&self, timestamp_sec: f64) -> i64 {
+        let q = self.time_base;
+        if q.num > 0 && q.den > 0 {
+            (timestamp_sec * q.den as f64 / q.num as f64).round() as i64
+        } else {
+            0
+        }
+    }
 
+    /// Seek to the keyframe at or before `target_ts` and flush the decoder so
+    /// the next [`decode_forward_to`](Self::decode_forward_to) walks from
+    /// there. Best-effort: a seek failure just decodes from where we are.
+    ///
+    /// # Safety
+    /// The decoder's `fmt`/`codec_ctx` must be valid and open.
+    unsafe fn seek_before(&mut self, target_ts: i64) {
+        let _ = ffi::av_seek_frame(
+            self.fmt,
+            self.stream_index,
+            target_ts,
+            ffi::AVSEEK_FLAG_BACKWARD as i32,
+        );
+        ffi::avcodec_flush_buffers(self.codec_ctx);
+    }
+
+    /// Decode forward from the decoder's current position to the first frame
+    /// at or past `target_ts` (or after [`MAX_FRAMES_TO_TARGET`]). Does *not*
+    /// seek: called after [`seek_before`](Self::seek_before) for a random
+    /// access, or directly to advance one frame during continuous playback.
+    ///
+    /// # Safety
+    /// The decoder's `fmt`/`codec_ctx` must be valid and open.
+    unsafe fn decode_forward_to(&mut self, target_ts: i64) -> Result<OwnedFrame, String> {
+        {
             let packet = ffi::av_packet_alloc();
             let frame = ffi::av_frame_alloc();
             if packet.is_null() || frame.is_null() {
@@ -1297,6 +1406,21 @@ impl Drop for Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sequential_step_is_strictly_forward_within_the_window() {
+        // First request: always a seek.
+        assert!(!is_sequential_step(None, 100, 50));
+        // Forward within the window: sequential.
+        assert!(is_sequential_step(Some(100), 101, 50));
+        assert!(is_sequential_step(Some(100), 150, 50));
+        // Repeat of the same position (paused re-render): a seek.
+        assert!(!is_sequential_step(Some(100), 100, 50));
+        // Backwards: a seek.
+        assert!(!is_sequential_step(Some(100), 99, 50));
+        // Past the window: a seek.
+        assert!(!is_sequential_step(Some(100), 151, 50));
+    }
 
     /// Exercises the full link + runtime-DLL-load chain: constructing the
     /// source and probing a missing file must return `Err` (from

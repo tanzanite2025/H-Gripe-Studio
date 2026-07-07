@@ -789,6 +789,23 @@ fn apply_temporal(
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();
+
+/// Persistent D3D11VA decode sessions keyed by viewport (continuous playback
+/// pacing on the video zero-copy path): a small forward playhead step decodes
+/// sequentially from the session's current position instead of reopening the
+/// container and seeking to a keyframe per frame. A session is replaced when
+/// the viewport's video changes, evicted when a decode fails (the next
+/// request reopens fresh), and dropped with the viewport.
+#[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
+static HW_SESSIONS: OnceLock<
+    Mutex<HashMap<u64, crate::studio::ffmpeg_native::D3d11PlaybackSession>>,
+> = OnceLock::new();
+
+#[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
+fn hw_sessions() -> &'static Mutex<HashMap<u64, crate::studio::ffmpeg_native::D3d11PlaybackSession>>
+{
+    HW_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 fn viewports() -> &'static Mutex<HashMap<u64, ViewportState>> {
@@ -1224,6 +1241,10 @@ pub(crate) fn viewport_destroy_inner(viewport_id: String) -> Result<(), String> 
     let mut map = viewports()
         .lock()
         .map_err(|_| "viewport registry poisoned")?;
+    #[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
+    if let Ok(mut sessions) = hw_sessions().lock() {
+        sessions.remove(&id);
+    }
     match map.remove(&id) {
         Some(state) => {
             eprintln!(
@@ -1921,10 +1942,33 @@ fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
         return None;
     }
     let result = (|| -> Result<(u32, u32), String> {
-        let frame = crate::studio::ffmpeg_native::decode_d3d11_frame(
-            std::path::Path::new(&path),
-            time_sec,
-        )?;
+        // Continuous playback pacing: reuse the viewport's persistent decode
+        // session so a forward playhead step decodes sequentially (no reopen,
+        // no keyframe seek). The lock is held across the decode — sessions
+        // are strictly one-at-a-time.
+        let mut sessions = hw_sessions()
+            .lock()
+            .map_err(|_| "hardware session registry poisoned".to_string())?;
+        let session = match sessions.entry(id) {
+            std::collections::hash_map::Entry::Occupied(entry)
+                if entry.get().path() == std::path::Path::new(&path) =>
+            {
+                entry.into_mut()
+            }
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                let slot = entry.into_mut();
+                *slot = crate::studio::ffmpeg_native::D3d11PlaybackSession::open(
+                    std::path::Path::new(&path),
+                )?;
+                slot
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(crate::studio::ffmpeg_native::D3d11PlaybackSession::open(
+                    std::path::Path::new(&path),
+                )?)
+            }
+        };
+        let frame = session.frame_near(time_sec)?;
         let size = (frame.width(), frame.height());
         crate::commands::viewport_surface::present_hw_frame(
             viewport_id,
@@ -1937,6 +1981,11 @@ fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
         Ok(size) => Some(size),
         Err(reason) => {
             eprintln!("[viewport] zero-copy present fell back for {viewport_id}: {reason}");
+            // Never leave a possibly-broken session behind: the next opted-in
+            // request reopens fresh.
+            if let Ok(mut sessions) = hw_sessions().lock() {
+                sessions.remove(&id);
+            }
             None
         }
     }
