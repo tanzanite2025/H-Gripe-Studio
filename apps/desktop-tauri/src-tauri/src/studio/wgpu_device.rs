@@ -25,6 +25,10 @@ pub(crate) struct SharedGpu {
     pub queue: wgpu::Queue,
     /// Human-readable adapter description (name + backend) for device reports.
     pub adapter_summary: String,
+    /// True when this device was selected with the actual presentation surface
+    /// as `compatible_surface`. A generic compute adapter is not enough for
+    /// the zero-copy viewport surface path.
+    pub surface_compatible: bool,
 }
 
 /// How the shared surface device resolved: the report every surface path
@@ -115,17 +119,24 @@ fn record_device_lost(reason: wgpu::DeviceLostReason, message: String) {
 }
 
 #[cfg(feature = "viewport-surface")]
-fn init_shared_gpu() -> Result<Arc<SharedGpu>, String> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+pub(crate) fn surface_instance() -> wgpu::Instance {
+    wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env())
+}
+
+#[cfg(feature = "viewport-surface")]
+fn init_shared_gpu(
+    instance: wgpu::Instance,
+    compatible_surface: Option<&wgpu::Surface<'_>>,
+) -> Result<Arc<SharedGpu>, String> {
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         force_fallback_adapter: false,
-        compatible_surface: None,
+        compatible_surface,
     }))
     .map_err(|e| format!("no suitable GPU adapter: {e}"))?;
     let info = adapter.get_info();
     let adapter_summary = format!("{} ({:?})", info.name, info.backend);
+    let surface_compatible = compatible_surface.is_some();
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("hgripe-viewport-surface"),
         required_features: wgpu::Features::empty(),
@@ -135,14 +146,33 @@ fn init_shared_gpu() -> Result<Arc<SharedGpu>, String> {
     .map_err(|e| format!("device request failed: {e}"))?;
     device.set_device_lost_callback(record_device_lost);
     device.on_uncaptured_error(Arc::new(record_uncaptured_error));
-    eprintln!("[viewport] shared wgpu device initialised: {adapter_summary}");
+    let profile = if surface_compatible {
+        "surface-compatible"
+    } else {
+        "generic"
+    };
+    eprintln!("[viewport] shared wgpu device initialised ({profile}): {adapter_summary}");
     Ok(Arc::new(SharedGpu {
         instance,
         adapter,
         device,
         queue,
         adapter_summary,
+        surface_compatible,
     }))
+}
+
+#[cfg(feature = "viewport-surface")]
+fn resolve_cached_shared_gpu(
+    cached: &Result<Arc<SharedGpu>, String>,
+) -> Result<Arc<SharedGpu>, String> {
+    match cached {
+        Ok(gpu) => match device_lost_reason() {
+            Some(reason) => Err(reason),
+            None => Ok(Arc::clone(gpu)),
+        },
+        Err(e) => Err(e.clone()),
+    }
 }
 
 /// The shared device, initialising it on first use. The result (including a
@@ -153,16 +183,46 @@ fn init_shared_gpu() -> Result<Arc<SharedGpu>, String> {
 #[allow(dead_code)] // consumed by the surface presentation path from Phase S1
 pub(crate) fn shared_gpu() -> Result<Arc<SharedGpu>, String> {
     match SHARED.get_or_init(|| {
-        init_shared_gpu().inspect_err(|e| {
+        init_shared_gpu(surface_instance(), None).inspect_err(|e| {
             eprintln!("[viewport] shared wgpu device unavailable, PNG fallback stays: {e}");
         })
     }) {
-        Ok(gpu) => match device_lost_reason() {
-            Some(reason) => Err(reason),
-            None => Ok(Arc::clone(gpu)),
-        },
-        Err(e) => Err(e.clone()),
+        cached => resolve_cached_shared_gpu(cached),
     }
+}
+
+/// Read the cached shared device without initialising it. Surface presentation
+/// uses this so the first real HWND surface can constrain adapter selection.
+#[cfg(feature = "viewport-surface")]
+#[allow(dead_code)]
+pub(crate) fn shared_gpu_cached() -> Option<Result<Arc<SharedGpu>, String>> {
+    SHARED.get().map(resolve_cached_shared_gpu)
+}
+
+/// Initialise the shared device using a real presentation surface as the
+/// adapter compatibility constraint. This is the zero-copy surface path's
+/// first-choice entry point.
+#[cfg(feature = "viewport-surface")]
+#[allow(dead_code)]
+pub(crate) fn shared_gpu_for_surface(
+    instance: wgpu::Instance,
+    surface: &wgpu::Surface<'_>,
+) -> Result<Arc<SharedGpu>, String> {
+    let cached = SHARED.get_or_init(|| {
+        init_shared_gpu(instance, Some(surface)).inspect_err(|e| {
+            eprintln!(
+                "[viewport] shared wgpu surface-compatible device unavailable, PNG fallback stays: {e}"
+            );
+        })
+    });
+    let gpu = resolve_cached_shared_gpu(cached)?;
+    if !gpu.surface_compatible {
+        return Err(
+            "shared WGPU device was initialised without a presentation surface; restart required for zero-copy surface profile"
+                .to_string(),
+        );
+    }
+    Ok(gpu)
 }
 
 /// Whether the shared device has already been initialised (successfully or
@@ -259,7 +319,19 @@ pub(crate) fn surface_device_status() -> Result<String, String> {
         match SHARED.get() {
             Some(Ok(gpu)) => match device_lost_reason() {
                 Some(reason) => Err(format!("{} — {}", gpu.adapter_summary, reason)),
-                None => Ok(gpu.adapter_summary.clone()),
+                None => {
+                    if gpu.surface_compatible {
+                        Ok(format!(
+                            "zero-copy surface profile: {}",
+                            gpu.adapter_summary
+                        ))
+                    } else {
+                        Ok(format!(
+                            "generic WGPU profile (not surface-compatible): {}",
+                            gpu.adapter_summary
+                        ))
+                    }
+                }
             },
             Some(Err(reason)) => Err(reason.clone()),
             None => {
@@ -273,20 +345,39 @@ pub(crate) fn surface_device_status() -> Result<String, String> {
     }
 }
 
-/// Resolve the surface device report, initialising the device if needed.
+/// Resolve the surface device report without forcing initialisation. A
+/// diagnostics read must not steal the first-init opportunity from the real
+/// presentation surface.
 #[cfg(feature = "viewport-surface")]
 #[allow(dead_code)] // wired into the viewport backend report from Phase S1
 pub(crate) fn surface_device_report() -> SurfaceDeviceReport {
-    match shared_gpu() {
-        Ok(gpu) => SurfaceDeviceReport {
+    match shared_gpu_cached() {
+        Some(Ok(gpu)) if gpu.surface_compatible => SurfaceDeviceReport {
             used: DeviceUsed::Wgpu,
-            backend: Some(gpu.adapter_summary.clone()),
+            backend: Some(format!(
+                "zero-copy surface profile: {}",
+                gpu.adapter_summary
+            )),
             fallback_reason: None,
         },
-        Err(e) => SurfaceDeviceReport {
+        Some(Ok(gpu)) => SurfaceDeviceReport {
+            used: DeviceUsed::Cpu,
+            backend: Some(gpu.adapter_summary.clone()),
+            fallback_reason: Some(
+                "shared WGPU device was not selected with a presentation surface".to_string(),
+            ),
+        },
+        Some(Err(e)) => SurfaceDeviceReport {
             used: DeviceUsed::Cpu,
             backend: None,
             fallback_reason: Some(e),
+        },
+        None => SurfaceDeviceReport {
+            used: DeviceUsed::Cpu,
+            backend: None,
+            fallback_reason: Some(
+                "not initialised yet (initialises on the first presented viewport)".to_string(),
+            ),
         },
     }
 }

@@ -5,6 +5,15 @@
 > wiring) have landed; heavy pixels present through WGPU viewports with the
 > PNG/blob transport as the browser-preview and no-adapter fallback. Kept as
 > the reference for the viewport host boundary and presentation contracts.
+>
+> 2026-07 zero-copy correction: this document remains the record of the
+> viewport-host migration, but the product target has been raised in
+> [`GPU_DEVICE_STRATEGY_PLAN.md`](../active/GPU_DEVICE_STRATEGY_PLAN.md).
+> Native surface swap is not considered the final zero-copy solution until the
+> adapter is selected with the actual presentation surface as the compatibility
+> constraint, the device registry exposes a zero-copy profile, and video decode
+> has a hardware-frame path that does not round-trip through CPU RGBA for
+> interactive playback.
 
 ## Status Snapshot (2026-07)
 

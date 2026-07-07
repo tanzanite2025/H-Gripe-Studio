@@ -33,6 +33,100 @@ cross-kernel scheduling work.
 This document must be read together with
 [`WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md).
 
+## Zero-Copy Presentation Is A Hard Product Target
+
+The previous WGPU surface work treated PNG/blob transport as an acceptable
+desktop fallback. That is no longer the long-term target. For H-Gripe Studio's
+image editor, grade preview, program monitor, crop/mask preview, and later
+video editing surfaces, the product target is:
+
+```text
+interactive desktop frame
+  -> no PNG encode
+  -> no base64/blob frame payload
+  -> no GPU -> CPU -> WebView round trip
+  -> present through a native GPU surface or an equivalent zero-copy texture path
+```
+
+CPU/software paths may remain for correctness, tests, export parity, unsupported
+machines, and explicit user fallback, but they must not be described as the
+final interactive presentation path.
+
+### Required Surface Adapter Strategy
+
+The surface path must stop selecting a generic high-performance adapter first
+and only then testing whether it can present to the viewport HWND. That order can
+fail on hybrid-GPU and driver-specific machines: the adapter can be valid for
+compute but invalid for the child-window surface, producing errors such as
+`surface is not supported by the shared adapter`.
+
+The correct probe order is:
+
+1. Create a real probe/presentation surface for the target window class
+   (Windows child HWND today).
+2. Request the WGPU adapter with that surface as `compatible_surface`.
+3. Prefer the best surface-compatible adapter, not merely the best compute
+   adapter.
+4. Cache a `SurfacePresentationProfile` for the session:
+   - supported / unsupported
+   - adapter name and backend
+   - surface format / present mode
+   - failure reason when unsupported
+5. Route every heavy viewport through that profile. Do not re-probe on every
+   mouse move, scroll, resize, slider tick, or frame.
+6. If the WebView-underlay child surface cannot be supported on a machine,
+   the next product path is a WGPU-owned native viewport/window composition
+   strategy, not accepting PNG/blob as the final answer.
+
+This means the current fallback caching is only a stability fix. The next
+implementation step must be a surface-compatible adapter selector and a visible
+diagnostic panel that says exactly why a machine is or is not in the zero-copy
+profile.
+
+### Required Video / FFmpeg Zero-Copy Strategy
+
+Vendored FFmpeg already means the app does not depend on a system FFmpeg,
+vcpkg, pkg-config, or CI downloads. It does not automatically mean video decode
+is zero-copy.
+
+For video, there are three different levels:
+
+| Level | Meaning | Status / Requirement |
+| --- | --- | --- |
+| Vendored software FFmpeg | Decode/encode through local libav DLLs and Rust FFI. | Baseline already local and controlled. |
+| Hardware FFmpeg session | Use a hardware decoder/encoder such as D3D11VA/DXVA2/NVDEC/QSV/AMF when compiled and accepted by the driver. | Must remain explicit/probed/reporting until stable. |
+| True video zero-copy | Hardware decoder outputs GPU frames that are imported or presented without CPU readback/upload. | Future hard target for playback/program monitor; requires FFmpeg HW frames + D3D/WGPU interop or a native compositor path. |
+
+So "FFmpeg is local" and "video preview is zero-copy" are not the same claim.
+The former is already true. The latter requires a dedicated hardware-frame path:
+
+```text
+vendored FFmpeg hw decode
+  -> AVHWDeviceContext / AVHWFramesContext
+  -> D3D11/D3D12 texture-backed frame
+  -> WGPU/native compositor import or same-GPU presentation
+  -> grade/preview surface
+```
+
+If a frame has to become `RgbaImage` and then be uploaded to WGPU, that path is
+not true decode zero-copy, even if presentation afterward is native.
+
+### Done Means
+
+Do not mark the zero-copy work complete until:
+
+- the surface adapter is selected using the actual presentation surface;
+- the device registry reports the zero-copy profile separately from generic
+  display adapters;
+- image edit, grade preview, program monitor, and crop/mask preview can run
+  interactive frames without PNG/blob transport on supported machines;
+- unsupported machines get a single structured reason, not repeated terminal
+  spam;
+- FFmpeg hardware decode/encode probes distinguish "compiled in",
+  "driver/session accepted", and "zero-copy texture path available";
+- the user can open a diagnostics panel and see why the current machine is or is
+  not using zero-copy.
+
 The priority order is:
 
 ```text

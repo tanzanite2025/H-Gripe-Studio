@@ -278,7 +278,9 @@ mod native {
     use super::{
         crop_uniform, frame_within_texture_limit, identity_uniform, PlacementReport, ViewWindow,
     };
-    use crate::studio::wgpu_device::{shared_gpu, SharedGpu};
+    use crate::studio::wgpu_device::{
+        shared_gpu_cached, shared_gpu_for_surface, surface_instance, SharedGpu,
+    };
 
     /// One viewport's presentation window and its (re)configurable surface.
     /// `HWND` is stored as `isize` so the entry is `Send`; every Win32 call
@@ -332,6 +334,7 @@ mod native {
         let reason = reason.to_ascii_lowercase();
         reason.contains("shared adapter")
             || reason.contains("not supported")
+            || reason.contains("without a presentation surface")
             || reason.contains("surface creation failed")
             || reason.contains("surface window class registration failed")
     }
@@ -433,6 +436,53 @@ mod native {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
         Ok(hwnd as isize)
+    }
+
+    fn surface_target(hwnd: isize) -> Result<wgpu::SurfaceTargetUnsafe, String> {
+        Ok(wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(wgpu::rwh::RawDisplayHandle::Windows(
+                wgpu::rwh::WindowsDisplayHandle::new(),
+            )),
+            raw_window_handle: wgpu::rwh::RawWindowHandle::Win32(
+                wgpu::rwh::Win32WindowHandle::new(
+                    std::num::NonZeroIsize::new(hwnd).ok_or("surface window handle is null")?,
+                ),
+            ),
+        })
+    }
+
+    fn create_surface(
+        instance: &wgpu::Instance,
+        hwnd: isize,
+    ) -> Result<wgpu::Surface<'static>, String> {
+        // Safety: the Entry owns the Win32 child window and drops the surface
+        // before destroying that window.
+        unsafe { instance.create_surface_unsafe(surface_target(hwnd)?) }
+            .map_err(|e| format!("surface creation failed: {e}"))
+    }
+
+    fn ensure_surface_gpu(entry: &mut Entry) -> Result<Arc<SharedGpu>, String> {
+        if let Some(cached) = shared_gpu_cached() {
+            let gpu = cached?;
+            if !gpu.surface_compatible {
+                return Err(
+                    "shared WGPU device was initialised without a presentation surface; restart required for zero-copy surface profile"
+                        .to_string(),
+                );
+            }
+            if entry.surface.is_none() {
+                entry.surface = Some(create_surface(&gpu.instance, entry.hwnd)?);
+                entry.config = None;
+            }
+            return Ok(gpu);
+        }
+
+        let instance = surface_instance();
+        let surface = create_surface(&instance, entry.hwnd)?;
+        let gpu = shared_gpu_for_surface(instance, &surface)?;
+        entry.surface = Some(surface);
+        entry.config = None;
+        Ok(gpu)
     }
 
     /// WGSL blit: a quad scaled to the aspect-fit rect, sampling the frame
@@ -745,28 +795,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     /// Create (or reuse) the entry's wgpu surface, reconfigure it to `w`x`h`
     /// if the size changed, and present one frame: a clear to the app
     /// background, plus the aspect-fit blit of the last uploaded frame
-    /// texture when one exists (S2) — a bare clear until then (S1).
+    /// texture when one exists (S2) - a bare clear until then (S1).
     fn clear_surface(gpu: &SharedGpu, entry: &mut Entry, w: u32, h: u32) -> Result<(), String> {
-        if entry.surface.is_none() {
-            let target = wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(wgpu::rwh::RawDisplayHandle::Windows(
-                    wgpu::rwh::WindowsDisplayHandle::new(),
-                )),
-                raw_window_handle: wgpu::rwh::RawWindowHandle::Win32(
-                    wgpu::rwh::Win32WindowHandle::new(
-                        std::num::NonZeroIsize::new(entry.hwnd)
-                            .ok_or("surface window handle is null")?,
-                    ),
-                ),
-            };
-            // Safety: the child window outlives the surface — the entry owns
-            // both and destroys the surface before the window.
-            let surface = unsafe { gpu.instance.create_surface_unsafe(target) }
-                .map_err(|e| format!("surface creation failed: {e}"))?;
-            entry.surface = Some(surface);
-            entry.config = None;
-        }
-        let surface = entry.surface.as_ref().expect("surface just ensured");
+        let surface = entry
+            .surface
+            .as_ref()
+            .ok_or("surface was not created before presentation")?;
         let needs_config = entry
             .config
             .as_ref()
@@ -874,9 +908,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         if surface_disabled_reason().is_some() {
             return false;
         }
-        let gpu = match shared_gpu() {
-            Ok(gpu) => gpu,
-            Err(_) => return false,
+        let gpu = match shared_gpu_cached() {
+            Some(Ok(gpu)) if gpu.surface_compatible => gpu,
+            _ => return false,
         };
         let mut map = match surfaces().lock() {
             Ok(map) => map,
@@ -920,9 +954,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         if surface_disabled_reason().is_some() {
             return false;
         }
-        let gpu = match shared_gpu() {
-            Ok(gpu) => gpu,
-            Err(_) => return false,
+        let gpu = match shared_gpu_cached() {
+            Some(Ok(gpu)) if gpu.surface_compatible => gpu,
+            _ => return false,
         };
         let mut map = match surfaces().lock() {
             Ok(map) => map,
@@ -958,7 +992,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     /// no presented texture (never presented, hidden, no GPU) — the CPU
     /// reference path answers instead.
     pub(super) fn read_pixels(viewport_id: &str) -> Option<(u32, u32, Vec<u8>)> {
-        let gpu = shared_gpu().ok()?;
+        let gpu = match shared_gpu_cached()? {
+            Ok(gpu) if gpu.surface_compatible => gpu,
+            _ => return None,
+        };
         let map = surfaces().lock().ok()?;
         let entry = map.get(viewport_id)?;
         if !entry.presented {
@@ -1035,10 +1072,6 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         if let Some(reason) = surface_disabled_reason() {
             return PlacementReport::fallback(reason);
         }
-        let gpu = match shared_gpu() {
-            Ok(gpu) => gpu,
-            Err(reason) => return PlacementReport::fallback(reason),
-        };
         let parent = match window.hwnd() {
             Ok(hwnd) => hwnd.0 as isize,
             Err(e) => return PlacementReport::fallback(format!("no parent window handle: {e}")),
@@ -1066,6 +1099,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             unsafe {
                 MoveWindow(entry.hwnd as HWND, rect.0, rect.1, rect.2, rect.3, 1);
             }
+            let gpu = ensure_surface_gpu(entry)?;
             clear_surface(&gpu, entry, rect.2.max(1) as u32, rect.3.max(1) as u32)?;
             if !entry.presented {
                 unsafe {
