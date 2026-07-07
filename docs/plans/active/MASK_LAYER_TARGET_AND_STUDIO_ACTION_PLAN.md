@@ -78,6 +78,64 @@ The action chain must not depend on UI automation. It should call internal
 actions such as `create_layer_mask`, `run_sam2_prompt_mask`, `feather_mask`,
 or `commit_selection_to_mask`.
 
+## Software-Level Preview And Editor Entries
+
+The canvas may trigger image preview or image editing, but neither surface
+belongs inside the canvas node layer.
+
+There are two product entry points over the same kernel/action layer:
+
+| Surface | Role | Ownership |
+| --- | --- | --- |
+| Image preview modal | Fast review, compare, quick operation preview, and accept / rerun / open editor decisions. | Software-level modal launched from a node result, asset, layer, or graph output. |
+| Image editor | Full document editing: layers, masks, paths, selections, history, and precise correction. | Software-level editor surface opened on demand from an image card, preview, asset, or layer target. |
+
+Both entries must call the same lower layer:
+
+```text
+crop / transform
+mask / matte
+grade / adjust
+selection / path
+resize / repair / inpaint
+  -> Studio Action
+  -> compute block / Rust-WGPU kernel / model backend
+  -> preview artifact
+  -> commit transaction
+```
+
+This means the preview modal may expose quick crop, quick mask, quick grade, or
+quick matte affordances, but those controls are only thin requests into the
+shared action layer. The full image editor may expose the same operations with
+more detailed UI and history, but it must not own a second implementation.
+
+The canvas passes references, not editor logic:
+
+```text
+assetId
+sourceNodeId
+node_output target
+layerId
+layer_mask target
+selectionId / pathId
+operationContext
+```
+
+If a preview operation needs manual correction, the preview opens the image
+editor with the same resolved target and draft artifact. If the editor commits,
+the result returns as a traceable image/layer/mask artifact, not as an invisible
+mutation of the canvas node.
+
+Non-negotiable rules:
+
+- do not put the full image editor inside a node card;
+- do not make preview into a second image editor with duplicated state;
+- do not create crop/mask/grade tab stacks inside preview when the image editor
+  already owns detailed editing;
+- do not run expensive compute merely because the preview modal opens;
+- only run compute after the user requests preview/apply or the graph run scope
+  explicitly reaches that operation.
+
 ## Target Vocabulary
 
 The editor needs first-class target ids. These ids are the language shared by
@@ -440,4 +498,3 @@ The design is ready for implementation when:
 
 When these are true, Goose or another agent layer becomes an adapter, not a
 foundation risk.
-

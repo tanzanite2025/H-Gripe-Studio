@@ -123,6 +123,32 @@ editor, and the user can crop, mask, paint, retouch, adjust layers, or make any
 other free edit there. Confirming that editor produces a traceable edited image
 asset / output without mutating the original source.
 
+Preview is also not a node-card implementation detail. A node, row, or output
+may expose a `Preview` action, but that action opens the shared software-level
+preview modal. The preview modal can show source/result/mask/cutout layers and
+offer quick operations such as crop, mask, grade, or matte preview, but those
+operations must call the same Studio Action / compute-block layer used by the
+full image editor.
+
+Correct ownership:
+
+```text
+node card / row
+  -> passes assetId, node_output, row port, layer, or mask target
+  -> opens software-level preview or image editor
+  -> shared action/kernel layer performs the work
+  -> result returns as an artifact or committed edit
+```
+
+Wrong ownership:
+
+```text
+node card
+  -> embeds a second mini image editor
+  -> owns private crop/mask/grade logic
+  -> mutates pixels without target/preview/undo
+```
+
 Image Processing rows are for flow-level, connectable operations. They expose
 row-specific input/output ports and parameters so the user can wire exactly the
 operation they want. They can provide preview/review affordances, but they should

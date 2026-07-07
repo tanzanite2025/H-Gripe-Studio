@@ -197,6 +197,30 @@ Image Processing card
 The row may expose advanced controls, but it still remains one Mask / Matte
 operation from the user's point of view.
 
+The same preprocess capability may also be used by software-level image
+surfaces:
+
+| Entry | Expected use |
+| --- | --- |
+| Image preview modal | Fast mask/matte review, feature-map comparison, quick rerun, and accept/open-editor decisions. |
+| Image editor | Detailed layer-mask editing, path/selection correction, history, and final commit. |
+| Image Processing row | Flow-level connectable mask/matte output for downstream cards. |
+
+These entries must not fork the implementation. They should all call the same
+compute capability and receive the same artifact types:
+
+```text
+entry surface
+  -> resolved StudioTarget / ProductionTarget
+  -> selection.from_colour or mask/matte compute block
+  -> feature map / trimap / alpha / cutout preview artifact
+  -> accept, edit, rerun, or route downstream
+```
+
+The preview modal is allowed to expose quick controls, but it stays a review
+surface. If the user needs brush/path/layer-mask correction, it opens the full
+image editor on the same target instead of growing its own editor stack.
+
 The Image Source card's bottom `Edit` action remains the entry for free manual
 image editing. This preprocess is for flow-level mask/matte generation, not for
 turning every small tool into a separate card.
