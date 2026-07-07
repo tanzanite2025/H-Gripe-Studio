@@ -16,7 +16,7 @@
 
 use serde::Serialize;
 
-use super::wgpu_device::AdapterRecord;
+use super::wgpu_device::{AdapterRecord, SurfacePresentationProfile};
 
 /// One capability entry: available with its detail, or unavailable with the
 /// reason kept visible (fallback is a reportable decision, never silent).
@@ -57,6 +57,11 @@ pub(crate) struct DeviceRegistrySnapshot {
     /// Shared viewport surface device — cached state only, never initialised
     /// by a snapshot (the lazy-init startup guard stays intact).
     pub viewport_surface: RegistryEntry,
+    /// The resolved surface presentation profile (adapter, backend, swapchain
+    /// format, or the permanent failure reason), once the first viewport
+    /// surface configured or permanently failed. Cached state only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_profile: Option<SurfacePresentationProfile>,
     /// The last uncaptured GPU error on the surface device (out of memory,
     /// validation, internal), when one has been recorded — the failing
     /// present fell back to the PNG transport and the error stays visible.
@@ -108,6 +113,7 @@ pub(crate) fn snapshot() -> DeviceRegistrySnapshot {
         viewport_surface: RegistryEntry::from_capability(
             super::wgpu_device::surface_device_status(),
         ),
+        surface_profile: super::wgpu_device::surface_presentation_profile(),
         viewport_surface_last_error: super::wgpu_device::last_uncaptured_error(),
         ffmpeg: RegistryEntry::from_capability(super::video_engine::ffmpeg_capability()),
         ffmpeg_hw_encoders: ffmpeg_hw_encoder_names(),

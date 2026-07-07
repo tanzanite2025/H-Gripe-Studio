@@ -279,7 +279,8 @@ mod native {
         crop_uniform, frame_within_texture_limit, identity_uniform, PlacementReport, ViewWindow,
     };
     use crate::studio::wgpu_device::{
-        shared_gpu_cached, shared_gpu_for_surface, surface_instance, SharedGpu,
+        record_surface_profile_failure, record_surface_profile_success, shared_gpu_cached,
+        shared_gpu_for_surface, surface_instance, SharedGpu,
     };
 
     /// One viewport's presentation window and its (re)configurable surface.
@@ -349,6 +350,7 @@ mod native {
                 *disabled = Some(reason.clone());
             }
         }
+        record_surface_profile_failure(reason.clone());
         reason
     }
 
@@ -815,6 +817,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             // of applying a second transfer curve.
             config.format = config.format.remove_srgb_suffix();
             surface.configure(&gpu.device, &config);
+            let info = gpu.adapter.get_info();
+            record_surface_profile_success(
+                info.name.clone(),
+                format!("{:?}", info.backend),
+                format!("{:?}", config.format),
+            );
             entry.config = Some(config);
         }
         let frame = match surface.get_current_texture() {
