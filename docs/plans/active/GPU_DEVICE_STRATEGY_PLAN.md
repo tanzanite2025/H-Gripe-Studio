@@ -145,6 +145,15 @@ import refuses) falls back to the CPU render path with the reason on stderr
 and the import outcome in the registry. The opt-in default stays software;
 the CPU path remains the explicit, reported fallback.
 
+Continuous playback paces through a persistent D3D11VA session per viewport
+(`ffmpeg_native::D3d11PlaybackSession`): a small forward playhead step
+decodes *sequentially* from the session's current position — no container
+reopen, no keyframe seek, no decoder flush — so the zero-copy path can hold
+a frame rate. A backwards step, a jump, or a paused re-render reads as a
+seek inside the same session; a source change replaces the session; a
+decode failure evicts it (the next request reopens fresh) and the frame
+falls back to the CPU path with the reason reported.
+
 ### Done Means
 
 Do not mark the zero-copy work complete until:
