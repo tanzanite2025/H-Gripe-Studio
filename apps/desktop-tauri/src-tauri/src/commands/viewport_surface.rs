@@ -1050,8 +1050,16 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             bind_group,
             format: wgpu::TextureFormat::Bgra8Unorm,
         });
-        entry.frame_view = view;
-        entry.crop_view = None;
+        // The imported texture always covers the whole frame (identity
+        // window); a zoom/pan view presents as a GPU crop of it — the same
+        // mechanism as the zoom/pan fast path, so later views keep cropping
+        // the same texture.
+        entry.frame_view = (1.0, 0.0, 0.0);
+        entry.crop_view = if view == (1.0, 0.0, 0.0) {
+            None
+        } else {
+            Some(view)
+        };
         let (w, h) = {
             let config = entry.config.as_ref().expect("config checked");
             (config.width, config.height)

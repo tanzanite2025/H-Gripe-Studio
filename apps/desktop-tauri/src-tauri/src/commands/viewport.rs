@@ -1867,10 +1867,12 @@ pub(crate) fn viewport_read_pixels(viewport_id: String) -> Result<tauri::ipc::Re
 
 /// The video zero-copy presentation fast path (GPU_DEVICE_STRATEGY_PLAN
 /// phase 3): when the viewport's video target explicitly opted in with
-/// `decodeDevice: "gpu"` and asks for the frame verbatim (no grade, no
-/// denoise, no overlay, identity view), decode it as a D3D11 GPU texture and
-/// present it on the native surface through the WGPU import — no CPU
-/// readback, no upload, no PNG. `Some((w, h))` means the frame is on the
+/// `decodeDevice: "gpu"` and asks for the frame ungraded (no grade, no
+/// denoise, no overlay), decode it as a D3D11 GPU texture and present it on
+/// the native surface through the WGPU import — no CPU readback, no upload,
+/// no PNG. Zoom/pan views present as GPU crops of the imported texture (the
+/// same crop mechanism as the zoom/pan fast path), so a non-identity view
+/// stays on the zero-copy path. `Some((w, h))` means the frame is on the
 /// surface; `None` means the caller runs the CPU render, with the reason on
 /// stderr and the import outcome in the device registry (never silent).
 #[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
@@ -1912,13 +1914,10 @@ fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
         }
         _ => return None,
     };
-    // The zero-copy path presents the decoded frame verbatim: any grade,
-    // denoise, overlay, or non-identity view needs the CPU render.
-    if grade_doc.is_some()
-        || temporal_denoise > 0.0
-        || overlay_scene.is_some()
-        || !view.is_identity()
-    {
+    // The zero-copy path presents the decoded frame ungraded: any grade,
+    // denoise, or overlay needs the CPU render. The view is not a gate —
+    // zoom/pan present as GPU crops of the imported texture.
+    if grade_doc.is_some() || temporal_denoise > 0.0 || overlay_scene.is_some() {
         return None;
     }
     let result = (|| -> Result<(u32, u32), String> {
