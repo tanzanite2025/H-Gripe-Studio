@@ -5,6 +5,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  bridgeSam2Runner,
+  builtinComputeBlocks,
   createComputeBlockRegistry,
   sam2PointPromptBlock,
   type Sam2MaskRequest,
@@ -52,6 +54,30 @@ describe("compute block registry", () => {
     )) as Sam2MaskResult;
     expect(result.maskArtifactRef).toBe("artifact-1");
     expect(calls).toHaveLength(1);
+  });
+
+  it("preloads the bridge-backed SAM 2 block in the builtin registry", async () => {
+    const registry = builtinComputeBlocks();
+    const [block] = registry.forCapability("mask.subject.point_prompt");
+    expect(block.id).toBe("sam2.point_prompt");
+    // Outside Tauri the bridge answers with its browser-dev mock; the
+    // contract mapping (mask_path -> maskArtifactRef, etc.) still applies.
+    const result = (await block.run(
+      { imageRef: "img.png", targetSpace: "document", points: [{ x: 1, y: 2, label: 1 }] },
+      { backend: null },
+    )) as Sam2MaskResult;
+    expect(result.maskArtifactRef).toMatch(/\.png$/);
+    expect(result.provider).toBeTruthy();
+    expect(result.variantUsed).toBe("tiny");
+  });
+
+  it("bridge runner refuses a prompt without a positive point", async () => {
+    await expect(
+      bridgeSam2Runner(
+        { imageRef: "img.png", targetSpace: "document", points: [{ x: 1, y: 2, label: 0 }] },
+        { backend: null },
+      ),
+    ).rejects.toThrow(/positive point/);
   });
 
   it("rejects duplicate block ids", () => {

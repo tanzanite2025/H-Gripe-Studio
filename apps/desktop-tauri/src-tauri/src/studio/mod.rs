@@ -40,6 +40,8 @@
 //! - [`subject_mask`]: the `subjectMask` node executor (native-Rust matte).
 //! - [`subject_matte`]: continuous alpha matting (ViTMatte / trimap, Compute lane).
 //! - [`subject_sam2`]: SAM 2 interactive point-prompt segmenter (Compute lane).
+//! - [`sam2_prompt`]: the `sam2_prompt_mask` command (Studio Action compute
+//!   block: image + point prompts -> mask artifact, outside a graph run).
 //! - [`reflection_regions`]: heuristic reflection candidate detection for
 //!   `smartLayerSplit` (Phase 3).
 //! - [`shadow_regions`]: heuristic cast-shadow candidate detection for
@@ -95,6 +97,7 @@ mod psd_export;
 mod reflection_regions;
 mod run_cancel;
 mod run_events;
+mod sam2_prompt;
 mod schedule;
 mod shadow_regions;
 pub(crate) mod studio_image;
@@ -127,6 +130,7 @@ pub(crate) use history::*;
 pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
 pub(crate) use persist::*;
+pub(crate) use sam2_prompt::*;
 pub(crate) use schedule::*;
 pub(crate) use subject_model::set_resource_dir as set_subject_model_resource_dir;
 pub(crate) use timeline_export::*;
