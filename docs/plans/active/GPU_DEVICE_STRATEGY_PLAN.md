@@ -132,12 +132,15 @@ texture path") from the recorded outcome of the first actual import — proven,
 not assumed.
 
 Phase 3 wires the import to presentation: a video viewport target that opts
-in with `decodeDevice: "gpu"` and asks for the frame verbatim (no grade, no
-denoise, no overlay, identity view) presents through
+in with `decodeDevice: "gpu"` and asks for the frame ungraded (no grade, no
+denoise, no overlay) presents through
 `try_present_hw_video_frame` -> `viewport_surface::present_hw_frame` — the
 decoded D3D11 frame is imported into the shared WGPU device and blitted to
 the native surface directly, with no CPU readback, no upload, and no PNG.
-Any other request (a grade doc, a zoomed view, a machine where decode or
+Zoom/pan views stay on this path: the imported texture covers the whole
+frame, so a non-identity view presents as a GPU crop of it (the same
+`crop_uniform` mechanism as the zoom/pan fast path).
+Any other request (a grade doc, a machine where decode or
 import refuses) falls back to the CPU render path with the reason on stderr
 and the import outcome in the registry. The opt-in default stays software;
 the CPU path remains the explicit, reported fallback.
