@@ -78,6 +78,11 @@ pub(crate) struct DeviceRegistrySnapshot {
     /// available proves the OS/driver accepted a D3D11 device this run — one
     /// level past compiled-in, one short of the zero-copy texture import.
     pub ffmpeg_d3d11va: RegistryEntry,
+    /// D3D11 -> WGPU texture import (the video zero-copy route, phase 2):
+    /// available proves a decoded hardware frame was imported into the WGPU
+    /// device without CPU readback this run — the zero-copy texture path
+    /// itself. Records on the first import attempt; reads cached state only.
+    pub d3d11_wgpu_interop: RegistryEntry,
     /// onnxruntime execution providers compiled into this build.
     pub onnx_providers: Vec<String>,
 }
@@ -90,6 +95,17 @@ fn ffmpeg_hw_encoder_names() -> Vec<String> {
     #[cfg(not(feature = "native-ffmpeg"))]
     {
         Vec::new()
+    }
+}
+
+fn d3d11_wgpu_interop_capability() -> Result<String, String> {
+    #[cfg(all(windows, feature = "native-ffmpeg", feature = "viewport-surface"))]
+    {
+        super::d3d11_wgpu::interop_capability()
+    }
+    #[cfg(not(all(windows, feature = "native-ffmpeg", feature = "viewport-surface")))]
+    {
+        Err("D3D11 -> WGPU interop is not compiled in (needs Windows with the native-ffmpeg and viewport-surface features)".to_string())
     }
 }
 
@@ -125,6 +141,7 @@ pub(crate) fn snapshot() -> DeviceRegistrySnapshot {
         ffmpeg_d3d11va: RegistryEntry::from_capability(
             super::video_engine::ffmpeg_d3d11va_capability(),
         ),
+        d3d11_wgpu_interop: RegistryEntry::from_capability(d3d11_wgpu_interop_capability()),
         onnx_providers: super::onnx_pool::compiled_providers()
             .into_iter()
             .map(str::to_string)
@@ -154,6 +171,7 @@ mod tests {
             &snap.viewport_surface,
             &snap.ffmpeg,
             &snap.ffmpeg_d3d11va,
+            &snap.d3d11_wgpu_interop,
         ] {
             assert!(!entry.detail.is_empty());
         }

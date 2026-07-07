@@ -64,6 +64,8 @@ mod color;
 mod color_match;
 pub(crate) mod color_match_cpu;
 mod crop;
+#[cfg(all(windows, feature = "native-ffmpeg", feature = "viewport-surface"))]
+pub(crate) mod d3d11_wgpu;
 mod detail_repaint;
 pub(crate) mod detail_repaint_cpu;
 mod detail_watchdog;

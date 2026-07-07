@@ -31,7 +31,7 @@ grade-gpu = ["hgripe-grade/gpu"]
 # compiles the shared wgpu device + surface path in. Device init is lazy —
 # nothing runs at app startup — and when no adapter is available at runtime the
 # viewport host keeps the PNG/blob transport and reports the fallback.
-viewport-surface = ["dep:wgpu", "dep:pollster", "dep:windows-sys"]
+viewport-surface = ["dep:wgpu", "dep:pollster", "dep:windows-sys", "dep:windows"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -98,6 +98,20 @@ pollster = { version = "0.4", optional = true }
 # Win32 child windows for native viewport surface presentation (feature
 # `viewport-surface`, plan Phase S1): one hidden, input-transparent child HWND
 # per presented viewport, kept below the webview in z-order.
+# D3D11/D3D12 interop for the video zero-copy route (`d3d11_wgpu`): opening
+# the FFmpeg D3D11VA decode device, converting decoded NV12 texture slices
+# through the D3D11 video processor into a D3D12-shared BGRA texture, and
+# wrapping that resource as a wgpu texture. Pinned to the same `windows` major
+# as wgpu-hal's dx12 backend so raw COM types line up.
+windows = { version = "0.62", optional = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Direct3D12",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Security",
+] }
 windows-sys = { version = "0.61", optional = true, features = [
   "Win32_Foundation",
   "Win32_System_LibraryLoader",
