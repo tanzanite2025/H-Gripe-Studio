@@ -129,9 +129,18 @@ processor (`VideoProcessorBlt`, fixed-function NV12->RGB on the GPU), fenced
 with a D3D11 event query, and wrapped as a `wgpu::Texture` via `wgpu-hal`.
 The registry's `d3d11_wgpu_interop` entry reports this third level ("zero-copy
 texture path") from the recorded outcome of the first actual import — proven,
-not assumed. Playback/preview integration (feeding these textures to the
-viewport surface per frame) is phase 3; the CPU readback bridge stays as the
-explicit fallback until then.
+not assumed.
+
+Phase 3 wires the import to presentation: a video viewport target that opts
+in with `decodeDevice: "gpu"` and asks for the frame verbatim (no grade, no
+denoise, no overlay, identity view) presents through
+`try_present_hw_video_frame` -> `viewport_surface::present_hw_frame` — the
+decoded D3D11 frame is imported into the shared WGPU device and blitted to
+the native surface directly, with no CPU readback, no upload, and no PNG.
+Any other request (a grade doc, a zoomed view, a machine where decode or
+import refuses) falls back to the CPU render path with the reason on stderr
+and the import outcome in the registry. The opt-in default stays software;
+the CPU path remains the explicit, reported fallback.
 
 ### Done Means
 

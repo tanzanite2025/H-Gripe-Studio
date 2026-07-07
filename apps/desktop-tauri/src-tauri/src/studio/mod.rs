@@ -76,7 +76,7 @@ mod edge_refine;
 pub(crate) mod edge_refine_cpu;
 mod exec;
 #[cfg(feature = "native-ffmpeg")]
-mod ffmpeg_native;
+pub(crate) mod ffmpeg_native;
 mod frame_cache;
 mod generate;
 pub(crate) mod grade;

@@ -53,7 +53,6 @@ use super::ffmpeg_native::D3d11Frame;
 /// header, so the layout is declared here; the leading interface pointers
 /// and the lock callbacks are the only fields the import touches.
 #[repr(C)]
-#[cfg_attr(not(test), allow(dead_code))]
 struct AvD3d11vaDeviceContext {
     device: *mut core::ffi::c_void,
     device_context: *mut core::ffi::c_void,
@@ -68,10 +67,8 @@ struct AvD3d11vaDeviceContext {
 
 /// Holds FFmpeg's hwcontext lock (protecting `device_context` /
 /// `video_context` use) for a scope, releasing on drop.
-#[cfg_attr(not(test), allow(dead_code))]
 struct HwCtxLock<'a>(&'a AvD3d11vaDeviceContext);
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl<'a> HwCtxLock<'a> {
     fn acquire(hwctx: &'a AvD3d11vaDeviceContext) -> Self {
         if let Some(lock) = hwctx.lock {
@@ -95,7 +92,6 @@ impl Drop for HwCtxLock<'_> {
 /// working import proves the path exists on this box.
 static INTEROP_RESULT: Mutex<Option<Result<String, String>>> = Mutex::new(None);
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn record_interop(outcome: Result<String, String>) {
     if let Ok(mut guard) = INTEROP_RESULT.lock() {
         match (&*guard, &outcome) {
@@ -124,7 +120,6 @@ pub(crate) fn interop_capability() -> Result<String, String> {
 /// WGPU Dx12 backend) as a BGRA8 `wgpu::Texture` with
 /// `TEXTURE_BINDING | COPY_SRC` usage, without the pixels ever visiting the
 /// CPU. Records the outcome for [`interop_capability`] either way.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn import_d3d11_frame(
     device: &wgpu::Device,
     frame: &D3d11Frame,
@@ -141,7 +136,6 @@ pub(crate) fn import_d3d11_frame(
     result
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn import_impl(device: &wgpu::Device, frame: &D3d11Frame) -> Result<wgpu::Texture, String> {
     let (width, height) = (frame.width(), frame.height());
     if width == 0 || height == 0 {
@@ -212,7 +206,6 @@ fn import_impl(device: &wgpu::Device, frame: &D3d11Frame) -> Result<wgpu::Textur
 /// `ALLOW_SIMULTANEOUS_ACCESS` is what lets the D3D11 device write it
 /// without cross-API resource state transitions; the CPU-side event-query
 /// fence in [`blit_frame_into_shared`] orders the accesses.
-#[cfg_attr(not(test), allow(dead_code))]
 fn create_shared_bgra_target(
     device12: &windows::Win32::Graphics::Direct3D12::ID3D12Device,
     width: u32,
@@ -266,7 +259,6 @@ fn create_shared_bgra_target(
 /// `hwctx` must point at the live `AVD3D11VADeviceContext` owning the
 /// frame's texture; `shared_handle` must be a D3D12 NT shared handle for a
 /// BGRA8 `width`x`height` texture.
-#[cfg_attr(not(test), allow(dead_code))]
 unsafe fn blit_frame_into_shared(
     hwctx: &AvD3d11vaDeviceContext,
     frame: &D3d11Frame,
