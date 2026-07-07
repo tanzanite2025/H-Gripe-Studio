@@ -19,7 +19,7 @@ import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEd
 import { useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, WHEEL_ZOOM_STEP, rotateTo, viewWindow, zoom100, zoomAt, zoomIn, zoomOut, type CanvasView } from "./canvasView";
+import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
 import { fromMaskDocument } from "./imageDocument";
@@ -79,6 +79,7 @@ import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
 import { ColorPicker, hexToRgb } from "./maskEditModal/ColorPicker";
 import { createPointerGestures, pointerDown, pointerMove, pointerUp, type PointerEnv } from "./maskEditModal/pointerMachine";
+import { useCanvasNavigation } from "./maskEditModal/useCanvasNavigation";
 import { useCropTool } from "./maskEditModal/useCropTool";
 import { useColorTools, type ColorToolsEnv } from "./maskEditModal/useColorTools";
 import { useDialogDrafts } from "./maskEditModal/useDialogDrafts";
@@ -92,10 +93,6 @@ import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
 // them against the real image on run.
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
-
-/** Idle time after the last view change before the underlay re-renders at
- * the new window's detail; the CSS transform carries the motion until then. */
-const VIEW_SETTLE_MS = 120;
 
 interface MaskEditModalProps {
   title: string;
@@ -247,11 +244,6 @@ export function MaskEditModal({
   );
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
-  // frame — the render path and pointer→image mapping are untouched by it.
-  const [view, setView] = useState<CanvasView>(FIT_VIEW);
-  const viewRef = useRef(view);
-  viewRef.current = view;
   // Underlay presentation goes through the viewport host (WGPU migration
   // Phase 2): the image is targeted by reference — a `node_output` target
   // when a node id is given, a registered image resource otherwise — and the
@@ -466,39 +458,16 @@ export function MaskEditModal({
     }
     return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
   }, [workspace, state, moveDraft]);
-  const targetViewportView = useMemo(() => {
-    // Image-workspace layer transform (move tool / free transform): while a
-    // layer is moved/scaled, the displayed underlay must be the full layer
-    // frame. Moving a cropped viewport window creates a visible hard edge
-    // inside the stage, because that surface/PNG only contains the old view.
-    if (imageTransform) return IDENTITY_VIEW;
-    const canvas = canvasRef.current;
-    // The stage rect bounds what is visible of the transformed frame; the
-    // window must cover it even when the frame's base rect is smaller.
-    const stage = canvas?.closest<HTMLElement>(".mask-edit-stage");
-    return viewWindow(
-      view,
-      canvas?.offsetWidth ?? 0,
-      canvas?.offsetHeight ?? 0,
-      stage?.clientWidth ?? 0,
-      stage?.clientHeight ?? 0,
-    );
-  }, [view, imageTransform]);
-  const [viewportView, setViewportView] = useState(targetViewportView);
-  useEffect(() => {
-    if (
-      targetViewportView.zoom === viewportView.zoom &&
-      targetViewportView.panX === viewportView.panX &&
-      targetViewportView.panY === viewportView.panY
-    )
-      return;
-    if (imageTransform) {
-      setViewportView(targetViewportView);
-      return;
-    }
-    const timer = setTimeout(() => setViewportView(targetViewportView), VIEW_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [targetViewportView, viewportView, imageTransform]);
+  // All in-flight pointer gesture state (drags, picked sources, pending
+  // loops) — one plain mutable object, mutated at pointer-move rate without
+  // re-rendering. See pointerMachine.ts.
+  const gestures = useRef(createPointerGestures()).current;
+  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
+  // frame — the render path and pointer→image mapping are untouched by it —
+  // plus the derived (settle-debounced) underlay view window, Alt+wheel zoom
+  // and Space hold-to-pan (see useCanvasNavigation).
+  const nav = useCanvasNavigation(canvasRef, imageTransform, gestures);
+  const { view, setView, viewRef, viewBase, targetViewportView, viewportView, spacePan, setSpacePan } = nav;
   // Image-workspace adjustment preview (image-kernel K2): the adjustment
   // stack compiles to a grade document and grades the displayed frame on the
   // f32 kernel — the same maths the video grade dialog runs. Null in the
@@ -583,10 +552,6 @@ export function MaskEditModal({
     };
   }, [gradePreview, underlay]);
 
-  // All in-flight pointer gesture state (drags, picked sources, pending
-  // loops) — one plain mutable object, mutated at pointer-move rate without
-  // re-rendering. See pointerMachine.ts.
-  const gestures = useRef(createPointerGestures()).current;
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
   // PS selection semantics: an active marquee is only a selection — it never
@@ -636,44 +601,10 @@ export function MaskEditModal({
   // rebuilds and the composite recomputes dirty tiles only, so a slider drag
   // or brush commit on a large document stays cheap.
   const proxyCache = useRef(new ProxyLayerCache());
-  // Space-hold pan (PS): any tool pans while Space is down.
-  const [spacePan, setSpacePan] = useState(false);
   // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
   const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
-
-  // The canvas's untransformed on-screen size (the clamp space for pan).
-  // `offsetWidth`/`offsetHeight` are layout sizes, unaffected by the view's
-  // CSS transform, so they stay correct under rotation.
-  const viewBase = useCallback((): [number, number] => {
-    const canvas = canvasRef.current;
-    if (!canvas) return [1, 1];
-    return [canvas.offsetWidth || 1, canvas.offsetHeight || 1];
-  }, []);
-
-  // Alt+wheel / Ctrl+wheel zooms about the cursor with any tool in hand (PS
-  // Alt+scroll). A native non-passive listener: React's synthetic `onWheel`
-  // is passive at the root, so `preventDefault` (needed to stop page scroll /
-  // browser pinch-zoom) would be ignored there.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!e.altKey && !e.ctrlKey) return;
-      e.preventDefault();
-      if (e.deltaY === 0 && e.deltaX === 0) return;
-      const rect = canvas.getBoundingClientRect();
-      const cx = e.clientX - (rect.left + rect.width / 2);
-      const cy = e.clientY - (rect.top + rect.height / 2);
-      // Alt+wheel on some platforms reports the delta on the X axis.
-      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-      const factor = delta < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
-      setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
-    };
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onWheel);
-  }, [viewBase]);
 
   // The pointer's angle (degrees) about the canvas centre on screen.
   const pointerAngle = (e: React.PointerEvent): number => {
@@ -684,17 +615,6 @@ export function MaskEditModal({
     return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
   };
 
-  // Space keyup ends the hold-to-pan (keydown arrives via the shortcut scope).
-  useEffect(() => {
-    const up = (e: KeyboardEvent) => {
-      if (e.key === " ") {
-        setSpacePan(false);
-        gestures.panDrag = null;
-      }
-    };
-    window.addEventListener("keyup", up);
-    return () => window.removeEventListener("keyup", up);
-  }, []);
   const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
 
   const penPendingRef = useRef(false);
