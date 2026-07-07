@@ -12,7 +12,10 @@
 // shader compilation once. `apply` is a blocking, synchronous call
 // (`pollster`) so it slots into the existing CPU-shaped API.
 
+mod texture;
 mod wgsl;
+
+pub use texture::TextureGrader;
 
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;

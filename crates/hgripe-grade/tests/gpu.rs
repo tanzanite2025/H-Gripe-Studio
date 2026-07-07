@@ -14,7 +14,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use hgripe_grade::{
     apply, BlendMode, GpuError, GpuGrader, GradeDoc, GradeLayer, GradeOp, GradeSpace, GradeSurface,
-    HslQualifier,
+    HslQualifier, TextureGrader,
 };
 
 // GPU work is serialised across tests: some adapters (WARP, notably)
@@ -536,6 +536,160 @@ fn qualifier_gated_layer_matches_cpu() {
         }],
     };
     check(&mut g.grader, &doc, &surface, 2e-4, "qualifier gate");
+}
+
+// The texture route (video zero-copy: ingress -> kernel -> egress) must
+// match the CPU reference within 8-bit quantisation: both ends start from
+// the same rgba8 pixels, so the only extra error is the kernel tolerance
+// plus the egress round to rgba8unorm.
+#[test]
+fn texture_grader_matches_cpu_within_8bit() {
+    let _guard = GPU_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+    })) else {
+        eprintln!("skipping GPU test: no adapter available");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("texture-grader-test"),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::downlevel_defaults(),
+        ..Default::default()
+    }))
+    .expect("device");
+
+    // 64 px wide keeps rows COPY_BYTES_PER_ROW_ALIGNMENT-aligned for the
+    // test's readback copy.
+    let (w, h) = (64u32, 36u32);
+    // Quantise the gradient to rgba8 so both paths start from identical
+    // pixels (the texture upload is 8-bit).
+    let bytes: Vec<u8> = gradient(w, h, GradeSpace::Srgb)
+        .data
+        .iter()
+        .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    let surface = GradeSurface {
+        w,
+        h,
+        data: bytes.iter().map(|&b| f32::from(b) / 255.0).collect(),
+        space: GradeSpace::Srgb,
+    };
+
+    let size = wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
+    };
+    let src = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("src"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &src,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(w * 4),
+            rows_per_image: Some(h),
+        },
+        size,
+    );
+    let dst = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("dst"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+
+    let doc = GradeDoc {
+        layers: vec![layer(vec![
+            GradeOp::Exposure { ev: 0.4 },
+            GradeOp::Contrast {
+                amount: 1.15,
+                pivot: 0.5,
+            },
+            GradeOp::Saturation { amount: 0.2 },
+        ])],
+    };
+    let mut grader = TextureGrader::new();
+    grader
+        .apply_texture(
+            &device,
+            &queue,
+            &doc,
+            &src.create_view(&wgpu::TextureViewDescriptor::default()),
+            &dst.create_view(&wgpu::TextureViewDescriptor::default()),
+            w,
+            h,
+            GradeSpace::Srgb,
+        )
+        .expect("apply_texture");
+
+    // Read the graded texture back (test-only; the production path never
+    // does this) and compare against the CPU reference.
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback"),
+        size: u64::from(w * h * 4),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &dst,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+        },
+        size,
+    );
+    queue.submit(Some(encoder.finish()));
+    readback.map_async(wgpu::MapMode::Read, .., |r| r.expect("map"));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("poll");
+    let gpu_bytes: Vec<u8> = readback.get_mapped_range(..).to_vec();
+
+    let mut cpu = surface.clone();
+    apply(&doc, &mut cpu);
+    let mut worst = 0u8;
+    for (i, (&g, c)) in gpu_bytes.iter().zip(&cpu.data).enumerate() {
+        let expect = (c.clamp(0.0, 1.0) * 255.0).round() as i32;
+        let d = (i32::from(g) - expect).unsigned_abs() as u8;
+        if d > worst {
+            worst = d;
+        }
+        assert!(d <= 2, "index {i}: gpu={g} cpu={expect} |d|={d} > 2");
+    }
+    eprintln!("texture grade: max |cpu - gpu| = {worst} / 255");
 }
 
 #[test]
