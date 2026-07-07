@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { tauriInvoke } from "../bridge/core";
 import { deviceRegistrySnapshot, type DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
 import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
 import { listProfiles } from "../bridge/tauri";
@@ -36,6 +35,7 @@ import {
   type LocalModelEntry,
   type ModelCapability,
 } from "./backendRegistry";
+import { probeLocalModelHealth, testApiProfileHealth } from "./backendHealth";
 
 // The system "Models / APIs" manager modal
 // (docs/plans/active/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md): one global surface
@@ -169,61 +169,42 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
       .catch((err) => setMessage(String(err)));
   }, [commit, t]);
 
-  // Manual connection test: reachability of the profile's base URL. A raw key
-  // is never involved here — credentials stay behind their secret ref.
+  // Manual connection test (shared with the Model/API agent actions): the
+  // check itself lives in `backendHealth.ts`.
   const handleTestApi = useCallback(
     (profile: ApiProfileEntry) => {
-      const finish = (health: ApiProfileEntry["health"]) =>
+      if (profile.base_url.trim()) setMessage(t("models.testing"));
+      void testApiProfileHealth(profile).then(({ outcome, health }) => {
         commit(upsertApiProfile(loadRegistry(), { ...profile, health }));
-      if (!profile.base_url.trim()) {
-        finish(profile.credentials_ref.trim() ? "untested" : "missing_key");
-        setMessage(t("models.noBaseUrl"));
-        return;
-      }
-      setMessage(t("models.testing"));
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      fetch(profile.base_url, { method: "GET", signal: controller.signal })
-        .then(() => {
-          finish(profile.credentials_ref.trim() ? "valid" : "missing_key");
-          setMessage(t("models.reachable"));
-        })
-        .catch(() => {
-          finish("unreachable");
-          setMessage(t("models.unreachable"));
-        })
-        .finally(() => clearTimeout(timer));
+        setMessage(
+          outcome === "no_base_url"
+            ? t("models.noBaseUrl")
+            : outcome === "reachable"
+              ? t("models.reachable")
+              : t("models.unreachable"),
+        );
+      });
     },
     [commit, t],
   );
 
-  // Manual local model test: weights presence via the backend (desktop only).
+  // Manual local model test (shared with the Model/API agent actions): the
+  // weights probe lives in `backendHealth.ts`.
   const handleTestLocal = useCallback(
     (model: LocalModelEntry) => {
-      const finish = (health: LocalModelEntry["health"], detail: string | null) =>
-        commit(
-          upsertLocalModel(loadRegistry(), { ...model, health, health_detail: detail }),
-        );
-      if (!model.weights_path.trim()) {
-        finish("missing_weights", t("models.noWeightsPath"));
-        return;
-      }
-      const invoke = tauriInvoke();
-      if (!invoke) {
-        setMessage(t("models.desktopOnlyTest"));
-        return;
-      }
-      setMessage(t("models.testing"));
-      invoke("probe_model_weights", { path: model.weights_path })
-        .then((present) => {
-          if (present) finish("installed", null);
-          else finish("missing_weights", model.weights_path);
-          setMessage(present ? t("models.weightsFound") : t("models.weightsMissing"));
-        })
-        .catch((err) => {
-          finish("untested", String(err));
-          setMessage(String(err));
-        });
+      if (model.weights_path.trim()) setMessage(t("models.testing"));
+      void probeLocalModelHealth(model).then(({ outcome, health, detail }) => {
+        if (health !== null) {
+          const nextDetail = outcome === "no_weights_path" ? t("models.noWeightsPath") : detail;
+          commit(
+            upsertLocalModel(loadRegistry(), { ...model, health, health_detail: nextDetail }),
+          );
+        }
+        if (outcome === "desktop_only") setMessage(t("models.desktopOnlyTest"));
+        else if (outcome === "weights_found") setMessage(t("models.weightsFound"));
+        else if (outcome === "weights_missing") setMessage(t("models.weightsMissing"));
+        else if (outcome === "probe_error") setMessage(detail ?? "");
+      });
     },
     [commit, t],
   );
