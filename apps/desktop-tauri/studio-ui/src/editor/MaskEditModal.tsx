@@ -33,7 +33,6 @@ import {
   type TransformParams,
 } from "./maskEdit";
 import type {
-  EditPathPoint,
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
@@ -62,6 +61,7 @@ import { useCanvasNavigation } from "./maskEditModal/useCanvasNavigation";
 import { useCropTool } from "./maskEditModal/useCropTool";
 import { useColorTools, type ColorToolsEnv } from "./maskEditModal/useColorTools";
 import { useDialogDrafts } from "./maskEditModal/useDialogDrafts";
+import { usePathEditing } from "./maskEditModal/usePathEditing";
 import { ImageSizeDialog } from "./maskEditModal/ImageSizeDialog";
 import { CropPanel } from "./maskEditModal/CropPanel";
 import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
@@ -255,9 +255,41 @@ export function MaskEditModal({
   } | null>(null);
   const lastMarqueeRef = useRef(lastMarquee);
   lastMarqueeRef.current = lastMarquee;
-  // Anchor re-editing (M2): index of the path op being re-edited plus a local
-  // draft of its anchors; committed as one undoable step on Done / Enter.
-  const [editingPath, setEditingPath] = useState<number | null>(null);
+  // Edits go through this wrapper, which stamps the active selection as the
+  // action's `clip` so rasterisation confines the op to the selection.
+  // Whole-mask reshapes (transform / crop / select-all) stay global.
+  const dispatch = useCallback((action: MaskEditAction) => {
+    const lm = lastMarqueeRef.current;
+    if (lm) {
+      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
+      if (action.type === "stroke") {
+        action = { ...action, stroke: { ...action.stroke, clip } };
+      } else if (action.type === "path") {
+        action = { ...action, path: { ...action.path, clip } };
+      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
+        action = { ...action, op: { ...action.op, clip } };
+      }
+    }
+    rawDispatch(action);
+  }, []);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // Pending pen anchors and anchor re-editing (M2): the path op being
+  // re-edited plus a local draft of its anchors, committed as one undoable
+  // step on Done / Enter (see usePathEditing).
+  const pathEditing = usePathEditing(dispatch, stateRef);
+  const {
+    penAnchors,
+    setPenAnchors,
+    editingPath,
+    anchorDraft,
+    setAnchorDraft,
+    penPendingRef,
+    editingPathRef,
+    startPathEdit,
+    commitPathEdit,
+    cancelPathEdit,
+  } = pathEditing;
   // Colour wells / picker / eyedropper sample / sampler pins and underlay
   // pixel sampling (see useColorTools). The env ref is re-assigned every
   // render further down, once the viewport hook has run.
@@ -447,21 +479,6 @@ export function MaskEditModal({
   // PS selection semantics: an active marquee is only a selection — it never
   // lands on the edit stack itself. Instead, edit steps recorded while it is
   // active carry it as their `clip`, so replay confines their effect to the
-  // selection. Whole-mask reshapes (transform / crop / select-all) stay global.
-  const dispatch = useCallback((action: MaskEditAction) => {
-    const lm = lastMarqueeRef.current;
-    if (lm) {
-      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
-      if (action.type === "stroke") {
-        action = { ...action, stroke: { ...action.stroke, clip } };
-      } else if (action.type === "path") {
-        action = { ...action, path: { ...action.path, clip } };
-      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
-        action = { ...action, op: { ...action.op, clip } };
-      }
-    }
-    rawDispatch(action);
-  }, []);
   // Floating size panel beside the selection: a local W×H draft, re-seeded
   // whenever the committed marquee changes.
   const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -477,9 +494,6 @@ export function MaskEditModal({
   // panel's controls (see useCropTool).
   const crop = useCropTool(dims, dispatch);
   const { quadDraft, setQuadDraft, cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
-  // Pending pen anchors (image-space) awaiting a close-path click.
-  const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
-  const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
   const [, forceRedraw] = useState(0);
 
   // Preview lane for morphology ops: a live, best-effort proxy render of
@@ -507,39 +521,10 @@ export function MaskEditModal({
 
   const activeLayerKind = state.current.layers[state.current.active]?.kind ?? "mask";
 
-  const penPendingRef = useRef(false);
-  penPendingRef.current = penAnchors.length > 0;
-  const editingPathRef = useRef<number | null>(null);
-  editingPathRef.current = editingPath;
-  const anchorDraftRef = useRef<EditPathPoint[] | null>(null);
-  anchorDraftRef.current = anchorDraft;
-  const stateRef = useRef(state);
-  stateRef.current = state;
   // Dialog drafts: the free-transform panel (Ctrl+T), fill dialog (Shift+F5)
   // and Image Size dialog (Ctrl+Alt+I) clusters (see useDialogDrafts).
   const dialogs = useDialogDrafts(dims, dispatch, stateRef);
   const { transformDraft, setTransformDraft, editingTransform, closeTransformPanel, fillDraft, setFillDraft, imageSizeDraft, setImageSizeDraft } = dialogs;
-
-  const startPathEdit = (index: number) => {
-    const op = activeOps(state.current)[index];
-    if (!op || !isPathOp(op)) return;
-    setPenAnchors([]);
-    setEditingPath(index);
-    setAnchorDraft(op.points.map((p) => ({ ...p })));
-  };
-
-  const commitPathEdit = useCallback(() => {
-    if (editingPathRef.current != null && anchorDraftRef.current) {
-      dispatch({ type: "path_anchors", index: editingPathRef.current, points: anchorDraftRef.current });
-    }
-    setEditingPath(null);
-    setAnchorDraft(null);
-  }, []);
-
-  const cancelPathEdit = useCallback(() => {
-    setEditingPath(null);
-    setAnchorDraft(null);
-  }, []);
 
   // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
   // active only while this modal is mounted, shadowing the canvas shortcuts.
