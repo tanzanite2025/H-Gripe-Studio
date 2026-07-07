@@ -32,13 +32,19 @@ export type ParseResult =
   | { ok: true; proposal: AgentProposal }
   | { ok: false; error: string };
 
+/** Any action registry the agent boundary can validate ids against. */
+export interface ActionIdLookup {
+  get(id: string): unknown;
+}
+
 /**
  * Validate a raw agent payload into a proposal. Fails closed: malformed
  * shapes, empty step lists, and action ids the registry does not know are
  * all rejected — an agent cannot smuggle a UI operation or raw document
- * mutation through this surface.
+ * mutation through this surface. Works against any action registry (mask
+ * document or canvas): the id lookup is the shared surface.
  */
-export function parseAgentProposal(raw: unknown, registry: StudioActionRegistry): ParseResult {
+export function parseAgentProposal(raw: unknown, registry: ActionIdLookup): ParseResult {
   if (!raw || typeof raw !== "object") return { ok: false, error: "proposal must be an object" };
   const o = raw as { intent?: unknown; steps?: unknown };
   const intent = typeof o.intent === "string" ? o.intent : "";
