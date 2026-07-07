@@ -253,6 +253,17 @@
 /* Frame on the native surface window below the webview: drop the stage
    background so the hole stays see-through. */
 .mask-edit-stage.presented { background: transparent; }
+/* Fallback coordinate-space chip: pinned bottom-left, mirroring the backend
+   badge on the right. */
+.mask-dims-fallback {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 /* PS-style brush cursor: a ring of the brush tip's true diameter, centred on
    the pointer (left/top set imperatively). The dark outline keeps the white
    ring readable over light imagery. */

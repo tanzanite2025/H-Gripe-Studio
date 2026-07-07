@@ -4,7 +4,7 @@ import type { CropCommit } from "./CropEditModal";
 import type { EditorTab } from "./host/EditorHost";
 import { useT } from "../i18n";
 import type { MaskDocument } from "../types/production";
-import { fromMaskDocument, toMaskDocument, type ImageDocument } from "./imageDocument";
+import { fromMaskDocument, maskBridgeGap, toMaskDocument, type ImageDocument } from "./imageDocument";
 
 /**
  * The image card's single Edit entry.
@@ -52,7 +52,14 @@ export function MediaEditModal({
   // The image editor's contract is ImageDocument (image-kernel K1). Until the
   // grade-kernel render path lands (K2), the mask editor remains the canvas,
   // so documents bridge losslessly at this boundary in both directions.
-  const maskInitial = useMemo(() => (initial ? toMaskDocument(initial) : null), [initial]);
+  const maskInitial = useMemo(() => {
+    if (!initial) return null;
+    const lowered = toMaskDocument(initial);
+    // A draft that cannot lower opens as a blank document; surface why so
+    // the restored-empty editor is diagnosable rather than silent.
+    if (!lowered) console.warn(`image draft cannot lower to edit_paths (${maskBridgeGap(initial)}) — opening blank`);
+    return lowered;
+  }, [initial]);
   // Every edit mirrors straight into the host draft, so collapsing and
   // reopening the editor restores layers / history exactly as left. The tab
   // light reports the draft as saved; committing to the graph stays on the

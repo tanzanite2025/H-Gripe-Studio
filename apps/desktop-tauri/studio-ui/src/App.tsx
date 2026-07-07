@@ -17,7 +17,7 @@ import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
 import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
-import { toMaskDocument, type ImageDocument } from "./editor/imageDocument";
+import { maskBridgeGap, toMaskDocument, type ImageDocument } from "./editor/imageDocument";
 import type { CropCommit } from "./editor/CropEditModal";
 import { normalizeEditPaths } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
@@ -1465,6 +1465,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                       openEditor: false,
                       run: true,
                     });
+                  } else if (mediaEditSource && !lowered) {
+                    // The draft stays in `mediaEditDrafts`, so reopening the
+                    // editor restores the document; only the apply is dropped.
+                    console.warn(`image edit apply skipped — document cannot lower to edit_paths (${maskBridgeGap(edits)})`);
                   }
                   setMediaEditSourceId(null);
                   setMediaEditBlank(false);

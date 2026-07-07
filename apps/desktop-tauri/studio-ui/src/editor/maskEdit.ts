@@ -87,6 +87,11 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     const layerGroups = normalizeLayerGroups(v.layerGroups);
     const groupIds = new Set(layerGroups.map((g) => g.id));
     const layers = v.layers.map((layer) => normalizeLayer(layer, groupIds)).filter((l): l is MaskLayer => l !== null);
+    // Tolerant loading is the contract, but a truncated document should not
+    // load silently: leave a trace for "where did my layer go".
+    if (layers.length < v.layers.length) {
+      console.warn(`normalizeEditPaths: dropped ${v.layers.length - layers.length} malformed layer(s) from stored edit_paths`);
+    }
     if (layers.length === 0) layers.push(emptyMaskLayer());
     const active = typeof v.active === "number" ? Math.min(Math.max(Math.trunc(v.active), 0), layers.length - 1) : 0;
     return {
