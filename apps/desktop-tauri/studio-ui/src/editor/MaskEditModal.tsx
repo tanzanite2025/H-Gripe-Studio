@@ -63,7 +63,7 @@ import {
 } from "./maskEditModal/stagePainter";
 import { catmullRomClosed, flattenEditPath } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap } from "./maskEditModal/magneticSnap";
-import type { ColorSample, RulerLine } from "./maskEditModal/stagePainter";
+import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
 import "./maskEditModal/maskEditModal.css";
@@ -80,6 +80,7 @@ import { PathsPanel } from "./maskEditModal/PathsPanel";
 import { ColorPicker, hexToRgb } from "./maskEditModal/ColorPicker";
 import { createPointerGestures, pointerDown, pointerMove, pointerUp, type PointerEnv } from "./maskEditModal/pointerMachine";
 import { useCropTool } from "./maskEditModal/useCropTool";
+import { useColorTools, type ColorToolsEnv } from "./maskEditModal/useColorTools";
 import { useDialogDrafts } from "./maskEditModal/useDialogDrafts";
 import { ImageSizeDialog } from "./maskEditModal/ImageSizeDialog";
 import { CropPanel } from "./maskEditModal/CropPanel";
@@ -286,9 +287,25 @@ export function MaskEditModal({
   // Anchor re-editing (M2): index of the path op being re-edited plus a local
   // draft of its anchors; committed as one undoable step on Done / Enter.
   const [editingPath, setEditingPath] = useState<number | null>(null);
-  // Color sampler pins (up to four persistent readouts, PS I flyout) — a
-  // pure view read, session-local, never recorded on the document.
-  const [colorSamples, setColorSamples] = useState<ColorSample[]>([]);
+  // Colour wells / picker / eyedropper sample / sampler pins and underlay
+  // pixel sampling (see useColorTools). The env ref is re-assigned every
+  // render further down, once the viewport hook has run.
+  const colorEnvRef = useRef<ColorToolsEnv | null>(null);
+  const colors = useColorTools(colorEnvRef);
+  const {
+    fgColor,
+    bgColor,
+    colorPicker,
+    setColorPicker,
+    sampledColor,
+    colorSamples,
+    setColorSamples,
+    resetColors,
+    swapColors,
+    commitPickedColor,
+    requestColorPick,
+    sampleUnderlay,
+  } = colors;
   // Ruler measurement: the last committed drag (session-local view read).
   const [rulerLine, setRulerLine] = useState<RulerLine | null>(null);
   // The committed marquee's marching ants stroke host-side over rendered
@@ -572,12 +589,6 @@ export function MaskEditModal({
   const gestures = useRef(createPointerGestures()).current;
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
-  // PS colour wells: foreground / background colours plus the open picker.
-  // The mask itself is grayscale, so a picked colour maps to paint polarity
-  // by luminance — a light foreground paints the mask in, a dark one erases.
-  const [fgColor, setFgColor] = useState("#ffffff");
-  const [bgColor, setBgColor] = useState("#000000");
-  const [colorPicker, setColorPicker] = useState<"fg" | "bg" | null>(null);
   // PS selection semantics: an active marquee is only a selection — it never
   // lands on the edit stack itself. Instead, edit steps recorded while it is
   // active carry it as their `clip`, so replay confines their effect to the
@@ -611,9 +622,6 @@ export function MaskEditModal({
   // panel's controls (see useCropTool).
   const crop = useCropTool(dims, dispatch);
   const { quadDraft, setQuadDraft, cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
-  // Eyedropper sample: the image colour under the last click, as `#rrggbb`;
-  // null until sampled (or when there is no underlay to read from).
-  const [sampledColor, setSampledColor] = useState<string | null>(null);
   // Pending pen anchors (image-space) awaiting a close-path click.
   const [penAnchors, setPenAnchors] = useState<[number, number][]>([]);
   const [anchorDraft, setAnchorDraft] = useState<EditPathPoint[] | null>(null);
@@ -768,41 +776,21 @@ export function MaskEditModal({
     selectTool("move");
     dialogs.openFreeTransform();
   };
-  // PS `D` (default colours): back to the default brush / add semantics and
-  // the default white-over-black wells.
-  const resetColors = () => {
-    selectTool(DEFAULT_TOOL_ID);
-    setPathMode("add");
-    setPaintTarget("layer");
-    setFgColor("#ffffff");
-    setBgColor("#000000");
-  };
 
-  // PS `X` (swap colours): swap the wells and flip paint polarity —
-  // brush↔eraser, or a path tool's boolean mode.
-  const swapColors = () => {
-    setFgColor(bgColor);
-    setBgColor(fgColor);
-    if (toolId === "brush") setToolId("eraser");
-    else if (toolId === "eraser") setToolId("brush");
-    else if (tool.kind === "path") setPathMode((m) => (m === "add" ? "subtract" : "add"));
-  };
-
-  // A picked well colour: in the grayscale mask the foreground's luminance
-  // sets the paint polarity (light paints in, dark erases — PS painting on a
-  // mask with white/black).
-  const commitPickedColor = (hex: string) => {
-    if (colorPicker === "bg") setBgColor(hex);
-    else {
-      setFgColor(hex);
-      const rgb = hexToRgb(hex);
-      if (rgb) {
-        const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
-        if (toolId === "brush" && lum < 0.5) setToolId("eraser");
-        else if (toolId === "eraser" && lum >= 0.5) setToolId("brush");
-      }
-    }
-    setColorPicker(null);
+  // The colour tools read the shell through this env at call time (see
+  // useColorTools); re-assigned every render so it always sees current values.
+  colorEnvRef.current = {
+    toolId,
+    toolKind: tool.kind,
+    selectTool,
+    setToolId,
+    setPathMode,
+    setPaintTarget,
+    underlay,
+    presented,
+    viewportHost: viewport.host,
+    frameView,
+    dims,
   };
 
   const shortcutHandlers: ShortcutHandlers = {
@@ -910,63 +898,7 @@ export function MaskEditModal({
     [dims.w, dims.h],
   );
 
-  // One-shot colour pick armed by the replace-color popup: the next canvas
-  // pointer-down samples the underlay into this callback instead of drawing.
-  const colorPickRequest = useRef<((hex: string) => void) | null>(null);
-  const requestColorPick = useCallback((cb: (hex: string) => void) => {
-    colorPickRequest.current = cb;
-  }, []);
-
-  // Eyedropper: read the underlay pixel at an image-space point by drawing
-  // the presented frame — a view window of the image — onto an offscreen
-  // canvas at the window's document size. Async (the data URL decodes first);
-  // a no-op when there is no underlay or the point is outside the window.
-  // A natively presented frame has no data URL: explicit pixel readback
-  // (`readPixels`, surface swap Phase S4) answers instead.
   const viewportHost = viewport.host;
-  const sampleUnderlay = useCallback(
-    (pt: [number, number], onSample?: (hex: string) => void) => {
-      const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
-      const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
-      const x = Math.round(pt[0] - frameView.panX * dims.w);
-      const y = Math.round(pt[1] - frameView.panY * dims.h);
-      if (x < 0 || y < 0 || x >= winW || y >= winH) return;
-      const sample = (r: number, g: number, b: number) => {
-        const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-        if (onSample) onSample(hex);
-        else setSampledColor(hex);
-      };
-      if (!underlay) {
-        if (!presented || !viewportHost || !viewportHost.isOpen) return;
-        viewportHost
-          .readPixels()
-          .then((px) => {
-            const fx = Math.min(px.width - 1, Math.floor((x / winW) * px.width));
-            const fy = Math.min(px.height - 1, Math.floor((y / winH) * px.height));
-            const i = (fy * px.width + fx) * 4;
-            sample(px.pixels[i], px.pixels[i + 1], px.pixels[i + 2]);
-          })
-          .catch(() => {
-            /* keep the previous sample */
-          });
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        const off = document.createElement("canvas");
-        off.width = winW;
-        off.height = winH;
-        const ctx = off.getContext("2d");
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, winW, winH);
-        const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-        sample(r, g, b);
-      };
-      img.src = underlay;
-    },
-    [underlay, presented, viewportHost, frameView, dims.w, dims.h],
-  );
-
   // Magnetic lasso: capture the underlay's visible window as an edge map at
   // drag start (async — the frame decodes first). The map lands in
   // `magneticEdge` for the commit-time snap; with no underlay (browser
@@ -1230,12 +1162,7 @@ export function MaskEditModal({
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     // An armed replace-color eyedropper consumes the next canvas click:
     // sample the underlay into the requesting swatch, nothing else fires.
-    if (colorPickRequest.current) {
-      const cb = colorPickRequest.current;
-      colorPickRequest.current = null;
-      sampleUnderlay(toImage(e), cb);
-      return;
-    }
+    if (colors.consumeColorPick(toImage(e))) return;
     pointerDown(pointerEnv(), gestures, e);
   };
 
