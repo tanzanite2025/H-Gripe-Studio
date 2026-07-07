@@ -162,6 +162,22 @@ pub(crate) fn ffmpeg_hw_decode_capability() -> Result<String, String> {
     }
 }
 
+/// Probe the D3D11VA hardware-decode *device* capability for the registry
+/// snapshot (the video zero-copy route, phase 1): `Ok` proves the OS/driver
+/// accepted a D3D11 device this run — one level past "compiled in", one
+/// level short of the zero-copy texture import (phase 2). `Err` carries the
+/// reason (feature off, or device creation refused).
+pub(crate) fn ffmpeg_d3d11va_capability() -> Result<String, String> {
+    #[cfg(feature = "native-ffmpeg")]
+    {
+        super::ffmpeg_native::d3d11va_device_capability()
+    }
+    #[cfg(not(feature = "native-ffmpeg"))]
+    {
+        Err("native-ffmpeg feature disabled (no vendored libav)".to_string())
+    }
+}
+
 /// The compiled-in hardware decoder matching an input codec name (e.g.
 /// `h264` -> `h264_cuvid`), from a probed decoder list. Pure name matching,
 /// kept separate from the ffi probe so it is testable.
@@ -176,13 +192,22 @@ pub(crate) fn decoder_for_codec(codec: &str, decoders: &[String]) -> Option<Stri
 
 /// The compiled-in hardware decoder for `video`'s codec, or the reason there
 /// is none (probe the input codec, then match a `{codec}_*` hardware
-/// decoder).
+/// decoder; when none matches, a compiled-in D3D11VA hwaccel for the codec
+/// selects the [`D3D11VA_DECODER`](super::ffmpeg_native::D3D11VA_DECODER)
+/// session — the Windows-native path that also covers boxes without
+/// cuvid/qsv).
 #[cfg(feature = "native-ffmpeg")]
 pub(crate) fn hardware_decoder_for_input(video: &std::path::Path) -> Result<String, String> {
     let codec = super::ffmpeg_native::probe_input_codec(video)?;
-    decoder_for_codec(&codec, &super::ffmpeg_native::hardware_decoders()).ok_or_else(|| {
-        format!("no hardware decoder for '{codec}' compiled into the vendored libav")
-    })
+    if let Some(hw) = decoder_for_codec(&codec, &super::ffmpeg_native::hardware_decoders()) {
+        return Ok(hw);
+    }
+    if super::ffmpeg_native::d3d11va_supported_for_codec(&codec) {
+        return Ok(super::ffmpeg_native::D3D11VA_DECODER.to_string());
+    }
+    Err(format!(
+        "no hardware decoder or D3D11VA hwaccel for '{codec}' compiled into the vendored libav"
+    ))
 }
 
 /// Run a decode-and-re-encode with the shared opt-in hardware *decode*
