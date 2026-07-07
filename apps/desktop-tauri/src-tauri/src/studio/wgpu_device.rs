@@ -8,8 +8,9 @@
 //! reported through the shared device vocabulary so callers downgrade to the
 //! PNG transport path instead of failing.
 
+use std::sync::Mutex;
 #[cfg(feature = "viewport-surface")]
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use crate::studio::device_report::DeviceUsed;
 
@@ -44,6 +45,69 @@ pub(crate) struct SurfaceDeviceReport {
 
 #[cfg(feature = "viewport-surface")]
 static SHARED: OnceLock<Result<Arc<SharedGpu>, String>> = OnceLock::new();
+
+/// The resolved surface presentation capability for this process: recorded
+/// once when the first viewport surface configures (or permanently fails)
+/// and reused by every heavy viewport afterwards, so support is decided one
+/// time instead of being re-probed on every layout tick.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct SurfacePresentationProfile {
+    pub supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+}
+
+static SURFACE_PROFILE: Mutex<Option<SurfacePresentationProfile>> = Mutex::new(None);
+
+/// The cached surface presentation profile, if one has been resolved.
+pub(crate) fn surface_presentation_profile() -> Option<SurfacePresentationProfile> {
+    SURFACE_PROFILE.lock().ok().and_then(|guard| guard.clone())
+}
+
+/// Record the working surface presentation profile (first successful surface
+/// configuration). A success overwrites an earlier transient failure; the
+/// first success wins over later ones.
+#[cfg_attr(not(all(windows, feature = "viewport-surface")), allow(dead_code))]
+pub(crate) fn record_surface_profile_success(
+    adapter: String,
+    backend: String,
+    surface_format: String,
+) {
+    if let Ok(mut guard) = SURFACE_PROFILE.lock() {
+        if guard.as_ref().is_none_or(|p| !p.supported) {
+            *guard = Some(SurfacePresentationProfile {
+                supported: true,
+                adapter: Some(adapter),
+                backend: Some(backend),
+                surface_format: Some(surface_format),
+                failure_reason: None,
+            });
+        }
+    }
+}
+
+/// Record that surface presentation resolved as unsupported for this process
+/// (a permanent fallback). A recorded success is never downgraded.
+#[cfg_attr(not(all(windows, feature = "viewport-surface")), allow(dead_code))]
+pub(crate) fn record_surface_profile_failure(reason: String) {
+    if let Ok(mut guard) = SURFACE_PROFILE.lock() {
+        if guard.is_none() {
+            *guard = Some(SurfacePresentationProfile {
+                supported: false,
+                adapter: None,
+                backend: None,
+                surface_format: None,
+                failure_reason: Some(reason),
+            });
+        }
+    }
+}
 
 /// The device-lost reason, recorded by the callback registered at device
 /// creation (GPU_DEVICE_STRATEGY_PLAN long-term step 4: structured
@@ -397,6 +461,39 @@ pub(crate) fn surface_device_report() -> SurfaceDeviceReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surface_profile_success_wins_and_is_never_downgraded() {
+        // One test owns the process-wide profile cache to keep ordering
+        // deterministic: a failure records once, a later success (the first
+        // configured surface) overwrites it, and further failures never
+        // downgrade a working profile.
+        assert!(surface_presentation_profile().is_none());
+        record_surface_profile_failure("surface creation failed: probe".to_string());
+        let profile = surface_presentation_profile().expect("failure recorded");
+        assert!(!profile.supported);
+        assert_eq!(
+            profile.failure_reason.as_deref(),
+            Some("surface creation failed: probe")
+        );
+        record_surface_profile_success(
+            "Test Adapter".to_string(),
+            "Dx12".to_string(),
+            "Bgra8Unorm".to_string(),
+        );
+        let profile = surface_presentation_profile().expect("success recorded");
+        assert!(profile.supported);
+        assert_eq!(profile.adapter.as_deref(), Some("Test Adapter"));
+        assert_eq!(profile.backend.as_deref(), Some("Dx12"));
+        assert_eq!(profile.surface_format.as_deref(), Some("Bgra8Unorm"));
+        assert!(profile.failure_reason.is_none());
+        record_surface_profile_failure("late failure".to_string());
+        assert!(
+            surface_presentation_profile()
+                .expect("still cached")
+                .supported
+        );
+    }
 
     #[test]
     fn report_vocabulary_is_shared() {
