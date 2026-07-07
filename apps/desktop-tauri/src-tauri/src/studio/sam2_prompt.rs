@@ -155,7 +155,11 @@ mod tests {
     fn needs_a_positive_point() {
         let err = sam2_prompt_mask(
             "ignored.png".to_string(),
-            vec![Sam2PromptPoint { x: 1.0, y: 1.0, label: 0 }],
+            vec![Sam2PromptPoint {
+                x: 1.0,
+                y: 1.0,
+                label: 0,
+            }],
             None,
             None,
             None,
@@ -168,7 +172,11 @@ mod tests {
     fn needs_an_image_path() {
         let err = sam2_prompt_mask(
             "  ".to_string(),
-            vec![Sam2PromptPoint { x: 1.0, y: 1.0, label: 1 }],
+            vec![Sam2PromptPoint {
+                x: 1.0,
+                y: 1.0,
+                label: 1,
+            }],
             None,
             None,
             None,
@@ -185,7 +193,11 @@ mod tests {
 
         let result = sam2_prompt_mask(
             image,
-            vec![Sam2PromptPoint { x: 32.0, y: 32.0, label: 1 }],
+            vec![Sam2PromptPoint {
+                x: 32.0,
+                y: 32.0,
+                label: 1,
+            }],
             Some("tiny".to_string()),
             Some(dir.to_string_lossy().to_string()),
             Some("sam2_prompt_test".to_string()),
@@ -200,7 +212,9 @@ mod tests {
         let bbox = result.bbox.expect("subject found");
         assert!(bbox[2] > 0 && bbox[3] > 0);
 
-        let mask = image::open(&result.mask_path).expect("read mask").to_luma8();
+        let mask = image::open(&result.mask_path)
+            .expect("read mask")
+            .to_luma8();
         assert_eq!(mask.dimensions(), (64, 64));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -210,7 +224,11 @@ mod tests {
     fn rejects_unsafe_output_names() {
         let err = sam2_prompt_mask(
             "ignored.png".to_string(),
-            vec![Sam2PromptPoint { x: 1.0, y: 1.0, label: 1 }],
+            vec![Sam2PromptPoint {
+                x: 1.0,
+                y: 1.0,
+                label: 1,
+            }],
             None,
             Some(std::env::temp_dir().to_string_lossy().to_string()),
             Some("../escape".to_string()),
