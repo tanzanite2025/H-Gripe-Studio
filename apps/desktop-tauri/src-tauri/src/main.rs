@@ -77,6 +77,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::runtime::get_runtime_info,
             commands::runtime::doctor,
+            commands::window_controls::window_minimize,
+            commands::window_controls::window_toggle_maximize,
+            commands::window_controls::window_close,
+            commands::window_controls::window_start_drag,
             commands::config::get_profiles,
             commands::config::probe_model_weights,
             commands::history::list_history,

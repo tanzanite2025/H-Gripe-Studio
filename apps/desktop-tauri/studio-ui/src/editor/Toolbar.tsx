@@ -1,6 +1,17 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import type {
+  Dispatch,
+  MouseEvent as ReactMouseEvent,
+  MutableRefObject,
+  SetStateAction,
+} from "react";
 import type { Node } from "@hgripe/flow";
 
+import {
+  closeWindow,
+  minimizeWindow,
+  startWindowDrag,
+  toggleMaximizeWindow,
+} from "../bridge/windowControls";
 import { NodeSearchBox } from "./NodeSearchBox";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
@@ -20,6 +31,46 @@ export function RedoIcon() {
       <path d="m15 14 5-5-5-5" />
       <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
     </svg>
+  );
+}
+
+function isInteractiveChromeTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        "button,input,textarea,select,a,[role='button'],.node-search,.window-traffic-controls",
+      ),
+    )
+  );
+}
+
+function WindowTrafficControls({ isDesktop }: { isDesktop: boolean }) {
+  if (!isDesktop) return null;
+  return (
+    <div className="window-traffic-controls" aria-label="Window controls">
+      <button
+        type="button"
+        className="window-traffic-button close"
+        title="Close"
+        aria-label="Close"
+        onClick={() => void closeWindow()}
+      />
+      <button
+        type="button"
+        className="window-traffic-button minimize"
+        title="Minimize"
+        aria-label="Minimize"
+        onClick={() => void minimizeWindow()}
+      />
+      <button
+        type="button"
+        className="window-traffic-button maximize"
+        title="Maximize or restore"
+        aria-label="Maximize or restore"
+        onClick={() => void toggleMaximizeWindow()}
+      />
+    </div>
   );
 }
 
@@ -110,12 +161,26 @@ export function Toolbar({
   onFilePicked,
 }: ToolbarProps) {
   const t = useT();
+  const handleTitleMouseDown = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!isDesktop || event.button !== 0 || event.detail > 1) return;
+    if (isInteractiveChromeTarget(event.target)) return;
+    void startWindowDrag();
+  };
+  const handleTitleDoubleClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!isDesktop || isInteractiveChromeTarget(event.target)) return;
+    void toggleMaximizeWindow();
+  };
 
   return (
     <header className="toolbar">
-      <div className="toolbar-title-row">
-        {/* Reserved zone for the future app-wide command system. */}
-        <div className="toolbar-command-zone" />
+      <div
+        className="toolbar-title-row"
+        onMouseDown={handleTitleMouseDown}
+        onDoubleClick={handleTitleDoubleClick}
+      >
+        <div className="toolbar-command-zone">
+          <WindowTrafficControls isDesktop={isDesktop} />
+        </div>
         <div className="toolbar-search">
           <NodeSearchBox nodes={nodes} onJump={onJumpToNode} />
         </div>

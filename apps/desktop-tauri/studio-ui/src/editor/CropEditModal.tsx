@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
+import { useSettledView } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 import { IDENTITY_VIEW, panView, zoomViewAt, type ViewportViewState } from "../viewport/view";
@@ -99,7 +100,22 @@ export function CropEditModal({
   // surface window placed at the stage's rect; the crop box and its dim are
   // DOM, compositing above the webview hole. PNG transport is the fallback.
   const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
-  const viewport = useViewportUnderlay("image_edit", source, 1280, view, null, underlayAnchorRef);
+  // Live zoom/pan should never enqueue a full frame render per pointer tick:
+  // the native surface crops its cached texture immediately, then a settled
+  // render refreshes detail after the gesture stops.
+  const settledView = useSettledView(view);
+  const viewport = useViewportUnderlay(
+    "image_edit",
+    source,
+    1280,
+    settledView,
+    null,
+    underlayAnchorRef,
+    true,
+    null,
+    undefined,
+    view,
+  );
   const underlay = viewport.underlay;
   const presented = viewport.presented;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };

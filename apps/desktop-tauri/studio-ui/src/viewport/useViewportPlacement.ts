@@ -33,6 +33,7 @@ function isPermanentSurfaceFallback(reason: string | undefined): boolean {
   return (
     text.includes("shared adapter") ||
     text.includes("not supported") ||
+    text.includes("without a presentation surface") ||
     text.includes("viewport-surface feature disabled") ||
     text.includes("windows-only") ||
     text.includes("surface creation failed") ||
