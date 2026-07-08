@@ -841,7 +841,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     copySelection,
     pasteClipboard,
     focusNode,
-    jumpToNode,
     deleteNode,
     disconnectNode,
     duplicateNode,
@@ -1610,8 +1609,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         setShowLog={setShowLog}
         snapshotCount={snapshots.length}
         logCount={runLog.length}
-        nodes={nodes}
-        onJumpToNode={jumpToNode}
         fileInputRef={fileInputRef}
         onFilePicked={(f) => void load(f)}
       />

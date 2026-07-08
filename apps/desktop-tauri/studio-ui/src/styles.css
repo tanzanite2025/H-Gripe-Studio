@@ -43,57 +43,29 @@ body {
   user-select: none;
 }
 .toolbar-title-row {
-  /* 4:2:4 zones — left reserved for the future command system, search
-   * centered, buttons confined to the right zone (no overlap). */
   display: grid;
-  grid-template-columns: 4fr 2fr 4fr;
+  grid-template-columns: auto minmax(40px, 1fr) auto;
   align-items: center;
   gap: 12px;
-  width: 100%;
-}
-.toolbar-document {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  white-space: nowrap;
-}
-.toolbar-search {
-  justify-self: center;
-  width: 100%;
-}
-.toolbar-search .node-search,
-.toolbar-search .node-search > input {
   width: 100%;
 }
 .toolbar-command-zone {
   justify-self: start;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   min-width: 68px;
 }
-.window-traffic-controls {
+.toolbar-drag-spacer {
+  align-self: stretch;
+  min-width: 40px;
+  cursor: default;
+}
+.toolbar-document {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 2px;
-}
-.window-traffic-button {
-  width: 13px;
-  height: 13px;
-  min-width: 13px;
-  min-height: 13px;
-  padding: 0 !important;
-  border-radius: 999px !important;
-  border: 1px solid rgba(0, 0, 0, 0.28);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  cursor: pointer;
-}
-.window-traffic-button.close { background: #ff5f57; }
-.window-traffic-button.minimize { background: #ffbd2e; }
-.window-traffic-button.maximize { background: #28c840; }
-.window-traffic-button:hover {
-  filter: brightness(1.08);
+  min-width: 0;
+  white-space: nowrap;
 }
 .toolbar-title-status button.active { border-color: var(--accent); color: var(--accent); }
 .toolbar-title-status {
@@ -166,6 +138,47 @@ button:disabled { opacity: 0.6; cursor: default; }
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.window-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+}
+.win-btn {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex: none;
+  color: rgba(18, 20, 26, 0.92);
+  cursor: default;
+}
+.win-close {
+  background: #ff5f57;
+}
+.win-minimize {
+  background: #febc2e;
+}
+.win-maximize {
+  background: #28c840;
+}
+.win-glyph {
+  opacity: 0;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  transition: opacity 120ms ease;
+  user-select: none;
+}
+.window-controls:hover .win-glyph,
+.win-btn:hover .win-glyph {
+  opacity: 1;
 }
 .toolbar-title-status .module-btn {
   width: 34px;
