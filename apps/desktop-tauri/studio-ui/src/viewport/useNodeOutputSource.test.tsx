@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// Pins the node-output source contract: with a node id the hook registers the
-// artifact and yields a `node_output` reference target the underlay presents
-// without the resource registry; without one, the plain path stays the source.
+// Pins the preview-only node-output source contract: with a node id the hook
+// registers the artifact and yields a `node_output` reference target the
+// underlay presents without the resource registry; without one, the plain path
+// stays the source.
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";

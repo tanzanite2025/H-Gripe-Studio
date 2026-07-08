@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useSettledView } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
@@ -33,7 +32,8 @@ export interface CropCommit {
 interface CropEditModalProps {
   title: string;
   imagePath?: string | null;
-  /** Node whose output backs the underlay, for a `node_output` target. */
+  /** Opening context only. Crop displays the image path and commits through
+   * the caller; node-output preview targets stay outside the editor surface. */
   nodeId?: string | null;
   initialMode: "manual" | "auto_subject";
   initialBox: [number, number, number, number] | null;
@@ -75,7 +75,6 @@ function defaultBox(w: number, h: number): CropBox {
 export function CropEditModal({
   title,
   imagePath,
-  nodeId,
   initialMode,
   initialBox,
   initialAspect,
@@ -93,9 +92,9 @@ export function CropEditModal({
   const panDrag = useRef<{ x: number; y: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Underlay presentation goes through the viewport host (WGPU migration
-  // Phase 2) by reference — a `node_output` target when a node id is given;
-  // null in browser preview, where the fallback dims + box stay.
-  const source = useNodeOutputSource(nodeId, imagePath);
+  // Phase 2) by the concrete image path. A node may open Crop and receive the
+  // commit back, but the crop editor itself is not a node-output preview.
+  const source = imagePath ?? undefined;
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed at the stage's rect; the crop box and its dim are
   // DOM, compositing above the webview hole. PNG transport is the fallback.

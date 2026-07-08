@@ -12,6 +12,9 @@ import type { GradeCommit } from "../GradePanel";
 // result back to whoever opened the editor — the host knows nothing about
 // nodes, the graph, or React Flow. The canvas side owns the adapters that
 // derive a request from a node and fold a result back into params/new nodes.
+// Important boundary: `nodeId` is opening/commit context only. Software-level
+// editors display their concrete asset path; node-output viewport targets
+// belong to preview gates, not to the editor's main canvas.
 //
 // Editors are code-split: nothing loads until a request opens one.
 
@@ -36,9 +39,8 @@ export interface EditorTarget {
   videoPath?: string | null;
   /** Display title for the editor chrome. */
   title: string;
-  /** Node whose output backs the target, when it is a node output: lets the
-   * editor preview present a `node_output` viewport target host-side rather
-   * than registering the path as a plain image resource. */
+  /** Opening context for graph adapters. Editors must not use this as their
+   * display source; they render `imagePath` and commit back through callbacks. */
   nodeId?: string | null;
 }
 

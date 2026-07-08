@@ -130,12 +130,30 @@ offer quick operations such as crop, mask, grade, or matte preview, but those
 operations must call the same Studio Action / compute-block layer used by the
 full image editor.
 
+### Editor / Preview Boundary
+
+Node context must not become the image editor's display source.
+
+The correct split is:
+
+- Preview/review surfaces may present `node_output`, row-port, layer, or mask
+  targets because their job is to inspect a graph artifact.
+- Software-level editors receive `imagePath` / asset refs for their main
+  underlay and may also receive `nodeId` as opening/commit context.
+- Saving from an editor returns through the caller's commit callback and folds
+  back into node params or creates a new artifact.
+
+`nodeId` therefore means "who opened me / where do I commit back", not "replace
+my canvas with a node-output viewport target". This keeps the editor stable
+when node artifacts are still registering, have stale ports, or are being
+recomputed.
+
 Correct ownership:
 
 ```text
 node card / row
-  -> passes assetId, node_output, row port, layer, or mask target
-  -> opens software-level preview or image editor
+  -> opens preview with assetId / node_output / row port / layer / mask target
+  -> opens editor with imagePath or asset ref plus optional commit context
   -> shared action/kernel layer performs the work
   -> result returns as an artifact or committed edit
 ```

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useNodeOutputSource } from "../viewport/useNodeOutputSource";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW } from "../viewport/view";
 import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
@@ -80,7 +79,8 @@ interface MaskEditModalProps {
   title: string;
   /** Backing image path (best-effort underlay); may be missing in preview. */
   imagePath?: string | null;
-  /** Node whose output backs the underlay, for a `node_output` target. */
+  /** Opening context only. Editors display the image path, then commit back
+   * through the caller; node-output preview targets stay outside this editor. */
   nodeId?: string | null;
   initial: unknown;
   /** Magic-wand colour tolerance from the node's param. */
@@ -152,7 +152,6 @@ const IMAGE_DOCK_LAYOUT: DockLayoutState = {
 export function MaskEditModal({
   title,
   imagePath,
-  nodeId,
   initial,
   wandTolerance,
   onCommit,
@@ -239,10 +238,11 @@ export function MaskEditModal({
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Underlay presentation goes through the viewport host (WGPU migration
-  // Phase 2): the image is targeted by reference — a `node_output` target
-  // when a node id is given, a registered image resource otherwise — and the
-  // host renders the frame; in browser preview it stays null and we draw a
-  // checkerboard so the user can still paint in the correct pixel space.
+  // Phase 2): editors display the concrete image path they were opened with.
+  // A node may open the editor and receive commits back, but it must not turn
+  // the editor's main canvas into a node-output preview target. Preview gates
+  // can use node_output targets; software-level editors need a stable asset
+  // source so the canvas never blanks while node artifacts are registering.
   // The requested frame is the canvas view's visible window, so underlay
   // detail follows the zoom (rendered through the viewport's cached proxy).
   // Debounced: during a wheel zoom / pan drag the stage's CSS transform (and
@@ -361,7 +361,7 @@ export function MaskEditModal({
       }),
     [workspace, lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
-  const source = useNodeOutputSource(nodeId, imagePath);
+  const source = imagePath ?? undefined;
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
   // surface can represent — a rotated view or the transparency preview hides

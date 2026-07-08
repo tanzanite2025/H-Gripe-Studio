@@ -34,7 +34,7 @@
 | `maskEditModal/LayersPanel.tsx` 等面板 | PS 式面板（图层行=眼睛/内容缩略图/链接/蒙版缩略图/名称、历史、通道、调整、路径、信息、工具选项） |
 | `maskEditModal/MaskStage.tsx` | 中央舞台展示：underlay 帧 + 编辑 canvas 叠一个文档空间 frame；`baseHidden` 隐藏底图显示棋盘格（之前修的 bug 就在这条 prop 链上） |
 | `MediaEditModal.tsx` | 统一图片编辑器：一个工具组切换器下托管 mask/crop 编辑器，带文档 tab 条 |
-| `host/EditorHost.tsx` | 软件级编辑器宿主：只认 `EditorTarget`（imagePath/nodeId/title）+ commit 回调，对节点/图一无所知；code-split 懒加载 |
+| `host/EditorHost.tsx` | 软件级编辑器宿主：只认 `EditorTarget`（`imagePath`/`title` + 可选 `nodeId` 回填上下文）+ commit 回调；编辑器主画布只显示资产/文件路径，不能把 `nodeId` 当成 `node_output` underlay target |
 
 ### 4. Agent / Action 层
 | 文件 | 职责 |
@@ -61,6 +61,21 @@
 1. **Underlay**：viewport host 渲染的帧窗口（native surface swap 时 webview 留洞），缩放静置 120ms 后按新窗口细节重渲；`imageTransform` 只作为 CSS 变换叠加。
 2. **Overlay canvas**：`stagePainter` 画笔画带/路径/选框——只是视觉提示，软笔刷用 CSS blur 近似，注释明确"proxy/后端 stamp 才是权威软栅格"。
 3. **Proxy 形态学**：`maskMorphology` 在缩小的 alpha buffer 上近似 grow/shrink/feather，`PreviewLane` latest-wins，永不写回。
+
+### 编辑器打开边界（必须锁住）
+
+图片编辑器、裁剪器、蒙版编辑器属于软件级编辑器，不属于节点内部预览层。节点可以携带上下文打开它们，但边界必须是：
+
+```text
+节点 / 预览弹窗
+  -> 传入 imagePath、title、可选 nodeId 上下文
+  -> 编辑器主画布只用 imagePath / 资产引用显示
+  -> 用户确认后通过 commit 回调保存回填到节点参数或生成新 artifact
+```
+
+`node_output` target 只能用于节点预览、review gate、抽屉预览、调色预览等“展示某个节点输出”的地方。它不能接管图片编辑器主画布，否则节点 artifact 注册、重跑、port 切换或 host-side target 解析失败时，会出现“右侧缩略图有图，但编辑器主画布一直黑/空”的断链。
+
+换句话说：`nodeId` 是打开来源和回填上下文，不是编辑器显示源。编辑器显示源必须稳定、可立即解码、可回退到 PNG/blob 兜底。
 
 ### 图像工作区支线（K1/K2）
 ```

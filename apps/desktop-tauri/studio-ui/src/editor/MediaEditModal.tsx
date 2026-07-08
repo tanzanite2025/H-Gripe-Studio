@@ -17,7 +17,8 @@ import { serializeEditState, type EditState } from "./maskEdit";
 interface MediaEditModalProps {
   title: string;
   imagePath?: string | null;
-  /** Node whose output backs the underlay, for a `node_output` target. */
+  /** Opening context only. The image editor displays `imagePath`; node
+   * context is used by the caller to save/commit back into the graph. */
   nodeId?: string | null;
   /** "Open image" entry: lands the picked file on a new image card / tab. */
   onPickFile?: () => void;
@@ -39,7 +40,6 @@ interface MediaEditModalProps {
 export function MediaEditModal({
   title,
   imagePath,
-  nodeId,
   onPickFile,
   tabs,
   onSelectTab,
@@ -113,7 +113,6 @@ export function MediaEditModal({
     <MaskEditModal
       title={title}
       imagePath={imagePath}
-      nodeId={nodeId}
       initial={maskInitial}
       wandTolerance={24}
       onCommit={(edits, state) => onCommitMask(fromMaskDocument(edits, serializeEditState(state)))}

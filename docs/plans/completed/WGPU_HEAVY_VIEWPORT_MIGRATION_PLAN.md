@@ -86,10 +86,14 @@ Implemented (PRs #329-400):
   (`viewport_render_frame_bin`: length-prefixed meta JSON + PNG bytes
   presented via short-lived object URLs) instead of base64 data URLs inside
   JSON.
-- Product-layer target wiring: the node-card grade modal, the mask/crop
-  editors and the media source's unified editor all preview through
-  `node_output` targets (like the drawer Grade tab), so the selection-target
-  model is uniform in the product layer.
+- Product-layer target wiring correction (2026-07): `node_output` targets are
+  valid for preview/review surfaces whose job is to inspect a graph artifact
+  (node preview gates, drawer previews, grade previews). Software-level
+  editors are deliberately different: the mask/crop editors and the media
+  source's unified image editor display the concrete `imagePath` / asset ref,
+  while `nodeId` remains only opening/commit context. This prevents editor
+  underlays from going blank when a node artifact target is stale, pending
+  registration, or being recomputed.
 - Mask editor presentation: the underlay detail follows canvas zoom (the
   modal requests the visible window from the host and places the rendered
   frame at the window's rect under the edit canvas), and the selection tint

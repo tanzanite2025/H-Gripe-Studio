@@ -1,7 +1,7 @@
-// Node-output underlay sources (WGPU migration: product-layer target wiring).
-// Editors that preview a node's output artifact register it with the viewport
-// host and present it as a `node_output` reference target, keeping the
-// selection-target model uniform with the drawer and grade surfaces.
+// Node-output underlay sources (WGPU migration: preview/review target wiring).
+// This hook is for preview gates that intentionally present a node artifact by
+// reference. Software-level editors must display their concrete asset path and
+// treat node ids only as opening/commit context.
 
 import { useEffect, useState } from "react";
 import { registerNodeOutput } from "../bridge/viewport";
