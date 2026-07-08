@@ -18,6 +18,7 @@ export type Box = [number, number, number, number];
 export interface MarqueeSelection {
   region: Box;
   ellipse: boolean;
+  polygon?: Pt[];
 }
 
 /** A crop-draft region's corners in TL, TR, BR, BL order. */
@@ -159,6 +160,7 @@ export interface PointerEnv {
   confirmCropDraft(draft: Box): void;
   setQuadDraft: React.Dispatch<React.SetStateAction<Pt[] | null>>;
   setLastMarquee: React.Dispatch<React.SetStateAction<MarqueeSelection | null>>;
+  setWorkSelection: React.Dispatch<React.SetStateAction<MarqueeSelection | null>>;
   setMoveDraft(v: Pt | null): void;
   setRulerLine(v: RulerLine | null): void;
   setColorSamples: React.Dispatch<React.SetStateAction<ColorSample[]>>;

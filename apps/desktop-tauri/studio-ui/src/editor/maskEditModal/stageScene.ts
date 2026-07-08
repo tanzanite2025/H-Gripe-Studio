@@ -30,6 +30,7 @@ import {
   paintSamPoints,
   paintShapeDraft,
   paintStroke,
+  paintWorkSelection,
   retouchBandColor,
   type ColorSample,
   type RulerLine,
@@ -38,6 +39,7 @@ import {
 export interface MarqueeSelection {
   region: [number, number, number, number];
   ellipse: boolean;
+  polygon?: [number, number][];
 }
 
 export interface OverlaySceneArgs {
@@ -70,6 +72,7 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
   const { workspace, frameDims, previewing, doc, editingPath, lastMarquee, antsPhase, toolId, rulerLine, colorSamples } = args;
   if (frameDims.w <= 0 || frameDims.h <= 0) return null;
   const items: ViewportOverlayItem[] = [];
+  let animatedSelection = false;
   // Committed pen / lasso paths: the same loops the canvas painter fills
   // and outlines, flattened to straight segments and normalized.
   if (workspace === "mask" && !previewing) {
@@ -118,13 +121,21 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
       });
     }
   }
-  if (lastMarquee) {
-    const [x0, y0, x1, y1] = lastMarquee.region;
-    items.push({
-      kind: "marquee",
-      region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
-      ...(lastMarquee.ellipse ? { ellipse: true } : null),
-    });
+  if (lastMarquee && workspace === "mask") {
+    if (lastMarquee.polygon) {
+      // Polygon lasso selections are painted on the DOM edit canvas instead
+      // of the host overlay. The canvas sits above both PNG and native WGPU
+      // underlays, so closing the lasso cannot disappear while the host
+      // surface catches up or lacks polygon-dash support.
+    } else {
+      const [x0, y0, x1, y1] = lastMarquee.region;
+      items.push({
+        kind: "marquee",
+        region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
+        ...(lastMarquee.ellipse ? { ellipse: true } : null),
+      });
+    }
+    animatedSelection = true;
   }
   const norm = (x: number, y: number): [number, number] => [x / frameDims.w, y / frameDims.h];
   // The committed ruler line (shown while the ruler tool is in hand):
@@ -170,7 +181,7 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
       items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3, stroke: colour, fill: colour });
     }
   }
-  return items.length > 0 ? { items, ...(lastMarquee ? { phase: antsPhase } : null) } : null;
+  return items.length > 0 ? { items, ...(animatedSelection ? { phase: antsPhase } : null) } : null;
 }
 
 export interface StagePaintArgs {
@@ -201,6 +212,7 @@ export interface StagePaintArgs {
   cropDraft: [number, number, number, number] | null;
   cropRegion: [number, number, number, number] | null;
   lastMarquee: MarqueeSelection | null;
+  workSelection: MarqueeSelection | null;
   antsPhase: number;
   gestures: PointerGestures;
 }
@@ -238,6 +250,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     cropDraft,
     cropRegion,
     lastMarquee,
+    workSelection,
     antsPhase,
     gestures,
   } = args;
@@ -268,10 +281,13 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (workspace === "mask" && !underlay && !presented) {
     doc.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
   }
+  if (workspace === "image" && !lastMarquee && workSelection) {
+    paintWorkSelection(ctx, workSelection);
+  }
   const live = gestures.drawing;
   if (live) {
     if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {
-      paintLassoLoop(ctx, live.points);
+      paintLassoLoop(ctx, live.points, false, antsPhase);
     } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
       paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, gestures.dodgeBurnMode));
     } else {
@@ -286,7 +302,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
 
   if ((tool.kind === "clone" || tool.id === "healing_brush") && gestures.cloneSource) paintCloneSource(ctx, gestures.cloneSource);
   if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, gestures.draggingAnchor);
-  if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors);
+  if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors, antsPhase);
   // With a host frame, sampler pins / ruler / SAM markers stroke host-side
   // (the viewport overlay scene) — the canvas keeps only the text labels.
   // The live ruler drag stays fully on the canvas for zero-latency feedback.
@@ -309,9 +325,11 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
   const mq = gestures.marquee;
   if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse", antsPhase);
-  else if (lastMarquee && !underlay && !presented) {
-    // The committed ants stroke host-side over the presented frame; the
-    // canvas only draws them when no host frame presents (browser preview).
+  else if (lastMarquee?.polygon) {
+    paintLassoLoop(ctx, lastMarquee.polygon, true, antsPhase);
+  } else if (lastMarquee && (workspace === "image" || (!underlay && !presented))) {
+    // Image-editor selections must stay on the DOM canvas so every closed
+    // selection shape remains visible above PNG / native WGPU underlays.
     const [x0, y0, x1, y1] = lastMarquee.region;
     paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse, antsPhase);
   }
@@ -319,7 +337,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (pl) {
     const pd = gestures.patchDrag;
     const [ox, oy] = pd ? [pd.end[0] - pd.start[0], pd.end[1] - pd.start[1]] : [0, 0];
-    paintLassoLoop(ctx, pd ? pl.map(([x, y]) => [x + ox, y + oy] as [number, number]) : pl, true);
+    paintLassoLoop(ctx, pd ? pl.map(([x, y]) => [x + ox, y + oy] as [number, number]) : pl, true, antsPhase);
     if (pd) paintDragArrow(ctx, pd.start, pd.end);
   }
   if (quadDraft) paintQuadDraft(ctx, quadDraft);

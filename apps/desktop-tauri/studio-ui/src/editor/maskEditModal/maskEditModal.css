@@ -60,6 +60,87 @@
   gap: 0 6px;
   padding: 10px;
 }
+.mask-edit-tools {
+  grid-column: 1;
+  grid-row: 1;
+}
+.mask-edit-stage {
+  grid-column: 2;
+  grid-row: 1;
+}
+.mask-selection-top-strip {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: center;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 5px;
+  border: 1px solid rgba(130, 146, 176, 0.28);
+  border-radius: 999px;
+  background: rgba(25, 29, 40, 0.88);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+.mask-selection-tool {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: rgba(238, 244, 255, 0.78);
+  background: rgba(255, 255, 255, 0.05);
+  line-height: 1;
+  cursor: pointer;
+}
+.mask-selection-tool-key {
+  position: absolute;
+  right: 4px;
+  top: 2px;
+  min-width: 8px;
+  padding: 0;
+  border: 0;
+  color: rgba(216, 225, 245, 0.72);
+  background: transparent;
+  font: 600 8px/1 var(--font-ui, system-ui, sans-serif);
+  text-align: center;
+  pointer-events: none;
+}
+.mask-selection-tool svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.mask-selection-tool:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.11);
+}
+.mask-selection-tool.active {
+  color: #ffffff;
+  border-color: rgba(99, 143, 255, 0.7);
+  background: rgba(71, 116, 255, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.mask-selection-tool.active .mask-selection-tool-key {
+  color: rgba(255, 255, 255, 0.92);
+}
+.mask-rail-resize {
+  grid-column: 3;
+  grid-row: 1;
+}
+.mask-edit-controls {
+  grid-column: 4;
+  grid-row: 1;
+}
 /* PS toolbar rail: a flat dark column of borderless icon buttons. It never
    scrolls — when the modal is too short for one column, groups wrap into a
    second column (PS's double-column mode). */

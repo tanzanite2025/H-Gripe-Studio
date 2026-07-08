@@ -13,8 +13,9 @@ import {
   type PaintTarget,
   type ShapeKind,
 } from "./maskTools";
-import { useShortcutScope, type ShortcutHandlers } from "../shortcuts";
-import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS } from "../shortcuts/scopes/maskEdit";
+import { parseCombo, useShortcutScope, type ShortcutHandlers } from "../shortcuts";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
 import { useT } from "../i18n";
 import { PreviewLane } from "../runtime/previewLane";
 import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
@@ -41,7 +42,7 @@ import type {
 import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
-import { catmullRomClosed } from "./maskEditModal/pathGeometry";
+import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap } from "./maskEditModal/magneticSnap";
 import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
@@ -67,6 +68,7 @@ import { usePathEditing } from "./maskEditModal/usePathEditing";
 import { ImageSizeDialog } from "./maskEditModal/ImageSizeDialog";
 import { CropPanel } from "./maskEditModal/CropPanel";
 import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
+import { ToolIcon } from "./maskEditModal/toolIcons";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -74,6 +76,17 @@ import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
 // them against the real image on run.
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
+const SELECTION_TOP_TOOLS = ["rect", "ellipse", "lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
+const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
+
+function toolKeyBadge(toolId: string): string {
+  const combo = toolCombo(toolId);
+  if (combo) {
+    const key = parseCombo(combo).key;
+    return key.length === 1 ? key.toUpperCase() : "";
+  }
+  return psSlotOf(toolId)?.shortcut ?? "";
+}
 
 interface MaskEditModalProps {
   title: string;
@@ -124,6 +137,40 @@ const SHELL_HANDOFF_MS = 300;
 // their global meaning even while a selection is up (PS transforms / crops
 // the selection contents, which the mask model has no notion of).
 const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
+interface ActiveSelection {
+  region: [number, number, number, number];
+  ellipse: boolean;
+  polygon?: [number, number][];
+}
+
+function polygonSelection(points: [number, number][]): ActiveSelection {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const region: [number, number, number, number] = [
+    Math.min(...xs),
+    Math.min(...ys),
+    Math.max(...xs),
+    Math.max(...ys),
+  ];
+  return { region, ellipse: false, polygon: points };
+}
+
+function pointInActiveSelection(point: [number, number], selection: ActiveSelection): boolean {
+  if (selection.polygon) return pointInPolygon(point, selection.polygon);
+  const [x0, y0, x1, y1] = selection.region;
+  const left = Math.min(x0, x1);
+  const right = Math.max(x0, x1);
+  const top = Math.min(y0, y1);
+  const bottom = Math.max(y0, y1);
+  const [x, y] = point;
+  if (x < left || x > right || y < top || y > bottom) return false;
+  if (!selection.ellipse) return true;
+  const rx = Math.max((right - left) / 2, 1);
+  const ry = Math.max((bottom - top) / 2, 1);
+  const cx = left + rx;
+  const cy = top + ry;
+  return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
+}
 
 // Default right-rail dock layout, mirroring PS: a 调整/属性 top group (plus
 // the mask-specific tool options / mask ops / info tabs) over a growing
@@ -264,12 +311,12 @@ export function MaskEditModal({
   // The active rect/ellipse marquee selection (PS-style): marching ants stay
   // visible across tools, subsequent edit steps are confined to it (`clip`),
   // and Ctrl+D / a plain marquee click deselects.
-  const [lastMarquee, setLastMarquee] = useState<{
-    region: [number, number, number, number];
-    ellipse: boolean;
-  } | null>(null);
+  const [lastMarquee, setLastMarquee] = useState<ActiveSelection | null>(null);
   const lastMarqueeRef = useRef(lastMarquee);
   lastMarqueeRef.current = lastMarquee;
+  const [workSelection, setWorkSelection] = useState<ActiveSelection | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
+  const [pathMenu, setPathMenu] = useState<{ x: number; y: number; selection: ActiveSelection } | null>(null);
   // Marching ants flow (PS): while a selection is active, the dash phase
   // advances a few times a second and the ants march along the outline —
   // host-side over presented frames and on the canvas fallback alike.
@@ -514,15 +561,17 @@ export function MaskEditModal({
   // PS selection semantics: an active marquee is only a selection — it never
   // lands on the edit stack itself. Instead, edit steps recorded while it is
   // active carry it as their `clip`, so replay confines their effect to the
-  // Floating size panel beside the selection: a local W×H draft, re-seeded
-  // whenever the committed marquee changes.
+  // Floating size panel beside the closed marquee shape: pending work
+  // selections show as solid outlines; established selections show marching
+  // ants. The panel reads whichever one is currently present.
+  const marqueeSelection = workSelection ?? lastMarquee;
   const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   useEffect(() => {
-    if (lastMarquee) {
-      const [x0, y0, x1, y1] = lastMarquee.region;
+    if (marqueeSelection) {
+      const [x0, y0, x1, y1] = marqueeSelection.region;
       setMarqueeDraft({ w: Math.round(x1 - x0), h: Math.round(y1 - y0) });
     }
-  }, [lastMarquee]);
+  }, [marqueeSelection]);
   const [shapeKind, setShapeKind] = useState<ShapeKind>("polygon");
   const [shapeSides, setShapeSides] = useState(5);
   // Crop tool: the adjustable rect / perspective-quad drafts and the floating
@@ -559,7 +608,18 @@ export function MaskEditModal({
   // Dialog drafts: the free-transform panel (Ctrl+T), fill dialog (Shift+F5)
   // and Image Size dialog (Ctrl+Alt+I) clusters (see useDialogDrafts).
   const dialogs = useDialogDrafts(dims, dispatch, stateRef);
-  const { transformDraft, setTransformDraft, editingTransform, closeTransformPanel, fillDraft, setFillDraft, imageSizeDraft, setImageSizeDraft } = dialogs;
+  const {
+    transformDraft,
+    setTransformDraft,
+    editingTransform,
+    closeTransformPanel,
+    fillDraft,
+    setFillDraft,
+    imageSizeDraft,
+    setImageSizeDraft,
+    openFreeTransform: openFreeTransformPanel,
+    openFillDialog,
+  } = dialogs;
 
   // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
   // active only while this modal is mounted, shadowing the canvas shortcuts.
@@ -604,8 +664,41 @@ export function MaskEditModal({
 
   const openFreeTransform = () => {
     selectTool("move");
-    dialogs.openFreeTransform();
+    openFreeTransformPanel();
   };
+
+  const disabledMenuAction = () => {};
+  const selectionMenuItems: MenuItem[] = [
+    { label: "取消选择", onClick: () => setLastMarquee(null) },
+    { label: "选择反向", onClick: disabledMenuAction, disabled: true },
+    { label: "羽化...", onClick: disabledMenuAction, disabled: true },
+    { label: "选择并遮住...", onClick: disabledMenuAction, disabled: true },
+    { label: "存储选区...", onClick: disabledMenuAction, disabled: true },
+    { label: "建立工作路径...", onClick: disabledMenuAction, disabled: true },
+    { label: "通过拷贝的图层", onClick: disabledMenuAction, disabled: true },
+    { label: "通过剪切的图层", onClick: disabledMenuAction, disabled: true },
+    { label: "新建图层...", onClick: disabledMenuAction, disabled: true },
+    { label: "自由变换", onClick: openFreeTransform },
+    { label: "变换选区", onClick: disabledMenuAction, disabled: true },
+    { label: "填充...", onClick: openFillDialog },
+    { label: "描边...", onClick: disabledMenuAction, disabled: true },
+    { label: "内容识别填充...", onClick: disabledMenuAction, disabled: true },
+    { label: "生成式填充...", onClick: disabledMenuAction, disabled: true },
+    { label: "删除和填充选区", onClick: disabledMenuAction, disabled: true },
+  ];
+
+  const pathMenuItems: MenuItem[] = [
+    {
+      label: "建立选区",
+      onClick: () => {
+        if (pathMenu) {
+          setLastMarquee(pathMenu.selection);
+          setWorkSelection(null);
+        }
+      },
+    },
+    { label: "取消路径", onClick: () => setWorkSelection(null) },
+  ];
 
   // The colour tools read the shell through this env at call time (see
   // useColorTools); re-assigned every render so it always sees current values.
@@ -644,6 +737,7 @@ export function MaskEditModal({
     clear: () => {
       // PS Ctrl+D: with an active selection, deselect; otherwise clear edits.
       if (lastMarqueeRef.current) setLastMarquee(null);
+      else if (workSelection) setWorkSelection(null);
       else dispatch({ type: "clear" });
     },
     select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
@@ -715,7 +809,7 @@ export function MaskEditModal({
   // centre (the transform's fixed point), un-rotated and un-scaled back into
   // the canvas's untransformed layout space, then scaled to image pixels.
   const toImage = useCallback(
-    (e: React.PointerEvent): [number, number] => {
+    (e: { clientX: number; clientY: number }): [number, number] => {
       const canvas = canvasRef.current;
       if (!canvas) return [0, 0];
       const rect = canvas.getBoundingClientRect();
@@ -733,6 +827,30 @@ export function MaskEditModal({
     },
     [dims.w, dims.h],
   );
+
+  const workSelectionAtPoint = (pt: [number, number]): ActiveSelection | null => {
+    return workSelection && pointInActiveSelection(pt, workSelection) ? workSelection : null;
+  };
+
+  const openSelectionContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pt = toImage(e);
+    const selection = lastMarqueeRef.current;
+    if (selection && pointInActiveSelection(pt, selection)) {
+      setPathMenu(null);
+      setSelectionMenu({ x: e.clientX, y: e.clientY });
+      return;
+    }
+    const pendingSelection = workSelectionAtPoint(pt);
+    if (pendingSelection) {
+      setSelectionMenu(null);
+      setPathMenu({ x: e.clientX, y: e.clientY, selection: pendingSelection });
+      return;
+    }
+    setSelectionMenu(null);
+    setPathMenu(null);
+  };
 
   const viewportHost = viewport.host;
   // Magnetic lasso: capture the underlay's visible window as an edge map at
@@ -812,10 +930,11 @@ export function MaskEditModal({
       cropDraft,
       cropRegion: null,
       lastMarquee,
+      workSelection: penAnchors.length > 0 ? null : workSelection,
       antsPhase,
       gestures,
     });
-  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, antsPhase]);
+  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, workSelection, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -861,6 +980,12 @@ export function MaskEditModal({
   // mode / closed / points, so every path tool replays identically.
   const commitPath = (toolName: string, pts: [number, number][]) => {
     if (pts.length < 3) return;
+    if (workspace === "image") {
+      setWorkSelection(polygonSelection(pts));
+      setLastMarquee(null);
+      setPathMenu(null);
+      return;
+    }
     dispatch({
       type: "path",
       path: {
@@ -925,6 +1050,7 @@ export function MaskEditModal({
     confirmCropDraft,
     setQuadDraft,
     setLastMarquee,
+    setWorkSelection,
     setMoveDraft,
     setRulerLine,
     setColorSamples,
@@ -1038,13 +1164,14 @@ export function MaskEditModal({
   // Anchored at the last marquee's top-left (or the image origin), clamped to
   // the canvas, and recorded as the same rect / ellipse op a drag would make.
   const applyMarqueeSize = (w: number, h: number) => {
-    const ellipse = lastMarquee ? lastMarquee.ellipse : toolId === "ellipse";
+    const ellipse = marqueeSelection ? marqueeSelection.ellipse : toolId === "ellipse";
     const cw = Math.max(2, Math.min(Math.round(w), dims.w));
     const ch = Math.max(2, Math.min(Math.round(h), dims.h));
-    const x0 = Math.min(lastMarquee?.region[0] ?? 0, dims.w - cw);
-    const y0 = Math.min(lastMarquee?.region[1] ?? 0, dims.h - ch);
+    const x0 = Math.min(marqueeSelection?.region[0] ?? 0, dims.w - cw);
+    const y0 = Math.min(marqueeSelection?.region[1] ?? 0, dims.h - ch);
     const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
     setLastMarquee({ region, ellipse });
+    setWorkSelection(null);
     forceRedraw((n) => n + 1);
   };
 
@@ -1106,6 +1233,7 @@ export function MaskEditModal({
           <MaskToolbar
             toolId={toolId}
             onToolClick={onToolClick}
+            hiddenSlotIds={workspace === "image" ? SELECTION_TOP_SLOT_IDS : []}
             faces={slotFaces}
             onPickFace={(slotId, id) => setSlotFaces((f) => ({ ...f, [slotId]: id }))}
             paintMode={tool.mode === "subtract" || (tool.kind === "path" && pathMode === "subtract") ? "subtract" : "add"}
@@ -1115,6 +1243,30 @@ export function MaskEditModal({
             onSwapColors={swapColors}
             onResetColors={resetColors}
           />
+
+          {workspace === "image" ? (
+            <div className="mask-selection-top-strip" role="toolbar" aria-label="选区工具">
+              {SELECTION_TOP_TOOLS.map((id) => {
+                const mt = maskTool(id);
+                if (!mt) return null;
+                const active = toolId === id;
+                const badge = toolKeyBadge(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`mask-selection-tool${active ? " active" : ""}`}
+                    title={mt.label}
+                    aria-label={mt.label}
+                    onClick={() => onToolClick(mt)}
+                  >
+                    <ToolIcon id={id} />
+                    {badge ? <kbd className="mask-selection-tool-key" aria-hidden="true">{badge}</kbd> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
 
           <MaskStage
             canvasRef={canvasRef}
@@ -1135,14 +1287,31 @@ export function MaskEditModal({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onContextMenu={openSelectionContextMenu}
             brushCursor={usesBrushCursor && !spacePan ? { diameter: brushSize * 2 } : null}
             brushCursorRef={brushCursorEl}
           />
+          {selectionMenu ? (
+            <ContextMenu
+              x={selectionMenu.x}
+              y={selectionMenu.y}
+              items={selectionMenuItems}
+              onClose={() => setSelectionMenu(null)}
+            />
+          ) : null}
+          {pathMenu ? (
+            <ContextMenu
+              x={pathMenu.x}
+              y={pathMenu.y}
+              items={pathMenuItems}
+              onClose={() => setPathMenu(null)}
+            />
+          ) : null}
 
           {/* Floating selection-size panel (see MarqueeSizePanel). */}
-          {lastMarquee && !gestures.marquee && tool.kind === "marquee" && canvasRef.current ? (
+          {marqueeSelection && !gestures.marquee && tool.kind === "marquee" && canvasRef.current ? (
             <MarqueeSizePanel
-              region={lastMarquee.region}
+              region={marqueeSelection.region}
               draft={marqueeDraft}
               setDraft={setMarqueeDraft}
               applySize={applyMarqueeSize}

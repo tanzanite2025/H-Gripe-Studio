@@ -19,6 +19,7 @@ import { ToolIcon } from "./toolIcons";
 interface MaskToolbarProps {
   toolId: string;
   onToolClick: (tool: MaskTool) => void;
+  hiddenSlotIds?: readonly string[];
   /** Last-used variant per multi-tool slot (the icon shown on the button). */
   faces: Record<string, string>;
   /** A flyout variant was picked: remember it as slot `slotId`'s face. */
@@ -48,9 +49,10 @@ function isActive(mt: MaskTool, toolId: string): boolean {
   return toolId === mt.id && (mt.kind !== "global" || isPreviewableOp(mt.id));
 }
 
-export function MaskToolbar({ toolId, onToolClick, faces, onPickFace, paintMode, fgColor, bgColor, onPickColor, onSwapColors, onResetColors }: MaskToolbarProps) {
+export function MaskToolbar({ toolId, onToolClick, hiddenSlotIds = [], faces, onPickFace, paintMode, fgColor, bgColor, onPickColor, onSwapColors, onResetColors }: MaskToolbarProps) {
   const t = useT();
   const lang = useContext(LangContext);
+  const hiddenSlots = new Set(hiddenSlotIds);
   // Which slot's flyout card is open ("si-gi" key) and where it anchors.
   // The card renders `position: fixed` so the scrollable toolbar column
   // can't clip it.
@@ -90,6 +92,7 @@ export function MaskToolbar({ toolId, onToolClick, faces, onPickFace, paintMode,
       {PS_TOOL_SECTIONS.map((section, si) => (
         <div key={si} className="mask-tool-group">
           {section.map((slot) => {
+            if (hiddenSlots.has(slot.id)) return null;
             const key = slot.id;
             const tools = slot.variants.map((id) => maskTool(id)).filter((mt): mt is MaskTool => mt != null);
             if (tools.length === 0) return null;

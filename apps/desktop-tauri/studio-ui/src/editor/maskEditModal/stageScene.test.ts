@@ -38,6 +38,32 @@ describe("buildViewportOverlayScene", () => {
     expect(scene).toBeNull();
   });
 
+  it("keeps active polygon lasso selections on the edit canvas, not the host overlay", () => {
+    const scene = buildViewportOverlayScene({
+      workspace: "image",
+      frameDims: { w: 100, h: 100 },
+      previewing: false,
+      doc: emptyMaskDocument(),
+      editingPath: null,
+      lastMarquee: {
+        region: [10, 10, 80, 80],
+        ellipse: false,
+        polygon: [
+          [10, 10],
+          [80, 10],
+          [70, 80],
+          [20, 70],
+        ],
+      },
+      antsPhase: 6,
+      toolId: "polygon_lasso",
+      rulerLine: null,
+      colorSamples: [],
+    });
+
+    expect(scene).toBeNull();
+  });
+
   it("keeps committed mask geometry visible in the mask workspace", () => {
     const scene = buildViewportOverlayScene({
       workspace: "mask",

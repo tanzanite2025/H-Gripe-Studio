@@ -48,6 +48,7 @@ interface MaskStageProps {
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   /** PS-style brush cursor: the tip's outline (image px) for brush-sized
    * tools, or null (no outline). Position is driven imperatively through
    * `brushCursorRef` (left/top %) to avoid re-rendering per pointer move. */
@@ -55,7 +56,7 @@ interface MaskStageProps {
   brushCursorRef: MutableRefObject<HTMLDivElement | null>;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef }: MaskStageProps) {
   const t = useT();
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
@@ -122,7 +123,7 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerLeave={onPointerUp}
-            onContextMenu={(e) => e.preventDefault()}
+            onContextMenu={onContextMenu}
           />
           {brushCursor ? (
             <div

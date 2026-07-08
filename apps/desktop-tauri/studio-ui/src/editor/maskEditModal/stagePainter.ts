@@ -14,6 +14,12 @@ export interface StrokeLike {
   flow?: number;
 }
 
+export interface SelectionOutline {
+  region: [number, number, number, number];
+  ellipse: boolean;
+  polygon?: [number, number][];
+}
+
 /** A committed or in-progress brush stroke band (blue add / red subtract / amber matte). */
 export function paintStroke(ctx: CanvasRenderingContext2D, s: StrokeLike, kind: "paint" | "matte" = "paint") {
   ctx.strokeStyle =
@@ -47,9 +53,7 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: StrokeLike, kind: 
   ctx.restore();
 }
 
-/** A committed pen / lasso vector path: translucent fill + outline (bezier
- *  segments where control handles are recorded). */
-export function paintPath(ctx: CanvasRenderingContext2D, p: EditPath) {
+function traceEditPath(ctx: CanvasRenderingContext2D, p: EditPath) {
   if (p.points.length < 2) return;
   ctx.beginPath();
   ctx.moveTo(p.points[0].x, p.points[0].y);
@@ -65,6 +69,49 @@ export function paintPath(ctx: CanvasRenderingContext2D, p: EditPath) {
     }
   }
   ctx.closePath();
+}
+
+function strokeMarchingAnts(ctx: CanvasRenderingContext2D, trace: () => void, phase = 0, width = 2) {
+  ctx.save();
+  ctx.lineWidth = width;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(255,255,255,0.96)";
+  ctx.setLineDash([]);
+  trace();
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(0,0,0,0.92)";
+  ctx.setLineDash([7, 5]);
+  ctx.lineDashOffset = -phase;
+  trace();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function traceSelectionOutline(ctx: CanvasRenderingContext2D, selection: SelectionOutline) {
+  ctx.beginPath();
+  if (selection.polygon?.length) {
+    selection.polygon.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.closePath();
+    return;
+  }
+  const [x0, y0, x1, y1] = selection.region;
+  const left = Math.min(x0, x1);
+  const top = Math.min(y0, y1);
+  const width = Math.abs(x1 - x0);
+  const height = Math.abs(y1 - y0);
+  if (selection.ellipse) {
+    ctx.ellipse(left + width / 2, top + height / 2, Math.max(width / 2, 0.5), Math.max(height / 2, 0.5), 0, 0, Math.PI * 2);
+  } else {
+    ctx.rect(left, top, width, height);
+  }
+}
+
+/** A committed pen / lasso vector path: translucent fill + outline (bezier
+ *  segments where control handles are recorded). */
+export function paintPath(ctx: CanvasRenderingContext2D, p: EditPath) {
+  if (p.points.length < 2) return;
+  traceEditPath(ctx, p);
   ctx.fillStyle =
     p.mode === "subtract"
       ? "rgba(244,98,98,0.3)"
@@ -77,16 +124,64 @@ export function paintPath(ctx: CanvasRenderingContext2D, p: EditPath) {
   ctx.stroke();
 }
 
-/** A live lasso loop: thin dashed outline, not a brush band. */
-export function paintLassoLoop(ctx: CanvasRenderingContext2D, points: [number, number][], close = false) {
-  ctx.strokeStyle = "rgba(86,168,255,0.9)";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([6, 4]);
-  ctx.beginPath();
-  points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-  if (close) ctx.closePath();
+/** A closed work path in the image editor: solid outline, not a selection. */
+export function paintWorkPath(ctx: CanvasRenderingContext2D, points: [number, number][]) {
+  if (points.length < 2) return;
+  const trace = () => {
+    ctx.beginPath();
+    points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.closePath();
+  };
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.92)";
+  trace();
   ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(47,124,246,0.96)";
+  trace();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** A closed work selection in the image editor: solid outline until the user
+ * explicitly turns it into an active marching-ants selection. */
+export function paintWorkSelection(ctx: CanvasRenderingContext2D, selection: SelectionOutline) {
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.92)";
+  traceSelectionOutline(ctx, selection);
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(47,124,246,0.96)";
+  traceSelectionOutline(ctx, selection);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** An active lasso selection path: PS-style high-contrast marching ants. */
+export function paintPathSelection(ctx: CanvasRenderingContext2D, p: EditPath, phase = 0) {
+  if (p.points.length < 2) return;
+  strokeMarchingAnts(ctx, () => traceEditPath(ctx, p), phase, 2.25);
+}
+
+/** A live lasso loop: PS-style high-contrast marching ants, not a brush band. */
+export function paintLassoLoop(ctx: CanvasRenderingContext2D, points: [number, number][], close = false, phase = 0) {
+  if (points.length < 2) return;
+  strokeMarchingAnts(
+    ctx,
+    () => {
+      ctx.beginPath();
+      points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      if (close) ctx.closePath();
+    },
+    phase,
+    2.25,
+  );
 }
 
 /** Solid blue crop edge — readable over white backgrounds. */
@@ -230,17 +325,27 @@ export function paintAnchorDraft(ctx: CanvasRenderingContext2D, anchors: EditPat
 
 /** Pending pen path: anchor squares + dashed polyline; the first anchor is
  *  highlighted (clicking it closes the path). */
-export function paintPenAnchors(ctx: CanvasRenderingContext2D, anchors: [number, number][]) {
-  ctx.strokeStyle = "rgba(86,168,255,0.9)";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([6, 4]);
-  ctx.beginPath();
-  anchors.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-  ctx.stroke();
-  ctx.setLineDash([]);
+export function paintPenAnchors(ctx: CanvasRenderingContext2D, anchors: [number, number][], phase = 0) {
+  if (anchors.length > 1) {
+    strokeMarchingAnts(
+      ctx,
+      () => {
+        ctx.beginPath();
+        anchors.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      },
+      phase,
+      2.25,
+    );
+  }
   anchors.forEach(([x, y], i) => {
-    ctx.fillStyle = i === 0 ? "rgba(120,230,140,0.95)" : "rgba(86,168,255,0.95)";
-    ctx.fillRect(x - 3, y - 3, 6, 6);
+    const size = i === 0 ? 10 : 8;
+    ctx.fillStyle = i === 0 ? "rgba(120,230,140,0.98)" : "rgba(47,124,246,0.98)";
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.rect(x - size / 2, y - size / 2, size, size);
+    ctx.fill();
+    ctx.stroke();
   });
 }
 
@@ -426,25 +531,8 @@ export function paintMarquee(
   ellipse: boolean,
   phase = 0,
 ) {
-  const [x1, y1] = start;
-  const [x2, y2] = end;
-  const strokeShape = () => {
-    if (ellipse) {
-      ctx.beginPath();
-      ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    } else {
-      ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-    }
-  };
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "rgba(255,255,255,0.95)";
-  ctx.setLineDash([]);
-  strokeShape();
-  ctx.strokeStyle = "rgba(0,0,0,0.9)";
-  ctx.setLineDash([6, 4]);
-  ctx.lineDashOffset = -phase;
-  strokeShape();
-  ctx.setLineDash([]);
-  ctx.lineDashOffset = 0;
+  strokeMarchingAnts(ctx, () => traceSelectionOutline(ctx, {
+    region: [start[0], start[1], end[0], end[1]],
+    ellipse,
+  }), phase, 2.25);
 }
