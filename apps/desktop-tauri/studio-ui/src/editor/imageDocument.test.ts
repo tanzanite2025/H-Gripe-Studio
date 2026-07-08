@@ -14,6 +14,7 @@ import {
   type EditOp,
   type MaskDocument,
 } from "../types/production";
+import { addBrushStroke, historySnapshots, initEditState, serializeEditState } from "./maskEdit";
 
 function sampleMaskDocument(): MaskDocument {
   const doc = emptyMaskDocument();
@@ -98,6 +99,24 @@ describe("imageDocument bridge", () => {
 
   it("reports no bridge gap for bridgeable documents", () => {
     expect(maskBridgeGap(fromMaskDocument(sampleMaskDocument()))).toBeNull();
+  });
+
+  it("carries the persistent editor history envelope", () => {
+    let state = initEditState();
+    state = addBrushStroke(state, {
+      id: "s1",
+      mode: "add",
+      radius: 12,
+      points: [[1, 2]],
+    });
+
+    const image = fromMaskDocument(state.current, serializeEditState(state));
+    const restored = initEditState(image.editHistory);
+
+    expect(image.editHistory?.past).toHaveLength(1);
+    expect(historySnapshots(restored)).toHaveLength(2);
+    expect(restored.current.layers[0].ops.map((op) => op.type)).toEqual(["brush"]);
+    expect(restored.past[0].layers[0].ops).toEqual([]);
   });
 
   it("empty documents bridge to empty documents", () => {

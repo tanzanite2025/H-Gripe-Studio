@@ -15,7 +15,7 @@ import type {
   ViewportTarget,
 } from "../bridge/viewport";
 import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
-import { useViewportPlacement } from "./useViewportPlacement";
+import { measurePlacement, useViewportPlacement } from "./useViewportPlacement";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
 /**
@@ -178,10 +178,10 @@ export function useViewportUnderlay(
 
   // Placement tracking (surface swap): inert without a placement ref — the
   // hook then never sends placement and frames stay on the PNG transport.
-  // The first frame renders before the placement lands (the surface window
-  // is created lazily by the first `set_placement`), so it always rides the
-  // PNG transport; when the report says the surface took the placement and
-  // the current frame is not on it yet, one re-render moves it over.
+  // On open, the effect below places the surface once before the first render
+  // so a WGPU-capable viewport does not flash CPU/PNG and then re-render.
+  // The tracking hook keeps the rect current after layout changes; if a late
+  // placement is the first successful one, `onPlaced` still moves the frame.
   const noPlacementRef = useRef<HTMLElement | null>(null);
   const framePresentedRef = useRef(false);
   const sentPresentEnabledRef = useRef(true);
@@ -262,6 +262,13 @@ export function useViewportUnderlay(
       const initialScene = sceneRef.current;
       if (initialScene) {
         await host.command({ kind: "set_overlay_scene", scene: initialScene });
+      }
+      if (placementRef?.current && presentEnabledRef.current) {
+        const placement = measurePlacement(placementRef.current, window.devicePixelRatio || 1);
+        if (placement.width > 0 && placement.height > 0) {
+          await host.place(placement).catch(() => null);
+          if (cancelled) return;
+        }
       }
       const frame = await host.renderFrame();
       if (cancelled) return;

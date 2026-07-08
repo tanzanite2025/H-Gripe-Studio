@@ -6,6 +6,7 @@
 
 import { type WorkflowGraph } from "../graph/model";
 import { DEFAULT_CANVAS_VIEWPORT, type CanvasViewport } from "./canvasDocument";
+import type { ImageDocument } from "./imageDocument";
 
 /** One canvas document's persisted state inside the manifest. */
 export interface ProjectCanvasState {
@@ -17,6 +18,8 @@ export interface ProjectCanvasState {
   selectedNodeId: string | null;
   viewport: CanvasViewport;
   graph: WorkflowGraph;
+  /** In-progress image editor documents, keyed by image-source node id. */
+  mediaEditDrafts: Record<string, ImageDocument>;
 }
 
 export interface ProjectManifest {
@@ -55,7 +58,19 @@ function parseCanvas(raw: unknown): ProjectCanvasState | null {
     selectedNodeId: typeof o.selectedNodeId === "string" ? o.selectedNodeId : null,
     viewport: isViewport(o.viewport) ? o.viewport : DEFAULT_CANVAS_VIEWPORT,
     graph,
+    mediaEditDrafts: parseMediaEditDrafts(o.mediaEditDrafts),
   };
+}
+
+function parseMediaEditDrafts(raw: unknown): Record<string, ImageDocument> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, ImageDocument> = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!id || !value || typeof value !== "object") continue;
+    const doc = value as ImageDocument;
+    if (doc.version === 1 && Array.isArray(doc.layers)) out[id] = doc;
+  }
+  return out;
 }
 
 /** Parse a persisted manifest, or null when absent/corrupt/incompatible. */

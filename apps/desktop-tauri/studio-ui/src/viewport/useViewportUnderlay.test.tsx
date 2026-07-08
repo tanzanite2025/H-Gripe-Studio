@@ -18,6 +18,20 @@ vi.mock("../bridge/files", () => ({
   registerResource: vi.fn(async (path: string) => ({ id: `res-${path}`, path })),
 }));
 
+function stubRect(el: HTMLElement, width = 640, height = 640) {
+  vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -144,7 +158,7 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });
 
-  it("re-renders onto the surface when the placement takes after the first frame", async () => {
+  it("places the surface before the first frame so WGPU does not force a second render", async () => {
     // Placement tracking needs layout plumbing jsdom lacks.
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
@@ -171,17 +185,16 @@ describe("useViewportUnderlay view state", () => {
       }));
 
     const el = document.createElement("div");
+    stubRect(el);
     document.body.appendChild(el);
     const { result, unmount } = renderHook(() =>
       useViewportUnderlay("image_edit", "a.png", 640, IDENTITY_VIEW, null, { current: el }),
     );
-    // The first frame rides the PNG transport (placement not yet sent)…
     await waitFor(() => expect(result.current.settled).toBe(true));
-    // …then the placement report triggers one re-render onto the surface.
     await waitFor(() => expect(result.current.presented).toBe(true));
     expect(result.current.underlay).toBeNull();
     expect(result.current.backend?.actual).toBe("wgpu");
-    expect(renderFrame).toHaveBeenCalledTimes(2);
+    expect(renderFrame).toHaveBeenCalledTimes(1);
     unmount();
     await waitFor(() => expect(openMockViewportCount()).toBe(0));
   });
@@ -211,6 +224,7 @@ describe("useViewportUnderlay view state", () => {
       .mockResolvedValue(true);
 
     const el = document.createElement("div");
+    stubRect(el);
     document.body.appendChild(el);
     const { result, rerender, unmount } = renderHook(
       ({ liveView }: { liveView: ViewportViewState | null }) =>

@@ -12,7 +12,7 @@
 
 import type { ComputeCapabilityId, ComputeCostClass } from "./computeBlocks";
 import type { EditState } from "./maskEdit";
-import { addLayerMask, addOperation, setActiveLayer, setActiveTarget } from "./maskEdit";
+import { addLayerMask, addOperation, cloneMaskDocument, setActiveLayer, setActiveTarget } from "./maskEdit";
 import type { SelectionTarget, StudioTarget } from "./studioTarget";
 import { describeTarget } from "./studioTarget";
 import type { MaskDocument, PointPrompt } from "../types/production";
@@ -244,9 +244,10 @@ export const sam2PromptMaskAction: StudioAction<Sam2PromptMaskParams> = {
     const targeted = withMaskTargetActive(ctx.state, ctx.target);
     if (!targeted) return { ok: false, state: ctx.state, summary: "mask target not found" };
     const doc = targeted.current;
+    const current = cloneMaskDocument({ ...doc, points: params.points.map((p) => ({ ...p })) });
     const next: EditState = {
-      current: { ...doc, points: params.points.map((p) => ({ ...p })) },
-      past: [...targeted.past, doc],
+      current,
+      past: [...targeted.past, cloneMaskDocument(doc)],
       future: [],
     };
     return { ok: true, state: next, summary: `SAM 2 prompts recorded for ${describeTarget(ctx.target)}` };

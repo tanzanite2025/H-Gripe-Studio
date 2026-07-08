@@ -16,6 +16,9 @@ interface PanelDockProps<Id extends string> {
   onSelect: (id: Id) => void;
   /** Let this group absorb the rail's remaining height (PS's Layers dock). */
   grow?: boolean;
+  /** Hide the tab strip for single-purpose groups whose title duplicates the content. */
+  hideTabs?: boolean;
+  className?: string;
   /**
    * PS tab docking: a tab (from this or any other group) was dropped at
    * `index` of this group's strip. Omit to disable dragging.
@@ -29,7 +32,15 @@ interface PanelDockProps<Id extends string> {
  * as `DockPanel` entries instead of adding bespoke tab markup. Render-only:
  * the tab layout lives in `dockLayout.ts` and is wired by the modal.
  */
-export function PanelDock<Id extends string>({ panels, active, onSelect, grow, onTabDrop }: PanelDockProps<Id>) {
+export function PanelDock<Id extends string>({
+  panels,
+  active,
+  onSelect,
+  grow,
+  hideTabs,
+  className,
+  onTabDrop,
+}: PanelDockProps<Id>) {
   const current = panels.find((p) => p.id === active) ?? panels[0];
   const allowDrop = (e: DragEvent) => {
     if (onTabDrop && e.dataTransfer.types.includes(TAB_MIME)) e.preventDefault();
@@ -43,26 +54,28 @@ export function PanelDock<Id extends string>({ panels, active, onSelect, grow, o
     onTabDrop(id, index);
   };
   return (
-    <div className={`mask-panel-group${grow ? " grow" : ""}`}>
-      <div className="mask-panel-tabs" role="tablist" onDragOver={allowDrop} onDrop={(e) => dropAt(e, panels.length)}>
-        {panels.map((p, i) => (
-          <button
-            key={p.id}
-            role="tab"
-            className={p.id === active ? "active" : ""}
-            draggable={!!onTabDrop}
-            onDragStart={(e) => {
-              e.dataTransfer.setData(TAB_MIME, p.id);
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            onDragOver={allowDrop}
-            onDrop={(e) => dropAt(e, i)}
-            onClick={() => onSelect(p.id)}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
+    <div className={`mask-panel-group${grow ? " grow" : ""}${hideTabs ? " no-tabs" : ""}${className ? ` ${className}` : ""}`}>
+      {hideTabs ? null : (
+        <div className="mask-panel-tabs" role="tablist" onDragOver={allowDrop} onDrop={(e) => dropAt(e, panels.length)}>
+          {panels.map((p, i) => (
+            <button
+              key={p.id}
+              role="tab"
+              className={p.id === active ? "active" : ""}
+              draggable={!!onTabDrop}
+              onDragStart={(e) => {
+                e.dataTransfer.setData(TAB_MIME, p.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={allowDrop}
+              onDrop={(e) => dropAt(e, i)}
+              onClick={() => onSelect(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mask-panel-group-body">{current?.content}</div>
     </div>
   );

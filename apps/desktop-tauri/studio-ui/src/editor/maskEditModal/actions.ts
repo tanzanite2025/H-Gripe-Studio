@@ -12,6 +12,7 @@ import {
   addLayerMask,
   clearEdits,
   duplicateLayer,
+  jumpToHistorySnapshot,
   mergeLayers,
   moveLayer,
   redo,
@@ -64,6 +65,7 @@ export type MaskEditAction =
   | { type: "path"; path: EditPath & EditOpBase }
   | { type: "undo" }
   | { type: "redo" }
+  | { type: "history_jump"; index: number }
   | { type: "clear" }
   | { type: "reselect" }
   | { type: "layer_duplicate"; selection?: NonNullable<EditOpBase["clip"]> | null }
@@ -118,6 +120,8 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return undo(state);
     case "redo":
       return redo(state);
+    case "history_jump":
+      return jumpToHistorySnapshot(state, action.index);
     case "clear":
       return clearEdits(state);
     case "reselect":

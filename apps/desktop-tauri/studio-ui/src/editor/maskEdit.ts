@@ -35,6 +35,7 @@ import {
   emptyLayerMask,
   emptyMaskDocument,
   emptyMaskLayer,
+  isBrushOp,
   isMaskOperation,
   isPathOp,
   LAYER_BLENDS,
@@ -49,11 +50,55 @@ export interface EditState {
   future: MaskDocument[];
 }
 
+export interface HistorySnapshot {
+  /** Chronological index across past -> current -> future. */
+  index: number;
+  doc: MaskDocument;
+  label: string;
+  current: boolean;
+  layers: number;
+  edits: number;
+  activeLayerName: string;
+}
+
+export const MASK_EDIT_STATE_SCHEMA = "hgripe.maskEditState.v1";
+
+export interface PersistedMaskEditState {
+  schema: typeof MASK_EDIT_STATE_SCHEMA;
+  version: 1;
+  current: MaskDocument;
+  past: MaskDocument[];
+  future: MaskDocument[];
+}
+
 const MAX_HISTORY = 100;
 export const LAYER_GROUP_COLORS = ["#5aa7ff", "#59c98f", "#f0b84f", "#ff7f66", "#a68cff", "#48c7d9"] as const;
 
 export function initEditState(initial?: unknown): EditState {
+  if (isPersistedMaskEditState(initial)) {
+    return {
+      current: normalizeEditPaths(initial.current),
+      past: initial.past.slice(-MAX_HISTORY).map(normalizeEditPaths),
+      future: initial.future.slice(-MAX_HISTORY).map(normalizeEditPaths),
+    };
+  }
   return { current: normalizeEditPaths(initial), past: [], future: [] };
+}
+
+function isPersistedMaskEditState(value: unknown): value is PersistedMaskEditState {
+  if (!value || typeof value !== "object") return false;
+  const v = value as { schema?: unknown; version?: unknown; current?: unknown; past?: unknown; future?: unknown };
+  return v.schema === MASK_EDIT_STATE_SCHEMA && v.version === 1 && Array.isArray(v.past) && Array.isArray(v.future);
+}
+
+export function serializeEditState(state: EditState): PersistedMaskEditState {
+  return {
+    schema: MASK_EDIT_STATE_SCHEMA,
+    version: 1,
+    current: cloneMaskDocument(state.current),
+    past: state.past.slice(-MAX_HISTORY).map(cloneMaskDocument),
+    future: state.future.slice(-MAX_HISTORY).map(cloneMaskDocument),
+  };
 }
 
 /**
@@ -212,6 +257,12 @@ function isEditOp(value: unknown): value is EditOp {
   return !!value && typeof value === "object" && typeof (value as { type?: unknown }).type === "string";
 }
 
+export function cloneMaskDocument(doc: MaskDocument): MaskDocument {
+  return typeof structuredClone === "function"
+    ? structuredClone(doc)
+    : (JSON.parse(JSON.stringify(doc)) as MaskDocument);
+}
+
 /**
  * Coerce a stored point into a `PointPrompt`. Accepts the current
  * `{ x, y, label }` shape and the legacy `[x, y]` pair (read as positive), so
@@ -259,9 +310,93 @@ export function setCanvasSize(state: EditState, canvas: ImageCanvasSize): EditSt
 // the redo stack. The history is capped so a long editing session cannot grow
 // unbounded in memory.
 function commit(state: EditState, next: MaskDocument): EditState {
-  const past = [...state.past, state.current];
+  const past = [...state.past, cloneMaskDocument(state.current)];
   if (past.length > MAX_HISTORY) past.shift();
-  return { current: next, past, future: [] };
+  return { current: cloneMaskDocument(next), past, future: [] };
+}
+
+function chronologicalDocuments(state: EditState): MaskDocument[] {
+  return [...state.past, state.current, ...state.future.slice().reverse()];
+}
+
+export function currentHistoryIndex(state: EditState): number {
+  return state.past.length;
+}
+
+export function historySnapshots(state: EditState): HistorySnapshot[] {
+  const docs = chronologicalDocuments(state);
+  const currentIndex = currentHistoryIndex(state);
+  return docs.map((doc, index) => ({
+    index,
+    doc,
+    label: snapshotLabel(index > 0 ? docs[index - 1] : null, doc),
+    current: index === currentIndex,
+    layers: doc.layers.length,
+    edits: editCount(doc),
+    activeLayerName: doc.layers[Math.min(Math.max(doc.active, 0), doc.layers.length - 1)]?.name ?? "Layer",
+  }));
+}
+
+export function jumpToHistorySnapshot(state: EditState, index: number): EditState {
+  const docs = chronologicalDocuments(state);
+  if (index < 0 || index >= docs.length || index === currentHistoryIndex(state)) return state;
+  return {
+    current: cloneMaskDocument(docs[index]),
+    past: docs.slice(0, index).map(cloneMaskDocument),
+    future: docs.slice(index + 1).reverse().map(cloneMaskDocument),
+  };
+}
+
+function snapshotLabel(previous: MaskDocument | null, doc: MaskDocument): string {
+  if (!previous) return "Open state";
+  if (doc.layers.length > previous.layers.length) return `Add layer (${doc.layers.length})`;
+  if (doc.layers.length < previous.layers.length) return `Remove layer (${doc.layers.length})`;
+  if (doc.canvas?.w !== previous.canvas?.w || doc.canvas?.h !== previous.canvas?.h) return "Canvas size";
+  if ((doc.layerGroups?.length ?? 0) !== (previous.layerGroups?.length ?? 0)) return "Layer groups";
+  const prevEdits = editCount(previous);
+  const nextEdits = editCount(doc);
+  if (nextEdits > prevEdits) return labelEditOp(lastVisibleOp(doc)) ?? "Add edit";
+  if (nextEdits < prevEdits) return "Remove edit";
+  return "Document snapshot";
+}
+
+function lastVisibleOp(doc: MaskDocument): EditOp | null {
+  for (let li = doc.layers.length - 1; li >= 0; li--) {
+    const layer = doc.layers[li];
+    const maskOps = layer.mask?.ops ?? [];
+    const op = maskOps[maskOps.length - 1] ?? layer.ops[layer.ops.length - 1];
+    if (op) return op;
+  }
+  return null;
+}
+
+export function labelEditOp(op: EditOp | null | undefined): string | null {
+  if (!op) return null;
+  if (isPathOp(op)) return `${op.tool} ${op.mode} (${op.points.length})`;
+  if (isBrushOp(op)) return `${op.mode === "subtract" ? "eraser" : "brush"} r${op.radius} (${op.points.length})`;
+  if (op.type === "transform") {
+    const scale = op.scale ?? 1;
+    const rotate = op.rotate ?? 0;
+    return `transform d${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}${scale !== 1 ? ` x${scale}` : ""}${rotate !== 0 ? ` ${rotate}deg` : ""}`;
+  }
+  if (op.type === "fill") return `fill ${op.mode === "subtract" ? "subtract" : "add"} ${op.amount ?? 100}%`;
+  if (op.type === "heal") return `heal r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "clone") return `clone r${op.amount ?? 8} d${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}`;
+  if (op.type === "history_brush") return `history r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "dodge_burn") return `${op.mode === "burn" ? "burn" : "dodge"} r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "sponge") return `sponge ${op.mode === "desaturate" ? "desat" : "sat"} r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "healing_brush") return `healing r${op.amount ?? 8} d${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)}`;
+  if (op.type === "quick_select") return `quick select tol${op.amount ?? 0} (${op.points?.length ?? 0})`;
+  if (op.type === "background_eraser") return `bg eraser r${op.amount ?? 8} tol${op.tolerance ?? 0}`;
+  if (op.type === "patch") return `patch d${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)} (${op.points?.length ?? 0})`;
+  if (op.type === "perspective_crop") return "perspective crop";
+  if (op.type === "red_eye") return `red eye @${Math.round(op.region?.[0] ?? 0)},${Math.round(op.region?.[1] ?? 0)}`;
+  if (op.type === "object_select") return "object select";
+  if (op.type === "remove") return `remove r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "content_aware_move") return `ca move d${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)} (${op.points?.length ?? 0})`;
+  if (op.type === "pattern_stamp") return `pattern r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  if (op.type === "art_history_brush") return `art history r${op.amount ?? 8} (${op.points?.length ?? 0})`;
+  return op.type;
 }
 
 /** The active target's ordered edit stack (what the history panel shows):
@@ -710,14 +845,14 @@ export function undo(state: EditState): EditState {
   if (state.past.length === 0) return state;
   const past = [...state.past];
   const previous = past.pop()!;
-  return { current: previous, past, future: [...state.future, state.current] };
+  return { current: cloneMaskDocument(previous), past, future: [...state.future, cloneMaskDocument(state.current)] };
 }
 
 export function redo(state: EditState): EditState {
   if (state.future.length === 0) return state;
   const future = [...state.future];
   const next = future.pop()!;
-  return { current: next, past: [...state.past, state.current], future };
+  return { current: cloneMaskDocument(next), past: [...state.past, cloneMaskDocument(state.current)], future };
 }
 
 export const canUndo = (state: EditState): boolean => state.past.length > 0;

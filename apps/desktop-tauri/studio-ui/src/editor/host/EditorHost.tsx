@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import type { MaskDocument } from "../../types/production";
+import type { EditState } from "../maskEdit";
 import type { ImageDocument } from "../imageDocument";
 import type { CropCommit } from "../CropEditModal";
 import type { GradeCommit } from "../GradePanel";
@@ -55,9 +56,9 @@ export type EditorRequest =
   | {
       editor: "mask";
       target: EditorTarget;
-      initial: MaskDocument | null;
+      initial: unknown;
       wandTolerance: number;
-      onCommit: (edits: MaskDocument) => void;
+      onCommit: (edits: MaskDocument, state: EditState) => void;
     }
   | {
       editor: "crop";

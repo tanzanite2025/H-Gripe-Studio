@@ -28,8 +28,11 @@ import {
   canRedo,
   canUndo,
   composeTransforms,
+  currentHistoryIndex,
   editCount,
+  historySnapshots,
   initEditState,
+  type EditState,
   type TransformParams,
 } from "./maskEdit";
 import type {
@@ -50,7 +53,7 @@ import { MaskOpsPanel } from "./maskEditModal/MaskOpsPanel";
 import { MaskStage } from "./maskEditModal/MaskStage";
 import { ToolOptionsPanel } from "./maskEditModal/ToolOptionsPanel";
 import { LayersPanel } from "./maskEditModal/LayersPanel";
-import { HistoryPanel } from "./maskEditModal/HistoryPanel";
+import { HistoryPanel, HistorySnapshotDialog } from "./maskEditModal/HistoryPanel";
 import { InfoPanel } from "./maskEditModal/InfoPanel";
 import { AdjustmentsPanel } from "./maskEditModal/AdjustmentsPanel";
 import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
@@ -79,14 +82,16 @@ interface MaskEditModalProps {
   imagePath?: string | null;
   /** Node whose output backs the underlay, for a `node_output` target. */
   nodeId?: string | null;
-  initial: MaskDocument | null;
+  initial: unknown;
   /** Magic-wand colour tolerance from the node's param. */
   wandTolerance: number;
-  onCommit: (edits: MaskDocument) => void;
+  onCommit: (edits: MaskDocument, state: EditState) => void;
   onClose: () => void;
   /** Draft sink: called on every edit so a host can keep the in-progress
    * document across editor remounts (e.g. the image editor's tab switches). */
   onDocChange?: (doc: MaskDocument) => void;
+  /** Full draft sink: includes undo/redo snapshots for persistent editor history. */
+  onEditStateChange?: (state: EditState) => void;
   /** Optional bar content (e.g. the unified editor's tool-group switcher). */
   headerExtra?: ReactNode;
   /** Leftmost bar slot (e.g. the image editor's save light). */
@@ -153,6 +158,7 @@ export function MaskEditModal({
   onCommit,
   onClose,
   onDocChange,
+  onEditStateChange,
   headerExtra,
   headerLeft,
   headerCenter,
@@ -182,12 +188,21 @@ export function MaskEditModal({
     return () => window.clearTimeout(timer);
   }, [entering]);
   const [state, rawDispatch] = useReducer(maskEditReducer, initial, initEditState);
+  const historyTimeline = useMemo(() => historySnapshots(state), [state]);
+  const currentSnapshotIndex = currentHistoryIndex(state);
+  const [historyReviewIndex, setHistoryReviewIndex] = useState<number | null>(null);
+  const historyReviewSnapshot = historyReviewIndex == null
+    ? null
+    : historyTimeline.find((snapshot) => snapshot.index === historyReviewIndex) ?? null;
   // Mirror the in-progress document out to the host so it survives remounts
   // (e.g. the image editor's document-tab switches).
   const onDocChangeRef = useRef(onDocChange);
   onDocChangeRef.current = onDocChange;
+  const onEditStateChangeRef = useRef(onEditStateChange);
+  onEditStateChangeRef.current = onEditStateChange;
   useEffect(() => {
     onDocChangeRef.current?.(state.current);
+    onEditStateChangeRef.current?.(state);
   }, [state]);
   // Open on the move tool (PS V) — reaching for the brush is opt-in, so a
   // stray first drag never paints the mask.
@@ -333,6 +348,7 @@ export function MaskEditModal({
   const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(
     () =>
       buildViewportOverlayScene({
+        workspace,
         frameDims,
         previewing,
         doc: state.current,
@@ -343,7 +359,7 @@ export function MaskEditModal({
         rulerLine,
         colorSamples,
       }),
-    [lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
+    [workspace, lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
   const source = useNodeOutputSource(nodeId, imagePath);
   // Native surface presentation (surface swap): the underlay presents on a
@@ -353,8 +369,8 @@ export function MaskEditModal({
   // canvas is DOM, so it keeps compositing above the hole.
   const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
   // Image-workspace crop: the last confirmed crop step on any visible layer.
-  // The stage dims everything outside the kept region so the crop reads as a
-  // document state (undoable via history), not a one-shot action.
+  // After confirm, the stage shows only this kept region (PS crop semantics)
+  // while the op remains undoable in the edit stack.
   const cropRegion = useMemo(() => {
     if (workspace !== "image") return null;
     let last: [number, number, number, number] | null = null;
@@ -423,11 +439,11 @@ export function MaskEditModal({
   // transform also uses the full-frame PNG path for now: transforming a
   // cropped view-window texture exposes hard edges inside the visible stage.
   const presentEnabled =
-    !overlayOnly && !baseHidden && !view.rotate && !imageTransform && !gradePreview && !entering && !closing;
-  const underlayViewportView = imageTransform ? IDENTITY_VIEW : viewportView;
+    !overlayOnly && !baseHidden && !view.rotate && !imageTransform && !cropRegion && !gradePreview && !entering && !closing;
+  const underlayViewportView = imageTransform || cropRegion ? IDENTITY_VIEW : viewportView;
   // The anchor moves under CSS transforms (view zoom/pan and the layer
   // transform) without firing the resize observer: re-measure on either.
-  const placementKey = useMemo(() => ({ view, imageTransform }), [view, imageTransform]);
+  const placementKey = useMemo(() => ({ view, imageTransform, cropRegion }), [view, imageTransform, cropRegion]);
   const viewport = useViewportUnderlay(
     "image_edit",
     source,
@@ -441,13 +457,22 @@ export function MaskEditModal({
     // Un-debounced view: every zoom/pan tick re-presents the surface's
     // cached frame as a GPU crop (the fast path) while `viewportView` above
     // waits for the settle re-render.
-    imageTransform ? null : targetViewportView,
+    imageTransform || cropRegion ? null : targetViewportView,
   );
   const underlay = viewport.underlay;
   const presented = viewport.presented;
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
   frameDimsRef.current = dims;
+  const cropView = useMemo(() => {
+    if (!cropRegion) return null;
+    const x0 = Math.max(0, Math.min(cropRegion[0], cropRegion[2], dims.w - 1));
+    const y0 = Math.max(0, Math.min(cropRegion[1], cropRegion[3], dims.h - 1));
+    const x1 = Math.min(dims.w, Math.max(cropRegion[0], cropRegion[2], x0 + 1));
+    const y1 = Math.min(dims.h, Math.max(cropRegion[1], cropRegion[3], y0 + 1));
+    if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+    return { region: [x0, y0, x1, y1] as [number, number, number, number] };
+  }, [cropRegion, dims.w, dims.h]);
 
   // The graded copy of the underlay frame: decode → f32 surface → `applyDoc`
   // → re-encode. Recomputes when the frame or the adjustment stack changes;
@@ -761,6 +786,7 @@ export function MaskEditModal({
     canvas.width = dims.w;
     canvas.height = dims.h;
     paintStage(ctx, {
+      workspace,
       dims,
       overlayOnly,
       underlay,
@@ -784,12 +810,12 @@ export function MaskEditModal({
       rulerLine,
       quadDraft,
       cropDraft,
-      cropRegion,
+      cropRegion: null,
       lastMarquee,
       antsPhase,
       gestures,
     });
-  }, [dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, antsPhase]);
+  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -1064,7 +1090,7 @@ export function MaskEditModal({
                 <button className={quickMask ? "active" : ""} onClick={() => setQuickMask((v) => !v)} title={t("mask.quickMaskTitle")}>
                   {t("mask.quickMask")}
                 </button>
-                <button className="primary" onClick={() => { onCommit(state.current); requestClose(); }} title={t("mask.applyTitle")}>
+                <button className="primary" onClick={() => { onCommit(state.current, state); requestClose(); }} title={t("mask.applyTitle")}>
                   {t("mask.apply")}
                 </button>
                 <button onClick={requestClose} title={t("mask.closeTitle")}>
@@ -1098,6 +1124,7 @@ export function MaskEditModal({
             presented={presented}
             baseHidden={baseHidden}
             fallbackDims={viewport.dims == null}
+            cropView={cropView}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
             imageTransform={imageTransform}
@@ -1256,29 +1283,38 @@ export function MaskEditModal({
                 },
                 history: {
                   id: "history",
-                  label: t("mask.history", { count: ops.length }),
+                  label: t("mask.history", { count: historyTimeline.length }),
                   content: (
-            <HistoryPanel
-              ops={ops}
-              dispatch={dispatch}
-              editingPath={editingPath}
-              startPathEdit={startPathEdit}
-              cancelPathEdit={cancelPathEdit}
-              editTransformStep={dialogs.editTransformStep}
-            />
+                    <HistoryPanel
+                      snapshots={historyTimeline}
+                      onReviewSnapshot={setHistoryReviewIndex}
+                    />
                   ),
                 },
               };
-              return dock.layout.groups.map((group, gi) => (
-                <PanelDock
-                  key={gi}
-                  grow={gi === dock.layout.groups.length - 1}
-                  active={group.active}
-                  onSelect={dock.onSelect}
-                  onTabDrop={(id, index) => dock.onTabDrop(id, gi, index)}
-                  panels={group.tabs.flatMap((id) => panelDefs[id] ?? [])}
-                />
-              ));
+              return dock.layout.groups.map((group, gi) => {
+                const isImageWorkspace = workspace === "image";
+                const isTopImageAdjustments = isImageWorkspace && gi === 0 && group.tabs.length === 1;
+                const isBottomImageLayers = isImageWorkspace && gi === dock.layout.groups.length - 1;
+                return (
+                  <PanelDock
+                    key={gi}
+                    grow={gi === dock.layout.groups.length - 1}
+                    hideTabs={isTopImageAdjustments}
+                    className={
+                      isTopImageAdjustments
+                        ? "image-adjustments-dock"
+                        : isBottomImageLayers
+                          ? "image-layers-dock"
+                          : undefined
+                    }
+                    active={group.active}
+                    onSelect={dock.onSelect}
+                    onTabDrop={(id, index) => dock.onTabDrop(id, gi, index)}
+                    panels={group.tabs.flatMap((id) => panelDefs[id] ?? [])}
+                  />
+                );
+              });
             })()}
           </div>
         </div>
@@ -1299,6 +1335,19 @@ export function MaskEditModal({
             dims={dims}
             apply={dialogs.applyImageSize}
             close={() => setImageSizeDraft(null)}
+          />
+        ) : null}
+        {historyReviewSnapshot ? (
+          <HistorySnapshotDialog
+            snapshot={historyReviewSnapshot}
+            currentIndex={currentSnapshotIndex}
+            onClose={() => setHistoryReviewIndex(null)}
+            onRestore={(index) => {
+              cancelPathEdit();
+              closeTransformPanel();
+              setHistoryReviewIndex(null);
+              dispatch({ type: "history_jump", index });
+            }}
           />
         ) : null}
       </div>

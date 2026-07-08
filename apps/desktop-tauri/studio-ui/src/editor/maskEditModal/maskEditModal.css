@@ -233,6 +233,13 @@
   position: relative;
   width: 100%;
 }
+.mask-edit-frame.cropped {
+  overflow: hidden;
+}
+.mask-edit-document-layer {
+  position: absolute;
+  inset: 0;
+}
 /* Hidden background pixel layer (image workspace): the frame shows the
    transparency checkerboard where the source frame would present. */
 .mask-edit-frame.base-hidden {
@@ -325,6 +332,12 @@
   overflow: hidden;
 }
 .mask-panel-group.grow { flex: 1 1 55%; }
+.mask-panel-group.image-adjustments-dock {
+  flex: 0 0 32%;
+}
+.mask-panel-group.image-layers-dock.grow {
+  flex: 1 1 68%;
+}
 .mask-panel-tabs {
   display: flex;
   background: var(--ps-tab-strip);
@@ -771,11 +784,14 @@
   color: #f46262;
   border-color: rgba(244, 98, 98, 0.4);
 }
-/* History panel (M2): one row per edit-stack step. */
+/* History panel: one row per global document snapshot. */
 .mask-history-list {
   display: flex;
   flex-direction: column;
   margin: 0 -8px;
+}
+.mask-history-list.snapshot-list {
+  gap: 1px;
 }
 .mask-history-row {
   display: flex;
@@ -789,6 +805,29 @@
   border-bottom: 1px solid var(--ps-dock-border);
   color: var(--text);
 }
+.mask-history-row.mask-history-snapshot {
+  width: 100%;
+  min-height: 34px;
+  text-align: left;
+  cursor: pointer;
+}
+.mask-history-row.mask-history-snapshot:hover {
+  background: var(--ps-hover);
+}
+.mask-history-row.mask-history-snapshot.current {
+  background: var(--ps-active-overlay);
+}
+.mask-history-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1px solid rgba(220, 228, 245, 0.7);
+  border-radius: 999px;
+}
+.mask-history-snapshot.current .mask-history-dot {
+  border-color: #59c98f;
+  background: #59c98f;
+}
 .mask-history-row.disabled { opacity: 0.45; }
 .mask-history-row.editing { background: var(--ps-active-overlay); }
 .mask-history-label {
@@ -796,6 +835,12 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-history-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
   white-space: nowrap;
 }
 .mask-history-row button {
@@ -816,6 +861,74 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   color: inherit;
+}
+.history-snapshot-dialog {
+  width: min(520px, calc(100vw - 48px));
+}
+.history-snapshot-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.history-snapshot-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-current-pill {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(89, 201, 143, 0.16);
+  color: #a9f0c9;
+  font-size: 11px;
+}
+.history-snapshot-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  color: var(--muted);
+}
+.history-snapshot-grid b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.history-layer-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--ps-dock-border);
+  background: var(--panel);
+}
+.history-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.history-layer-row:last-child {
+  border-bottom: 0;
+}
+.history-layer-row.active {
+  background: var(--ps-active-overlay);
+}
+.history-layer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-layer-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* Layers panel — PS-style: a blend/opacity head row, then full-bleed layer

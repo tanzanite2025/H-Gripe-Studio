@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { WorkflowGraph } from "../graph/model";
 import { DEFAULT_CANVAS_VIEWPORT } from "./canvasDocument";
+import type { ImageDocument } from "./imageDocument";
 import {
   clearLocalProjectManifest,
   loadLocalProjectManifest,
@@ -35,6 +36,7 @@ function manifest(): ProjectManifest {
         selectedNodeId: null,
         viewport: { x: 10, y: -5, zoom: 1.5 },
         graph: graph(),
+        mediaEditDrafts: {},
       },
       {
         id: "c2",
@@ -44,8 +46,29 @@ function manifest(): ProjectManifest {
         selectedNodeId: "n1",
         viewport: DEFAULT_CANVAS_VIEWPORT,
         graph: graph(),
+        mediaEditDrafts: {},
       },
     ],
+  };
+}
+
+function imageDraft(): ImageDocument {
+  return {
+    version: 1,
+    layers: [
+      {
+        id: "l1",
+        name: "Background",
+        layer: { kind: "pixel", edits: [{ type: "crop", region: [0, 0, 10, 10] }] },
+        blend: "normal",
+        opacity: 1,
+        visible: true,
+      },
+    ],
+    active: 0,
+    matte_strokes: [],
+    points: [],
+    layerGroups: [],
   };
 }
 
@@ -60,6 +83,13 @@ describe("project manifest", () => {
   it("round-trips through localStorage", () => {
     saveLocalProjectManifest(manifest());
     expect(loadLocalProjectManifest()).toEqual(manifest());
+  });
+
+  it("round-trips image editor drafts in the manifest", () => {
+    const m = manifest();
+    m.canvases[1].mediaEditDrafts = { n1: imageDraft() };
+    const parsed = parseProjectManifest(serializeProjectManifest(m));
+    expect(parsed?.canvases[1].mediaEditDrafts.n1).toEqual(imageDraft());
   });
 
   it("returns null for absent, corrupt, or wrong-version payloads", () => {
@@ -95,6 +125,7 @@ describe("project manifest", () => {
       name: null,
       selectedNodeId: null,
       viewport: DEFAULT_CANVAS_VIEWPORT,
+      mediaEditDrafts: {},
     });
   });
 });

@@ -3,8 +3,8 @@ import { MaskEditModal } from "./MaskEditModal";
 import type { CropCommit } from "./CropEditModal";
 import type { EditorTab } from "./host/EditorHost";
 import { useT } from "../i18n";
-import type { MaskDocument } from "../types/production";
 import { fromMaskDocument, maskBridgeGap, toMaskDocument, type ImageDocument } from "./imageDocument";
+import { serializeEditState, type EditState } from "./maskEdit";
 
 /**
  * The image card's single Edit entry.
@@ -54,6 +54,7 @@ export function MediaEditModal({
   // so documents bridge losslessly at this boundary in both directions.
   const maskInitial = useMemo(() => {
     if (!initial) return null;
+    if (initial.editHistory) return initial.editHistory;
     const lowered = toMaskDocument(initial);
     // A draft that cannot lower opens as a blank document; surface why so
     // the restored-empty editor is diagnosable rather than silent.
@@ -65,14 +66,12 @@ export function MediaEditModal({
   // light reports the draft as saved; committing to the graph stays on the
   // explicit Apply.
   const seeded = useRef(false);
-  const handleDocChange = (doc: MaskDocument) => {
-    // The editor mirrors its initial document on mount; only later edits
-    // rewrite the draft.
+  const handleEditStateChange = (state: EditState) => {
     if (!seeded.current) {
       seeded.current = true;
       return;
     }
-    onDocChange?.(fromMaskDocument(doc));
+    onDocChange?.(fromMaskDocument(state.current, serializeEditState(state)));
   };
   const tabStrip =
     (tabs && tabs.length > 0) || onPickFile ? (
@@ -117,9 +116,9 @@ export function MediaEditModal({
       nodeId={nodeId}
       initial={maskInitial}
       wandTolerance={24}
-      onCommit={(edits: MaskDocument) => onCommitMask(fromMaskDocument(edits))}
+      onCommit={(edits, state) => onCommitMask(fromMaskDocument(edits, serializeEditState(state)))}
       onClose={onClose}
-      onDocChange={handleDocChange}
+      onEditStateChange={handleEditStateChange}
       headerCenter={collapseArrow}
       headerTabs={tabStrip}
       hideTitle

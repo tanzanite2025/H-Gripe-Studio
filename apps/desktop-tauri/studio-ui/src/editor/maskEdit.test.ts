@@ -13,7 +13,9 @@ import {
   composeTransforms,
   duplicateLayer,
   editCount,
+  historySnapshots,
   initEditState,
+  jumpToHistorySnapshot,
   moveLayer,
   normalizeEditPaths,
   isEmpty,
@@ -264,6 +266,29 @@ describe("maskEdit reducer-style helpers", () => {
     s = addOperation(s, { type: "invert" });
     expect(canRedo(s)).toBe(false);
     expect(stackOperations(s.current)).toHaveLength(1);
+  });
+
+  it("jumps to a full document snapshot without flattening the layer tree", () => {
+    let s = initEditState();
+    s = addBrushStroke(s, stroke("base"));
+    s = addLayer(s, "Overlay");
+    s = addOperation(s, { type: "invert" });
+
+    const snapshots = historySnapshots(s);
+    expect(snapshots).toHaveLength(4);
+    expect(snapshots[0].label).toBe("Open state");
+    expect(snapshots[2].layers).toBe(2);
+
+    const afterLayerAdd = jumpToHistorySnapshot(s, 2);
+    expect(afterLayerAdd.current.layers.map((layer) => layer.name)).toEqual(["Background", "Overlay"]);
+    expect(afterLayerAdd.current.active).toBe(1);
+    expect(afterLayerAdd.current.layers[0].ops.map((op) => op.type)).toEqual(["brush"]);
+    expect(afterLayerAdd.current.layers[1].ops).toEqual([]);
+    expect(canRedo(afterLayerAdd)).toBe(true);
+
+    const opened = jumpToHistorySnapshot(s, 0);
+    expect(opened.current.layers).toHaveLength(1);
+    expect(editCount(opened.current)).toBe(0);
   });
 
   it("clear is undoable and a no-op when already empty", () => {

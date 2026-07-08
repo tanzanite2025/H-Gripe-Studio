@@ -41,6 +41,9 @@ export interface MarqueeSelection {
 }
 
 export interface OverlaySceneArgs {
+  /** Product surface using the shared stage. Mask history overlays belong
+   * to the mask workspace; image editing shows committed pixels instead. */
+  workspace: "image" | "mask";
   /** Previous render's frame dims (the scene is built before the viewport
    * hook runs; a selection is only made after the frame has settled). */
   frameDims: { w: number; h: number };
@@ -64,12 +67,12 @@ export interface OverlaySceneArgs {
  * screen pixel wide at any zoom instead of scaling with a document-size
  * canvas. Live drags stay on the canvas for zero-latency feedback. */
 export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverlayScene | null {
-  const { frameDims, previewing, doc, editingPath, lastMarquee, antsPhase, toolId, rulerLine, colorSamples } = args;
+  const { workspace, frameDims, previewing, doc, editingPath, lastMarquee, antsPhase, toolId, rulerLine, colorSamples } = args;
   if (frameDims.w <= 0 || frameDims.h <= 0) return null;
   const items: ViewportOverlayItem[] = [];
   // Committed pen / lasso paths: the same loops the canvas painter fills
   // and outlines, flattened to straight segments and normalized.
-  if (!previewing) {
+  if (workspace === "mask" && !previewing) {
     const activeTarget = activeTargetKind(doc);
     doc.layers.forEach((layer, li) => {
       if (!layer.visible) return;
@@ -104,14 +107,16 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
   }
   // Matte strokes (amber) render whether or not a preview runs, like the
   // canvas painter.
-  for (const s of doc.matte_strokes) {
-    if (s.points.length === 0) continue;
-    items.push({
-      kind: "band",
-      points: s.points.map(([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number]),
-      radius: Math.min(1, s.radius / frameDims.w),
-      color: [244 / 255, 196 / 255, 84 / 255, 0.6],
-    });
+  if (workspace === "mask") {
+    for (const s of doc.matte_strokes) {
+      if (s.points.length === 0) continue;
+      items.push({
+        kind: "band",
+        points: s.points.map(([x, y]) => [x / frameDims.w, y / frameDims.h] as [number, number]),
+        radius: Math.min(1, s.radius / frameDims.w),
+        color: [244 / 255, 196 / 255, 84 / 255, 0.6],
+      });
+    }
   }
   if (lastMarquee) {
     const [x0, y0, x1, y1] = lastMarquee.region;
@@ -151,22 +156,25 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
   }
   // SAM point prompts: `+` include / `−` exclude crosshairs with a centre
   // dot; the numbered label stays on the canvas.
-  for (const { x, y, label } of doc.points) {
-    const colour: [number, number, number, number] =
-      label === 0 ? [244 / 255, 98 / 255, 98 / 255, 0.95] : [120 / 255, 230 / 255, 140 / 255, 0.95];
-    items.push({
-      kind: "marker",
-      center: norm(x, y),
-      shape: label === 0 ? "minus" : "cross",
-      size: 9,
-      stroke: colour,
-    });
-    items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3, stroke: colour, fill: colour });
+  if (workspace === "mask") {
+    for (const { x, y, label } of doc.points) {
+      const colour: [number, number, number, number] =
+        label === 0 ? [244 / 255, 98 / 255, 98 / 255, 0.95] : [120 / 255, 230 / 255, 140 / 255, 0.95];
+      items.push({
+        kind: "marker",
+        center: norm(x, y),
+        shape: label === 0 ? "minus" : "cross",
+        size: 9,
+        stroke: colour,
+      });
+      items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3, stroke: colour, fill: colour });
+    }
   }
   return items.length > 0 ? { items, ...(lastMarquee ? { phase: antsPhase } : null) } : null;
 }
 
 export interface StagePaintArgs {
+  workspace: "image" | "mask";
   dims: { w: number; h: number };
   /** Transparency preview: dark backdrop so the mask reads clearly. */
   overlayOnly: boolean;
@@ -204,6 +212,7 @@ export interface StagePaintArgs {
  * shows through. */
 export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs): void {
   const {
+    workspace,
     dims,
     overlayOnly,
     underlay,
@@ -245,7 +254,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   // confusing double-draw; matte strokes / points / marquee still render.
   // Committed brush bands and vector paths render host-side (the viewport
   // overlay scene); the canvas draws them only for the fallback stage.
-  if (!previewing && !underlay && !presented) {
+  if (workspace === "mask" && !previewing && !underlay && !presented) {
     const activeTarget = activeTargetKind(doc);
     doc.layers.forEach((layer, li) => {
       if (!layer.visible) return;
@@ -256,7 +265,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
       }));
     });
   }
-  if (!underlay && !presented) {
+  if (workspace === "mask" && !underlay && !presented) {
     doc.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
   }
   const live = gestures.drawing;
@@ -285,7 +294,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples, hostFrame);
   const rl = gestures.rulerDrag ?? (tool.id === "ruler" ? rulerLine : null);
   if (rl) paintRuler(ctx, rl, hostFrame && gestures.rulerDrag == null);
-  paintSamPoints(ctx, doc.points, hostFrame);
+  if (workspace === "mask") paintSamPoints(ctx, doc.points, hostFrame);
   // With a host frame — a PNG underlay or a natively presented surface —
   // the selection tint is composited host-side (the viewport mask
   // overlay); paint it locally only for the fallback stage.

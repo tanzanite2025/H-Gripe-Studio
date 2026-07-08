@@ -22,6 +22,7 @@ import {
   type MaskLayer,
 } from "../types/production";
 import type { GradeBlendMode, GradeOp } from "./gradeKernel";
+import type { PersistedMaskEditState } from "./maskEdit";
 
 // Every mask-document blend is a grade-kernel blend (checked at compile
 // time): the bridge can carry `blend` across unchanged.
@@ -102,6 +103,8 @@ export interface ImageDocument {
   layerGroups: LayerGroup[];
   /** Which attachment of the active layer receives new edits; absent ⇒ pixel. */
   activeTarget?: LayerTargetKind;
+  /** Full editor snapshot timeline for reopening the image editor later. */
+  editHistory?: PersistedMaskEditState;
 }
 
 export function emptyImageLayer(name = "Background"): ImageLayer {
@@ -145,7 +148,7 @@ function fromMaskLayer(l: MaskLayer): ImageLayer {
 }
 
 /** Lift a stored mask draft into the image-document model (always succeeds). */
-export function fromMaskDocument(doc: MaskDocument): ImageDocument {
+export function fromMaskDocument(doc: MaskDocument, editHistory?: PersistedMaskEditState): ImageDocument {
   return {
     version: 1,
     layers: doc.layers.map(fromMaskLayer),
@@ -155,6 +158,7 @@ export function fromMaskDocument(doc: MaskDocument): ImageDocument {
     points: doc.points,
     layerGroups: doc.layerGroups,
     ...(doc.activeTarget !== undefined ? { activeTarget: doc.activeTarget } : null),
+    ...(editHistory !== undefined ? { editHistory } : null),
   };
 }
 

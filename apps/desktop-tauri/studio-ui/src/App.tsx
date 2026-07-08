@@ -19,7 +19,7 @@ import { PreviewModal } from "./editor/PreviewModal";
 import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
 import { maskBridgeGap, toMaskDocument, type ImageDocument } from "./editor/imageDocument";
 import type { CropCommit } from "./editor/CropEditModal";
-import { normalizeEditPaths } from "./editor/maskEdit";
+import { normalizeEditPaths, serializeEditState } from "./editor/maskEdit";
 import { useHistory } from "./editor/useHistory";
 import { useCanvasDocument } from "./editor/useCanvasDocument";
 import {
@@ -242,20 +242,23 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // Per-image in-progress edit documents for the unified image editor's
   // document tabs: switching tabs remounts the editor, so drafts live here.
   const mediaEditDrafts = useRef(new Map<string, ImageDocument>());
+  const [mediaDraftRevision, setMediaDraftRevision] = useState(0);
 
   // Deleting a canvas node cascades: its in-progress image-editor draft and
   // its host-side output registrations must not outlive it.
   const knownNodeIds = useRef<Set<string> | null>(null);
   useEffect(() => {
     const ids = new Set(nodes.map((n) => n.id));
+    let draftsChanged = false;
     if (knownNodeIds.current) {
       for (const id of knownNodeIds.current) {
         if (ids.has(id)) continue;
-        mediaEditDrafts.current.delete(id);
+        draftsChanged = mediaEditDrafts.current.delete(id) || draftsChanged;
         unregisterNodeOutput(id).catch(() => {});
       }
     }
     knownNodeIds.current = ids;
+    if (draftsChanged) setMediaDraftRevision((v) => v + 1);
   }, [nodes]);
 
   const history = useHistory({ nodes, edges, setNodes, setEdges, scopeId: canvas.documentId });
@@ -604,10 +607,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     manifestRestored.current = true;
     const apply = (manifest: ProjectManifest | null) => {
       if (!manifest) return false;
+      const restoredDrafts = new Map<string, ImageDocument>();
       canvas.restoreCanvases(
         manifest.activeCanvasId,
         manifest.canvases.map((c) => {
           const graph = fromWorkflowGraph(c.graph);
+          for (const [nodeId, draft] of Object.entries(c.mediaEditDrafts)) restoredDrafts.set(nodeId, draft);
           return {
             id: c.id,
             path: c.path,
@@ -620,6 +625,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           };
         }),
       );
+      mediaEditDrafts.current = restoredDrafts;
+      setMediaDraftRevision((v) => v + 1);
       setMessage(t("canvasTabs.restored"));
       return true;
     };
@@ -669,6 +676,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           selectedNodeId: c.selectedNodeId,
           viewport: c.viewport,
           graph: toWorkflowGraph(c.nodes, c.edges),
+          mediaEditDrafts: Object.fromEntries(
+            c.nodes
+              .map((node) => [node.id, mediaEditDrafts.current.get(node.id)] as const)
+              .filter((entry): entry is readonly [string, ImageDocument] => entry[1] != null),
+          ),
         })),
       };
       if (isDesktop) {
@@ -688,7 +700,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [manifestReady, canvas, nodes, edges, selectedId, currentFile, fileDirty, isDesktop, setMessage]);
+  }, [manifestReady, canvas, nodes, edges, selectedId, currentFile, fileDirty, mediaDraftRevision, isDesktop, setMessage]);
 
   // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
   // graph in tab order. Defined below the run controller (see runAllCanvases).
@@ -1317,13 +1329,22 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           imagePath: connectedImagePath(maskEditNode.id) ?? null,
           nodeId: maskEditNode.id,
         },
-        initial: normalizeEditPaths((maskEditNode.data as HgripeNodeData).params.edit_paths),
+        initial: (maskEditNode.data as HgripeNodeData).params.edit_history
+          ?? normalizeEditPaths((maskEditNode.data as HgripeNodeData).params.edit_paths),
         wandTolerance: Number((maskEditNode.data as HgripeNodeData).params.wand_tolerance ?? 24),
-        onCommit: (edits) => {
+        onCommit: (edits, editState) => {
           // Commit the edit, then run up to this node so the result shows
           // immediately (the effect fires once `nodes` reflects the commit).
+          const data = maskEditNode.data as HgripeNodeData;
           pendingRunNode.current = maskEditNode.id;
-          onParamChange(maskEditNode.id, "edit_paths", edits);
+          takeSnapshot();
+          patchNode(maskEditNode.id, {
+            params: {
+              ...data.params,
+              edit_paths: edits,
+              edit_history: serializeEditState(editState),
+            },
+          });
         },
       }
     : cropEditNode
@@ -1447,7 +1468,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 },
                 initial: mediaEditSource ? (mediaEditDrafts.current.get(mediaEditSource.id) ?? null) : null,
                 onDocChange: (doc: ImageDocument) => {
-                  if (mediaEditSource) mediaEditDrafts.current.set(mediaEditSource.id, doc);
+                  if (mediaEditSource) {
+                    mediaEditDrafts.current.set(mediaEditSource.id, doc);
+                    setMediaDraftRevision((v) => v + 1);
+                  }
                 },
                 // Apply spawns exactly one bound edit node of the chosen kind from
                 // the source (never mutating it) and runs it — same pipeline as the
@@ -1458,9 +1482,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                   // bridgeable until grade-kernel-only features land).
                   const lowered = toMaskDocument(edits);
                   if (mediaEditSource && lowered) {
-                    mediaEditDrafts.current.delete(mediaEditSource.id);
+                    if (mediaEditDrafts.current.delete(mediaEditSource.id)) setMediaDraftRevision((v) => v + 1);
                     addBoundEdit(mediaEditSource.id, "subjectMask", {
-                      params: { edit_paths: lowered },
+                      params: { edit_paths: lowered, ...(edits.editHistory ? { edit_history: edits.editHistory } : null) },
                       openEditor: false,
                       run: true,
                     });
@@ -1587,8 +1611,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     setGradeEditNodeId(null);
     setMediaEditSourceId(null);
     setMediaEditBlank(false);
-    // Saved drafts survive the close (the editor unmount frees the heavy
-    // canvas/underlay memory); unsaved edits are dropped by design.
+    // Drafts survive close and project-manifest autosave; the editor unmount
+    // only frees the heavy canvas/underlay memory.
   };
 
   return (

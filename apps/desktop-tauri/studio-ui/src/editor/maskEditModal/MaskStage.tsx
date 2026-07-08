@@ -41,6 +41,8 @@ interface MaskStageProps {
   /** `dims` is the default fallback space (no decodable backing image):
    * edits record in it and rasterise against the real image on run. */
   fallbackDims?: boolean;
+  /** Confirmed image crop: show only this original-image rect, PS-style. */
+  cropView?: { region: [number, number, number, number] } | null;
   spacePan: boolean;
   toolId: string;
   onPointerDown: (e: React.PointerEvent) => void;
@@ -53,7 +55,7 @@ interface MaskStageProps {
   brushCursorRef: MutableRefObject<HTMLDivElement | null>;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, brushCursor, brushCursorRef }: MaskStageProps) {
   const t = useT();
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
@@ -71,6 +73,17 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
     height: `${100 / frameView.zoom}%`,
     ...layerStyle,
   };
+  const cropRegion = cropView?.region ?? null;
+  const cropW = cropRegion ? Math.max(1, cropRegion[2] - cropRegion[0]) : dims.w;
+  const cropH = cropRegion ? Math.max(1, cropRegion[3] - cropRegion[1]) : dims.h;
+  const documentLayerStyle = cropRegion
+    ? {
+        left: `${-(cropRegion[0] / cropW) * 100}%`,
+        top: `${-(cropRegion[1] / cropH) * 100}%`,
+        width: `${(dims.w / cropW) * 100}%`,
+        height: `${(dims.h / cropH) * 100}%`,
+      }
+    : undefined;
   return (
     <div
       className={`mask-edit-stage${presented && !overlayOnly ? " presented" : ""}`}
@@ -79,48 +92,50 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
       onDragStart={(e) => e.preventDefault()}
     >
       <div
-        className={`mask-edit-frame${baseHidden ? " base-hidden" : ""}`}
+        className={`mask-edit-frame${baseHidden ? " base-hidden" : ""}${cropRegion ? " cropped" : ""}`}
         style={{
-          aspectRatio: `${dims.w} / ${dims.h}`,
-          maxWidth: `min(100%, ${dims.w}px)`,
-          maxHeight: `min(100%, ${dims.h}px)`,
+          aspectRatio: `${cropW} / ${cropH}`,
+          maxWidth: `min(100%, ${cropW}px)`,
+          maxHeight: `min(100%, ${cropH}px)`,
           transform: isFitView(view) ? undefined : viewTransform(view),
           transformOrigin: "center",
         }}
       >
-        <div ref={underlayRef} className="mask-edit-underlay-anchor" style={windowRect} />
-        {underlay && !overlayOnly && (
-          <img
-            className="mask-edit-underlay"
-            src={underlay}
-            alt=""
-            draggable={false}
-            style={windowRect}
-          />
-        )}
-        <canvas
-          ref={canvasRef}
-          className="mask-edit-canvas"
-          style={{
-            cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
-          }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
-          onContextMenu={(e) => e.preventDefault()}
-        />
-        {brushCursor ? (
-          <div
-            ref={brushCursorRef}
-            className="mask-brush-cursor"
+        <div className="mask-edit-document-layer" style={documentLayerStyle}>
+          <div ref={underlayRef} className="mask-edit-underlay-anchor" style={windowRect} />
+          {underlay && !overlayOnly && (
+            <img
+              className="mask-edit-underlay"
+              src={underlay}
+              alt=""
+              draggable={false}
+              style={windowRect}
+            />
+          )}
+          <canvas
+            ref={canvasRef}
+            className="mask-edit-canvas"
             style={{
-              width: `${(brushCursor.diameter / dims.w) * 100}%`,
-              height: `${(brushCursor.diameter / dims.h) * 100}%`,
-              display: "none",
+              cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
             }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerLeave={onPointerUp}
+            onContextMenu={(e) => e.preventDefault()}
           />
-        ) : null}
+          {brushCursor ? (
+            <div
+              ref={brushCursorRef}
+              className="mask-brush-cursor"
+              style={{
+                width: `${(brushCursor.diameter / dims.w) * 100}%`,
+                height: `${(brushCursor.diameter / dims.h) * 100}%`,
+                display: "none",
+              }}
+            />
+          ) : null}
+        </div>
       </div>
       {fallbackDims ? (
         <span className="mask-dims-fallback muted" title={t("mask.fallbackDimsTitle")}>
