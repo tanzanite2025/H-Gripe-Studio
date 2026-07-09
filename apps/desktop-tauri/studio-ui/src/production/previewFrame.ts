@@ -18,6 +18,8 @@ export type PreviewFrameTarget =
       /** Timeline start of the clip, for mapping between timeline and
        * clip-local time (playback frame-grid pacing). */
       clipStartSec: number;
+      /** Source media in-point, seconds. */
+      sourceStartSec: number;
     };
 
 /**
@@ -46,8 +48,9 @@ export function resolvePreviewFrame(
       kind: "video",
       clipId: clip.id,
       path: asset.path,
-      sourceTimeSec: Math.max(0, timeSec - clip.start),
+      sourceTimeSec: Math.max(0, (clip.sourceStartSec ?? 0) + timeSec - clip.start),
       clipStartSec: clip.start,
+      sourceStartSec: clip.sourceStartSec ?? 0,
     };
   }
   return { kind: "still", clipId: clip.id, path: asset.path };
@@ -67,6 +70,7 @@ export function paceToFrameGrid(
   fps: number | null,
 ): number {
   if (!target || target.kind !== "video" || !fps || fps <= 0) return timeSec;
-  const local = Math.max(0, timeSec - target.clipStartSec);
-  return target.clipStartSec + Math.floor(local * fps) / fps;
+  const sourceTime = Math.max(0, target.sourceStartSec + timeSec - target.clipStartSec);
+  const snappedSource = Math.floor(sourceTime * fps) / fps;
+  return target.clipStartSec + Math.max(0, snappedSource - target.sourceStartSec);
 }

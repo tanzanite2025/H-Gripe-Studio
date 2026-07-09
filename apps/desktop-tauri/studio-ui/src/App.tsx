@@ -105,6 +105,7 @@ import {
   selectBinAsset,
   selectClip,
   setClipGradeDoc,
+  splitTimelineClip,
   useProductionState,
 } from "./production/productionStore";
 import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
@@ -347,6 +348,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   const handleRemoveClip = useCallback((clipId: string) => {
     removeTimelineClip(productionStore, clipId);
+  }, []);
+
+  const handleSplitTimelineClip = useCallback((clipId: string, atSec: number) => {
+    splitTimelineClip(productionStore, clipId, atSec);
   }, []);
 
   const handleSelectClip = useCallback((clipId: string | null) => {
@@ -1811,6 +1816,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onAddTrack={handleAddTrack}
           onRemoveTrack={handleRemoveTrack}
           onRemoveClip={handleRemoveClip}
+          onSplitClipAt={handleSplitTimelineClip}
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}
           onOpenClipGrade={handleOpenClipGrade}

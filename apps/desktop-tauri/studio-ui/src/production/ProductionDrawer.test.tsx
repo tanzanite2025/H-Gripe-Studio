@@ -18,19 +18,20 @@ const assets: MediaAsset[] = [
 
 const timeline: TimelineModel = {
   id: "timeline-1",
+  fps: 24,
   tracks: [
     {
       id: "track-v1",
       kind: "video",
       clips: [
-        { id: "clip-video", kind: "video", assetId: "asset-v", start: 0, duration: 10 },
-        { id: "clip-still", kind: "still", assetId: "asset-i", start: 10, duration: 5 },
+        { id: "clip-video", kind: "video", assetId: "asset-v", start: 0, duration: 10, sourceStartSec: 0 },
+        { id: "clip-still", kind: "still", assetId: "asset-i", start: 10, duration: 5, sourceStartSec: 0 },
       ],
     },
     {
       id: "track-a1",
       kind: "audio",
-      clips: [{ id: "clip-audio", kind: "audio", assetId: "asset-a", start: 0, duration: 8 }],
+      clips: [{ id: "clip-audio", kind: "audio", assetId: "asset-a", start: 0, duration: 8, sourceStartSec: 0 }],
     },
   ],
 };
@@ -54,6 +55,7 @@ function drawerProps(overrides: Partial<ProductionDrawerProps> = {}): Production
     onAddTrack: () => {},
     onRemoveTrack: () => {},
     onRemoveClip: () => {},
+    onSplitClipAt: () => {},
     onOpenImageEdit: () => {},
     onOpenAudioEdit: () => {},
     onOpenClipGrade: () => {},
@@ -91,7 +93,61 @@ describe("ProductionDrawer clip context menu", () => {
     );
 
     expect(getByTestId("program-monitor")).toBeDefined();
-    expect(container.querySelector(".production-timeline-empty")?.textContent).toContain("Empty timeline");
+    expect(container.querySelector(".production-timeline-track-card")).toBeDefined();
+    expect(container.querySelector(".production-timeline-empty")).toBeNull();
+  });
+
+  it("uses the razor tool to split a clip at the clicked position", () => {
+    const onSplitClipAt = vi.fn();
+    const { container } = render(<ProductionDrawer {...drawerProps({ onSplitClipAt })} />);
+    const razor = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-timeline-tool")).find(
+      (button) => button.title === "Razor tool",
+    );
+    expect(razor).toBeDefined();
+    fireEvent.click(razor!);
+    const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+      (el) => el.textContent?.includes("a.mp4"),
+    )!;
+    clip.getBoundingClientRect = () =>
+      ({
+        left: 100,
+        right: 300,
+        width: 200,
+        top: 0,
+        bottom: 24,
+        height: 24,
+        x: 100,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    fireEvent.click(clip, { clientX: 150 });
+    expect(onSplitClipAt).toHaveBeenCalledWith("clip-video", 2.5);
+  });
+
+  it("does not split when the razor click is too close to the clip edge", () => {
+    const onSplitClipAt = vi.fn();
+    const { container } = render(<ProductionDrawer {...drawerProps({ onSplitClipAt })} />);
+    const razor = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-timeline-tool")).find(
+      (button) => button.title === "Razor tool",
+    );
+    fireEvent.click(razor!);
+    const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+      (el) => el.textContent?.includes("a.mp4"),
+    )!;
+    clip.getBoundingClientRect = () =>
+      ({
+        left: 100,
+        right: 300,
+        width: 200,
+        top: 0,
+        bottom: 24,
+        height: 24,
+        x: 100,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    fireEvent.click(clip, { clientX: 101 });
+    expect(onSplitClipAt).not.toHaveBeenCalled();
   });
 
   it("offers split-to-layers on a video clip and forwards the clip id", () => {

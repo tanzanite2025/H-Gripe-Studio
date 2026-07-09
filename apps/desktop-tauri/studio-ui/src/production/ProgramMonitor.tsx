@@ -251,14 +251,20 @@ export function ProgramMonitor({
   timeline,
   assets,
   clipGradeDoc,
+  playheadSec: controlledPlayheadSec,
+  onPlayheadSecChange,
 }: {
   timeline: TimelineModel;
   assets: MediaAsset[];
   /** The clip's stored grade doc (JSON string), applied to its frames. */
   clipGradeDoc?: (clipId: string) => string | null;
+  playheadSec?: number;
+  onPlayheadSecChange?: (sec: number) => void;
 }) {
   const t = useT();
-  const [playheadSec, setPlayheadSec] = useState(0);
+  const [localPlayheadSec, setLocalPlayheadSec] = useState(0);
+  const playheadSec = controlledPlayheadSec ?? localPlayheadSec;
+  const setPlayheadSec = onPlayheadSecChange ?? setLocalPlayheadSec;
   const [playing, setPlaying] = useState(false);
   const [safeArea, setSafeArea] = useState(false);
   const [, setMarkers] = useState<number[]>([]);

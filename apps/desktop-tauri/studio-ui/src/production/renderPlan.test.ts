@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MediaAsset } from "./mediaBin";
-import { appendClip, createTimeline, trimClip, type TimelineModel } from "./timeline";
+import { appendClip, createTimeline, splitClip, trimClip, type TimelineModel } from "./timeline";
 import {
   buildRenderPlan,
   DEFAULT_EXPORT_FPS,
@@ -128,6 +128,15 @@ describe("expandPlanFrames", () => {
     ]);
     expect(frames?.frameTimes).toEqual([0, 0.5, 1, 1.5, null, null, null, null]);
     expect(frames?.hasVideoFrames).toBe(true);
+  });
+
+  it("offsets video frame times after a razor split", () => {
+    const assets = [asset("v1", "video", "C:/clip.mp4")];
+    const { timeline, clipIds } = withClips(assets);
+    const split = splitClip(timeline, clipIds[0], 1)!;
+    const plan = buildRenderPlan(split.timeline, assets, { fps: 2 });
+    const frames = expandPlanFrames(plan);
+    expect(frames?.frameTimes).toEqual([0, 0.5, 1, 1.5]);
   });
 
   it("refuses plans that exceed the frame budget", () => {

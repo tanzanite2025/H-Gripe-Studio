@@ -15,6 +15,7 @@ import {
   selectBinAsset,
   selectClip,
   setClipGradeDoc,
+  splitTimelineClip,
   type ProductionStore,
 } from "./productionStore";
 import { defaultAudioEdit } from "./audioEdit";
@@ -130,6 +131,17 @@ describe("productionStore", () => {
     expect(clipGradeDocOf(state, keepId)).toBe('{"keep":true}');
     expect(clipGradeDocOf(state, dropId)).toBeNull();
     expect(Object.keys(state.gradeDocs)).toHaveLength(1);
+  });
+
+  it("splits a clip and selects the right-hand segment", () => {
+    const { store, clipId } = storeWithClip();
+    splitTimelineClip(store, clipId, 2);
+    const state = store.getState();
+    const track = state.timeline.tracks.find((t) => t.clips.some((c) => c.id === clipId))!;
+    expect(track.clips).toHaveLength(2);
+    expect(track.clips[0]).toMatchObject({ id: clipId, duration: 2, sourceStartSec: 0 });
+    expect(track.clips[1]).toMatchObject({ start: 2, sourceStartSec: 2 });
+    expect(state.selectedClipId).toBe(track.clips[1].id);
   });
 
   it("commitAudioEdit clamps the edit and trims the clip to the edited span", () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { addAsset, type MediaAsset } from "./mediaBin";
 import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
-import { appendClip, createTimeline, type TimelineModel } from "./timeline";
+import { appendClip, createTimeline, splitClip, type TimelineModel } from "./timeline";
 
 function setup(): { timeline: TimelineModel; assets: MediaAsset[] } {
   let assets: MediaAsset[] = [];
@@ -30,6 +30,18 @@ describe("resolvePreviewFrame", () => {
       kind: "video",
       path: "C:/media/b.mp4",
       sourceTimeSec: 3.5,
+    });
+  });
+
+  it("keeps source time continuous after a razor split", () => {
+    const { timeline, assets } = setup();
+    const videoTrack = timeline.tracks.find((t) => t.kind === "video")!;
+    const videoClip = videoTrack.clips.find((c) => c.kind === "video")!;
+    const split = splitClip(timeline, videoClip.id, 9)!;
+    const frame = resolvePreviewFrame(split.timeline, assets, 10);
+    expect(frame).toMatchObject({
+      kind: "video",
+      sourceTimeSec: 5,
     });
   });
 

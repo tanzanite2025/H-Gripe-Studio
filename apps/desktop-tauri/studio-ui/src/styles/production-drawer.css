@@ -570,6 +570,7 @@
   pointer-events: none;
 }
 .production-timeline {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -577,7 +578,7 @@
   gap: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px;
+  padding: 8px 42px 8px 8px;
   min-height: 0;
   background: rgba(255, 255, 255, 0.018);
 }
@@ -586,6 +587,54 @@
 .production-timeline-head .spacer { flex: 1; }
 .production-timeline-duration { color: var(--muted); font-size: 11px; }
 .production-timeline-empty { color: var(--muted); font-size: 12px; margin: 0; }
+.production-timeline-ruler {
+  position: relative;
+  height: 34px;
+  margin-left: 94px;
+  border-bottom: 1px solid #343946;
+  background:
+    linear-gradient(#5f6675, #5f6675) left bottom 8px / 100% 1px no-repeat,
+    #171b25;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+.production-timeline-ruler-tick {
+  position: absolute;
+  bottom: 7px;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: #767d8c;
+  pointer-events: none;
+}
+.production-timeline-ruler-tick.minor {
+  height: 5px;
+  opacity: 0.72;
+}
+.production-timeline-ruler-tick.major {
+  height: 11px;
+  opacity: 1;
+}
+.production-timeline-ruler-tick.major span {
+  position: absolute;
+  left: 4px;
+  top: -18px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.production-timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  background: #5b8cff;
+  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.28);
+  pointer-events: none;
+}
 .production-monitor {
   flex: 1;
   width: 100%;
@@ -737,6 +786,51 @@
   overflow: auto;
   min-height: 0;
 }
+.production-track-nav {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  max-height: calc(100% - 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #171b25;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.production-track-nav::-webkit-scrollbar {
+  display: none;
+}
+.production-track-nav-button {
+  width: 28px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: var(--text);
+}
+.production-track-nav-button.nav-video {
+  background: #2c3444;
+}
+.production-track-nav-button.nav-audio {
+  background: #2e3a33;
+}
+.production-track-nav-button:hover {
+  filter: brightness(1.16);
+}
 .production-track { display: flex; align-items: stretch; gap: 6px; }
 /* Video / audio group boundary, like Premiere's split between V1 and A1. */
 .production-track-group-start {
@@ -821,6 +915,23 @@
 .production-clip.clip-still { background: #35402e; }
 .production-clip.clip-audio { background: #40303c; }
 .production-clip.active { outline: 1px solid var(--accent); }
+.production-clip.razor-ready { cursor: crosshair; }
+.production-clip-razor-preview {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
+  transform: translateX(-1px);
+  border-radius: 999px;
+  background: #f7768e;
+  box-shadow: 0 0 0 1px rgba(247, 118, 142, 0.26);
+  pointer-events: none;
+}
+.production-clip-razor-preview.invalid {
+  opacity: 0.32;
+  background: var(--muted);
+  box-shadow: none;
+}
 .production-clip-name {
   overflow: hidden;
   text-overflow: ellipsis;

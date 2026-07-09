@@ -19,6 +19,8 @@ export interface TimelineClip {
   start: number;
   /** Clip length, seconds (always > 0). */
   duration: number;
+  /** Source media in-point, seconds. Used by razor splits and trims. */
+  sourceStartSec: number;
 }
 
 export interface TimelineTrack {
@@ -29,10 +31,13 @@ export interface TimelineTrack {
 
 export interface TimelineModel {
   id: string;
+  /** Project timeline timebase. Razor, ruler and playhead snap to this fps. */
+  fps: number;
   tracks: TimelineTrack[];
 }
 
 /** Default clip lengths until real media durations are probed. */
+export const DEFAULT_TIMELINE_FPS = 24;
 export const DEFAULT_STILL_SECONDS = 5;
 export const DEFAULT_MEDIA_SECONDS = 10;
 export const MIN_CLIP_SECONDS = 0.1;
@@ -55,10 +60,23 @@ export function defaultClipDuration(kind: ClipKind): number {
   return kind === "still" ? DEFAULT_STILL_SECONDS : DEFAULT_MEDIA_SECONDS;
 }
 
+export function secondsToFrame(sec: number, fps: number = DEFAULT_TIMELINE_FPS): number {
+  return Math.round(Math.max(0, sec) * Math.max(1, fps));
+}
+
+export function frameToSeconds(frame: number, fps: number = DEFAULT_TIMELINE_FPS): number {
+  return Math.max(0, frame) / Math.max(1, fps);
+}
+
+export function snapTimeToFrame(sec: number, fps: number = DEFAULT_TIMELINE_FPS): number {
+  return frameToSeconds(secondsToFrame(sec, fps), fps);
+}
+
 /** One video track and one audio track; more can be added on demand. */
 export function createTimeline(): TimelineModel {
   return {
     id: freshId("timeline"),
+    fps: DEFAULT_TIMELINE_FPS,
     tracks: [
       { id: freshId("track-v"), kind: "video", clips: [] },
       { id: freshId("track-a"), kind: "audio", clips: [] },
@@ -118,6 +136,7 @@ export function appendClip(
     assetId: asset.id,
     start: trackEnd(track),
     duration: Math.max(MIN_CLIP_SECONDS, opts.duration ?? defaultClipDuration(clipKind)),
+    sourceStartSec: 0,
   };
   return {
     timeline: {
@@ -147,6 +166,52 @@ export function removeClip(timeline: TimelineModel, clipId: string): TimelineMod
       t.clips.some((c) => c.id === clipId) ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t,
     ),
   };
+}
+
+export interface SplitClipResult {
+  timeline: TimelineModel;
+  trackId: string;
+  left: TimelineClip;
+  right: TimelineClip;
+}
+
+/** Razor split: cut one clip at a timeline time, preserving source continuity. */
+export function splitClip(timeline: TimelineModel, clipId: string, atSec: number): SplitClipResult | null {
+  const snappedAtSec = snapTimeToFrame(atSec, timeline.fps ?? DEFAULT_TIMELINE_FPS);
+  for (const track of timeline.tracks) {
+    const index = track.clips.findIndex((c) => c.id === clipId);
+    if (index < 0) continue;
+    const clip = track.clips[index];
+    const offset = snappedAtSec - clip.start;
+    const leftDuration = offset;
+    const rightDuration = clip.duration - offset;
+    if (leftDuration < MIN_CLIP_SECONDS || rightDuration < MIN_CLIP_SECONDS) return null;
+    const left: TimelineClip = {
+      ...clip,
+      duration: leftDuration,
+    };
+    const right: TimelineClip = {
+      ...clip,
+      id: freshId("clip"),
+      start: snappedAtSec,
+      duration: rightDuration,
+      sourceStartSec: (clip.sourceStartSec ?? 0) + offset,
+    };
+    return {
+      trackId: track.id,
+      left,
+      right,
+      timeline: {
+        ...timeline,
+        tracks: timeline.tracks.map((t) =>
+          t.id === track.id
+            ? { ...t, clips: [...t.clips.slice(0, index), left, right, ...t.clips.slice(index + 1)] }
+            : t,
+        ),
+      },
+    };
+  }
+  return null;
 }
 
 /** Remove every clip referencing the given asset (asset deleted from the bin). */

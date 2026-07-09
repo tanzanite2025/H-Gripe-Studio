@@ -7,8 +7,11 @@ import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 import { ProgramMonitor } from "./ProgramMonitor";
 import type { ProductionTarget } from "./productionTarget";
+import { TimelineRuler } from "./TimelineRuler";
 import {
   clipKindForAsset,
+  DEFAULT_TIMELINE_FPS,
+  MIN_CLIP_SECONDS,
   timelineDuration,
   trackEnd,
   trackKindForClip,
@@ -48,6 +51,7 @@ export interface ProductionDrawerProps {
   /** Remove a track and its clips (the last remaining track stays). */
   onRemoveTrack: (trackId: string) => void;
   onRemoveClip: (clipId: string) => void;
+  onSplitClipAt: (clipId: string, atSec: number) => void;
   /** Right-click on an image asset / still clip: open the existing image editor. */
   onOpenImageEdit: (assetId: string) => void;
   /** Right-click on an audio clip: open the minimal trim/gain/fade editor. */
@@ -102,15 +106,15 @@ function ExportIcon() {
 
 type TimelineTool = "select" | "track" | "trim" | "razor" | "pen" | "shape" | "hand" | "type";
 
-const TIMELINE_TOOLS: Array<{ id: TimelineTool; label: string }> = [
-  { id: "select", label: "Selection tool" },
-  { id: "track", label: "Track select tool" },
-  { id: "trim", label: "Trim tool" },
-  { id: "razor", label: "Razor tool" },
-  { id: "pen", label: "Pen tool" },
-  { id: "shape", label: "Shape tool" },
-  { id: "hand", label: "Hand tool" },
-  { id: "type", label: "Type tool" },
+const TIMELINE_TOOLS: Array<{ id: TimelineTool; labelKey: MsgKey }> = [
+  { id: "select", labelKey: "drawer.timelineToolSelect" },
+  { id: "track", labelKey: "drawer.timelineToolTrackSelect" },
+  { id: "trim", labelKey: "drawer.timelineToolTrim" },
+  { id: "razor", labelKey: "drawer.timelineToolRazor" },
+  { id: "pen", labelKey: "drawer.timelineToolPen" },
+  { id: "shape", labelKey: "drawer.timelineToolShape" },
+  { id: "hand", labelKey: "drawer.timelineToolHand" },
+  { id: "type", labelKey: "drawer.timelineToolType" },
 ];
 
 function TimelineToolIcon({ tool }: { tool: TimelineTool }) {
@@ -190,6 +194,7 @@ export function ProductionDrawer({
   onAddTrack,
   onRemoveTrack,
   onRemoveClip,
+  onSplitClipAt,
   onOpenImageEdit,
   onOpenAudioEdit,
   onOpenClipGrade,
@@ -222,7 +227,10 @@ export function ProductionDrawer({
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [dragAssetId, setDragAssetId] = useState<string | null>(null);
   const [timelineTool, setTimelineTool] = useState<TimelineTool>("select");
+  const [razorPreview, setRazorPreview] = useState<{ clipId: string; ratio: number; valid: boolean } | null>(null);
+  const [playheadSec, setPlayheadSec] = useState(0);
   const programColumnRef = useRef<HTMLDivElement | null>(null);
+  const trackRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
 
   useEffect(() => {
@@ -284,6 +292,10 @@ export function ProductionDrawer({
     };
   }, [renderExpanded]);
 
+  useEffect(() => {
+    if (timelineTool !== "razor") setRazorPreview(null);
+  }, [timelineTool]);
+
   if (!renderExpanded) {
     return (
       <div className="production-drawer production-drawer-rail">
@@ -304,6 +316,8 @@ export function ProductionDrawer({
   const activeAsset = assets.find((a) => a.id === activeAssetId) ?? null;
   const selectedClip = timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ?? null;
   const selectedClipAsset = selectedClip ? (assets.find((a) => a.id === selectedClip.assetId) ?? null) : null;
+  const timelineFps = timeline.fps ?? DEFAULT_TIMELINE_FPS;
+  const timelineLen = timelineDuration(timeline);
 
   // Premiere-style track stack: video tracks on top with the highest lane
   // first (V2 above V1), audio tracks below in ascending order (A1 first).
@@ -323,6 +337,14 @@ export function ProductionDrawer({
       if (clip) return assets.find((a) => a.id === clip.assetId)?.name ?? clip.assetId;
     }
     return clipId;
+  };
+
+  const scrollTrackIntoView = (trackId: string) => {
+    trackRefs.current[trackId]?.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+      behavior: "smooth",
+    });
   };
 
   const targetLabel = !target
@@ -452,14 +474,14 @@ export function ProductionDrawer({
           <div className="production-timeline-tools production-timeline-side-tools" role="toolbar" aria-label="Timeline tools">
             {TIMELINE_TOOLS.map((tool) => (
               <button
-                key={tool.id}
-                type="button"
-                className={`production-timeline-tool${timelineTool === tool.id ? " active" : ""}`}
-                onClick={() => setTimelineTool(tool.id)}
-                title={tool.label}
-                aria-label={tool.label}
-                aria-pressed={timelineTool === tool.id}
-              >
+                  key={tool.id}
+                  type="button"
+                  className={`production-timeline-tool${timelineTool === tool.id ? " active" : ""}`}
+                  onClick={() => setTimelineTool(tool.id)}
+                  title={t(tool.labelKey)}
+                  aria-label={t(tool.labelKey)}
+                  aria-pressed={timelineTool === tool.id}
+                >
                 <TimelineToolIcon tool={tool.id} />
               </button>
             ))}
@@ -469,7 +491,13 @@ export function ProductionDrawer({
         <div className="production-edit-workspace">
           <div className="production-edit-top">
           <div className="production-program-column" ref={programColumnRef}>
-            <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
+            <ProgramMonitor
+              timeline={timeline}
+              assets={assets}
+              clipGradeDoc={clipGradeDoc}
+              playheadSec={playheadSec}
+              onPlayheadSecChange={setPlayheadSec}
+            />
           </div>
 
           <aside
@@ -550,14 +578,13 @@ export function ProductionDrawer({
           </div>
 
           <div className="production-timeline-shell">
-            <div className="production-timeline">
-            <div className="production-timeline-head">
-              <h3>{t("drawer.timelineTitle")}</h3>
-              <span className="production-timeline-duration">
-                {t("drawer.timelineDuration", { s: timelineDuration(timeline).toFixed(1) })}
-              </span>
-              <div className="spacer" />
-              </div>
+            <div className="production-timeline production-timeline-track-card">
+              <TimelineRuler
+                fps={timelineFps}
+                durationSec={timelineLen}
+                playheadSec={playheadSec}
+                onPlayheadSecChange={setPlayheadSec}
+              />
               <div className="production-timeline-tracks">
               {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
                 // Scale every lane to the same overall timeline length so clip
@@ -566,10 +593,14 @@ export function ProductionDrawer({
                 const acceptsActive =
                   !!activeAsset && trackKindForClip(clipKindForAsset(activeAsset.kind)) === track.kind;
                 return (
-                  <div
-                    key={track.id}
-                    className={`production-track${groupBoundary ? " production-track-group-start" : ""}`}
-                  >
+                    <div
+                      key={track.id}
+                      ref={(el) => {
+                        if (el) trackRefs.current[track.id] = el;
+                        else delete trackRefs.current[track.id];
+                      }}
+                      className={`production-track${groupBoundary ? " production-track-group-start" : ""}`}
+                    >
                     <span className="production-track-head">
                       <span className={`production-track-label track-${track.kind}`}>
                         {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
@@ -604,17 +635,45 @@ export function ProductionDrawer({
                         setDragAssetId(null);
                       }}
                     >
-                      {track.clips.map((clip) => {
-                        const selected = clip.id === selectedClipId;
-                        return (
-                          <button
+                        {track.clips.map((clip) => {
+                          const selected = clip.id === selectedClipId;
+                          const preview = razorPreview?.clipId === clip.id ? razorPreview : null;
+                          return (
+                            <button
                             key={clip.id}
-                            className={`production-clip clip-${clip.kind}${selected ? " active" : ""}`}
+                            className={`production-clip clip-${clip.kind}${selected ? " active" : ""}${timelineTool === "razor" ? " razor-ready" : ""}`}
                             style={{
                               left: `${(clip.start / total) * 100}%`,
                               width: `${(clip.duration / total) * 100}%`,
                             }}
-                            onClick={() => onSelectClip(selected ? null : clip.id)}
+                            onClick={(e) => {
+                              if (timelineTool === "razor") {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
+                                const clampedRatio = Math.min(1, Math.max(0, ratio));
+                                const offset = clip.duration * clampedRatio;
+                                if (offset >= MIN_CLIP_SECONDS && clip.duration - offset >= MIN_CLIP_SECONDS) {
+                                  onSplitClipAt(clip.id, clip.start + offset);
+                                }
+                                return;
+                              }
+                              onSelectClip(selected ? null : clip.id);
+                            }}
+                            onMouseMove={(e) => {
+                              if (timelineTool !== "razor") return;
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
+                              const clampedRatio = Math.min(1, Math.max(0, ratio));
+                              const offset = clip.duration * clampedRatio;
+                              setRazorPreview({
+                                clipId: clip.id,
+                                ratio: clampedRatio,
+                                valid: offset >= MIN_CLIP_SECONDS && clip.duration - offset >= MIN_CLIP_SECONDS,
+                              });
+                            }}
+                            onMouseLeave={() => {
+                              if (timelineTool === "razor") setRazorPreview(null);
+                            }}
                             onContextMenu={(e) => {
                               e.preventDefault();
                               onSelectClip(clip.id);
@@ -628,6 +687,12 @@ export function ProductionDrawer({
                             }}
                             title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s · ${t("drawer.clipMenuHint")}`}
                           >
+                            {preview ? (
+                              <span
+                                className={`production-clip-razor-preview${preview.valid ? "" : " invalid"}`}
+                                style={{ left: `${preview.ratio * 100}%` }}
+                              />
+                            ) : null}
                             <span className="production-clip-name">{clipAssetName(clip.id)}</span>
                             {selected ? (
                               <span
@@ -648,8 +713,24 @@ export function ProductionDrawer({
                     </div>
                   </div>
                 );
-              })}
-            </div>
+                })}
+              </div>
+              <div className="production-track-nav" aria-label="轨道定位">
+                {orderedTracks.map(({ track, laneNumber }) => {
+                  const label = `${track.kind === "video" ? "V" : "A"}${laneNumber}`;
+                  return (
+                    <button
+                      key={`nav-${track.id}`}
+                      type="button"
+                      className={`production-track-nav-button nav-${track.kind}`}
+                      onClick={() => scrollTrackIntoView(track.id)}
+                      title={track.kind === "video" ? `${t("drawer.trackVideo")}${laneNumber}` : `${t("drawer.trackAudio")}${laneNumber}`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

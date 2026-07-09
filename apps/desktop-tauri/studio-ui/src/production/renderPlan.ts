@@ -20,6 +20,8 @@ export interface RenderSegment {
   start: number;
   /** Playback length, seconds. */
   duration: number;
+  /** Source media in-point, seconds. */
+  sourceStartSec: number;
   /** The clip's stored grade doc (JSON string), applied at encode time. */
   gradeDoc: string | null;
 }
@@ -95,6 +97,7 @@ export function buildRenderPlan(
       path: asset.path,
       start: clip.start,
       duration: clip.duration,
+      sourceStartSec: clip.sourceStartSec ?? 0,
       gradeDoc: opts.clipGradeDoc?.(clip.id) ?? null,
     });
   }
@@ -114,8 +117,9 @@ export function buildRenderPlan(
         path: asset.path,
         start: clip.start,
         duration: clip.duration,
+        sourceStartSec: clip.sourceStartSec ?? 0,
         gradeDoc: null,
-        trimStartSec: edit.trimStartSec,
+        trimStartSec: (clip.sourceStartSec ?? 0) + edit.trimStartSec,
         gainDb: edit.gainDb,
         fadeInSec: edit.fadeInSec,
         fadeOutSec: edit.fadeOutSec,
@@ -161,7 +165,7 @@ export function expandPlanFrames(plan: RenderPlan): ExpandedFrames | null {
       paths.push(segment.path);
       gradeDocs.push(segment.gradeDoc);
       if (segment.kind === "video") {
-        frameTimes.push(Math.min(i / plan.fps, segment.duration));
+        frameTimes.push(segment.sourceStartSec + Math.min(i / plan.fps, segment.duration));
         hasVideoFrames = true;
       } else {
         frameTimes.push(null);

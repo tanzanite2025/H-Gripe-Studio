@@ -19,6 +19,7 @@ import {
   removeClip,
   removeClipsForAsset,
   removeTrack,
+  splitClip,
   trimClip,
   type TimelineModel,
   type TrackKind,
@@ -229,6 +230,17 @@ export function removeTimelineTrack(store: ProductionStore, trackId: string): vo
 /** Remove a clip; its edit documents cascade away. */
 export function removeTimelineClip(store: ProductionStore, clipId: string): void {
   store.mutate((state) => withTimeline(state, removeClip(state.timeline, clipId)));
+}
+
+export function splitTimelineClip(store: ProductionStore, clipId: string, atSec: number): void {
+  store.mutate((state) => {
+    const result = splitClip(state.timeline, clipId, atSec);
+    if (!result) return state;
+    return {
+      ...withTimeline(state, result.timeline),
+      selectedClipId: result.right.id,
+    };
+  });
 }
 
 export function selectClip(store: ProductionStore, clipId: string | null): void {

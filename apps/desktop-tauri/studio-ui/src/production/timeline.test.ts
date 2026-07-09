@@ -12,6 +12,7 @@ import {
   removeClip,
   removeClipsForAsset,
   removeTrack,
+  splitClip,
   timelineDuration,
   trackKindForClip,
   trimClip,
@@ -44,6 +45,7 @@ describe("timeline model", () => {
     expect(first!.clip.kind).toBe("still");
     expect(first!.clip.start).toBe(0);
     expect(first!.clip.duration).toBe(DEFAULT_STILL_SECONDS);
+    expect(first!.clip.sourceStartSec).toBe(0);
     const second = appendClip(first!.timeline, videoAsset);
     expect(second!.trackId).toBe(first!.trackId);
     expect(second!.clip.start).toBe(DEFAULT_STILL_SECONDS);
@@ -63,7 +65,7 @@ describe("timeline model", () => {
   });
 
   it("returns null when no compatible track exists", () => {
-    const tl = { id: "t", tracks: [] };
+    const tl = { id: "t", fps: 24, tracks: [] };
     expect(appendClip(tl, imageAsset)).toBeNull();
   });
 
@@ -102,5 +104,16 @@ describe("timeline model", () => {
     const later = findClip(trimClip(trimmed, r.clip.id, { start: 2.5 }), r.clip.id)!.clip;
     expect(later.start).toBe(2.5);
     expect(later.duration).toBe(MIN_CLIP_SECONDS);
+  });
+
+  it("splits a clip while preserving source continuity", () => {
+    const r = appendClip(createTimeline(), videoAsset, { duration: 10 })!;
+    const split = splitClip(r.timeline, r.clip.id, 4);
+    expect(split).not.toBeNull();
+    const clips = split!.timeline.tracks.find((t) => t.id === split!.trackId)!.clips;
+    expect(clips).toHaveLength(2);
+    expect(clips[0]).toMatchObject({ id: r.clip.id, start: 0, duration: 4, sourceStartSec: 0 });
+    expect(clips[1]).toMatchObject({ start: 4, duration: 6, sourceStartSec: 4 });
+    expect(splitClip(split!.timeline, clips[0].id, 0.01)).toBeNull();
   });
 });
