@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { canvasDocumentTitle } from "./canvasDocument";
-import type { CanvasTabInfo } from "./useCanvasDocument";
+import { MAX_CANVAS_TABS, type CanvasTabInfo } from "./useCanvasDocument";
 import { useT } from "../i18n";
 
 interface CanvasTabsProps {
@@ -96,6 +96,7 @@ export function CanvasTabs({
 }: CanvasTabsProps) {
   const t = useT();
   const untitled = t("status.untitled");
+  const tabLimitReached = tabs.length >= MAX_CANVAS_TABS;
   // Open "⋯" menu (dropdown is position:fixed so the scrollable strip cannot
   // clip it; the anchor point comes from the toggle button).
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -239,7 +240,7 @@ export function CanvasTabs({
         <button
           className="canvas-tab-new"
           aria-label={t("canvasTabs.new")}
-          title={t("canvasTabs.new")}
+          title={tabLimitReached ? t("canvasTabs.limitTitle") : t("canvasTabs.new")}
           aria-expanded={menu?.id === NEW_MENU_ID}
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -259,6 +260,8 @@ export function CanvasTabs({
           >
             <button
               role="menuitem"
+              disabled={tabLimitReached}
+              title={tabLimitReached ? t("canvasTabs.limitTitle") : t("canvasTabs.newBlank")}
               onClick={() => {
                 setMenu(null);
                 onNewCanvas();

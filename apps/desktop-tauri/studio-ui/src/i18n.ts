@@ -19,6 +19,14 @@ export const messages = {
   "status.untitled": { en: "untitled", zh: "未命名" },
   "status.untitledTitle": { en: "untitled (not yet saved to a file)", zh: "未命名（尚未保存到文件）" },
   "canvasTabs.new": { en: "New canvas", zh: "新建画布" },
+  "canvasTabs.limitTitle": {
+    en: "Up to 3 canvas tabs can be open at once",
+    zh: "最多只能同时打开 3 个画布标签",
+  },
+  "canvasTabs.limitMessage": {
+    en: "Canvas tab limit reached: close one before opening another.",
+    zh: "画布标签已达上限：最多同时打开 3 个，请先关闭一个。",
+  },
   "canvasTabs.close": { en: "Close canvas", zh: "关闭画布" },
   "canvasTabs.save": { en: "Save", zh: "保存" },
   "canvasTabs.savedState": { en: "Saved", zh: "已保存" },

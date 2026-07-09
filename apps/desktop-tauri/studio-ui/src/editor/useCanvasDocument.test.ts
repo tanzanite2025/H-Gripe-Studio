@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Node } from "@hgripe/flow";
 
-import { useCanvasDocument, type CanvasFileBridge } from "./useCanvasDocument";
+import { MAX_CANVAS_TABS, useCanvasDocument, type CanvasFileBridge } from "./useCanvasDocument";
 
 function node(id: string): Node {
   return { id, type: "hgripe", position: { x: 0, y: 0 }, data: { kind: "prompt" } };
@@ -44,6 +44,22 @@ describe("useCanvasDocument tabs", () => {
     // The new canvas is untitled and clean; the parked tab keeps its file state.
     expect(file.set).toHaveBeenCalledWith(null, false);
     expect(result.current.tabs[0]).toMatchObject({ path: "C:/flows/hero.json", dirty: true });
+  });
+
+  it("openNewCanvas refuses to create more than the tab limit", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
+    const file = bridge({ path: null, dirty: false });
+    act(() => result.current.registerFileBridge(file.bridge));
+
+    const outcomes: string[] = [];
+    for (let i = 1; i < MAX_CANVAS_TABS + 1; i += 1) {
+      act(() => {
+        outcomes.push(result.current.openNewCanvas());
+      });
+    }
+
+    expect(outcomes).toEqual(["opened", "opened", "limit"]);
+    expect(result.current.tabs).toHaveLength(MAX_CANVAS_TABS);
   });
 
   it("activateCanvas restores the parked graph, selection, and file state", () => {
@@ -173,6 +189,54 @@ describe("useCanvasDocument tabs", () => {
     expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
   });
 
+  it("openCanvasWith blocks a fourth new tab but still activates an already-open path", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
+    const file = bridge({ path: "C:/flows/a.json", dirty: false });
+    act(() => result.current.registerFileBridge(file.bridge));
+
+    let outcome: string | undefined;
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("b")],
+        edges: [],
+        path: "C:/flows/b.json",
+      });
+    });
+    expect(outcome).toBe("opened");
+
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("c")],
+        edges: [],
+        path: "C:/flows/c.json",
+      });
+    });
+    expect(outcome).toBe("opened");
+    expect(result.current.tabs).toHaveLength(MAX_CANVAS_TABS);
+
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("d")],
+        edges: [],
+        path: "C:/flows/d.json",
+      });
+    });
+    expect(outcome).toBe("limit");
+    expect(result.current.tabs).toHaveLength(MAX_CANVAS_TABS);
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["c"]);
+
+    act(() => {
+      outcome = result.current.openCanvasWith({
+        nodes: [node("stale-b")],
+        edges: [],
+        path: "C:/flows/b.json",
+      });
+    });
+    expect(outcome).toBe("activated");
+    expect(result.current.tabs).toHaveLength(MAX_CANVAS_TABS);
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["b"]);
+  });
+
   it("exportCanvases captures the live active tab and parked tabs verbatim", () => {
     const { result } = renderHook(() => useCanvasDocument({ nodes: [node("a")], edges: [] }));
     const file = bridge({ path: "C:/flows/hero.json", dirty: true });
@@ -227,6 +291,58 @@ describe("useCanvasDocument tabs", () => {
     expect(file.set).toHaveBeenLastCalledWith(null, true);
 
     act(() => result.current.activateCanvas("c1"));
+    expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
+    expect(file.set).toHaveBeenLastCalledWith("C:/flows/a.json", false);
+  });
+
+  it("restoreCanvases trims restored tabs to the supported tab limit", () => {
+    const { result } = renderHook(() => useCanvasDocument({ nodes: [node("z")], edges: [] }));
+    const file = bridge({ path: null, dirty: false });
+    act(() => result.current.registerFileBridge(file.bridge));
+
+    act(() =>
+      result.current.restoreCanvases("c4", [
+        {
+          id: "c1",
+          path: "C:/flows/a.json",
+          dirty: false,
+          selectedNodeId: null,
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [node("a")],
+          edges: [],
+        },
+        {
+          id: "c2",
+          path: "C:/flows/b.json",
+          dirty: false,
+          selectedNodeId: null,
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [node("b")],
+          edges: [],
+        },
+        {
+          id: "c3",
+          path: "C:/flows/c.json",
+          dirty: false,
+          selectedNodeId: null,
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [node("c")],
+          edges: [],
+        },
+        {
+          id: "c4",
+          path: "C:/flows/d.json",
+          dirty: false,
+          selectedNodeId: null,
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [node("d")],
+          edges: [],
+        },
+      ]),
+    );
+
+    expect(result.current.tabs.map((t) => t.id)).toEqual(["c1", "c2", "c3"]);
+    expect(result.current.documentId).toBe("c1");
     expect(result.current.nodes.map((n) => n.id)).toEqual(["a"]);
     expect(file.set).toHaveBeenLastCalledWith("C:/flows/a.json", false);
   });

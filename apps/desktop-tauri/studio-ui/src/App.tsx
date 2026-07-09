@@ -233,6 +233,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         : ""
       : "browser preview (backend mocked)",
   );
+  const openNewCanvasOrWarn = useCallback(() => {
+    const result = openNewCanvas();
+    if (result === "limit") setMessage(t("canvasTabs.limitMessage"));
+  }, [openNewCanvas, t]);
 
   // True while a node drag is in progress, so we snapshot only once per drag.
   const dragging = useRef(false);
@@ -1255,7 +1259,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     save: () => void handleSave(),
     saveAs: () => void handleSaveAs(),
     open: () => void handleOpen(),
-    newWorkflow: openNewCanvas,
+    newWorkflow: openNewCanvasOrWarn,
     run: () => void run(),
     canRun: !running && issues.length === 0,
   });
@@ -1637,7 +1641,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         activeDirty={fileDirty}
         onActivate={activateCanvas}
         onClose={closeCanvasTab}
-        onNewCanvas={openNewCanvas}
+        onNewCanvas={openNewCanvasOrWarn}
         onOpenFile={() => void handleOpen()}
         onSaveTab={(id) => requestTabAction(id, "save")}
         onSaveAsTab={(id) => requestTabAction(id, "saveAs")}
@@ -1666,7 +1670,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 }}
                 onNew={() => {
                   setShowProject(false);
-                  openNewCanvas();
+                  openNewCanvasOrWarn();
                 }}
                 onNewInFolder={() => void handleNewInFolder()}
                 onRenameFile={(path) => void handleRenameFile(path)}

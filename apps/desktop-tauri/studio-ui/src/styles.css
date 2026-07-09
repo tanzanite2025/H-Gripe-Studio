@@ -396,6 +396,12 @@ button:disabled { opacity: 0.6; cursor: default; }
   white-space: nowrap;
 }
 .canvas-tab-menu button:hover { background: rgba(91, 140, 255, 0.16); }
+.canvas-tab-menu button:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  opacity: 0.55;
+}
+.canvas-tab-menu button:disabled:hover { background: transparent; }
 .canvas-tab-menu button.danger { color: #f28b8b; }
 .canvas-tab-menu button.danger:hover { background: rgba(242, 139, 139, 0.14); }
 /* project-level batch action: pinned right so the tab strip stays centered */

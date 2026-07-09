@@ -21,6 +21,11 @@ import {
 } from "./graphStore";
 import { DEFAULT_CANVAS_VIEWPORT, newCanvasDocumentId, type CanvasViewport } from "./canvasDocument";
 
+export const MAX_CANVAS_TABS = 3;
+
+export type OpenNewCanvasResult = "opened" | "limit";
+export type OpenCanvasWithResult = "opened" | "activated" | "already-active" | "limit";
+
 /** Parked (inactive) canvas state, restored verbatim on tab activation. */
 interface StoredCanvas {
   nodes: Node[];
@@ -77,16 +82,13 @@ export interface UseCanvasDocument {
   /** Register the file-state bridge once the file controller exists. */
   registerFileBridge: (bridge: CanvasFileBridge) => void;
   /** Park the active canvas and open a fresh, empty, untitled one. */
-  openNewCanvas: () => void;
+  openNewCanvas: () => OpenNewCanvasResult;
   /**
    * Open a loaded workflow in a new tab (parking the active canvas). When
    * `path` is already open in another tab, that tab is activated instead.
-   * Returns "opened", "activated", or "already-active".
+   * Returns "opened", "activated", "already-active", or "limit".
    */
-  openCanvasWith: (state: { nodes: Node[]; edges: Edge[]; path: string | null }) =>
-    | "opened"
-    | "activated"
-    | "already-active";
+  openCanvasWith: (state: { nodes: Node[]; edges: Edge[]; path: string | null }) => OpenCanvasWithResult;
   /** Park the active canvas and swap the given one in. */
   activateCanvas: (id: string) => void;
   /** Close a canvas; when the last one closes, a fresh one replaces it. */
@@ -155,6 +157,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
   );
 
   const openNewCanvas = useCallback(() => {
+    if (tabsRef.current.length >= MAX_CANVAS_TABS) return "limit" as const;
     parkActive();
     const id = newCanvasDocumentId();
     setTabs((list) => [...list, { id, path: null, dirty: false }]);
@@ -166,6 +169,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
       path: null,
       dirty: false,
     });
+    return "opened" as const;
   }, [parkActive, loadCanvas]);
 
   const openCanvasWith = useCallback(
@@ -186,6 +190,7 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
           }
         }
       }
+      if (tabsRef.current.length >= MAX_CANVAS_TABS) return "limit" as const;
       parkActive();
       const id = newCanvasDocumentId();
       setTabs((list) => [...list, { id, path: state.path, dirty: false }]);
@@ -266,9 +271,10 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
 
   const restoreCanvases = useCallback(
     (activeCanvasId: string, canvases: CanvasSnapshotState[]) => {
-      if (canvases.length === 0) return;
+      const limitedCanvases = canvases.slice(0, MAX_CANVAS_TABS);
+      if (limitedCanvases.length === 0) return;
       store.current.clear();
-      for (const c of canvases) {
+      for (const c of limitedCanvases) {
         store.current.set(c.id, {
           nodes: c.nodes,
           edges: c.edges,
@@ -278,10 +284,10 @@ export function useCanvasDocument(initial: { nodes: Node[]; edges: Edge[] }): Us
           dirty: c.dirty,
         });
       }
-      const active = canvases.find((c) => c.id === activeCanvasId) ?? canvases[0];
+      const active = limitedCanvases.find((c) => c.id === activeCanvasId) ?? limitedCanvases[0];
       const parked = store.current.get(active.id);
       store.current.delete(active.id);
-      setTabs(canvases.map((c) => ({ id: c.id, path: c.path, dirty: c.dirty, name: c.name ?? null })));
+      setTabs(limitedCanvases.map((c) => ({ id: c.id, path: c.path, dirty: c.dirty, name: c.name ?? null })));
       if (parked) loadCanvas(active.id, parked);
     },
     [loadCanvas],

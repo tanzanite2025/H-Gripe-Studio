@@ -74,7 +74,7 @@ export interface StudioFileControllerOptions {
   openInCanvasTab?: (
     graph: WorkflowGraph,
     path: string | null,
-  ) => "opened" | "activated" | "already-active";
+  ) => "opened" | "activated" | "already-active" | "limit";
 }
 
 export interface StudioFileController {
@@ -317,7 +317,12 @@ export function useStudioFileController({
         const graph = deserializeGraph(await file.text());
         if (openInCanvasTab) {
           skipDirty.current = true;
-          openInCanvasTab(graph, null);
+          const result = openInCanvasTab(graph, null);
+          if (result === "limit") {
+            skipDirty.current = false;
+            setMessage("canvas tab limit reached: close one before opening another");
+            return;
+          }
           setMessage(`loaded ${file.name} in a new canvas`);
           return;
         }
@@ -360,6 +365,11 @@ export function useStudioFileController({
           const graph = deserializeGraph(await readStudioWorkflow(path));
           skipDirty.current = true;
           const result = openInCanvasTab(graph, path);
+          if (result === "limit") {
+            skipDirty.current = false;
+            setMessage("canvas tab limit reached: close one before opening another");
+            return;
+          }
           rememberFile(path);
           setMessage(
             result === "opened"
