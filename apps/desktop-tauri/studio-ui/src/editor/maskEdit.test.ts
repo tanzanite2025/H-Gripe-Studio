@@ -342,6 +342,32 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers[1].mask?.ops).toEqual([{ type: "ellipse", region: [0, 0, 8, 8] }]);
   });
 
+  it("image layer-via-copy records source image content and exact polygon masks", () => {
+    let s = initEditState();
+    s = duplicateLayer(
+      s,
+      {
+        region: [2, 3, 20, 15],
+        polygon: [
+          [2, 3],
+          [20, 3],
+          [12, 15],
+        ],
+      },
+      { includeSourceImage: true },
+    );
+
+    expect(s.current.layers).toHaveLength(2);
+    expect(s.current.layers[1].ops.map((op) => op.type)).toEqual(["source_image"]);
+    expect(s.current.layers[1].mask?.ops[0]).toMatchObject({
+      type: "path",
+      mode: "add",
+      tool: "selection",
+      closed: true,
+      points: [{ x: 2, y: 3 }, { x: 20, y: 3 }, { x: 12, y: 15 }],
+    });
+  });
+
   it("renames a layer (undoable) and ignores blank or unchanged names", () => {
     let s = initEditState();
     const original = s.current.layers[0].name;

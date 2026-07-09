@@ -34,6 +34,8 @@ function sourceKey(source: ViewportUnderlaySource | undefined): string {
       return `image:${source.resourceId}`;
     case "image_layer":
       return `image_layer:${source.assetId}:${source.layerId}`;
+    case "image_composite":
+      return `image_composite:${source.resourceId}:${source.documentKey}:${source.documentWidth}x${source.documentHeight}`;
     case "video_clip":
       return `video_clip:${source.timelineId}:${source.clipId}:${source.timeSec}`;
     case "video_frame":

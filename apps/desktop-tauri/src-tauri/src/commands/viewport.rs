@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use image::RgbaImage;
+use image::{Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -43,6 +43,17 @@ pub(crate) enum ViewportTarget {
         asset_id: String,
         #[serde(rename = "layerId")]
         layer_id: String,
+    },
+    ImageComposite {
+        #[serde(rename = "resourceId")]
+        resource_id: String,
+        document: Value,
+        #[serde(rename = "documentKey")]
+        document_key: String,
+        #[serde(rename = "documentWidth")]
+        document_width: u32,
+        #[serde(rename = "documentHeight")]
+        document_height: u32,
     },
     VideoClip {
         #[serde(rename = "timelineId")]
@@ -1291,7 +1302,9 @@ pub(crate) fn viewport_set_target(
     // Validate reference targets eagerly so a bad id fails at set time, not at
     // the first render.
     match &target {
-        ViewportTarget::Image { resource_id } | ViewportTarget::VideoFrame { resource_id, .. } => {
+        ViewportTarget::Image { resource_id }
+        | ViewportTarget::ImageComposite { resource_id, .. }
+        | ViewportTarget::VideoFrame { resource_id, .. } => {
             if resource::get(resource_id).is_none() {
                 return Err(format!("unknown resource id: {resource_id}"));
             }
@@ -1750,6 +1763,30 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 overlay_scene.as_deref(),
             )
         }
+        ViewportTarget::ImageComposite {
+            resource_id,
+            document,
+            document_key,
+            document_width,
+            document_height,
+        } => {
+            let entry = resource::get(&resource_id)
+                .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
+            render_image_composite_path(
+                id,
+                &entry.path,
+                &document,
+                &document_key,
+                document_width,
+                document_height,
+                width,
+                height,
+                grade_doc,
+                view,
+                mask_overlay.as_deref(),
+                overlay_scene.as_deref(),
+            )
+        }
         #[cfg(feature = "native-ffmpeg")]
         ViewportTarget::VideoFrame {
             resource_id,
@@ -2152,6 +2189,445 @@ fn render_video_path(
         backend: cpu_backend(),
         view,
     })
+}
+
+fn render_image_composite_path(
+    id: u64,
+    path: &str,
+    document: &Value,
+    _document_key: &str,
+    document_width: u32,
+    document_height: u32,
+    width: u32,
+    height: u32,
+    grade_doc: Option<Value>,
+    view: ViewportView,
+    mask_overlay: Option<&MaskOverlay>,
+    overlay_scene: Option<&OverlayScene>,
+) -> Result<RenderedRgba, String> {
+    let size = width.max(height).clamp(64, 2048);
+    let detail = if grade_doc.is_some()
+        || !view.is_identity()
+        || mask_overlay.is_some()
+        || overlay_scene.is_some()
+    {
+        proxy_detail_size(size, view)
+    } else {
+        size
+    };
+    let key = ProxyKey {
+        path: path.to_string(),
+        time_bits: None,
+        size: detail,
+    };
+    let proxy = cached_proxy(id, key, || {
+        load_image_srgb_proxy(std::path::Path::new(path), detail)
+    })?;
+    let mut image = composite_image_document(
+        &proxy,
+        document,
+        document_width.max(1),
+        document_height.max(1),
+    );
+    let full_dims = image.dimensions();
+    if !view.is_identity() {
+        image = crop_view(&image, view);
+    }
+    if grade_doc.is_some() || mask_overlay.is_some() || overlay_scene.is_some() {
+        let doc = parse_grade_doc(grade_doc.as_ref())?;
+        let mut surface = crate::studio::srgb_proxy_surface(&image)?;
+        let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
+        if let Some(overlay) = mask_overlay {
+            composite_mask_overlay(&mut surface, overlay, full_dims, view);
+        }
+        if let Some(scene) = overlay_scene {
+            composite_overlay_scene(&mut surface, scene, full_dims, view);
+        }
+        image = crate::studio::surface_to_rgba(&surface)?;
+        return Ok(RenderedRgba {
+            image: Arc::new(image),
+            backend: grade_backend_report(backend),
+            view,
+        });
+    }
+    Ok(RenderedRgba {
+        image: Arc::new(image),
+        backend: cpu_backend(),
+        view,
+    })
+}
+
+fn composite_image_document(
+    source: &RgbaImage,
+    document: &Value,
+    document_width: u32,
+    document_height: u32,
+) -> RgbaImage {
+    let (w, h) = source.dimensions();
+    let mut out = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 0]));
+    let Some(layers) = document.get("layers").and_then(Value::as_array) else {
+        return source.clone();
+    };
+    for (index, layer) in layers.iter().enumerate() {
+        if layer.get("visible").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        if layer.get("kind").and_then(Value::as_str) == Some("adjustment") {
+            continue;
+        }
+        if !layer_sources_image(layer, index) {
+            continue;
+        }
+        let opacity = layer
+            .get("opacity")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0) as f32;
+        if opacity <= 0.0 {
+            continue;
+        }
+        let mask = raster_layer_mask(layer, w, h, document_width, document_height);
+        let transform = layer_transform(layer, w, h, document_width, document_height);
+        let mask_linked = layer
+            .get("mask")
+            .and_then(|mask| mask.get("unlinked"))
+            .and_then(Value::as_bool)
+            != Some(true);
+        let blend = layer
+            .get("blend")
+            .and_then(Value::as_str)
+            .unwrap_or("normal");
+        composite_source_layer(
+            &mut out,
+            source,
+            mask.as_deref(),
+            opacity,
+            transform,
+            mask_linked,
+            blend,
+        );
+    }
+    out
+}
+
+#[derive(Clone, Copy)]
+struct LayerTransform {
+    dx: f32,
+    dy: f32,
+    scale: f32,
+    rotate: f32,
+}
+
+impl LayerTransform {
+    const IDENTITY: LayerTransform = LayerTransform {
+        dx: 0.0,
+        dy: 0.0,
+        scale: 1.0,
+        rotate: 0.0,
+    };
+
+    fn is_identity(self) -> bool {
+        self.dx == 0.0 && self.dy == 0.0 && self.scale == 1.0 && self.rotate == 0.0
+    }
+}
+
+fn compose_layer_transform(a: LayerTransform, b: LayerTransform) -> LayerTransform {
+    let rad = b.rotate.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    LayerTransform {
+        dx: b.scale * (cos * a.dx - sin * a.dy) + b.dx,
+        dy: b.scale * (sin * a.dx + cos * a.dy) + b.dy,
+        scale: a.scale * b.scale,
+        rotate: a.rotate + b.rotate,
+    }
+}
+
+fn layer_transform(
+    layer: &Value,
+    width: u32,
+    height: u32,
+    document_width: u32,
+    document_height: u32,
+) -> LayerTransform {
+    let sx = width as f32 / document_width.max(1) as f32;
+    let sy = height as f32 / document_height.max(1) as f32;
+    let mut transform = LayerTransform::IDENTITY;
+    for op in layer
+        .get("ops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if op.get("disabled").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        if op.get("type").and_then(Value::as_str) != Some("transform") {
+            continue;
+        }
+        let next = LayerTransform {
+            dx: op.get("dx").and_then(Value::as_f64).unwrap_or(0.0) as f32 * sx,
+            dy: op.get("dy").and_then(Value::as_f64).unwrap_or(0.0) as f32 * sy,
+            scale: op
+                .get("scale")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0)
+                .max(1e-6) as f32,
+            rotate: op.get("rotate").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        };
+        transform = compose_layer_transform(transform, next);
+    }
+    transform
+}
+
+fn layer_sources_image(layer: &Value, index: usize) -> bool {
+    if index == 0 {
+        return true;
+    }
+    layer
+        .get("ops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|op| op.get("type").and_then(Value::as_str) == Some("source_image"))
+}
+
+fn raster_layer_mask(
+    layer: &Value,
+    width: u32,
+    height: u32,
+    document_width: u32,
+    document_height: u32,
+) -> Option<Vec<u8>> {
+    let mask = layer.get("mask")?;
+    if mask.get("disabled").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let ops = mask.get("ops").and_then(Value::as_array)?;
+    if ops.is_empty() {
+        return None;
+    }
+    let mut alpha = vec![0u8; (width * height) as usize];
+    let sx = width as f32 / document_width.max(1) as f32;
+    let sy = height as f32 / document_height.max(1) as f32;
+    for op in ops {
+        let mode = op.get("mode").and_then(Value::as_str).unwrap_or("add");
+        let shape = raster_mask_shape(op, width, height, sx, sy);
+        let Some(shape) = shape else {
+            continue;
+        };
+        for (dst, src) in alpha.iter_mut().zip(shape.iter()) {
+            match mode {
+                "subtract" => {
+                    if *src > 0 {
+                        *dst = 0;
+                    }
+                }
+                "intersect" => {
+                    *dst = if *src > 0 { *dst } else { 0 };
+                }
+                _ => {
+                    if *src > 0 {
+                        *dst = 255;
+                    }
+                }
+            }
+        }
+    }
+    Some(alpha)
+}
+
+fn raster_mask_shape(op: &Value, width: u32, height: u32, sx: f32, sy: f32) -> Option<Vec<u8>> {
+    match op.get("type").and_then(Value::as_str) {
+        Some("rect") | Some("ellipse") => {
+            let region = op_region(op)?;
+            Some(raster_region_shape(
+                width,
+                height,
+                &region,
+                op.get("type").and_then(Value::as_str) == Some("ellipse"),
+                sx,
+                sy,
+            ))
+        }
+        Some("path") => {
+            let points = op
+                .get("points")?
+                .as_array()?
+                .iter()
+                .filter_map(|p| {
+                    Some((
+                        p.get("x")?.as_f64()? as f32 * sx,
+                        p.get("y")?.as_f64()? as f32 * sy,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            if points.len() < 3 {
+                return None;
+            }
+            Some(raster_polygon_shape(width, height, &points))
+        }
+        _ => None,
+    }
+}
+
+fn op_region(op: &Value) -> Option<[f32; 4]> {
+    let values = op.get("region")?.as_array()?;
+    if values.len() < 4 {
+        return None;
+    }
+    Some([
+        values.first()?.as_f64()? as f32,
+        values.get(1)?.as_f64()? as f32,
+        values.get(2)?.as_f64()? as f32,
+        values.get(3)?.as_f64()? as f32,
+    ])
+}
+
+fn raster_region_shape(
+    width: u32,
+    height: u32,
+    region: &[f32; 4],
+    ellipse: bool,
+    sx: f32,
+    sy: f32,
+) -> Vec<u8> {
+    let mut alpha = vec![0u8; (width * height) as usize];
+    let x1 = region[0].min(region[2]) * sx;
+    let y1 = region[1].min(region[3]) * sy;
+    let x2 = region[0].max(region[2]) * sx;
+    let y2 = region[1].max(region[3]) * sy;
+    let cx = (x1 + x2) * 0.5;
+    let cy = (y1 + y2) * 0.5;
+    let rx = ((x2 - x1) * 0.5).max(0.5);
+    let ry = ((y2 - y1) * 0.5).max(0.5);
+    let px0 = x1.floor().max(0.0) as u32;
+    let py0 = y1.floor().max(0.0) as u32;
+    let px1 = (x2.ceil() as i64).clamp(0, width as i64 - 1) as u32;
+    let py1 = (y2.ceil() as i64).clamp(0, height as i64 - 1) as u32;
+    for y in py0..=py1 {
+        for x in px0..=px1 {
+            if ellipse {
+                let nx = (x as f32 + 0.5 - cx) / rx;
+                let ny = (y as f32 + 0.5 - cy) / ry;
+                if nx * nx + ny * ny > 1.0 {
+                    continue;
+                }
+            }
+            alpha[(y * width + x) as usize] = 255;
+        }
+    }
+    alpha
+}
+
+fn raster_polygon_shape(width: u32, height: u32, points: &[(f32, f32)]) -> Vec<u8> {
+    let mut alpha = vec![0u8; (width * height) as usize];
+    for y in 0..height {
+        for x in 0..width {
+            if point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, points) {
+                alpha[(y * width + x) as usize] = 255;
+            }
+        }
+    }
+    alpha
+}
+
+fn point_in_polygon(x: f32, y: f32, points: &[(f32, f32)]) -> bool {
+    let mut inside = false;
+    let mut j = points.len() - 1;
+    for i in 0..points.len() {
+        let (xi, yi) = points[i];
+        let (xj, yj) = points[j];
+        if ((yi > y) != (yj > y)) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+fn inverse_layer_sample(
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    transform: LayerTransform,
+) -> Option<(u32, u32)> {
+    if transform.is_identity() {
+        return Some((x, y));
+    }
+    let cx = width as f32 / 2.0;
+    let cy = height as f32 / 2.0;
+    let s = transform.scale.max(1e-6);
+    let rad = transform.rotate.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let tx = x as f32 + 0.5 - transform.dx - cx;
+    let ty = y as f32 + 0.5 - transform.dy - cy;
+    let sx = (tx * cos + ty * sin) / s + cx;
+    let sy = (-tx * sin + ty * cos) / s + cy;
+    if sx < 0.0 || sy < 0.0 || sx >= width as f32 || sy >= height as f32 {
+        return None;
+    }
+    Some((sx.floor() as u32, sy.floor() as u32))
+}
+
+fn blend_channel(dst: f32, src: f32, blend: &str) -> f32 {
+    match blend {
+        "multiply" => dst * src / 255.0,
+        "screen" => 255.0 - (255.0 - dst) * (255.0 - src) / 255.0,
+        "darken" => dst.min(src),
+        "lighten" => dst.max(src),
+        "difference" => (dst - src).abs(),
+        _ => src,
+    }
+}
+
+fn composite_source_layer(
+    dst: &mut RgbaImage,
+    src: &RgbaImage,
+    mask: Option<&[u8]>,
+    opacity: f32,
+    transform: LayerTransform,
+    mask_linked: bool,
+    blend: &str,
+) {
+    let (width, height) = dst.dimensions();
+    for y in 0..height {
+        for x in 0..width {
+            let Some((sx, sy)) = inverse_layer_sample(x, y, width, height, transform) else {
+                continue;
+            };
+            let dst_index = (y * width + x) as usize;
+            let src_index = (sy * width + sx) as usize;
+            let coverage = mask
+                .map(|m| f32::from(m[if mask_linked { src_index } else { dst_index }]) / 255.0)
+                .unwrap_or(1.0);
+            let s = src.get_pixel(sx, sy);
+            let d = dst.get_pixel_mut(x, y);
+            let sa = (f32::from(s.0[3]) / 255.0) * coverage * opacity;
+            if sa <= 0.0 {
+                continue;
+            }
+            let da = f32::from(d.0[3]) / 255.0;
+            let out_a = sa + da * (1.0 - sa);
+            if out_a <= 0.0 {
+                *d = Rgba([0, 0, 0, 0]);
+                continue;
+            }
+            for c in 0..3 {
+                let sr = f32::from(s.0[c]) / 255.0;
+                let dr = f32::from(d.0[c]) / 255.0;
+                let blended = if da > 0.0 {
+                    blend_channel(dr * 255.0, sr * 255.0, blend) / 255.0
+                } else {
+                    sr
+                };
+                d.0[c] = (((blended * sa + dr * da * (1.0 - sa)) / out_a) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            d.0[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 /// Render one still-image source (an image resource or a layer artifact) at
@@ -3121,6 +3597,111 @@ mod tests {
         viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&subject_path);
         let _ = std::fs::remove_file(&background_path);
+    }
+
+    #[test]
+    fn image_composite_target_renders_source_copy_layers_through_masks() {
+        let path = std::env::temp_dir().join("hgripe_viewport_image_composite.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([220, 20, 40, 255]))
+            .save(&path)
+            .expect("write source");
+        let canonical = path.to_string_lossy().to_string();
+        let res_id = resource::id_for(&canonical);
+        resource::put(
+            &res_id,
+            resource::ResourceEntry {
+                path: canonical,
+                width: Some(64),
+                height: Some(64),
+            },
+        );
+
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageComposite {
+                resource_id: res_id,
+                document_key: "copy-rect".to_string(),
+                document_width: 64,
+                document_height: 64,
+                document: serde_json::json!({
+                    "version": 3,
+                    "layers": [
+                        { "kind": "mask", "visible": false, "opacity": 1.0, "ops": [] },
+                        {
+                            "kind": "mask",
+                            "visible": true,
+                            "opacity": 1.0,
+                            "ops": [{ "type": "source_image" }],
+                            "mask": { "ops": [{ "type": "rect", "region": [16, 16, 48, 48] }] }
+                        }
+                    ]
+                }),
+            },
+        )
+        .expect("set composite target");
+
+        let rendered = viewport_render_rgba(&desc.viewport_id).expect("render composite");
+        assert_eq!(rendered.image.get_pixel(24, 24).0, [220, 20, 40, 255]);
+        assert_eq!(rendered.image.get_pixel(4, 4).0, [0, 0, 0, 0]);
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn image_composite_target_moves_linked_masks_with_transformed_layers() {
+        let path = std::env::temp_dir().join("hgripe_viewport_image_composite_move.png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([20, 180, 90, 255]))
+            .save(&path)
+            .expect("write source");
+        let canonical = path.to_string_lossy().to_string();
+        let res_id = resource::id_for(&canonical);
+        resource::put(
+            &res_id,
+            resource::ResourceEntry {
+                path: canonical,
+                width: Some(64),
+                height: Some(64),
+            },
+        );
+
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 64, 64).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageComposite {
+                resource_id: res_id,
+                document_key: "copy-rect-moved".to_string(),
+                document_width: 64,
+                document_height: 64,
+                document: serde_json::json!({
+                    "version": 3,
+                    "layers": [
+                        { "kind": "mask", "visible": false, "opacity": 1.0, "ops": [] },
+                        {
+                            "kind": "mask",
+                            "visible": true,
+                            "opacity": 1.0,
+                            "ops": [
+                                { "type": "source_image" },
+                                { "type": "transform", "dx": 8, "dy": 0 }
+                            ],
+                            "mask": { "ops": [{ "type": "rect", "region": [16, 16, 48, 48] }] }
+                        }
+                    ]
+                }),
+            },
+        )
+        .expect("set composite target");
+
+        let rendered = viewport_render_rgba(&desc.viewport_id).expect("render moved composite");
+        assert_eq!(rendered.image.get_pixel(32, 24).0, [20, 180, 90, 255]);
+        assert_eq!(rendered.image.get_pixel(20, 24).0, [0, 0, 0, 0]);
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

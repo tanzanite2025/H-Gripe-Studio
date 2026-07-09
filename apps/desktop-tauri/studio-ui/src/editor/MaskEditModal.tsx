@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
+import { useViewportUnderlay, type ViewportUnderlaySource } from "../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW } from "../viewport/view";
 import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
+import { registerResource } from "../bridge/files";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -23,6 +24,7 @@ import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
 import { fromMaskDocument } from "./imageDocument";
+import { imageCompositeTarget, imageDocumentNeedsComposite, withActiveLayerDraftTransform } from "./imageCompositeSource";
 import {
   activeOps,
   canRedo,
@@ -416,7 +418,33 @@ export function MaskEditModal({
       }),
     [workspace, lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
-  const source = imagePath ?? undefined;
+  const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
+  const plainSource = imagePath ?? undefined;
+  const compositeDims = frameDimsRef.current;
+  const needsCompositeSource = workspace === "image" && Boolean(imagePath) && imageDocumentNeedsComposite(state.current);
+  const compositeDocument = useMemo(
+    () => withActiveLayerDraftTransform(state.current, needsCompositeSource ? moveDraft : null),
+    [state.current, needsCompositeSource, moveDraft],
+  );
+  const [compositeResourceId, setCompositeResourceId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!needsCompositeSource || !imagePath) {
+      setCompositeResourceId(null);
+      return;
+    }
+    registerResource(imagePath).then((resource) => {
+      if (!cancelled) setCompositeResourceId(resource?.id ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsCompositeSource, imagePath]);
+  const source = useMemo<ViewportUnderlaySource | undefined>(() => {
+    if (!needsCompositeSource) return plainSource;
+    if (!compositeResourceId) return undefined;
+    return imageCompositeTarget(compositeResourceId, compositeDocument, compositeDims);
+  }, [needsCompositeSource, plainSource, compositeResourceId, compositeDocument, compositeDims.w, compositeDims.h]);
   // Native surface presentation (surface swap): the underlay presents on a
   // surface window placed under the anchor's rect while the view is one the
   // surface can represent — a rotated view or the transparency preview hides
@@ -443,9 +471,8 @@ export function MaskEditModal({
   // target does not apply `transform` ops to the image, so the stage carries
   // the composed committed transforms — plus the in-progress move drag — as a
   // CSS transform on the presented window; the move reads live on screen.
-  const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
   const imageTransform = useMemo(() => {
-    if (workspace !== "image") return null;
+    if (workspace !== "image" || needsCompositeSource) return null;
     let t: TransformParams | null = null;
     for (const layer of state.current.layers) {
       if (!layer.visible) continue;
@@ -460,7 +487,7 @@ export function MaskEditModal({
       t = { ...base, dx: base.dx + moveDraft[0], dy: base.dy + moveDraft[1] };
     }
     return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
-  }, [workspace, state, moveDraft]);
+  }, [workspace, needsCompositeSource, state, moveDraft]);
   // All in-flight pointer gesture state (drags, picked sources, pending
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
@@ -773,7 +800,11 @@ export function MaskEditModal({
       // PS Ctrl+J: with a selection, Layer Via Copy — the new layer holds
       // the selected region (its mask) and the marching ants drop.
       const selection = lastMarqueeRef.current;
-      dispatch({ type: "layer_duplicate", ...(selection ? { selection } : null) });
+      dispatch({
+        type: "layer_duplicate",
+        ...(selection ? { selection } : null),
+        ...(workspace === "image" ? { includeSourceImage: true } : null),
+      });
       if (selection) setLastMarquee(null);
     },
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
@@ -1083,8 +1114,9 @@ export function MaskEditModal({
         if (editingPathRef.current != null) cancelPathEdit();
       },
       setToolId,
+      includeSourceImage: workspace === "image",
     });
-  }, [activeStudioTarget, cancelPathEdit, editingPathRef, stateRef, setToolId]);
+  }, [activeStudioTarget, cancelPathEdit, editingPathRef, stateRef, setToolId, workspace]);
 
   // Pointer gestures: the shell only captures the pointer, serves one-shot
   // requests (the armed colour pick) and keeps the brush ring on the cursor;

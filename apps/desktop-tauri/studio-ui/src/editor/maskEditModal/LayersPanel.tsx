@@ -6,7 +6,7 @@ import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
 import type { LayerBlend, LayerGroup, LayerTargetKind, MaskDocument, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
-import { LAYER_GROUP_COLORS } from "../maskEdit";
+import { hasSourceImageContent, LAYER_GROUP_COLORS } from "../maskEdit";
 import { runMaskEditorCommand } from "../maskEditorCommandRunner";
 import { buildLayerThumb } from "../maskMorphology";
 import { getCommand, getCommandCapability, type CommandId } from "../studioCommands";
@@ -310,6 +310,7 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
       target: activeStudioTarget,
       dispatch,
       beforeStructuralChange: onBeforeLayerChange,
+      includeSourceImage: workspace === "image",
     });
   };
 
@@ -405,7 +406,7 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
           const showBaseImage = Boolean(
             imagePath &&
               layer.kind !== "adjustment" &&
-              (workspace === "image" ? i === 0 || layer.ops.length === 0 : i === 0 && layer.ops.length === 0),
+              (workspace === "image" ? i === 0 || hasSourceImageContent(layer) : i === 0 && layer.ops.length === 0),
           );
           const displayName =
             showBaseImage && imagePath && layer.name === "Background" ? basename(imagePath) : layer.name;
@@ -578,7 +579,10 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
             <button
               className="mask-flyout-item"
               onClick={() => {
-                dispatch({ type: "layer_duplicate" });
+                dispatch({
+                  type: "layer_duplicate",
+                  ...(workspace === "image" ? { includeSourceImage: true } : null),
+                });
                 setMenu(null);
               }}
             >

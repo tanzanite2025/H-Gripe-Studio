@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use image::{imageops, GrayImage, Luma, Rgba, RgbaImage};
+use image::{imageops, GrayImage, Luma, RgbaImage};
 use rayon::prelude::*;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -480,6 +480,7 @@ fn apply_edit_paths(
         let ops = layer.get("ops");
         if index == 0 {
             replay_ops(image, mask, ops, default_tolerance, operations);
+            apply_layer_mask(image, mask, layer, default_tolerance, operations);
         } else if ops
             .and_then(Value::as_array)
             .is_none_or(|list| list.is_empty())
@@ -494,7 +495,7 @@ fn apply_edit_paths(
             // skips the full replay of every other layer.
             let key =
                 replay_cache::layer_key(mask.width(), mask.height(), ops, default_tolerance, image);
-            let (surface, log) = match replay_cache::get(key) {
+            let (mut surface, log) = match replay_cache::get(key) {
                 Some(hit) => hit,
                 None => {
                     let mut surface =
@@ -506,6 +507,7 @@ fn apply_edit_paths(
                 }
             };
             operations.extend(log);
+            apply_layer_mask(image, &mut surface, layer, default_tolerance, operations);
             let blend = layer
                 .get("blend")
                 .and_then(Value::as_str)
@@ -523,6 +525,37 @@ fn apply_edit_paths(
             }));
         }
     }
+}
+
+fn apply_layer_mask(
+    image: &RgbaImage,
+    surface: &mut GrayImage,
+    layer: &Value,
+    default_tolerance: i32,
+    operations: &mut Vec<Value>,
+) {
+    let Some(layer_mask) = layer.get("mask") else {
+        return;
+    };
+    if layer_mask.get("disabled").and_then(Value::as_bool) == Some(true) {
+        return;
+    }
+    let ops = layer_mask.get("ops");
+    if ops
+        .and_then(Value::as_array)
+        .is_none_or(|list| list.is_empty())
+    {
+        return;
+    }
+    let mut gate = GrayImage::from_pixel(surface.width(), surface.height(), Luma([MASK_OFF]));
+    let mut log = Vec::new();
+    replay_ops(image, &mut gate, ops, default_tolerance, &mut log);
+    for (s, g) in surface.pixels_mut().zip(gate.pixels()) {
+        s.0[0] = ((u16::from(s.0[0]) * u16::from(g.0[0]) + 127) / 255) as u8;
+    }
+    let applied = log.len();
+    operations.extend(log);
+    operations.push(json!({ "type": "layer_mask", "ops": applied }));
 }
 
 /// Process-global LRU of replayed upper-layer surfaces (M7 performance layer;
@@ -1103,6 +1136,15 @@ fn apply_queued_operation(
                 p.0[0] = MASK_ON;
             }
             operations.push(json!({ "type": "select_all" }));
+        }
+        Some("source_image") => {
+            // Image workspace Layer Via Copy: this layer carries a copy of
+            // the opened source image. In the mask executor that means full
+            // coverage, then the layer mask gates the copied pixels.
+            for p in mask.pixels_mut() {
+                p.0[0] = MASK_ON;
+            }
+            operations.push(json!({ "type": "source_image" }));
         }
         Some("delete") => {
             // PS Delete (M9): drop the selection, as a history step (unlike
@@ -2508,6 +2550,33 @@ fn normalise_layer_groups(value: Option<&Value>) -> Vec<Value> {
     out
 }
 
+fn normalise_layer_mask(value: Option<&Value>) -> Option<Value> {
+    let mask = value?;
+    if !mask.is_object() {
+        return None;
+    }
+    let ops = mask
+        .get("ops")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut out = json!({
+        "id": mask
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or("mask"),
+        "ops": ops,
+    });
+    if mask.get("disabled").and_then(Value::as_bool) == Some(true) {
+        out["disabled"] = json!(true);
+    }
+    if mask.get("unlinked").and_then(Value::as_bool) == Some(true) {
+        out["unlinked"] = json!(true);
+    }
+    Some(out)
+}
+
 // Fill in a stored layer's missing / malformed fields with their defaults.
 fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Value {
     let mut out = empty_layer();
@@ -2551,6 +2620,9 @@ fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Value {
     }
     if let Some(adjustment) = layer.get("adjustment") {
         out["adjustment"] = adjustment.clone();
+    }
+    if let Some(mask) = normalise_layer_mask(layer.get("mask")) {
+        out["mask"] = mask;
     }
     out
 }
@@ -2931,6 +3003,7 @@ fn save_png(gray: &DynamicGray, path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::Rgba;
     use std::collections::HashSet;
 
     /// Run a subject-mask node with no skippable ports (the default for every
@@ -4147,6 +4220,27 @@ mod tests {
         let mut mask = solid(4, 4, MASK_OFF);
         apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut Vec::new());
         assert_eq!(mask.get_pixel(0, 0).0[0], 128);
+    }
+
+    #[test]
+    fn layer_mask_gates_source_image_copy_layers() {
+        let image = RgbaImage::from_pixel(20, 20, Rgba([0, 0, 0, 255]));
+        let doc = json!({ "version": 3, "layers": [
+            { "ops": [] },
+            {
+                "ops": [{ "type": "source_image" }],
+                "mask": { "ops": [{ "type": "rect", "region": [4, 5, 12, 15] }] }
+            }
+        ]});
+        let mut mask = solid(20, 20, MASK_OFF);
+        let mut operations = Vec::new();
+        apply_edit_paths(&image, &mut mask, Some(&doc), 24, &mut operations);
+
+        assert_eq!(mask.get_pixel(6, 6).0[0], MASK_ON);
+        assert_eq!(mask.get_pixel(2, 2).0[0], MASK_OFF);
+        assert!(operations
+            .iter()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("layer_mask")));
     }
 
     #[test]

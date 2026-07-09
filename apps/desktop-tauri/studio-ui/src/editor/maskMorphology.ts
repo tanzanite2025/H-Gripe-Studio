@@ -24,6 +24,7 @@ import type {
   MaskOperation,
 } from "../types/production";
 import { isBrushOp, isPathOp } from "../types/production";
+import { SOURCE_IMAGE_OP_TYPE } from "./maskEdit";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
 export interface ProxyMask {
@@ -939,6 +940,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
       mask = perspectiveCrop(mask, op, scale);
     } else if (op.type === "transform") {
       mask = transformMask(mask, (op.dx ?? 0) * scale, (op.dy ?? 0) * scale, op.scale ?? 1, op.rotate ?? 0);
+    } else if (op.type === SOURCE_IMAGE_OP_TYPE) {
+      mask.data.fill(255);
     } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser" || op.type === "red_eye" || op.type === "object_select" || op.type === "remove") {
       // Need the real image; not previewable on the proxy.
     } else {
@@ -1057,6 +1060,19 @@ export function buildLayerThumb(layer: MaskLayer, dims: { w: number; h: number }
   return replayOps(createProxyMask(w, h), layer.ops, scale);
 }
 
+function applyLayerMask(surface: ProxyMask, layer: MaskLayer, scale: number): ProxyMask {
+  if (!layer.mask || layer.mask.disabled || layer.mask.ops.length === 0) return surface;
+  const gate = replayOps(createProxyMask(surface.w, surface.h), layer.mask.ops, scale);
+  for (let i = 0; i < surface.data.length; i++) {
+    surface.data[i] = Math.round((surface.data[i] * gate.data[i]) / 255);
+  }
+  return surface;
+}
+
+function renderLayerSurface(layer: MaskLayer, w: number, h: number, scale: number): ProxyMask {
+  return applyLayerMask(replayOps(createProxyMask(w, h), layer.ops, scale), layer, scale);
+}
+
 /**
  * Rasterise the committed document (each layer's vector paths + brush strokes
  * + marquee regions + queued morphology, in order) into a downscaled proxy
@@ -1083,14 +1099,14 @@ export function buildProxyMask(
       if (layer.adjustment) applyAdjustment(mask, layer.adjustment, layer.opacity);
       return;
     }
+    const surface = renderLayerSurface(layer, w, h, scale);
     if (i === 0) {
-      mask = replayOps(mask, layer.ops, scale);
+      mask = surface;
       return;
     }
     // A content-less upper layer (PS: fully transparent) composites nothing;
     // blending its empty surface would wipe the composite below it.
     if (layer.ops.length === 0) return;
-    const surface = replayOps(createProxyMask(w, h), layer.ops, scale);
     blendInto(mask, surface, layer.blend, layer.opacity);
   });
   return { mask, scale };
@@ -1138,6 +1154,8 @@ export interface ProxyCacheStats {
 
 interface LayerCacheEntry {
   ops: EditOp[];
+  maskOps: EditOp[] | null;
+  maskDisabled: boolean;
   surface: ProxyMask;
 }
 
@@ -1212,7 +1230,8 @@ export class ProxyLayerCache {
       .map(
         (l) =>
           `${l.id}:${l.kind}:${l.visible ? 1 : 0}:${l.blend}:${l.opacity}:` +
-          (l.kind === "adjustment" && l.adjustment ? JSON.stringify(l.adjustment) : ""),
+          (l.kind === "adjustment" && l.adjustment ? JSON.stringify(l.adjustment) : "") +
+          (l.kind !== "adjustment" && l.mask ? `:${l.mask.disabled ? 1 : 0}:${JSON.stringify(l.mask.ops)}` : ""),
       )
       .join("|");
     const luts = doc.layers.map((l) =>
@@ -1246,22 +1265,24 @@ export class ProxyLayerCache {
     return cloneMask(mask);
   }
 
-  private layerSurface(layer: { id: string; ops: EditOp[] }, w: number, h: number, scale: number): ProxyMask {
+  private layerSurface(layer: MaskLayer, w: number, h: number, scale: number): ProxyMask {
+    const maskDisabled = layer.mask?.disabled === true;
+    const maskOps = layer.mask && !maskDisabled && layer.mask.ops.length > 0 ? layer.mask.ops : null;
     const entry = this.layers.get(layer.id);
-    if (entry && entry.ops === layer.ops) {
+    if (entry && entry.ops === layer.ops && entry.maskOps === maskOps && entry.maskDisabled === maskDisabled) {
       this.stats.layersReused++;
       return entry.surface;
     }
-    if (entry && entry.ops.length > 0 && sharedOpsPrefix(entry.ops, layer.ops) === entry.ops.length) {
+    if (!maskOps && entry && !entry.maskOps && entry.ops.length > 0 && sharedOpsPrefix(entry.ops, layer.ops) === entry.ops.length) {
       // Replay is strictly sequential, so resuming from a cached prefix
       // surface and applying only the appended ops is always exact.
       const surface = replayOps(cloneMask(entry.surface), layer.ops.slice(entry.ops.length), scale);
-      this.layers.set(layer.id, { ops: layer.ops, surface });
+      this.layers.set(layer.id, { ops: layer.ops, maskOps, maskDisabled, surface });
       this.stats.layersResumed++;
       return surface;
     }
-    const surface = replayOps(createProxyMask(w, h), layer.ops, scale);
-    this.layers.set(layer.id, { ops: layer.ops, surface });
+    const surface = renderLayerSurface(layer, w, h, scale);
+    this.layers.set(layer.id, { ops: layer.ops, maskOps, maskDisabled, surface });
     this.stats.layersReplayed++;
     return surface;
   }

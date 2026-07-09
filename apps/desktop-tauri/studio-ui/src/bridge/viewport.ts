@@ -12,6 +12,14 @@ export type ViewportKind = "image_edit" | "grade_preview" | "video_preview";
 export type ViewportTarget =
   | { kind: "image"; resourceId: string }
   | { kind: "image_layer"; assetId: string; layerId: string }
+  | {
+      kind: "image_composite";
+      resourceId: string;
+      document: unknown;
+      documentKey: string;
+      documentWidth: number;
+      documentHeight: number;
+    }
   | { kind: "video_clip"; timelineId: string; clipId: string; timeSec: number }
   | { kind: "video_frame"; resourceId: string; timeSec: number }
   | { kind: "node_output"; nodeId: string; outputPort?: string };

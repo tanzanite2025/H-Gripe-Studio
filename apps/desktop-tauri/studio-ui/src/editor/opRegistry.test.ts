@@ -10,10 +10,11 @@ import {
 import type { EditOp } from "../types/production";
 
 describe("opRegistry", () => {
-  it("mask op types are unique and all registered in the mask kernel", () => {
+  it("mask-document op types are unique and all registered with their kernel", () => {
     expect(new Set(MASK_OP_TYPES).size).toBe(MASK_OP_TYPES.length);
     for (const type of MASK_OP_TYPES) {
-      expect(MASK_OPS[type]).toEqual({ kernel: "mask", adjustment: false });
+      const kernel = type === "source_image" ? "raster" : "mask";
+      expect(MASK_OPS[type]).toEqual({ kernel, adjustment: false });
     }
   });
 
@@ -22,6 +23,7 @@ describe("opRegistry", () => {
     expect(maskOpMeta(brush)?.kernel).toBe("mask");
     const feather = { type: "feather", amount: 3 } as EditOp;
     expect(maskOpMeta(feather)?.kernel).toBe("mask");
+    expect(maskOpMeta({ type: "source_image" } as EditOp)?.kernel).toBe("raster");
     const bogus = { type: "not_an_op" } as EditOp;
     expect(maskOpMeta(bogus)).toBeNull();
   });

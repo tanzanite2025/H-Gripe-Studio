@@ -9,10 +9,11 @@ export interface MaskEditorCommandEnv {
   dispatch: MaskEditDispatch;
   beforeStructuralChange?: () => void;
   setToolId?: (toolId: string) => void;
+  includeSourceImage?: boolean;
 }
 
 export function runMaskEditorCommand(id: CommandId, env: MaskEditorCommandEnv): boolean {
-  const { doc, target, dispatch, beforeStructuralChange, setToolId } = env;
+  const { doc, target, dispatch, beforeStructuralChange, setToolId, includeSourceImage } = env;
   const active = doc.active;
   switch (id) {
     case "layer.invert":
@@ -28,7 +29,7 @@ export function runMaskEditorCommand(id: CommandId, env: MaskEditorCommandEnv): 
       dispatch({ type: "layer_mask_add", index: active });
       return true;
     case "layer.duplicate":
-      dispatch({ type: "layer_duplicate" });
+      dispatch({ type: "layer_duplicate", ...(includeSourceImage ? { includeSourceImage: true } : null) });
       return true;
     case "layer.add":
       dispatch({ type: "layer_add" });

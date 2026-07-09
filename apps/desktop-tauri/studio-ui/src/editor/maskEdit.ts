@@ -13,7 +13,6 @@ import type {
   AdjustmentType,
   BrushStroke,
   EditOp,
-  EditOpBase,
   EditPath,
   EditPathPoint,
   ImageCanvasSize,
@@ -40,6 +39,14 @@ import {
   isPathOp,
   LAYER_BLENDS,
 } from "../types/production";
+
+export const SOURCE_IMAGE_OP_TYPE = "source_image";
+
+export interface LayerCopySelection {
+  region: [number, number, number, number];
+  ellipse?: boolean;
+  polygon?: [number, number][];
+}
 
 export interface EditState {
   /** The committed document. */
@@ -643,6 +650,10 @@ export function layerOpStacks(layer: MaskLayer): { target: LayerTargetKind; ops:
   return stacks;
 }
 
+export function hasSourceImageContent(layer: MaskLayer): boolean {
+  return layer.kind !== "adjustment" && layer.ops.some((op) => op.type === SOURCE_IMAGE_OP_TYPE);
+}
+
 function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): EditState {
   const layer = state.current.layers[index];
   if (!layer) return state;
@@ -814,18 +825,42 @@ export function reselect(state: EditState): EditState {
  * PS duplicate-via-copy (Ctrl+J; M9): copy the active layer (fresh id,
  * "… copy" name) directly above itself and make the copy active (undoable).
  * Adjustment layers duplicate too — the copy re-tone-maps the composite.
- * With an active marquee `selection` this is PS Layer Via Copy: the copy
- * carries a layer mask filled with the selection, so it holds only the
- * selected region's content.
+ * With an active selection this is PS Layer Via Copy: the copy carries a
+ * layer mask filled with the selection, so it holds only the selected region's
+ * content. In the image workspace the base layer is the opened image even
+ * when its op stack is empty; `includeSourceImage` records that source-backed
+ * content explicitly so the copy is not mistaken for a transparent layer.
  */
-export function duplicateLayer(state: EditState, selection?: NonNullable<EditOpBase["clip"]> | null): EditState {
+export function duplicateLayer(
+  state: EditState,
+  selection?: LayerCopySelection | null,
+  options: { includeSourceImage?: boolean } = {},
+): EditState {
   const doc = state.current;
   const index = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
   const source = doc.layers[index];
+  const copyOps = source.ops.map((op) => ({ ...op }));
+  const shouldCarrySourceImage =
+    source.kind !== "adjustment" && (hasSourceImageContent(source) || (options.includeSourceImage === true && index === 0));
+  if (shouldCarrySourceImage && !copyOps.some((op) => op.type === SOURCE_IMAGE_OP_TYPE)) {
+    copyOps.unshift({ type: SOURCE_IMAGE_OP_TYPE });
+  }
   const mask: LayerMask | null = selection
     ? {
         ...emptyLayerMask(),
-        ops: [{ type: selection.ellipse ? "ellipse" : "rect", region: [...selection.region] }],
+        ops:
+          selection.polygon && selection.polygon.length >= 3
+            ? [
+                {
+                  type: "path",
+                  id: `copy-mask-${Math.random().toString(36).slice(2, 10)}`,
+                  mode: "add",
+                  tool: "selection",
+                  closed: true,
+                  points: selection.polygon.map(([x, y]) => ({ x, y })),
+                },
+              ]
+            : [{ type: selection.ellipse ? "ellipse" : "rect", region: [...selection.region] }],
       }
     : source.mask
       ? { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) }
@@ -834,7 +869,7 @@ export function duplicateLayer(state: EditState, selection?: NonNullable<EditOpB
     ...source,
     id: emptyMaskLayer().id,
     name: `${source.name} copy`,
-    ops: source.ops.map((op) => ({ ...op })),
+    ops: copyOps,
     ...(mask ? { mask } : null),
   };
   const layers = [...doc.layers.slice(0, index + 1), copy, ...doc.layers.slice(index + 1)];

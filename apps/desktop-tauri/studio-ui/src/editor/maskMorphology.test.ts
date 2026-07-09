@@ -513,6 +513,24 @@ describe("buildProxyMask", () => {
     expect(area(mask)).toBe(32 * 32);
   });
 
+  it("source-image layer copies are clipped by their layer mask", () => {
+    const d = doc([]);
+    d.layers.push({
+      id: "copy",
+      name: "Background copy",
+      kind: "mask",
+      blend: "normal",
+      opacity: 1,
+      visible: true,
+      ops: [{ type: "source_image" }],
+      mask: { id: "mask-copy", ops: [{ type: "rect", region: [4, 5, 12, 15] }] },
+    });
+
+    const { mask } = buildProxyMask(d, { w: 20, h: 20 }, { proxyWidth: 20 });
+    expect(mask.data[6 * 20 + 6]).toBe(255);
+    expect(mask.data[2 * 20 + 2]).toBe(0);
+  });
+
   it("skips disabled history steps on replay", () => {
     const stroke = { type: "brush" as const, id: "s1", mode: "add", radius: 40, points: [[480, 320]] as [number, number][] };
     const enabled = doc([stroke]);

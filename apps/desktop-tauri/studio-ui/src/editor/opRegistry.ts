@@ -73,13 +73,14 @@ export const MASK_OP_TYPES = [
   "content_aware_move",
   "pattern_stamp",
   "art_history_brush",
+  "source_image",
 ] as const;
 export type MaskOpType = (typeof MASK_OP_TYPES)[number];
 
 const MASK_OP_META: OpMeta = { kernel: "mask", adjustment: false };
 
 export const MASK_OPS: Record<MaskOpType, OpMeta> = Object.fromEntries(
-  MASK_OP_TYPES.map((type) => [type, MASK_OP_META]),
+  MASK_OP_TYPES.map((type) => [type, type === "source_image" ? { kernel: "raster", adjustment: false } : MASK_OP_META]),
 ) as Record<MaskOpType, OpMeta>;
 
 // ---------------------------------------------------------------------------

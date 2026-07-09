@@ -40,6 +40,7 @@ import {
   updateOpTransform,
   updatePathAnchors,
   type EditState,
+  type LayerCopySelection,
   type TransformParams,
 } from "../maskEdit";
 import type {
@@ -68,7 +69,7 @@ export type MaskEditAction =
   | { type: "history_jump"; index: number }
   | { type: "clear" }
   | { type: "reselect" }
-  | { type: "layer_duplicate"; selection?: NonNullable<EditOpBase["clip"]> | null }
+  | { type: "layer_duplicate"; selection?: LayerCopySelection | null; includeSourceImage?: boolean }
   | { type: "remove_op"; index: number }
   | { type: "toggle_op"; index: number }
   | { type: "op_amount"; index: number; amount: number }
@@ -127,7 +128,7 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
     case "reselect":
       return reselect(state);
     case "layer_duplicate":
-      return duplicateLayer(state, action.selection);
+      return duplicateLayer(state, action.selection, { includeSourceImage: action.includeSourceImage });
     case "remove_op":
       return removeOp(state, action.index);
     case "toggle_op":

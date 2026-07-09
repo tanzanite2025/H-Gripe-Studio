@@ -198,7 +198,7 @@ export interface BrushStroke {
  * the executed result cannot drift.
  */
 export interface MaskOperation {
-  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn` | `sponge` | `healing_brush` | `quick_select` | `background_eraser` | `patch` | `perspective_crop` | `red_eye` | `object_select` | `remove` | `content_aware_move` | `pattern_stamp` | `art_history_brush`. */
+  /** `wand` | `invert` | `fill_holes` | `smooth` | `grow` | `shrink` | `feather` | `rect` | `ellipse` | `crop` | `transform` | `select_all` | `delete` | `gradient` | `fill` | `heal` | `clone` | `history_brush` | `dodge_burn` | `sponge` | `healing_brush` | `quick_select` | `background_eraser` | `patch` | `perspective_crop` | `red_eye` | `object_select` | `remove` | `content_aware_move` | `pattern_stamp` | `art_history_brush` | `source_image`. */
   type: string;
   /** Operation-specific scalar (tolerance / px / radius; for `fill`: opacity 0..100; for `heal` / `clone` / `history_brush` / `dodge_burn`: brush radius px), when relevant. */
   amount?: number;
