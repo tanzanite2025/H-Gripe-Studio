@@ -1,9 +1,217 @@
 use std::collections::VecDeque;
 
-use image::{GrayImage, Luma};
+use image::{GrayImage, Luma, RgbaImage};
 use rayon::prelude::*;
 
-use super::{neighbours, MASK_OFF, MASK_ON, SELECTED_THRESHOLD};
+use super::{MASK_OFF, MASK_ON, SELECTED_THRESHOLD};
+
+/// Fill a marquee `rect` / `ellipse` region (`[x1, y1, x2, y2]` image-space).
+pub(super) fn fill_marquee(mask: &mut GrayImage, kind: &str, region: &[f64]) {
+    let (width, height) = mask.dimensions();
+    let x1 = region[0].min(region[2]);
+    let y1 = region[1].min(region[3]);
+    let x2 = region[0].max(region[2]);
+    let y2 = region[1].max(region[3]);
+    let cx = (x1 + x2) / 2.0;
+    let cy = (y1 + y2) / 2.0;
+    let rx = ((x2 - x1) / 2.0).max(0.5);
+    let ry = ((y2 - y1) / 2.0).max(0.5);
+    let px0 = x1.floor().max(0.0) as u32;
+    let py0 = y1.floor().max(0.0) as u32;
+    let px1 = (x2.ceil() as i64).clamp(0, width as i64 - 1) as u32;
+    let py1 = (y2.ceil() as i64).clamp(0, height as i64 - 1) as u32;
+    for y in py0..=py1 {
+        for x in px0..=px1 {
+            if kind == "ellipse" {
+                let nx = (x as f64 - cx) / rx;
+                let ny = (y as f64 - cy) / ry;
+                if nx * nx + ny * ny > 1.0 {
+                    continue;
+                }
+            }
+            mask.put_pixel(x, y, Luma([MASK_ON]));
+        }
+    }
+}
+
+/// Composite a linear gradient ramp (M10): full selection at the drag start
+/// fading to none at the end (`region: [x1, y1, x2, y2]` image-space). `add`
+/// unions the ramp into the mask; `subtract` cuts it away. Mirrors the proxy
+/// `fillGradient` in `maskMorphology.ts`.
+pub(super) fn fill_gradient(mask: &mut GrayImage, region: &[f64], subtract: bool) {
+    let ax = region[0];
+    let ay = region[1];
+    let dx = region[2] - ax;
+    let dy = region[3] - ay;
+    let len2 = dx * dx + dy * dy;
+    if len2 < 1e-6 {
+        return;
+    }
+    let (w, h) = mask.dimensions();
+    for y in 0..h {
+        for x in 0..w {
+            let t =
+                (((x as f64 + 0.5 - ax) * dx + (y as f64 + 0.5 - ay) * dy) / len2).clamp(0.0, 1.0);
+            let ramp = (255.0 * (1.0 - t)).round() as i32;
+            let px = &mut mask.get_pixel_mut(x, y).0[0];
+            let v = *px as i32;
+            *px = if subtract {
+                (v - ramp).max(0) as u8
+            } else {
+                v.max(ramp) as u8
+            };
+        }
+    }
+}
+
+/// Clear the mask outside a `crop` region (`[x1, y1, x2, y2]` image-space).
+pub(super) fn crop_mask(mask: &mut GrayImage, region: &[f64]) {
+    let x1 = region[0].min(region[2]);
+    let y1 = region[1].min(region[3]);
+    let x2 = region[0].max(region[2]);
+    let y2 = region[1].max(region[3]);
+    for (x, y, p) in mask.enumerate_pixels_mut() {
+        let cx = f64::from(x) + 0.5;
+        let cy = f64::from(y) + 0.5;
+        if cx < x1 || cx > x2 || cy < y1 || cy > y2 {
+            p.0[0] = MASK_OFF;
+        }
+    }
+}
+
+/// Move / scale / rotate the mask about the image centre (M5 free transform):
+/// inverse-mapped nearest-neighbour sampling, pixels mapping outside the
+/// source read as background. `dx`/`dy` are px, `rotate` degrees clockwise,
+/// `scale` a uniform factor. Mirrors the proxy `transformMask` in
+/// `maskMorphology.ts`.
+pub(super) fn transform_mask(
+    mask: &GrayImage,
+    dx: f64,
+    dy: f64,
+    scale: f64,
+    rotate: f64,
+) -> GrayImage {
+    let (width, height) = mask.dimensions();
+    let s = scale.max(1e-6);
+    let rad = rotate.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let cx = f64::from(width) / 2.0;
+    let cy = f64::from(height) / 2.0;
+    let mut out = GrayImage::new(width, height);
+    for (x, y, p) in out.enumerate_pixels_mut() {
+        // Invert: un-translate, un-rotate, un-scale about the centre.
+        let tx = f64::from(x) + 0.5 - dx - cx;
+        let ty = f64::from(y) + 0.5 - dy - cy;
+        let rx = (tx * cos + ty * sin) / s + cx;
+        let ry = (-tx * sin + ty * cos) / s + cy;
+        let sx = rx.floor();
+        let sy = ry.floor();
+        if sx < 0.0 || sy < 0.0 || sx >= f64::from(width) || sy >= f64::from(height) {
+            continue;
+        }
+        p.0[0] = mask.get_pixel(sx as u32, sy as u32).0[0];
+    }
+    out
+}
+
+/// Flood-fill from a seed, painting `fill` over the contiguous region whose
+/// colour stays within `tolerance` (max per-channel RGB distance) of the seed
+/// colour — `MASK_ON` selects (wand / paint bucket), `MASK_OFF` erases (magic
+/// eraser).
+pub(super) fn wand_select(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    seed_x: u32,
+    seed_y: u32,
+    tolerance: i32,
+    fill: u8,
+) {
+    let (width, height) = image.dimensions();
+    if seed_x >= width || seed_y >= height {
+        return;
+    }
+    let seed = image.get_pixel(seed_x, seed_y).0;
+    let mut visited = vec![false; (width * height) as usize];
+    let mut queue = VecDeque::new();
+    queue.push_back((seed_x, seed_y));
+    visited[(seed_y * width + seed_x) as usize] = true;
+
+    while let Some((x, y)) = queue.pop_front() {
+        let px = image.get_pixel(x, y).0;
+        let dist = (0..3)
+            .map(|c| (i32::from(px[c]) - i32::from(seed[c])).abs())
+            .max()
+            .unwrap_or(0);
+        if dist > tolerance {
+            continue;
+        }
+        mask.put_pixel(x, y, Luma([fill]));
+        for (nx, ny) in neighbours(x, y, width, height) {
+            let idx = (ny * width + nx) as usize;
+            if !visited[idx] {
+                visited[idx] = true;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+}
+
+/// Minimum redness (`r − max(g, b)`) for a pixel to read as part of a red
+/// reflection.
+const RED_EYE_MIN: i32 = 32;
+
+/// How red-dominant a pixel is: the red channel's excess over the stronger
+/// of green / blue.
+fn redness(px: [u8; 4]) -> i32 {
+    i32::from(px[0]) - i32::from(px[1]).max(i32::from(px[2]))
+}
+
+/// Red eye (PS J flyout, on a mask): flood-fill from the click over the
+/// contiguous red-dominant region (`redness ≥ RED_EYE_MIN`), selecting it
+/// into the mask. A click on a non-red pixel is a no-op.
+pub(super) fn red_eye_select(image: &RgbaImage, mask: &mut GrayImage, seed_x: u32, seed_y: u32) {
+    let (width, height) = image.dimensions();
+    if seed_x >= width || seed_y >= height {
+        return;
+    }
+    if redness(image.get_pixel(seed_x, seed_y).0) < RED_EYE_MIN {
+        return;
+    }
+    let mut visited = vec![false; (width * height) as usize];
+    let mut queue = VecDeque::new();
+    queue.push_back((seed_x, seed_y));
+    visited[(seed_y * width + seed_x) as usize] = true;
+    while let Some((x, y)) = queue.pop_front() {
+        if redness(image.get_pixel(x, y).0) < RED_EYE_MIN {
+            continue;
+        }
+        mask.put_pixel(x, y, Luma([MASK_ON]));
+        for (nx, ny) in neighbours(x, y, width, height) {
+            let idx = (ny * width + nx) as usize;
+            if !visited[idx] {
+                visited[idx] = true;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+}
+
+fn neighbours(x: u32, y: u32, width: u32, height: u32) -> Vec<(u32, u32)> {
+    let mut out = Vec::with_capacity(4);
+    if x > 0 {
+        out.push((x - 1, y));
+    }
+    if x + 1 < width {
+        out.push((x + 1, y));
+    }
+    if y > 0 {
+        out.push((x, y - 1));
+    }
+    if y + 1 < height {
+        out.push((x, y + 1));
+    }
+    out
+}
 
 /// Stamp filled discs of `radius` along a polyline, writing `value`.
 pub(super) fn stamp_stroke(mask: &mut GrayImage, points: &[(f32, f32)], radius: u32, value: u8) {
