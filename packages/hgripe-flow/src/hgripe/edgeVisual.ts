@@ -1,3 +1,5 @@
+import type { Pt } from "./edgeRouting";
+
 export const EDGE_STROKE_WIDTH = 2;
 export const EDGE_STROKE_WIDTH_SELECTED = 3;
 export const EDGE_ARROW_MARKER = {
@@ -18,6 +20,10 @@ export type HgripeEdgeVisualState = "default" | "running" | "error";
 
 export interface HgripeEdgeData extends Record<string, unknown> {
   hgripeVisualState?: HgripeEdgeVisualState;
+  waypoints?: Pt[];
+  onWaypointDragStart?: () => void;
+  onWaypointChange?: (index: number, point: Pt) => void;
+  onWaypointRemove?: (index: number) => void;
 }
 
 export function hgripeEdgeVisualState(

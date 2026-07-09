@@ -65,4 +65,21 @@ describe("buildPaste", () => {
     const out = buildPaste(clip, { x: 0, y: 0 }, (k) => `${k}-1`);
     expect(out.edges).toEqual([]);
   });
+
+  it("offsets explicit edge waypoints with pasted nodes", () => {
+    const clip = {
+      nodes: [node("a", "prompt", true), node("b", "generate", true)],
+      edges: [
+        {
+          id: "e1",
+          source: "a",
+          target: "b",
+          data: { waypoints: [{ x: 180, y: 220 }] },
+        },
+      ] as Edge[],
+    };
+    const out = buildPaste(clip, { x: 40, y: 40 }, (kind) => `${kind}-copy`);
+
+    expect(out.edges[0].data?.waypoints).toEqual([{ x: 220, y: 260 }]);
+  });
 });

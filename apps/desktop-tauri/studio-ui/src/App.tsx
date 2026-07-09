@@ -1821,6 +1821,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 onSelect={handleCanvasSelect}
                 onAddNode={addNode}
                 onBeforeConnect={takeSnapshot}
+                onBeforeEdgeEdit={takeSnapshot}
                 onNodeDragStop={handleNodeDragStop}
                 onViewportChange={setViewport}
                 viewportKey={canvas.documentId}

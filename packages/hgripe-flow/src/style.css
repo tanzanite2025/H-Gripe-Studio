@@ -15,6 +15,18 @@
   filter: saturate(1.08);
 }
 
+.hgripe-edge-waypoint {
+  fill: #151925;
+  stroke: #8fb2ff;
+  stroke-width: 2;
+  cursor: move;
+  pointer-events: all;
+}
+
+.hgripe-edge-waypoint:hover {
+  fill: #8fb2ff;
+}
+
 @keyframes hgripe-edge-running {
   to {
     stroke-dashoffset: -13;

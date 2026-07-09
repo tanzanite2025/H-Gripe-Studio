@@ -59,6 +59,8 @@ export interface GraphEdge {
   sourcePort: string;
   target: string;
   targetPort: string;
+  /** Optional flow-space bend points for an explicitly routed edge. */
+  waypoints?: { x: number; y: number }[];
 }
 
 export const GRAPH_VERSION = 1 as const;

@@ -11,6 +11,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type IsValidConnection,
+  type Pt,
   type Viewport,
 } from "@hgripe/flow";
 import "@hgripe/flow/style.css";
@@ -20,6 +21,13 @@ import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
 import { withEdgeExecutionStates } from "./edgeExecutionState";
+import {
+  addEdgeWaypoint,
+  clearEdgeWaypoints,
+  edgeWaypoints,
+  moveEdgeWaypoint,
+  removeEdgeWaypoint,
+} from "./edgeWaypoints";
 import { miniMapColor } from "./minimap";
 import { DND_NODE_KIND } from "./Palette";
 import { nodeSpec } from "../graph/nodeSpecs";
@@ -37,6 +45,8 @@ interface FlowCanvasProps {
   onAddNode: (kind: string, position: { x: number; y: number }) => void;
   /** Called right before a new edge is created, so the host can snapshot. */
   onBeforeConnect?: () => void;
+  /** Called before a manual edge route changes, so the host can snapshot. */
+  onBeforeEdgeEdit?: () => void;
   /** Called after a node finishes dragging, so the host can (re)assign groups. */
   onNodeDragStop?: (node: Node) => void;
   /** Called when a pane pan/zoom settles, with the resulting viewport. */
@@ -65,6 +75,7 @@ export function FlowCanvas({
   onSelect,
   onAddNode,
   onBeforeConnect,
+  onBeforeEdgeEdit,
   onNodeDragStop,
   onViewportChange,
   viewportKey,
@@ -118,7 +129,39 @@ export function FlowCanvas({
     () => toWorkflowGraph(graphView.nodes, graphView.edges),
     [graphView],
   );
-  const renderedEdges = useMemo(() => withEdgeExecutionStates(edges, nodes), [edges, nodes]);
+  const renderedEdges = useMemo(
+    () =>
+      withEdgeExecutionStates(edges, nodes).map((edge) =>
+        edgeWaypoints(edge).length > 0
+          ? {
+              ...edge,
+              data: {
+                ...edge.data,
+                onWaypointDragStart: onBeforeEdgeEdit,
+                onWaypointChange: (index: number, point: Pt) =>
+                  setEdges((current) =>
+                    current.map((candidate) =>
+                      candidate.id === edge.id
+                        ? moveEdgeWaypoint(candidate, index, point)
+                        : candidate,
+                    ),
+                  ),
+                onWaypointRemove: (index: number) => {
+                  onBeforeEdgeEdit?.();
+                  setEdges((current) =>
+                    current.map((candidate) =>
+                      candidate.id === edge.id
+                        ? removeEdgeWaypoint(candidate, index)
+                        : candidate,
+                    ),
+                  );
+                },
+              },
+            }
+          : edge,
+      ),
+    [edges, nodes, onBeforeEdgeEdit, setEdges],
+  );
   const isValidConnection: IsValidConnection = useCallback(
     (c: Connection | Edge) => {
       const sourceType = portType(c.source, c.sourceHandle, "out");
@@ -139,6 +182,31 @@ export function FlowCanvas({
       setEdges((eds) => addHgripeDataEdge(params, eds));
     },
     [setEdges, onBeforeConnect],
+  );
+
+  const handleEdgeDoubleClick = useCallback(
+    (event: React.MouseEvent, edge: Edge) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.shiftKey) {
+        if (edgeWaypoints(edge).length === 0) return;
+        onBeforeEdgeEdit?.();
+        setEdges((current) =>
+          current.map((candidate) =>
+            candidate.id === edge.id ? clearEdgeWaypoints(candidate) : candidate,
+          ),
+        );
+        return;
+      }
+      onBeforeEdgeEdit?.();
+      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      setEdges((current) =>
+        current.map((candidate) =>
+          candidate.id === edge.id ? addEdgeWaypoint(candidate, point) : candidate,
+        ),
+      );
+    },
+    [onBeforeEdgeEdit, screenToFlowPosition, setEdges],
   );
 
   // Minimap fill: run status (progress/failures) over a per-category fallback;
@@ -203,6 +271,7 @@ export function FlowCanvas({
       onPaneContextMenu={handlePaneContextMenu}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
+      onEdgeDoubleClick={handleEdgeDoubleClick}
       onConnect={onConnect}
       onNodeDragStop={handleNodeDragStop}
       onMoveEnd={handleMoveEnd}
