@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useT, type MsgKey } from "../i18n";
 import type { DrawerMode } from "./drawerState";
@@ -120,6 +120,10 @@ export function ProductionDrawer({
   onToggleProtected,
 }: ProductionDrawerProps) {
   const t = useT();
+  const expanded = mode !== "collapsed";
+  const [renderExpanded, setRenderExpanded] = useState(expanded);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<number | null>(null);
   // Clip context menu: right-click a clip for grade / edit / remove actions.
   const [clipMenu, setClipMenu] = useState<{
     x: number;
@@ -128,13 +132,39 @@ export function ProductionDrawer({
     assetId: string;
     kind: ClipKind;
   } | null>(null);
+  const [detailTab, setDetailTab] = useState<"details" | "grade">("details");
 
-  if (mode === "collapsed") {
+  useEffect(() => {
+    if (closeTimer.current != null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    if (expanded) {
+      setRenderExpanded(true);
+      setClosing(false);
+      return;
+    }
+    if (!renderExpanded) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      setRenderExpanded(false);
+      setClosing(false);
+      closeTimer.current = null;
+    }, 220);
+    return () => {
+      if (closeTimer.current != null) {
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+    };
+  }, [expanded, renderExpanded]);
+
+  if (!renderExpanded) {
     return (
       <div className="production-drawer production-drawer-rail">
         <button
           className="production-drawer-handle"
-          onClick={() => onSetMode("half")}
+          onClick={() => onSetMode("open")}
           title={t("drawer.openTitle")}
         >
           ▴ {t("drawer.title")}
@@ -147,6 +177,8 @@ export function ProductionDrawer({
   }
 
   const activeAsset = assets.find((a) => a.id === activeAssetId) ?? null;
+  const selectedClip = timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ?? null;
+  const selectedClipAsset = selectedClip ? (assets.find((a) => a.id === selectedClip.assetId) ?? null) : null;
 
   // Premiere-style track stack: video tracks on top with the highest lane
   // first (V2 above V1), audio tracks below in ascending order (A1 first).
@@ -187,7 +219,7 @@ export function ProductionDrawer({
                 : target.kind;
 
   return (
-    <div className={`production-drawer production-drawer-${mode}`}>
+    <div className={`production-drawer production-drawer-open${closing ? " production-drawer-closing" : ""}`}>
       <div className="production-drawer-head">
         <span className="production-drawer-title">{t("drawer.tabEdit")}</span>
         <span className="production-drawer-target" title={targetLabel}>
@@ -195,29 +227,20 @@ export function ProductionDrawer({
         </span>
         <div className="spacer" />
         <button
-          onClick={() => onSetMode(mode === "half" ? "full" : "half")}
-          title={mode === "half" ? t("drawer.fullTitle") : t("drawer.halfTitle")}
+          className="production-drawer-collapse"
+          onClick={() => onSetMode("collapsed")}
+          title={t("drawer.collapseTitle")}
+          aria-label={t("drawer.collapseTitle")}
         >
-          {mode === "half" ? "⤢" : "⤡"}
-        </button>
-        <button onClick={() => onSetMode("collapsed")} title={t("drawer.collapseTitle")}>
-          ▾
+          <svg viewBox="0 0 48 8" width="48" height="8" aria-hidden="true">
+            <path d="M2 1.5 L24 6.5 L46 1.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
         </button>
       </div>
 
       <div className="production-drawer-body production-edit">
-          {layeredAsset ? (
-            <LayerReviewPanel
-              asset={layeredAsset}
-              selectedLayerId={selectedLayerId}
-              onSelectLayer={onSelectLayer}
-              visibility={layerVisibility}
-              onToggleVisibility={onToggleLayerVisibility}
-              onMergeLayers={onMergeLayers}
-              onSplitLayer={onSplitLayer}
-              onToggleProtected={onToggleProtected}
-            />
-          ) : null}
+        <div className="production-edit-workspace">
+          <div className="production-edit-top">
           <div className="production-bin">
             <div className="production-bin-head">
               <h3>{t("drawer.binTitle")}</h3>
@@ -262,6 +285,85 @@ export function ProductionDrawer({
               </ul>
             )}
           </div>
+
+          <div className="production-program-column">
+            <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
+          </div>
+
+          <aside className="production-detail-panel">
+            <div className="production-detail-tabs" role="tablist" aria-label={t("drawer.detailTabs")}>
+              <button
+                type="button"
+                className={detailTab === "details" ? "active" : ""}
+                aria-selected={detailTab === "details"}
+                onClick={() => setDetailTab("details")}
+              >
+                {t("drawer.detailsTab")}
+              </button>
+              <button
+                type="button"
+                className={detailTab === "grade" ? "active" : ""}
+                aria-selected={detailTab === "grade"}
+                onClick={() => setDetailTab("grade")}
+              >
+                {t("drawer.gradeTab")}
+              </button>
+            </div>
+            <div className="production-detail-body">
+              {detailTab === "details" ? (
+                layeredAsset ? (
+                  <LayerReviewPanel
+                    asset={layeredAsset}
+                    selectedLayerId={selectedLayerId}
+                    onSelectLayer={onSelectLayer}
+                    visibility={layerVisibility}
+                    onToggleVisibility={onToggleLayerVisibility}
+                    onMergeLayers={onMergeLayers}
+                    onSplitLayer={onSplitLayer}
+                    onToggleProtected={onToggleProtected}
+                  />
+                ) : selectedClip ? (
+                  <dl className="production-detail-list">
+                    <div>
+                      <dt>{t("drawer.detailClip")}</dt>
+                      <dd>{selectedClipAsset?.name ?? selectedClip.assetId}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("drawer.detailKind")}</dt>
+                      <dd>{selectedClip.kind}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("drawer.detailRange")}</dt>
+                      <dd>
+                        {selectedClip.start.toFixed(2)}s - {(selectedClip.start + selectedClip.duration).toFixed(2)}s
+                      </dd>
+                    </div>
+                  </dl>
+                ) : activeAsset ? (
+                  <dl className="production-detail-list">
+                    <div>
+                      <dt>{t("drawer.detailAsset")}</dt>
+                      <dd>{activeAsset.name}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("drawer.detailKind")}</dt>
+                      <dd>{t(kindKey(activeAsset.kind))}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("drawer.detailPath")}</dt>
+                      <dd title={activeAsset.path}>{activeAsset.path}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="production-detail-empty">{t("drawer.detailEmpty")}</p>
+                )
+              ) : (
+                <p className="production-detail-empty">{t("drawer.gradePlaceholder")}</p>
+              )}
+            </div>
+          </aside>
+          </div>
+
           <div className="production-timeline">
             <div className="production-timeline-head">
               <h3>{t("drawer.timelineTitle")}</h3>
@@ -292,9 +394,7 @@ export function ProductionDrawer({
             </div>
             {timeline.tracks.every((track) => track.clips.length === 0) ? (
               <p className="production-timeline-empty">{t("drawer.timelineEmpty")}</p>
-            ) : (
-              <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
-            )}
+            ) : null}
             <div className="production-timeline-tracks">
               {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
                 // Scale every lane to the same overall timeline length so clip
@@ -377,6 +477,7 @@ export function ProductionDrawer({
             </div>
           </div>
         </div>
+      </div>
       {clipMenu ? (
         <div
           className="production-clip-menu-backdrop"

@@ -236,6 +236,9 @@ export function ProgramMonitor({
 
   return (
     <div className="production-monitor">
+      <div className="production-monitor-head">
+        <h3>{t("drawer.monitorTitle")}</h3>
+      </div>
       <div
         className={`production-monitor-frame${state.presented ? " presented" : ""}`}
         {...stageProps}

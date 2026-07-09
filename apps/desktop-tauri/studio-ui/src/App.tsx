@@ -1714,7 +1714,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             </div>
           </div>
         )}
-        <div className={drawerMode === "full" ? "workspace workspace-hidden" : "workspace"}>
+        <div className="workspace">
           <Palette
             onAdd={addNode}
             showMinimap={showMinimap}

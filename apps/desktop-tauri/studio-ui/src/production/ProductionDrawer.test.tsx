@@ -7,8 +7,8 @@ import { ProductionDrawer, type ProductionDrawerProps } from "./ProductionDrawer
 import type { TimelineModel } from "./timeline";
 
 // The program monitor needs a real viewport host (ResizeObserver, frame
-// presentation); the clip menu under test does not.
-vi.mock("./ProgramMonitor", () => ({ ProgramMonitor: () => null }));
+// presentation); keep a marker so drawer layout tests can assert it is mounted.
+vi.mock("./ProgramMonitor", () => ({ ProgramMonitor: () => <div data-testid="program-monitor" /> }));
 
 const assets: MediaAsset[] = [
   { id: "asset-v", kind: "video", path: "/media/a.mp4", name: "a.mp4", addedAt: 0 },
@@ -37,7 +37,7 @@ const timeline: TimelineModel = {
 
 function drawerProps(overrides: Partial<ProductionDrawerProps> = {}): ProductionDrawerProps {
   return {
-    mode: "half",
+    mode: "open",
     onSetMode: () => {},
     target: null,
     assets,
@@ -81,6 +81,19 @@ afterEach(() => {
 });
 
 describe("ProductionDrawer clip context menu", () => {
+  it("keeps the program monitor visible when the timeline is empty", () => {
+    const emptyTimeline: TimelineModel = {
+      ...timeline,
+      tracks: timeline.tracks.map((track) => ({ ...track, clips: [] })),
+    };
+    const { container, getByTestId } = render(
+      <ProductionDrawer {...drawerProps({ timeline: emptyTimeline })} />,
+    );
+
+    expect(getByTestId("program-monitor")).toBeDefined();
+    expect(container.querySelector(".production-timeline-empty")?.textContent).toContain("Empty timeline");
+  });
+
   it("offers split-to-layers on a video clip and forwards the clip id", () => {
     const onSplitClipToLayers = vi.fn();
     const { container } = render(<ProductionDrawer {...drawerProps({ onSplitClipToLayers })} />);
