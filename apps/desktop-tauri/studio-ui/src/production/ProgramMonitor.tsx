@@ -139,6 +139,17 @@ function FastForwardIcon() {
   );
 }
 
+function LoopPlaybackIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M7 7h9.5a3.5 3.5 0 0 1 0 7H8" />
+      <path d="m13 4 3 3-3 3" />
+      <path d="M17 17H7.5a3.5 3.5 0 0 1 0-7H16" />
+      <path d="m11 20-3-3 3-3" />
+    </MonitorIcon>
+  );
+}
+
 function PlayIcon() {
   return (
     <MonitorIcon>
@@ -191,6 +202,43 @@ function formatTimecode(sec: number, fps: number) {
   const hours = Math.floor(totalSeconds / 3600);
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
+}
+
+export function resolveLoopPlaybackRange(
+  duration: number,
+  inPointSec: number | null,
+  outPointSec: number | null,
+) {
+  const end = clampTime(outPointSec ?? duration, duration);
+  const start = clampTime(inPointSec ?? 0, duration);
+  return start < end ? { start, end } : { start: 0, end: duration };
+}
+
+export function advancePlaybackTime({
+  currentSec,
+  elapsedSec,
+  duration,
+  loop,
+  loopStartSec,
+  loopEndSec,
+}: {
+  currentSec: number;
+  elapsedSec: number;
+  duration: number;
+  loop: boolean;
+  loopStartSec: number;
+  loopEndSec: number;
+}) {
+  if (duration <= 0) return { timeSec: 0, playing: false };
+  if (!loop || loopEndSec <= loopStartSec) {
+    const next = currentSec + elapsedSec;
+    return next >= duration ? { timeSec: duration, playing: false } : { timeSec: next, playing: true };
+  }
+  const base = currentSec < loopStartSec || currentSec >= loopEndSec ? loopStartSec : currentSec;
+  const next = base + elapsedSec;
+  if (next < loopEndSec) return { timeSec: next, playing: true };
+  const span = loopEndSec - loopStartSec;
+  return { timeSec: loopStartSec + ((next - loopEndSec) % span), playing: true };
 }
 
 /**
@@ -295,6 +343,7 @@ export function ProgramMonitor({
   const playheadSec = controlledPlayheadSec ?? localPlayheadSec;
   const setPlayheadSec = onPlayheadSecChange ?? setLocalPlayheadSec;
   const [playing, setPlaying] = useState(false);
+  const [loopPlayback, setLoopPlayback] = useState(false);
   const [safeArea, setSafeArea] = useState(false);
   const [exportFrameOpen, setExportFrameOpen] = useState(false);
   const [, setMarkers] = useState<number[]>([]);
@@ -325,6 +374,10 @@ export function ProgramMonitor({
   const sourceFps = useSourceFps(playheadTarget?.kind === "video" ? playheadTarget.path : null);
   const displayFps = sourceFps && sourceFps > 0 ? sourceFps : 24;
   const frameStep = 1 / displayFps;
+  const loopRange = useMemo(
+    () => resolveLoopPlaybackRange(duration, inPointSec, outPointSec),
+    [duration, inPointSec, outPointSec],
+  );
   const requestSec = playing ? paceToFrameGrid(playheadTarget, clampedSec, sourceFps) : clampedSec;
   const target = useMemo(
     () => resolvePreviewFrame(timeline, assets, requestSec),
@@ -383,19 +436,25 @@ export function ProgramMonitor({
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      const next = playheadRef.current + (now - last) / 1000;
+      const result = advancePlaybackTime({
+        currentSec: playheadRef.current,
+        elapsedSec: (now - last) / 1000,
+        duration,
+        loop: loopPlayback,
+        loopStartSec: loopRange.start,
+        loopEndSec: loopRange.end,
+      });
       last = now;
-      if (next >= duration) {
-        setPlayheadSec(duration);
+      setPlayheadSec(result.timeSec);
+      if (!result.playing) {
         setPlaying(false);
         return;
       }
-      setPlayheadSec(next);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, duration]);
+  }, [playing, duration, loopPlayback, loopRange.start, loopRange.end]);
 
   // Normalized device transparency for the backend badge (shared vocabulary).
   const backendReport = useMemo(
@@ -405,8 +464,13 @@ export function ProgramMonitor({
 
   const togglePlay = () => {
     if (duration <= 0) return;
+    if (!playing && loopPlayback) {
+      if (playheadRef.current < loopRange.start || playheadRef.current >= loopRange.end) {
+        setPlayheadSec(loopRange.start);
+      }
+    }
     // Play from the start when the playhead sits at the end.
-    if (!playing && playheadRef.current >= duration) setPlayheadSec(0);
+    if (!playing && !loopPlayback && playheadRef.current >= duration) setPlayheadSec(0);
     setPlaying((p) => !p);
   };
   const seekTo = (sec: number) => {
@@ -484,6 +548,17 @@ export function ProgramMonitor({
           </button>
           <button type="button" className="production-monitor-control" onClick={() => seekTo(clampedSec + 1)} disabled={duration <= 0} title="快进 1 秒">
             <FastForwardIcon />
+          </button>
+          <button
+            type="button"
+            className={`production-monitor-control production-monitor-loop${loopPlayback ? " active" : ""}`}
+            onClick={() => setLoopPlayback((on) => !on)}
+            disabled={duration <= 0}
+            title={t("drawer.monitorLoopPlayback")}
+            aria-label={t("drawer.monitorLoopPlayback")}
+            aria-pressed={loopPlayback}
+          >
+            <LoopPlaybackIcon />
           </button>
           <span className="production-monitor-control-separator" />
           <button
