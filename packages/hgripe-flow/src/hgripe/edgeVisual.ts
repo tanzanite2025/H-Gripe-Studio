@@ -14,6 +14,19 @@ export const EDGE_ARROW_MARKER = {
 // simplify together. Selected edges keep full detail.
 export const EDGE_LOD_ZOOM_THRESHOLD = 0.55;
 
+export type HgripeEdgeVisualState = "default" | "running" | "error";
+
+export interface HgripeEdgeData extends Record<string, unknown> {
+  hgripeVisualState?: HgripeEdgeVisualState;
+}
+
+export function hgripeEdgeVisualState(
+  data: Record<string, unknown> | undefined,
+): HgripeEdgeVisualState {
+  const state = data?.hgripeVisualState;
+  return state === "running" || state === "error" ? state : "default";
+}
+
 /** Should an edge render in simplified (marker-less) form at this zoom? */
 export function isEdgeLodActive(zoom: number, threshold = EDGE_LOD_ZOOM_THRESHOLD): boolean {
   return zoom < threshold;

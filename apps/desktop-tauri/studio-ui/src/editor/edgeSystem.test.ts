@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   HGRIPE_BINDING_EDGE_TYPE,
   HGRIPE_DATA_EDGE_TYPE,
+  hgripeEdgeVisualState,
   normalizeHgripeEdges,
   withHgripeBindingEdge,
   withHgripeDataEdge,
@@ -28,5 +29,12 @@ describe("H-Gripe edge system", () => {
     expect(withHgripeBindingEdge({ id: "b1", source: "a", target: "edit" }).type).toBe(
       HGRIPE_BINDING_EDGE_TYPE,
     );
+  });
+
+  it("accepts only supported runtime visual states", () => {
+    expect(hgripeEdgeVisualState({ hgripeVisualState: "running" })).toBe("running");
+    expect(hgripeEdgeVisualState({ hgripeVisualState: "error" })).toBe("error");
+    expect(hgripeEdgeVisualState({ hgripeVisualState: "unknown" })).toBe("default");
+    expect(hgripeEdgeVisualState(undefined)).toBe("default");
   });
 });

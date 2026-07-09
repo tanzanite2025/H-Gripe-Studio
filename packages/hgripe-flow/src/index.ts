@@ -18,7 +18,13 @@ export {
   pointsToPath,
   type Pt,
 } from "./hgripe/edgeRouting";
-export { EDGE_LOD_ZOOM_THRESHOLD, isEdgeLodActive } from "./hgripe/edgeVisual";
+export {
+  EDGE_LOD_ZOOM_THRESHOLD,
+  hgripeEdgeVisualState,
+  isEdgeLodActive,
+  type HgripeEdgeData,
+  type HgripeEdgeVisualState,
+} from "./hgripe/edgeVisual";
 export {
   addHgripeDataEdge,
   HgripeFlow,
