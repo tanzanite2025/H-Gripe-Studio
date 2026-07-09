@@ -6,6 +6,7 @@
 import {
   createViewport,
   destroyViewport,
+  exportViewportFrame,
   presentViewportView,
   readViewportPixels,
   renderViewportFrame,
@@ -19,6 +20,8 @@ import {
   setViewportTarget,
   setViewportView,
   type ViewportBackend,
+  type ViewportFrameExportFormat,
+  type ViewportFrameExportResult,
   type ViewportFrame,
   type ViewportKind,
   type ViewportMaskOverlay,
@@ -146,6 +149,13 @@ export class WgpuViewportHost {
    * never the per-frame path (surface swap Phase S4). */
   async readPixels(): Promise<ViewportPixels> {
     return readViewportPixels(this.id());
+  }
+
+  async exportFrame(
+    path: string,
+    format: ViewportFrameExportFormat,
+  ): Promise<ViewportFrameExportResult> {
+    return exportViewportFrame(this.id(), path, format);
   }
 
   /** Destroy the underlying viewport. Safe to call more than once. */

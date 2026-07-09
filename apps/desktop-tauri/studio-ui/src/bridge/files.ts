@@ -283,6 +283,30 @@ export async function pickFile(opts: PickFileOptions = {}): Promise<string | nul
   return (path as string | null) ?? null;
 }
 
+export interface PickFolderOptions {
+  title?: string;
+  dir?: string | null;
+}
+
+/** Open the OS-native folder picker and resolve to the chosen directory. */
+export async function pickFolder(opts: PickFolderOptions = {}): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  const path = await invoke("pick_folder", {
+    title: opts.title ?? null,
+    dir: opts.dir ?? null,
+  });
+  return (path as string | null) ?? null;
+}
+
+/** Resolve the configured runtime output directory. */
+export async function getRuntimeOutputDir(): Promise<string> {
+  const invoke = tauriInvoke();
+  if (!invoke) return "/mock/outputs";
+  const info = (await invoke("get_runtime_info")) as { output_dir?: { path?: string } };
+  return info.output_dir?.path ?? "";
+}
+
 export interface FileDropEvent {
   /** Absolute paths of the dropped files. */
   paths: string[];

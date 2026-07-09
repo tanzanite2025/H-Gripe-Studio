@@ -60,6 +60,15 @@ export interface ViewportFrame {
   presented: boolean;
 }
 
+export type ViewportFrameExportFormat = "png" | "jpeg" | "bmp";
+
+export interface ViewportFrameExportResult {
+  path: string;
+  width: number;
+  height: number;
+  format: ViewportFrameExportFormat;
+}
+
 /** Binary frame payload layout (see `viewport_render_frame_bin`):
  * `[u32 LE meta length][meta JSON {width, height, backend, presented}][PNG
  * bytes]`; a presented frame carries no PNG bytes. Exported for tests;
@@ -362,6 +371,20 @@ export async function resizeViewport(
   const vp = mockGet(viewportId);
   vp.width = width;
   vp.height = height;
+}
+
+export async function exportViewportFrame(
+  viewportId: string,
+  path: string,
+  format: ViewportFrameExportFormat,
+): Promise<ViewportFrameExportResult> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    return (await invoke("viewport_export_frame", { viewportId, path, format })) as ViewportFrameExportResult;
+  }
+  const vp = mockGet(viewportId);
+  if (!vp.target) throw new Error(`viewport ${viewportId} has no target`);
+  return { path, width: Math.max(vp.width, 1), height: Math.max(vp.height, 1), format };
 }
 
 /**
