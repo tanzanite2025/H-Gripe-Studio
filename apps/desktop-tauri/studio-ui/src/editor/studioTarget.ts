@@ -65,6 +65,13 @@ export type TargetBounds =
   | { kind: "path"; rect: Rect; pathId: string }
   | { kind: "node_output"; rect: Rect; nodeId: string; portId: string };
 
+export interface TargetBoundsTransform {
+  dx: number;
+  dy: number;
+  scale: number;
+  rotate: number;
+}
+
 export interface TargetBoundsContext {
   dims: { w: number; h: number };
   selections?: readonly SelectionTarget[];
@@ -84,6 +91,38 @@ function lookupRect(source: RectLookup | undefined, key: string): Rect | null {
 
 function fullDocumentRect(dims: { w: number; h: number }): Rect {
   return [0, 0, Math.max(0, dims.w), Math.max(0, dims.h)];
+}
+
+function transformPoint(point: [number, number], transform: TargetBoundsTransform, dims: { w: number; h: number }): [number, number] {
+  const cx = dims.w / 2;
+  const cy = dims.h / 2;
+  const rad = (transform.rotate * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const sx = (point[0] - cx) * transform.scale;
+  const sy = (point[1] - cy) * transform.scale;
+  return [cx + sx * cos - sy * sin + transform.dx, cy + sx * sin + sy * cos + transform.dy];
+}
+
+export function transformRect(rect: Rect, transform: TargetBoundsTransform, dims: { w: number; h: number }): Rect {
+  const points = [
+    transformPoint([rect[0], rect[1]], transform, dims),
+    transformPoint([rect[2], rect[1]], transform, dims),
+    transformPoint([rect[2], rect[3]], transform, dims),
+    transformPoint([rect[0], rect[3]], transform, dims),
+  ];
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function isLayerBoundTargetBounds(bounds: TargetBounds): bounds is Extract<TargetBounds, { layerId: string }> {
+  return bounds.kind === "layer_frame" || bounds.kind === "content" || bounds.kind === "mask";
+}
+
+export function transformLayerTargetBounds(bounds: TargetBounds, transform: TargetBoundsTransform | null, dims: { w: number; h: number }): TargetBounds {
+  if (!transform || !isLayerBoundTargetBounds(bounds)) return bounds;
+  return { ...bounds, rect: transformRect(bounds.rect, transform, dims) };
 }
 
 function normalizeRect(rect: Rect, dims: { w: number; h: number }): Rect | null {

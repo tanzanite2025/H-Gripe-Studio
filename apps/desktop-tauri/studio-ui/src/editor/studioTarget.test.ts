@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { emptyLayerMask, emptyMaskDocument, type EditPath, type MaskDocument } from "../types/production";
-import { pathBounds, resolveActiveTarget, resolveTargetBounds, type SelectionTarget, type StudioDocumentRef } from "./studioTarget";
+import {
+  pathBounds,
+  resolveActiveTarget,
+  resolveTargetBounds,
+  transformLayerTargetBounds,
+  transformRect,
+  type SelectionTarget,
+  type StudioDocumentRef,
+} from "./studioTarget";
 
 const ref: StudioDocumentRef = { canvasId: "canvas-1", documentId: "doc-1" };
 const dims = { w: 100, h: 80 };
@@ -86,5 +94,21 @@ describe("studio target bounds", () => {
         nodeOutputBounds: { "node-1:image": [4, 6, 60, 70] },
       }),
     ).toEqual({ kind: "node_output", rect: [4, 6, 60, 70], nodeId: "node-1", portId: "image" });
+  });
+
+  it("transforms only layer-bound display bounds", () => {
+    const transform = { dx: 5, dy: -3, scale: 1, rotate: 0 };
+
+    expect(transformRect([10, 12, 30, 32], transform, dims)).toEqual([15, 9, 35, 29]);
+    expect(transformLayerTargetBounds({ kind: "layer_frame", rect: [10, 12, 30, 32], layerId: "layer-base" }, transform, dims)).toEqual({
+      kind: "layer_frame",
+      rect: [15, 9, 35, 29],
+      layerId: "layer-base",
+    });
+    expect(transformLayerTargetBounds({ kind: "selection", rect: [10, 12, 30, 32], selectionId: "sel-1" }, transform, dims)).toEqual({
+      kind: "selection",
+      rect: [10, 12, 30, 32],
+      selectionId: "sel-1",
+    });
   });
 });

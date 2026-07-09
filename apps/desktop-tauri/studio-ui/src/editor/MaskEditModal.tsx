@@ -69,7 +69,7 @@ import { ImageSizeDialog } from "./maskEditModal/ImageSizeDialog";
 import { CropPanel } from "./maskEditModal/CropPanel";
 import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
 import { ToolIcon } from "./maskEditModal/toolIcons";
-import { resolveActiveTarget, resolveTargetBounds } from "./studioTarget";
+import { resolveActiveTarget, resolveTargetBounds, transformLayerTargetBounds } from "./studioTarget";
 import { getCommand, getCommandCapability, type CommandId } from "./studioCommands";
 import { ContextActionBar } from "./maskEditModal/ContextActionBar";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
@@ -82,7 +82,7 @@ const DEFAULT_W = 960;
 const DEFAULT_H = 640;
 const SELECTION_TOP_TOOLS = ["rect", "ellipse", "magnetic_lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
-const IMAGE_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "layer.addMask", "layer.duplicate", "target.transform", "target.delete"];
+const IMAGE_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "layer.addMask", "layer.duplicate", "target.transform"];
 
 function toolKeyBadge(toolId: string): string {
   const combo = toolCombo(toolId);
@@ -528,6 +528,9 @@ export function MaskEditModal({
   const targetBounds = useMemo(() => {
     return resolveTargetBounds(state.current, activeStudioTarget, { dims });
   }, [state.current, activeStudioTarget, dims.w, dims.h]);
+  const displayTargetBounds = useMemo(() => {
+    return transformLayerTargetBounds(targetBounds, workspace === "image" ? imageTransform : null, dims);
+  }, [targetBounds, workspace, imageTransform, dims.w, dims.h]);
   const contextActionItems = useMemo(() => {
     if (workspace !== "image") return [];
     return IMAGE_CONTEXT_COMMANDS
@@ -993,13 +996,13 @@ export function MaskEditModal({
       quadDraft,
       cropDraft,
       cropRegion: null,
-      targetBounds: workspace === "image" ? targetBounds : null,
+      targetBounds: workspace === "image" ? displayTargetBounds : null,
       lastMarquee,
       workSelection: penAnchors.length > 0 ? null : workSelection,
       antsPhase,
       gestures,
     });
-  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, targetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, workSelection, antsPhase]);
+  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, displayTargetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, workSelection, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -1371,7 +1374,7 @@ export function MaskEditModal({
             contextActionBar={
               workspace === "image" ? (
                 <ContextActionBar
-                  bounds={targetBounds}
+                  bounds={displayTargetBounds}
                   dims={dims}
                   items={contextActionItems}
                   onCommand={runContextCommand}
