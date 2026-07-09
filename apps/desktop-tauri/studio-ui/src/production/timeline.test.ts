@@ -17,6 +17,8 @@ import {
   splitClip,
   timelineMarkers,
   toggleMarker,
+  toggleTrackHidden,
+  toggleTrackLock,
   timelineDuration,
   timelineSnapPoints,
   trackKindForClip,
@@ -121,6 +123,31 @@ describe("timeline model", () => {
       DEFAULT_STILL_SECONDS,
       DEFAULT_STILL_SECONDS + DEFAULT_MEDIA_SECONDS,
     ]);
+  });
+
+  it("toggles track lock / hidden flags", () => {
+    const tl = createTimeline();
+    const video = tl.tracks[0];
+    const locked = toggleTrackLock(tl, video.id);
+    expect(locked.tracks[0].locked).toBe(true);
+    expect(toggleTrackLock(locked, video.id).tracks[0].locked).toBe(false);
+    const hidden = toggleTrackHidden(tl, video.id);
+    expect(hidden.tracks[0].hidden).toBe(true);
+    expect(toggleTrackLock(tl, "missing")).toBe(tl);
+    expect(toggleTrackHidden(tl, "missing")).toBe(tl);
+  });
+
+  it("never appends clips onto a locked track", () => {
+    const tl = createTimeline();
+    const video = tl.tracks.find((t) => t.kind === "video")!;
+    const locked = toggleTrackLock(tl, video.id);
+    // Only one video track and it is locked: the clip has nowhere to go.
+    expect(appendClip(locked, imageAsset)).toBeNull();
+    // A second unlocked video track picks up the clip instead.
+    const twoTracks = addTrack(locked, "video");
+    const r = appendClip(twoTracks, imageAsset, { trackId: video.id });
+    expect(r).not.toBeNull();
+    expect(r!.trackId).not.toBe(video.id);
   });
 
   it("toggles frame-snapped markers and removes them by id", () => {
