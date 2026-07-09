@@ -393,5 +393,31 @@
       "opacity": 1,
       "expected": 128
     }
+  ],
+  "rgbaCompositeCases": [
+    {
+      "name": "multiply uses the grade kernel",
+      "mode": "multiply",
+      "backdrop": [64, 128, 192, 255],
+      "source": [200, 100, 50, 255],
+      "opacity": 1,
+      "expected": [50, 50, 38, 255]
+    },
+    {
+      "name": "partial alpha and opacity use W3C source-over",
+      "mode": "screen",
+      "backdrop": [40, 80, 120, 128],
+      "source": [200, 100, 50, 160],
+      "opacity": 0.65,
+      "expected": [135, 106, 108, 180]
+    },
+    {
+      "name": "difference respects source alpha and layer opacity",
+      "mode": "difference",
+      "backdrop": [30, 170, 220, 255],
+      "source": [220, 60, 120, 200],
+      "opacity": 0.8,
+      "expected": [130, 132, 145, 255]
+    }
   ]
 }

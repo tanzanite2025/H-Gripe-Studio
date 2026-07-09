@@ -1,0 +1,435 @@
+use hgripe_grade::{composite_over, BlendMode, GradeSpace, GradeSurface};
+use image::RgbaImage;
+use serde_json::Value;
+
+use super::{srgb_proxy_surface, surface_to_rgba};
+
+pub(crate) fn composite_image_document(
+    source: &RgbaImage,
+    document: &Value,
+    document_width: u32,
+    document_height: u32,
+) -> Result<RgbaImage, String> {
+    let Some(layers) = document.get("layers").and_then(Value::as_array) else {
+        return Ok(source.clone());
+    };
+    let source_surface = srgb_proxy_surface(source)?;
+    let mut composite = GradeSurface {
+        w: source.width(),
+        h: source.height(),
+        data: vec![0.0; source.as_raw().len()],
+        space: GradeSpace::Srgb,
+    };
+    for (index, layer) in layers.iter().enumerate() {
+        if layer.get("visible").and_then(Value::as_bool) == Some(false)
+            || layer.get("kind").and_then(Value::as_str) == Some("adjustment")
+            || !layer_sources_image(layer, index)
+        {
+            continue;
+        }
+        let opacity = layer
+            .get("opacity")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0) as f32;
+        if opacity <= 0.0 {
+            continue;
+        }
+        let mask = raster_layer_mask(
+            layer,
+            source.width(),
+            source.height(),
+            document_width,
+            document_height,
+        );
+        let transform = layer_transform(
+            layer,
+            source.width(),
+            source.height(),
+            document_width,
+            document_height,
+        );
+        let mask_linked = layer
+            .get("mask")
+            .and_then(|mask| mask.get("unlinked"))
+            .and_then(Value::as_bool)
+            != Some(true);
+        let (surface, gate) =
+            transformed_layer(&source_surface, mask.as_deref(), transform, mask_linked);
+        let mode = layer
+            .get("blend")
+            .and_then(Value::as_str)
+            .and_then(BlendMode::from_name)
+            .filter(|mode| {
+                matches!(
+                    mode,
+                    BlendMode::Normal
+                        | BlendMode::Multiply
+                        | BlendMode::Screen
+                        | BlendMode::Darken
+                        | BlendMode::Lighten
+                        | BlendMode::Difference
+                )
+            })
+            .unwrap_or(BlendMode::Normal);
+        composite_over(&mut composite, &surface, mode, opacity, gate.as_deref());
+    }
+    surface_to_rgba(&composite)
+}
+
+#[derive(Clone, Copy)]
+struct LayerTransform {
+    dx: f32,
+    dy: f32,
+    scale: f32,
+    rotate: f32,
+}
+
+impl LayerTransform {
+    const IDENTITY: LayerTransform = LayerTransform {
+        dx: 0.0,
+        dy: 0.0,
+        scale: 1.0,
+        rotate: 0.0,
+    };
+
+    fn is_identity(self) -> bool {
+        self.dx == 0.0 && self.dy == 0.0 && self.scale == 1.0 && self.rotate == 0.0
+    }
+}
+
+fn compose_layer_transform(a: LayerTransform, b: LayerTransform) -> LayerTransform {
+    let rad = b.rotate.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    LayerTransform {
+        dx: b.scale * (cos * a.dx - sin * a.dy) + b.dx,
+        dy: b.scale * (sin * a.dx + cos * a.dy) + b.dy,
+        scale: a.scale * b.scale,
+        rotate: a.rotate + b.rotate,
+    }
+}
+
+fn layer_transform(
+    layer: &Value,
+    width: u32,
+    height: u32,
+    document_width: u32,
+    document_height: u32,
+) -> LayerTransform {
+    let sx = width as f32 / document_width.max(1) as f32;
+    let sy = height as f32 / document_height.max(1) as f32;
+    let mut transform = LayerTransform::IDENTITY;
+    for op in layer
+        .get("ops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if op.get("disabled").and_then(Value::as_bool) == Some(true)
+            || op.get("type").and_then(Value::as_str) != Some("transform")
+        {
+            continue;
+        }
+        let next = LayerTransform {
+            dx: op.get("dx").and_then(Value::as_f64).unwrap_or(0.0) as f32 * sx,
+            dy: op.get("dy").and_then(Value::as_f64).unwrap_or(0.0) as f32 * sy,
+            scale: op
+                .get("scale")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0)
+                .max(1e-6) as f32,
+            rotate: op.get("rotate").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        };
+        transform = compose_layer_transform(transform, next);
+    }
+    transform
+}
+
+fn layer_sources_image(layer: &Value, index: usize) -> bool {
+    index == 0
+        || layer
+            .get("ops")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|op| op.get("type").and_then(Value::as_str) == Some("source_image"))
+}
+
+fn raster_layer_mask(
+    layer: &Value,
+    width: u32,
+    height: u32,
+    document_width: u32,
+    document_height: u32,
+) -> Option<Vec<u8>> {
+    let mask = layer.get("mask")?;
+    if mask.get("disabled").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let ops = mask.get("ops").and_then(Value::as_array)?;
+    if ops.is_empty() {
+        return None;
+    }
+    let mut alpha = vec![0u8; (width * height) as usize];
+    let sx = width as f32 / document_width.max(1) as f32;
+    let sy = height as f32 / document_height.max(1) as f32;
+    for op in ops {
+        let mode = op.get("mode").and_then(Value::as_str).unwrap_or("add");
+        let Some(shape) = raster_mask_shape(op, width, height, sx, sy) else {
+            continue;
+        };
+        for (dst, src) in alpha.iter_mut().zip(shape.iter()) {
+            match mode {
+                "subtract" if *src > 0 => *dst = 0,
+                "intersect" => *dst = if *src > 0 { *dst } else { 0 },
+                _ if *src > 0 => *dst = 255,
+                _ => {}
+            }
+        }
+    }
+    Some(alpha)
+}
+
+fn raster_mask_shape(op: &Value, width: u32, height: u32, sx: f32, sy: f32) -> Option<Vec<u8>> {
+    match op.get("type").and_then(Value::as_str) {
+        Some("rect") | Some("ellipse") => {
+            let region = op_region(op)?;
+            Some(raster_region_shape(
+                width,
+                height,
+                &region,
+                op.get("type").and_then(Value::as_str) == Some("ellipse"),
+                sx,
+                sy,
+            ))
+        }
+        Some("path") => {
+            let points = op
+                .get("points")?
+                .as_array()?
+                .iter()
+                .filter_map(|p| {
+                    Some((
+                        p.get("x")?.as_f64()? as f32 * sx,
+                        p.get("y")?.as_f64()? as f32 * sy,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            (points.len() >= 3).then(|| raster_polygon_shape(width, height, &points))
+        }
+        _ => None,
+    }
+}
+
+fn op_region(op: &Value) -> Option<[f32; 4]> {
+    let values = op.get("region")?.as_array()?;
+    if values.len() < 4 {
+        return None;
+    }
+    Some([
+        values.first()?.as_f64()? as f32,
+        values.get(1)?.as_f64()? as f32,
+        values.get(2)?.as_f64()? as f32,
+        values.get(3)?.as_f64()? as f32,
+    ])
+}
+
+fn raster_region_shape(
+    width: u32,
+    height: u32,
+    region: &[f32; 4],
+    ellipse: bool,
+    sx: f32,
+    sy: f32,
+) -> Vec<u8> {
+    let mut alpha = vec![0u8; (width * height) as usize];
+    let x1 = region[0].min(region[2]) * sx;
+    let y1 = region[1].min(region[3]) * sy;
+    let x2 = region[0].max(region[2]) * sx;
+    let y2 = region[1].max(region[3]) * sy;
+    let cx = (x1 + x2) * 0.5;
+    let cy = (y1 + y2) * 0.5;
+    let rx = ((x2 - x1) * 0.5).max(0.5);
+    let ry = ((y2 - y1) * 0.5).max(0.5);
+    let px0 = x1.floor().max(0.0) as u32;
+    let py0 = y1.floor().max(0.0) as u32;
+    let px1 = (x2.ceil() as i64).clamp(0, width as i64 - 1) as u32;
+    let py1 = (y2.ceil() as i64).clamp(0, height as i64 - 1) as u32;
+    for y in py0..=py1 {
+        for x in px0..=px1 {
+            if ellipse {
+                let nx = (x as f32 + 0.5 - cx) / rx;
+                let ny = (y as f32 + 0.5 - cy) / ry;
+                if nx * nx + ny * ny > 1.0 {
+                    continue;
+                }
+            }
+            alpha[(y * width + x) as usize] = 255;
+        }
+    }
+    alpha
+}
+
+fn raster_polygon_shape(width: u32, height: u32, points: &[(f32, f32)]) -> Vec<u8> {
+    let mut alpha = vec![0u8; (width * height) as usize];
+    for y in 0..height {
+        for x in 0..width {
+            if point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, points) {
+                alpha[(y * width + x) as usize] = 255;
+            }
+        }
+    }
+    alpha
+}
+
+fn point_in_polygon(x: f32, y: f32, points: &[(f32, f32)]) -> bool {
+    let mut inside = false;
+    let mut j = points.len() - 1;
+    for i in 0..points.len() {
+        let (xi, yi) = points[i];
+        let (xj, yj) = points[j];
+        if ((yi > y) != (yj > y)) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+fn transformed_layer(
+    source: &GradeSurface,
+    mask: Option<&[u8]>,
+    transform: LayerTransform,
+    mask_linked: bool,
+) -> (GradeSurface, Option<Vec<f32>>) {
+    let mut data = vec![0.0; source.data.len()];
+    let mut gate = mask.map(|_| vec![0.0; (source.w * source.h) as usize]);
+    for y in 0..source.h {
+        for x in 0..source.w {
+            let Some((sx, sy)) = inverse_layer_sample(x, y, source.w, source.h, transform) else {
+                continue;
+            };
+            let dst_index = (y * source.w + x) as usize;
+            let src_index = (sy * source.w + sx) as usize;
+            data[dst_index * 4..dst_index * 4 + 4]
+                .copy_from_slice(&source.data[src_index * 4..src_index * 4 + 4]);
+            if let (Some(mask), Some(gate)) = (mask, gate.as_mut()) {
+                gate[dst_index] =
+                    f32::from(mask[if mask_linked { src_index } else { dst_index }]) / 255.0;
+            }
+        }
+    }
+    (
+        GradeSurface {
+            w: source.w,
+            h: source.h,
+            data,
+            space: source.space,
+        },
+        gate,
+    )
+}
+
+fn inverse_layer_sample(
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    transform: LayerTransform,
+) -> Option<(u32, u32)> {
+    if transform.is_identity() {
+        return Some((x, y));
+    }
+    let cx = width as f32 / 2.0;
+    let cy = height as f32 / 2.0;
+    let s = transform.scale.max(1e-6);
+    let rad = transform.rotate.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let tx = x as f32 + 0.5 - transform.dx - cx;
+    let ty = y as f32 + 0.5 - transform.dy - cy;
+    let sx = (tx * cos + ty * sin) / s + cx;
+    let sy = (-tx * sin + ty * cos) / s + cy;
+    if sx < 0.0 || sy < 0.0 || sx >= width as f32 || sy >= height as f32 {
+        return None;
+    }
+    Some((sx.floor() as u32, sy.floor() as u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgba;
+    use serde::Deserialize;
+    use serde_json::json;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ImageDocumentFixtures {
+        rgba_composite_cases: Vec<RgbaCompositeCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct RgbaCompositeCase {
+        name: String,
+        mode: String,
+        backdrop: [u8; 4],
+        source: [u8; 4],
+        opacity: f64,
+        expected: [u8; 4],
+    }
+
+    fn rgba_composite_cases() -> Vec<RgbaCompositeCase> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../studio-ui/src/editor/imageDocumentContractFixtures.json"
+        );
+        let raw = std::fs::read_to_string(path).expect("image-document fixtures readable");
+        serde_json::from_str::<ImageDocumentFixtures>(&raw)
+            .expect("image-document fixtures parse")
+            .rgba_composite_cases
+    }
+
+    #[test]
+    fn composite_matches_the_shared_rgba_contract() {
+        let cases = rgba_composite_cases();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let mut source = RgbaImage::new(2, 1);
+            source.put_pixel(0, 0, Rgba(case.source));
+            source.put_pixel(1, 0, Rgba(case.backdrop));
+            let document = json!({
+                "layers": [
+                    {
+                        "kind": "mask",
+                        "visible": true,
+                        "opacity": 1.0,
+                        "blend": "normal",
+                        "ops": []
+                    },
+                    {
+                        "kind": "mask",
+                        "visible": true,
+                        "opacity": case.opacity,
+                        "blend": case.mode,
+                        "ops": [
+                            { "type": "source_image" },
+                            { "type": "transform", "dx": 1.0 }
+                        ]
+                    }
+                ]
+            });
+            let output =
+                composite_image_document(&source, &document, 2, 1).expect("composite image");
+            assert_eq!(output.get_pixel(1, 0).0, case.expected, "{}", case.name);
+        }
+    }
+
+    #[test]
+    fn missing_layer_stack_keeps_the_source() {
+        let source = RgbaImage::from_pixel(1, 1, Rgba([10, 20, 30, 40]));
+        assert_eq!(
+            composite_image_document(&source, &json!({}), 1, 1).expect("source fallback"),
+            source
+        );
+    }
+}

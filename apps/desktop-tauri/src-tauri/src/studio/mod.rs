@@ -90,6 +90,7 @@ mod graph;
 pub(crate) mod heif_decode;
 mod history;
 pub(crate) mod image_buffer;
+pub(crate) mod image_document;
 mod image_enhance;
 pub(crate) mod image_enhance_cpu;
 mod layer_merge;
