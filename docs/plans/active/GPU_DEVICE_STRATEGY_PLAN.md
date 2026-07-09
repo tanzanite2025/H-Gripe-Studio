@@ -1,15 +1,15 @@
 # GPU / Device Strategy Plan
 
-> Status: active. Short-term reporting steps 1–4 of the recommended order have
-> started landing: the device-field inventory, the shared TypeScript
-> `DeviceReport` vocabulary, and normalizers for the local-engine `*_report`
-> outputs and viewport `ViewportBackend` frames live in
-> `studio-ui/src/runtime/deviceReport.ts`, and every run now logs a per-node
-> `device requested -> used (backend; fallback)` line, and the grade panel /
-> program monitor backend badges render from the same vocabulary with
-> fallbacks kept visible, and the Rust-side vocabulary mirror lives in
-> `src-tauri/src/studio/device_report.rs`. Remaining: capability-summary
-> refinement and the medium/long-term hardening below.
+> Status: active, but the short-term reporting track has landed. The
+> device-field inventory, shared TS/Rust `DeviceReport` vocabulary, node and
+> viewport normalizers, per-node run logging, grade/program-monitor backend
+> badges, capability summaries, display-adapter probes, `ffmpeg_hw` encode /
+> decode probes, and `device_registry_snapshot` diagnostics are present.
+> The D3D11VA -> WGPU zero-copy implementation is also present; keep this
+> document active for native-machine validation, fallback hardening, and future
+> cross-kernel scheduling rather than for a new replacement architecture.
+> FFmpeg remains the repository-maintained vendored `third_party` build; do not
+> replace it with external libraries.
 
 ## Purpose
 
@@ -179,6 +179,12 @@ Do not mark the zero-copy work complete until:
   "driver/session accepted", and "zero-copy texture path available";
 - the user can open a diagnostics panel and see why the current machine is or is
   not using zero-copy.
+
+Implementation note: the D3D11VA session, D3D11/WGPU import, viewport
+presentation, grade-on-imported-texture path, persistent playback session,
+frame-grid pacing, registry entries, and diagnostics UI are in the repository.
+The remaining gate is native-machine evidence across supported and fallback
+hardware profiles, not another code path or an external FFmpeg dependency.
 
 The priority order is:
 

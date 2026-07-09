@@ -255,7 +255,7 @@ This keeps first launch fast and prevents UI panels from causing runtime stalls.
   defines the shared reference layer and execution resolution.
 - [`NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md`](NODE_CARD_BACKEND_SELECTION_CONTRACT_PLAN.md)
   defines how cards and rows consume the manager through dropdowns.
-- [`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md) defines requested
+- [`GPU_DEVICE_STRATEGY_PLAN.md`](../active/GPU_DEVICE_STRATEGY_PLAN.md) defines requested
   vs actual device reporting.
 - [`PROMPT_ASSISTANT_SYSTEM_PLAN.md`](PROMPT_ASSISTANT_SYSTEM_PLAN.md) consumes
   the same backend refs for assistant conversations.
