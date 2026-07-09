@@ -439,7 +439,7 @@ export function addMatteStroke(state: EditState, stroke: BrushStroke): EditState
   });
 }
 
-/** Append a closed pen / lasso vector path (rasterised by the backend on run). */
+/** Append a closed vector selection path (rasterised by the backend on run). */
 export function addPath(state: EditState, path: EditPath): EditState {
   if (path.points.length < 3 || activeLayerLocked(state.current)) return state;
   return commit(state, withActiveOps(state.current, [...activeOps(state.current), { ...path, type: "path" }]));

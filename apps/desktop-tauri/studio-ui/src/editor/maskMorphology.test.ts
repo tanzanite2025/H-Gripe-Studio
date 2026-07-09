@@ -528,14 +528,14 @@ describe("buildProxyMask", () => {
     expect(area(grown.mask)).toBeGreaterThan(area(base.mask));
   });
 
-  it("rasterises pen / lasso paths and boolean-combines by mode", () => {
+  it("rasterises pen / magnetic-lasso paths and boolean-combines by mode", () => {
     const square = (x0: number, y0: number, x1: number, y1: number) => [
       { x: x0, y: y0 },
       { x: x1, y: y0 },
       { x: x1, y: y1 },
       { x: x0, y: y1 },
     ];
-    const addOp: EditOp = { type: "path", id: "p1", mode: "add", tool: "lasso", closed: true, points: square(120, 120, 840, 520) };
+    const addOp: EditOp = { type: "path", id: "p1", mode: "add", tool: "magnetic_lasso", closed: true, points: square(120, 120, 840, 520) };
     const added = doc([addOp]);
     const { mask, scale } = buildProxyMask(added, { w: 960, h: 640 }, { proxyWidth: 320 });
     const at = (x: number, y: number) => mask.data[Math.round(y * scale) * mask.w + Math.round(x * scale)];
@@ -553,7 +553,7 @@ describe("buildProxyMask", () => {
 
     const intersected = doc([
       addOp,
-      { type: "path", id: "p3", mode: "intersect", tool: "lasso", closed: true, points: square(120, 120, 480, 320) },
+      { type: "path", id: "p3", mode: "intersect", tool: "magnetic_lasso", closed: true, points: square(120, 120, 480, 320) },
     ]);
     const inter = buildProxyMask(intersected, { w: 960, h: 640 }, { proxyWidth: 320 });
     const atInter = (x: number, y: number) => inter.mask.data[Math.round(y * inter.scale) * inter.mask.w + Math.round(x * inter.scale)];
@@ -648,7 +648,7 @@ describe("buildProxyMask", () => {
   it("a single-layer document rasterises identically to the pre-M3 flat replay", () => {
     // M3 acceptance: no compositing side-effects for one layer.
     const ops: EditOp[] = [
-      { type: "path", id: "p1", mode: "add", tool: "lasso", closed: true,
+      { type: "path", id: "p1", mode: "add", tool: "magnetic_lasso", closed: true,
         points: [{ x: 100, y: 100 }, { x: 800, y: 100 }, { x: 800, y: 500 }, { x: 100, y: 500 }] },
       { type: "brush", id: "s1", mode: "subtract", radius: 40, points: [[480, 320]] },
       { type: "invert" },

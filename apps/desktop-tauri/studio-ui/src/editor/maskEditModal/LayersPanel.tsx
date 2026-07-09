@@ -125,6 +125,54 @@ function groupStyle(group: LayerGroup): CSSProperties {
   return { "--mask-layer-group-color": group.color } as CSSProperties;
 }
 
+function LayerActionIcon({ icon }: { icon: "invert" | "link" | "mask" | "duplicate" | "add" | "delete" }) {
+  if (icon === "invert") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (icon === "link") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M6.6 5.1 5.2 3.7a3 3 0 0 0-4.2 4.2l1.7 1.7a3 3 0 0 0 4.2 0l.7-.7" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="m9.4 10.9 1.4 1.4a3 3 0 0 0 4.2-4.2l-1.7-1.7a3 3 0 0 0-4.2 0l-.7.7" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="m5.8 10.2 4.4-4.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === "mask") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="1.8" y="3" width="12.4" height="10" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <circle cx="8" cy="8" r="3" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (icon === "duplicate") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="3" y="5" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M6 3h5.8c.7 0 1.2.5 1.2 1.2V10" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (icon === "add") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 4.5h10M6.2 4.5V3.2h3.6v1.3M5 6v6.5c0 .7.5 1.2 1.2 1.2h3.6c.7 0 1.2-.5 1.2-1.2V6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
@@ -556,53 +604,55 @@ export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, i
         <button
           className="mask-layer-action"
           title={t("mask.layerInvertTitle")}
+          aria-label={t("mask.layerInvertTitle")}
           disabled={!activeLayer || activeLayer.locked}
           onClick={() => dispatch({ type: "op", op: { type: "invert" } })}
         >
-          {t("mask.layerActionInvert")}
+          <LayerActionIcon icon="invert" />
         </button>
         <button
           className={`mask-layer-action${activeLayer?.linked ? " on" : ""}`}
           title={activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
+          aria-label={activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
           disabled={!activeLayer}
           onClick={() => dispatch({ type: "layer_link", index: active })}
         >
-          {t("mask.layerActionLink")}
+          <LayerActionIcon icon="link" />
         </button>
         <button
           className="mask-layer-action"
           title={t("mask.layerMaskAddTitle")}
+          aria-label={t("mask.layerMaskAddTitle")}
           disabled={!activeLayer || Boolean(activeLayer.mask) || activeLayer.kind === "adjustment" || activeLayer.locked}
           onClick={() => {
             onBeforeLayerChange();
             dispatch({ type: "layer_mask_add", index: active });
           }}
         >
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
-            <circle cx="8" cy="8" r="3.2" fill="currentColor" />
-          </svg>
+          <LayerActionIcon icon="mask" />
         </button>
         <button
           className="mask-layer-action"
           title={t("mask.layerDuplicate")}
+          aria-label={t("mask.layerDuplicate")}
           onClick={() => dispatch({ type: "layer_duplicate" })}
         >
-          {t("mask.layerActionDup")}
+          <LayerActionIcon icon="duplicate" />
         </button>
-        <button className="mask-layer-action" title={t("mask.layerAddTitle")} onClick={() => dispatch({ type: "layer_add" })}>
-          +
+        <button className="mask-layer-action" title={t("mask.layerAddTitle")} aria-label={t("mask.layerAddTitle")} onClick={() => dispatch({ type: "layer_add" })}>
+          <LayerActionIcon icon="add" />
         </button>
         <button
           className="mask-layer-action"
           title={t("mask.layerDelete")}
+          aria-label={t("mask.layerDelete")}
           disabled={layers.length <= 1 || activeLayer?.locked}
           onClick={() => {
             onBeforeLayerChange();
             dispatch({ type: "layer_remove", index: active });
           }}
         >
-          {t("mask.layerActionDel")}
+          <LayerActionIcon icon="delete" />
         </button>
       </div>
     </div>

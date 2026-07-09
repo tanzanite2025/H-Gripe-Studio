@@ -34,7 +34,6 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
     label: "钢笔",
     hint: "点击放置锚点；点击第一个锚点（或 闭合路径）即可闭合——运行时栅格化并布尔合并。",
   },
-  lasso: { label: "套索", hint: "围绕主体自由拖拽一圈；松开后闭合为一条路径选区。" },
   gradient: { label: "渐变", hint: "拖拽 起点 → 终点：从完全选中到无的线性渐变，作为可随时改参的一步（按住 Alt 拖拽为减去）。" },
   move: { label: "移动", hint: "拖拽以移动蒙版；Ctrl+T 打开自由变换（移动 / 缩放 / 旋转，可随时改参）。" },
   crop: { label: "裁剪", hint: "拖出裁剪框——框外的蒙版被清除（可随时改参的一步）。" },

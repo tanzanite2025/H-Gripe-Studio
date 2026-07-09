@@ -17,13 +17,36 @@ import { anchorEditDown, anchorEditMove, anchorEditUp, pathEditHitDown } from ".
 import { patchCaptureLoop, patchDown, patchMove, patchUp } from "./pointer/patch";
 import { shapeDown, shapeMove, shapeUp } from "./pointer/shape";
 import { transformDown, transformMove, transformUp } from "./pointer/transform";
+import { snapToEdgeCandidate, traceMagneticSegment } from "./magneticSnap";
 import type { PointerEnv, PointerGestures } from "./pointer/types";
 
 export { createPointerGestures, cropCorners } from "./pointer/types";
 export type { MarqueeSelection, PointerEnv, PointerGestures } from "./pointer/types";
 
+function snapMagneticLivePoint(env: PointerEnv, g: PointerGestures, pt: [number, number]): [number, number] {
+  if (!g.magneticEdge) return pt;
+  const candidate = snapToEdgeCandidate(g.magneticEdge, pt, env.magnetic.width, env.magnetic.contrast);
+  const lock = g.magneticLock;
+  const lockRadius = Math.max(4, env.magnetic.width * 0.65);
+  if (!candidate.snapped) {
+    if (lock && Math.hypot(pt[0] - lock.point[0], pt[1] - lock.point[1]) <= lockRadius * 0.75) return lock.point;
+    g.magneticLock = null;
+    return pt;
+  }
+  if (lock) {
+    const jump = Math.hypot(candidate.point[0] - lock.point[0], candidate.point[1] - lock.point[1]);
+    const stronger = candidate.score > lock.score * 1.18;
+    if (jump <= lockRadius && !stronger) return lock.point;
+  }
+  g.magneticLock = { point: candidate.point, score: candidate.score };
+  return candidate.point;
+}
+
 export function pointerDown(env: PointerEnv, g: PointerGestures, e: React.PointerEvent): void {
   const { tool } = env;
+  // Right-click belongs to the selection/path context menu. Let only the
+  // SAM point tool consume it, where right-click is the negative point.
+  if (e.button !== 0 && tool.kind !== "point") return;
   if (navigationDown(env, g, e)) return;
   if (anchorEditDown(env, g, e)) return;
   if (tool.status !== "ready") return;
@@ -35,6 +58,7 @@ export function pointerDown(env: PointerEnv, g: PointerGestures, e: React.Pointe
   if (activeIsAdjustment && tool.kind !== "point" && !toMatteTarget) return;
   (e.target as Element).setPointerCapture?.(e.pointerId);
   const pt = env.toImage(e);
+  if (tool.id === "magnetic_lasso") g.magneticLock = null;
   if (tool.kind === "path_edit") return pathEditHitDown(env, pt);
   if (tool.kind === "path") return pathToolDown(env, g, pt);
   if (tool.id === "patch" || tool.id === "content_aware_move") return patchDown(env, g, pt);
@@ -69,7 +93,25 @@ export function pointerMove(env: PointerEnv, g: PointerGestures, e: React.Pointe
   if (g.drawing) {
     // Freehand drags (brush family, lassos, the patch loop) share the
     // point-accumulation plumbing; the tool only matters on release.
-    g.drawing.points.push(env.toImage(e));
+    const pt = env.toImage(e);
+    if (env.tool.id === "magnetic_lasso") {
+      const snapped = snapMagneticLivePoint(env, g, pt);
+      const last = g.drawing.points[g.drawing.points.length - 1];
+      const spacing = Math.max(2, env.magnetic.frequency);
+      if (last && Math.hypot(snapped[0] - last[0], snapped[1] - last[1]) < spacing) {
+        if (g.drawing.points.length > 1) g.drawing.points[g.drawing.points.length - 1] = snapped;
+      } else if (last && g.magneticEdge) {
+        const segment = traceMagneticSegment(g.magneticEdge, last, snapped, env.magnetic.width, env.magnetic.contrast);
+        for (const next of segment.slice(1)) {
+          const tail = g.drawing.points[g.drawing.points.length - 1];
+          if (!tail || Math.hypot(next[0] - tail[0], next[1] - tail[1]) >= 1) g.drawing.points.push(next);
+        }
+      } else {
+        g.drawing.points.push(snapped);
+      }
+    } else {
+      g.drawing.points.push(pt);
+    }
     env.redraw();
     return;
   }
@@ -89,6 +131,7 @@ export function pointerUp(env: PointerEnv, g: PointerGestures): void {
   if (g.drawing) {
     const pts = g.drawing.points;
     g.drawing = null;
+    if (tool.id === "magnetic_lasso") g.magneticLock = null;
     if (tool.id === "lasso" || tool.id === "freeform_pen" || tool.id === "magnetic_lasso") {
       return commitDrawnLoop(env, g, pts);
     }

@@ -824,7 +824,7 @@ export function perspectiveCrop(mask: ProxyMask, op: MaskOperation, scale: numbe
 }
 
 /**
- * Rasterise one committed pen / lasso path onto the proxy: flatten the anchor
+ * Rasterise one committed vector selection path onto the proxy: flatten the anchor
  * loop to a straight-edged polygon (proxy resolution makes bezier flattening
  * unnecessary), even-odd scanline fill, then boolean-combine per `mode`.
  */

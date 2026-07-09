@@ -24,6 +24,12 @@ interface ToolOptionsPanelProps {
   setBrushFlow: (n: number) => void;
   brushSpacing: number;
   setBrushSpacing: (n: number) => void;
+  magneticWidth: number;
+  setMagneticWidth: (n: number) => void;
+  magneticContrast: number;
+  setMagneticContrast: (n: number) => void;
+  magneticFrequency: number;
+  setMagneticFrequency: (n: number) => void;
   paintTarget: PaintTarget;
   setPaintTarget: (t: PaintTarget) => void;
   /** Eyedropper sample (`#rrggbb`); null until a colour has been picked. */
@@ -73,6 +79,12 @@ export function ToolOptionsPanel({
   setBrushFlow,
   brushSpacing,
   setBrushSpacing,
+  magneticWidth,
+  setMagneticWidth,
+  magneticContrast,
+  setMagneticContrast,
+  magneticFrequency,
+  setMagneticFrequency,
   paintTarget,
   setPaintTarget,
   sampledColor,
@@ -206,6 +218,27 @@ export function ToolOptionsPanel({
             <button onClick={cancelPreview}>{t("mask.previewCancel")}</button>
           </span>
           <small className="muted">{t("mask.previewHint")}</small>
+        </div>
+      ) : null}
+      {tool.id === "magnetic_lasso" ? (
+        <div className="field">
+          <span>{t("mask.magneticTitle")}</span>
+          <label className="slider-row">
+            <span>{t("mask.magneticWidth")}</span>
+            <input type="range" min={2} max={48} value={magneticWidth} onChange={(e) => setMagneticWidth(Number(e.target.value))} />
+            <output>{magneticWidth}</output>
+          </label>
+          <label className="slider-row">
+            <span>{t("mask.magneticContrast")}</span>
+            <input type="range" min={0} max={100} value={magneticContrast} onChange={(e) => setMagneticContrast(Number(e.target.value))} />
+            <output>{magneticContrast}</output>
+          </label>
+          <label className="slider-row">
+            <span>{t("mask.magneticFrequency")}</span>
+            <input type="range" min={2} max={48} value={magneticFrequency} onChange={(e) => setMagneticFrequency(Number(e.target.value))} />
+            <output>{magneticFrequency}</output>
+          </label>
+          <small className="muted">{t("mask.magneticHint")}</small>
         </div>
       ) : null}
       {tool.kind === "shape" ? (

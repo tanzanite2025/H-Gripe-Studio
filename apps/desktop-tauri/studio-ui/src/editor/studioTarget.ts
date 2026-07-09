@@ -46,7 +46,7 @@ export function resolveActiveTarget(doc: MaskDocument, ref: StudioDocumentRef): 
  */
 export interface SelectionTarget {
   id: string;
-  source: "pen" | "lasso" | "marquee" | "sam2" | "wand" | "mask";
+  source: "pen" | "magnetic_lasso" | "polygon_lasso" | "marquee" | "sam2" | "wand" | "mask";
   /** Image-space `[x1, y1, x2, y2]`. */
   bounds: [number, number, number, number];
   maskArtifactRef?: string;

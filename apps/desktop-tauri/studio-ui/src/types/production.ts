@@ -143,7 +143,7 @@ export interface ExportedArtifacts {
 }
 
 /**
- * A single bezier/lasso path edit (Subject Mask). The backend flattens the
+ * A single bezier/vector selection path edit (Subject Mask). The backend flattens the
  * anchor loop (cubic bezier where control handles are present), rasterises the
  * closed polygon and boolean-combines it with the mask per `mode`. Mirrors the
  * Rust `EditPaths` schema in `docs/cards/subject-mask-matte.md`.
@@ -161,7 +161,7 @@ export interface EditPath {
   id: string;
   /** `add` | `subtract` | `intersect`. */
   mode: string;
-  /** `pen` | `lasso` | `shape`. */
+  /** `pen` | `magnetic_lasso` | `polygon_lasso` | `shape`. */
   tool: string;
   closed: boolean;
   points: EditPathPoint[];

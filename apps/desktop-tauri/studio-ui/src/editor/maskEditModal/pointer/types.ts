@@ -6,7 +6,7 @@
 import type React from "react";
 import type { CanvasView } from "../../canvasView";
 import type { EditPathPoint, MaskDocument } from "../../../types/production";
-import type { EdgeMap } from "../magneticSnap";
+import type { EdgeMap, MagneticSnapSettings } from "../magneticSnap";
 import type { MaskTool, PaintTarget, ShapeKind } from "../../maskTools";
 import type { MaskEditAction } from "../actions";
 import type { ColorSample, RulerLine } from "../stagePainter";
@@ -63,6 +63,9 @@ export interface PointerGestures {
   /** Magnetic lasso: an edge map over the underlay's visible window, captured
    * at drag start so the drawn loop can snap to image edges on release. */
   magneticEdge: EdgeMap | null;
+  /** Last stable live snap point. Keeps magnetic lasso from jumping between
+   * neighbouring edges when the cursor jitters. */
+  magneticLock: { point: Pt; score: number } | null;
   /** Patch tool: the committed lasso loop awaiting its drop drag, and the
    * in-progress drop drag (the loop's translation vector). */
   patchLoop: Pt[] | null;
@@ -97,6 +100,7 @@ export function createPointerGestures(): PointerGestures {
     dodgeBurnMode: "dodge",
     spongeMode: "saturate",
     magneticEdge: null,
+    magneticLock: null,
     patchLoop: null,
     patchDrag: null,
     quadCorner: null,
@@ -135,6 +139,7 @@ export interface PointerEnv {
   brushHardness: number;
   brushFlow: number;
   brushSpacing: number;
+  magnetic: MagneticSnapSettings;
   pathMode: "add" | "subtract" | "intersect";
   shapeKind: ShapeKind;
   shapeSides: number;

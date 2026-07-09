@@ -16,7 +16,7 @@ export const MASK_EDIT_SHORTCUTS: readonly ShortcutBinding[] = [
   { id: "tool_eraser", combo: "e", status: "ready", hint: "Eraser tool." },
   { id: "tool_wand", combo: "w", status: "ready", hint: "Magic wand tool." },
   { id: "tool_pen", combo: "p", status: "ready", hint: "Pen tool." },
-  { id: "tool_lasso", combo: "l", status: "ready", hint: "Lasso tool." },
+  { id: "tool_lasso", combo: "l", status: "ready", hint: "Magnetic lasso tool." },
   { id: "tool_rect", combo: "m", status: "ready", hint: "Rectangular marquee." },
   { id: "tool_ellipse", combo: "shift+m", status: "ready", hint: "Elliptical marquee (PS cycles marquees with Shift+M)." },
   // Editing.
@@ -88,7 +88,7 @@ export const TOOL_COMBO: Readonly<Record<string, string>> = {
   eraser: "e",
   wand: "w",
   pen: "p",
-  lasso: "l",
+  magnetic_lasso: "l",
   rect: "m",
   ellipse: "shift+m",
   move: "v",

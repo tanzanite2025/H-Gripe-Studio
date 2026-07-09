@@ -1311,6 +1311,7 @@
 .mask-layer-action:hover:not(:disabled) { background: var(--ps-hover); color: var(--text); }
 .mask-layer-action:disabled { opacity: 0.4; cursor: default; }
 .mask-layer-action.on { background: var(--ps-active-overlay); color: var(--text); }
+.mask-layer-action svg { width: 16px; height: 16px; display: block; }
 /* The ◐ adjustment picker rendered as one more icon slot. */
 .mask-layer-adjustment-add {
   width: 30px;

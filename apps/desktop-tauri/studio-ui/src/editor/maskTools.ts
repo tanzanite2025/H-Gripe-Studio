@@ -35,8 +35,8 @@ export type ToolKind =
   // Drag on the canvas to move the mask: records a `transform` op with the
   // drag's `dx`/`dy` (Ctrl+T opens the numeric free-transform panel).
   | "transform"
-  // Vector path selection: pen (click anchors, bezier-capable) / lasso
-  // (freehand). Recorded as an `EditPath`; the backend rasterises the closed
+  // Vector path selection: pen anchors plus edge-guided / polygonal lasso
+  // variants. Recorded as an `EditPath`; the backend rasterises the closed
   // polygon and boolean-combines it with the mask (add/subtract/intersect).
   | "path"
   // Canvas navigation (M8): hand pans the zoomed view, zoom clicks in/out.
@@ -124,9 +124,9 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "clone", label: "Clone", status: "ready", kind: "clone", lane: "preview", hint: "Clone stamp: Alt+click picks a source point, then paint copies the mask from the source offset (a revisable step)." },
   { id: "pattern_stamp", label: "Pattern stamp", status: "ready", kind: "clone", lane: "preview", hint: "Pattern stamp: paint a repeating checker pattern into the mask (a revisable step)." },
   { id: "healing_brush", label: "Healing brush", status: "ready", kind: "heal", lane: "preview", hint: "Healing brush: Alt+click picks a source, then paint blends the mask from the source offset with feathered edges (a revisable step)." },
-  { id: "patch", label: "Patch", status: "ready", kind: "heal", lane: "preview", hint: "Patch: lasso a region, then drag it onto clean texture — the region is refilled from where you dropped it, edges feathered (a revisable step)." },
+  { id: "patch", label: "Patch", status: "ready", kind: "heal", lane: "preview", hint: "Patch: draw a closed region, then drag it onto clean texture — the region is refilled from where you dropped it, edges feathered (a revisable step)." },
   { id: "remove", label: "Remove", status: "ready", kind: "heal", lane: "render", hint: "Remove: brush over an object — the stroke seeds the segmenter and the segmented object is subtracted from the mask on run." },
-  { id: "content_aware_move", label: "Content-aware move", status: "ready", kind: "heal", lane: "preview", hint: "Content-aware move: lasso a region, then drag it to its new place — the region moves there and the hole behind it is healed from its surroundings (a revisable step)." },
+  { id: "content_aware_move", label: "Content-aware move", status: "ready", kind: "heal", lane: "preview", hint: "Content-aware move: draw a closed region, then drag it to its new place — the region moves there and the hole behind it is healed from its surroundings (a revisable step)." },
   { id: "red_eye", label: "Red eye", status: "ready", kind: "click", lane: "render", hint: "Red eye: click a red reflection — the contiguous red-dominant region floods into the mask." },
   { id: "history_brush", label: "History brush", status: "ready", kind: "history", lane: "preview", hint: "History brush: paint a region back to the layer's initial state — the mask before any edit steps (a revisable step)." },
   { id: "art_history_brush", label: "Art history brush", status: "ready", kind: "history", lane: "preview", hint: "Art history brush: paint stylised strokes that restore the layer's initial state through a deterministic jitter (a revisable step)." },
@@ -136,12 +136,11 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "color_sampler", label: "Color sampler", status: "ready", kind: "sample", lane: "interactive", hint: "Color sampler: click to pin up to four persistent colour readouts — listed in tool options, markers on the canvas." },
   { id: "ruler", label: "Ruler", status: "ready", kind: "sample", lane: "interactive", hint: "Ruler: drag to measure distance and angle — a pure view read, nothing is recorded." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
-  { id: "freeform_pen", label: "Freeform pen", status: "ready", kind: "path", lane: "interactive", hint: "Freeform pen: drag a freehand path; released, it closes into a path selection (like the lasso, on the pen slot)." },
+  { id: "freeform_pen", label: "Freeform pen", status: "ready", kind: "path", lane: "interactive", hint: "Freeform pen: drag a freehand path; released, it closes into a path selection." },
   { id: "curvature_pen", label: "Curvature pen", status: "ready", kind: "path", lane: "interactive", hint: "Curvature pen: click points and a smooth closed curve is fitted through them on close." },
   { id: "path_select", label: "Path selection", status: "ready", kind: "path_edit", lane: "interactive", hint: "Path selection: click a committed path to select it, then drag to move the whole path (Done commits)." },
   { id: "direct_select", label: "Direct selection", status: "ready", kind: "path_edit", lane: "interactive", hint: "Direct selection: click a committed path to select it, then drag individual anchors (Done commits)." },
   { id: "shape", label: "Shape", status: "ready", kind: "shape", lane: "interactive", hint: "Drag a box — the chosen shape (triangle / polygon / star / line) commits as an ordinary path step (add / subtract / intersect)." },
-  { id: "lasso", label: "Lasso", status: "ready", kind: "path", lane: "interactive", hint: "Drag a freehand loop around the subject; released, it closes into a path selection." },
   { id: "magnetic_lasso", label: "Magnetic lasso", status: "ready", kind: "path", lane: "interactive", hint: "Magnetic lasso: drag a loop and the points snap to nearby image edges on release." },
   { id: "polygon_lasso", label: "Polygonal lasso", status: "ready", kind: "path", lane: "interactive", hint: "Polygonal lasso: click straight segments around the subject; click the first point (or Close path) to close." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
@@ -163,7 +162,7 @@ export const MASK_TOOLS: readonly MaskTool[] = [
 export const ANCHOR_PATH_TOOLS: readonly string[] = ["pen", "polygon_lasso", "curvature_pen"];
 
 /** Path tools that record a freehand drag loop, closed on pointer-up. */
-export const FREEHAND_PATH_TOOLS: readonly string[] = ["lasso", "freeform_pen", "magnetic_lasso"];
+export const FREEHAND_PATH_TOOLS: readonly string[] = ["freeform_pen", "magnetic_lasso"];
 
 /**
  * A Photoshop toolbar slot (PS_TOOLBAR_PARITY_PLAN § "Proposed Registry
@@ -192,7 +191,7 @@ export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
   [
     { id: "move", shortcut: "V", label: "Move", variants: ["move"] },
     { id: "marquee", shortcut: "M", label: "Marquee", variants: ["rect", "ellipse"] },
-    { id: "lasso", shortcut: "L", label: "Lasso", variants: ["lasso", "polygon_lasso", "magnetic_lasso"] },
+    { id: "lasso", shortcut: "L", label: "Lasso", variants: ["magnetic_lasso", "polygon_lasso"] },
     { id: "selection", shortcut: "W", label: "Selection", variants: ["object_select", "quick_select", "wand", "point"] },
     { id: "crop", shortcut: "C", label: "Crop", variants: ["crop", "perspective_crop"] },
     { id: "sample", shortcut: "I", label: "Sample", variants: ["eyedropper", "color_sampler", "ruler"] },
@@ -271,7 +270,7 @@ export type ShapeKind = "triangle" | "polygon" | "star" | "line";
  * (image px). `sides` is the vertex count for `polygon` / `star` (min 3);
  * `line` is a thin `thickness`-px rectangle along the drag vector. The
  * result feeds the ordinary path-op rasteriser, so shapes replay like any
- * pen / lasso step.
+ * pen / magnetic-lasso step.
  */
 export function shapeVertices(
   kind: ShapeKind,

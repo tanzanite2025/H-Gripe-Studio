@@ -87,7 +87,7 @@ describe("maskEdit normalizeEditPaths", () => {
   it("migrates version-1 arrays onto the ops stack in legacy replay order", () => {
     const e = normalizeEditPaths({
       version: 1,
-      paths: [{ id: "p1", mode: "add", tool: "lasso", closed: true, points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }] }],
+      paths: [{ id: "p1", mode: "add", tool: "magnetic_lasso", closed: true, points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }] }],
       brush_strokes: [stroke("s1")],
       matte_strokes: [stroke("m1")],
       operations: [{ type: "feather", amount: 3 }],
@@ -186,12 +186,12 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.points).toEqual([{ x: 120, y: 80, label: 1 }]);
   });
 
-  it("records closed pen / lasso paths and counts them", () => {
+  it("records closed pen / magnetic-lasso paths and counts them", () => {
     let s = initEditState();
     s = addPath(s, {
       id: "p1",
       mode: "add",
-      tool: "lasso",
+      tool: "magnetic_lasso",
       closed: true,
       points: [
         { x: 0, y: 0 },

@@ -22,11 +22,15 @@ describe("mask tool registry", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("ships pen / lasso as ready path tools", () => {
-    for (const id of ["pen", "lasso"]) {
+  it("ships pen / magnetic lasso as ready path tools", () => {
+    for (const id of ["pen", "magnetic_lasso"]) {
       expect(maskTool(id)?.status, id).toBe("ready");
       expect(maskTool(id)?.kind, id).toBe("path");
     }
+  });
+
+  it("does not expose the plain freehand lasso as a tool", () => {
+    expect(maskTool("lasso")).toBeUndefined();
   });
 
   it("ships brush / eraser / point / wand / morphology / matting as ready", () => {
@@ -139,7 +143,7 @@ describe("mask tool registry", () => {
   });
 
   it("routes paint / marquee / path tools to the interactive lane", () => {
-    for (const id of ["brush", "eraser", "rect", "ellipse", "pen", "lasso"]) {
+    for (const id of ["brush", "eraser", "rect", "ellipse", "pen", "magnetic_lasso"]) {
       expect(maskTool(id)?.lane, id).toBe("interactive");
     }
   });

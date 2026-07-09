@@ -43,7 +43,7 @@ import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
 import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
-import { buildEdgeMap } from "./maskEditModal/magneticSnap";
+import { buildEdgeMap, DEFAULT_MAGNETIC_SNAP } from "./maskEditModal/magneticSnap";
 import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
@@ -76,7 +76,7 @@ import { ToolIcon } from "./maskEditModal/toolIcons";
 // them against the real image on run.
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
-const SELECTION_TOP_TOOLS = ["rect", "ellipse", "lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
+const SELECTION_TOP_TOOLS = ["rect", "ellipse", "magnetic_lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
 
 function toolKeyBadge(toolId: string): string {
@@ -262,6 +262,9 @@ export function MaskEditModal({
   const [brushHardness, setBrushHardness] = useState(1);
   const [brushFlow, setBrushFlow] = useState(1);
   const [brushSpacing, setBrushSpacing] = useState(0.25);
+  const [magneticWidth, setMagneticWidth] = useState(DEFAULT_MAGNETIC_SNAP.width);
+  const [magneticContrast, setMagneticContrast] = useState(DEFAULT_MAGNETIC_SNAP.contrast);
+  const [magneticFrequency, setMagneticFrequency] = useState(DEFAULT_MAGNETIC_SNAP.frequency);
   // What paint strokes are recorded onto (M4 tool/target decoupling): the
   // active mask layer, or the trimap matting band.
   const [paintTarget, setPaintTarget] = useState<PaintTarget>("layer");
@@ -274,7 +277,7 @@ export function MaskEditModal({
   // Morphology preview proxy (grow/shrink/feather/smooth), recomputed by the
   // preview lane effect below.
   const [preview, setPreview] = useState<ProxyMask | null>(null);
-  // Boolean mode the next committed pen / lasso path combines with.
+  // Boolean mode the next committed path-selection shape combines with.
   const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
   // PS-style right rail: tabbed dock groups driven by a persisted layout
   // (drag a tab to re-dock it; drag the rail edge to resize).
@@ -457,6 +460,8 @@ export function MaskEditModal({
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
   const gestures = useRef(createPointerGestures()).current;
+  const magneticEdgeKeyRef = useRef<string | null>(null);
+  const magneticEdgePendingKeyRef = useRef<string | null>(null);
   // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
   // frame — the render path and pointer→image mapping are untouched by it —
   // plus the derived (settle-debounced) underlay view window, Alt+wheel zoom
@@ -721,7 +726,7 @@ export function MaskEditModal({
     tool_eraser: () => selectSlot("eraser"),
     tool_wand: () => selectSlot("selection"),
     tool_pen: () => selectSlot("pen"),
-    tool_lasso: () => selectSlot("lasso"),
+    tool_lasso: () => selectTool("magnetic_lasso"),
     tool_rect: () => selectSlot("marquee"),
     tool_ellipse: () => cycleSlot("marquee"),
     tool_gradient: () => selectSlot("fill"),
@@ -853,28 +858,53 @@ export function MaskEditModal({
   };
 
   const viewportHost = viewport.host;
-  // Magnetic lasso: capture the underlay's visible window as an edge map at
-  // drag start (async — the frame decodes first). The map lands in
-  // `magneticEdge` for the commit-time snap; with no underlay (browser
-  // preview) it stays null and the lasso commits unsnapped.
+  const magneticUnderlay = baseHidden ? null : (gradedUnderlay ?? underlay);
+  // Magnetic lasso: prewarm and cache the visible window's edge map. Pointer
+  // down can reuse a same-window map immediately; stale async readbacks are
+  // ignored so old pixels never drive a new drag.
   const captureEdgeMap = useCallback(() => {
-    gestures.magneticEdge = null;
     const winW = Math.max(1, Math.round(dims.w / frameView.zoom));
     const winH = Math.max(1, Math.round(dims.h / frameView.zoom));
     const offX = Math.round(frameView.panX * dims.w);
     const offY = Math.round(frameView.panY * dims.h);
-    if (!underlay) {
-      if (!presented || !viewportHost || !viewportHost.isOpen) return;
+    const sourceKey = magneticUnderlay
+      ? `underlay:${magneticUnderlay.length}:${magneticUnderlay.slice(0, 96)}:${magneticUnderlay.slice(-96)}`
+      : `host:${presented ? 1 : 0}:${viewportHost?.isOpen ? 1 : 0}`;
+    const key = `${sourceKey}:${winW}x${winH}:${offX},${offY}`;
+    if (gestures.magneticEdge && magneticEdgeKeyRef.current === key) return;
+    if (magneticEdgePendingKeyRef.current === key) return;
+    gestures.magneticEdge = null;
+    magneticEdgeKeyRef.current = null;
+    magneticEdgePendingKeyRef.current = key;
+
+    const commitEdgeMap = (pixels: Uint8Array | Uint8ClampedArray, width: number, height: number) => {
+      if (magneticEdgePendingKeyRef.current !== key) return;
+      gestures.magneticEdge = buildEdgeMap(pixels, width, height, offX, offY);
+      magneticEdgeKeyRef.current = key;
+      magneticEdgePendingKeyRef.current = null;
+    };
+    const failEdgeMap = () => {
+      if (magneticEdgePendingKeyRef.current === key) magneticEdgePendingKeyRef.current = null;
+    };
+
+    if (!magneticUnderlay) {
+      if (!presented || !viewportHost || !viewportHost.isOpen) {
+        failEdgeMap();
+        return;
+      }
       viewportHost
         .readPixels()
         .then((px) => {
           // The readback is at the frame's own resolution; only a readback
           // matching the window maps 1:1 onto image-space coordinates.
-          if (px.width !== winW || px.height !== winH) return;
-          gestures.magneticEdge = buildEdgeMap(px.pixels, px.width, px.height, offX, offY);
+          if (px.width !== winW || px.height !== winH) {
+            failEdgeMap();
+            return;
+          }
+          commitEdgeMap(px.pixels, px.width, px.height);
         })
         .catch(() => {
-          /* leave unsnapped */
+          failEdgeMap();
         });
       return;
     }
@@ -884,13 +914,29 @@ export function MaskEditModal({
       off.width = winW;
       off.height = winH;
       const ctx = off.getContext("2d");
-      if (!ctx) return;
+      if (!ctx) {
+        failEdgeMap();
+        return;
+      }
       ctx.drawImage(img, 0, 0, winW, winH);
       const { data } = ctx.getImageData(0, 0, winW, winH);
-      gestures.magneticEdge = buildEdgeMap(data, winW, winH, offX, offY);
+      commitEdgeMap(data, winW, winH);
     };
-    img.src = underlay;
-  }, [underlay, presented, viewportHost, frameView, dims.w, dims.h]);
+    img.onerror = failEdgeMap;
+    img.src = magneticUnderlay;
+  }, [magneticUnderlay, presented, viewportHost, frameView, dims.w, dims.h]);
+
+  useEffect(() => {
+    if (toolId !== "magnetic_lasso") return;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const idleId = idleWindow.requestIdleCallback?.(() => captureEdgeMap(), { timeout: 300 });
+    if (idleId != null) return () => idleWindow.cancelIdleCallback?.(idleId);
+    const timer = window.setTimeout(captureEdgeMap, 0);
+    return () => window.clearTimeout(timer);
+  }, [toolId, captureEdgeMap]);
 
   // Redraw the overlay: committed brush strokes and the in-progress
   // stroke/marquee (see stageScene's paintStage). The underlay presents
@@ -1029,6 +1075,7 @@ export function MaskEditModal({
     brushHardness,
     brushFlow,
     brushSpacing,
+    magnetic: { width: magneticWidth, contrast: magneticContrast, frequency: magneticFrequency },
     pathMode,
     shapeKind,
     shapeSides,
@@ -1361,6 +1408,12 @@ export function MaskEditModal({
               shapeSides={shapeSides}
               setShapeSides={setShapeSides}
               setBrushSpacing={setBrushSpacing}
+              magneticWidth={magneticWidth}
+              setMagneticWidth={setMagneticWidth}
+              magneticContrast={magneticContrast}
+              setMagneticContrast={setMagneticContrast}
+              magneticFrequency={magneticFrequency}
+              setMagneticFrequency={setMagneticFrequency}
               paintTarget={paintTarget}
               setPaintTarget={setPaintTarget}
               showAmount={showAmount}
