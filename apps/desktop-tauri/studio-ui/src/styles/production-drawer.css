@@ -658,15 +658,33 @@
   border-right: 6px solid transparent;
   border-top: 8px solid #5b8cff;
 }
+/* Shared horizontal scroll viewport: the ruler, playhead overlay and lanes
+   stretch to zoom * viewport width inside it and scroll together. */
+.production-timeline-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.production-timeline-scroll-inner {
+  position: relative;
+  flex: 1;
+  min-width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 /* Playhead line extended from the ruler down across every track lane.
-   left/right mirror the card padding (8px / 42px) plus the 94px header
-   column; top clears the 34px ruler. */
+   left mirrors the 94px header column; top clears the 34px ruler plus gap. */
 .production-timeline-playhead-overlay {
   position: absolute;
   top: 42px;
-  bottom: 8px;
-  left: 102px;
-  right: 42px;
+  bottom: 0;
+  left: 94px;
+  right: 0;
   pointer-events: none;
   z-index: 2;
 }
@@ -881,8 +899,12 @@
   border-top: 1px solid var(--border);
   padding-top: 6px;
 }
-/* Fixed-width track header column so every lane starts at the same x. */
+/* Fixed-width track header column so every lane starts at the same x.
+   Sticky so headers stay put while the zoomed lanes scroll horizontally. */
 .production-track-head {
+  position: sticky;
+  left: 0;
+  z-index: 3;
   width: 88px;
   flex: none;
   display: flex;

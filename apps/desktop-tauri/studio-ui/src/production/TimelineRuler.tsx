@@ -64,6 +64,17 @@ export function playheadTimeForKey(
   return frameToSeconds(frame, fps);
 }
 
+/** Timeline zoom bounds and step: 1 = fit the whole ruler, each step ×1.5. */
+export const TIMELINE_ZOOM_MIN = 1;
+export const TIMELINE_ZOOM_MAX = 8;
+export const TIMELINE_ZOOM_STEP = 1.5;
+
+/** Next zoom level: direction > 0 zooms in, < 0 zooms out, clamped. */
+export function timelineZoomStep(zoom: number, direction: number): number {
+  const next = direction > 0 ? zoom * TIMELINE_ZOOM_STEP : direction < 0 ? zoom / TIMELINE_ZOOM_STEP : zoom;
+  return Math.min(TIMELINE_ZOOM_MAX, Math.max(TIMELINE_ZOOM_MIN, next));
+}
+
 /** Playhead time after a wheel notch: down / right advances one frame
  * (Shift = 5), up / left steps back. */
 export function playheadTimeForWheel(
@@ -91,6 +102,9 @@ export interface TimelineRulerProps {
   onToggleMarker?: () => void;
   /** Right-click a marker to remove it. */
   onRemoveMarker?: (markerId: string) => void;
+  /** Horizontal zoom factor (1 = fit). Enables Ctrl+wheel and =/-/\ keys. */
+  zoom?: number;
+  onZoomChange?: (zoom: number) => void;
 }
 
 export function TimelineRuler({
@@ -102,6 +116,8 @@ export function TimelineRuler({
   markers,
   onToggleMarker,
   onRemoveMarker,
+  zoom,
+  onZoomChange,
 }: TimelineRulerProps) {
   const timelineFps = fps || DEFAULT_TIMELINE_FPS;
   const rulerDuration = timelineRulerDuration(durationSec, playheadSec);
@@ -133,6 +149,23 @@ export function TimelineRuler({
           onToggleMarker();
           return;
         }
+        if (onZoomChange) {
+          if (e.key === "=" || e.key === "+") {
+            e.preventDefault();
+            onZoomChange(timelineZoomStep(zoom ?? 1, 1));
+            return;
+          }
+          if (e.key === "-" || e.key === "_") {
+            e.preventDefault();
+            onZoomChange(timelineZoomStep(zoom ?? 1, -1));
+            return;
+          }
+          if (e.key === "\\") {
+            e.preventDefault();
+            onZoomChange(TIMELINE_ZOOM_MIN);
+            return;
+          }
+        }
         const next = playheadTimeForKey(e.key, e.shiftKey, playheadSec, durationSec, timelineFps);
         if (next === null) return;
         e.preventDefault();
@@ -141,6 +174,10 @@ export function TimelineRuler({
       onWheel={(e) => {
         const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
         if (delta === 0) return;
+        if (e.ctrlKey || e.metaKey) {
+          onZoomChange?.(timelineZoomStep(zoom ?? 1, delta < 0 ? 1 : -1));
+          return;
+        }
         onPlayheadSecChange(playheadTimeForWheel(delta, e.shiftKey, playheadSec, timelineFps));
       }}
       onPointerDown={(e) => {

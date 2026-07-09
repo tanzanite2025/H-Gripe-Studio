@@ -235,6 +235,9 @@ export function ProductionDrawer({
   const [timelineTool, setTimelineTool] = useState<TimelineTool>("select");
   const [razorPreview, setRazorPreview] = useState<{ clipId: string; ratio: number; valid: boolean } | null>(null);
   const [playheadSec, setPlayheadSec] = useState(0);
+  // Horizontal timeline zoom (1 = fit): the ruler / lane content stretches to
+  // zoom * viewport width inside the shared scroll viewport.
+  const [timelineZoom, setTimelineZoom] = useState(1);
   const programColumnRef = useRef<HTMLDivElement | null>(null);
   const trackRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
@@ -590,6 +593,11 @@ export function ProductionDrawer({
 
           <div className="production-timeline-shell">
             <div className="production-timeline production-timeline-track-card">
+              <div className="production-timeline-scroll">
+              <div
+                className="production-timeline-scroll-inner"
+                style={{ width: `${timelineZoom * 100}%` }}
+              >
               <TimelineRuler
                 fps={timelineFps}
                 durationSec={timelineLen}
@@ -599,6 +607,8 @@ export function ProductionDrawer({
                 markers={timeline.markers}
                 onToggleMarker={onToggleMarkerAt ? () => onToggleMarkerAt(playheadSec) : undefined}
                 onRemoveMarker={onRemoveMarker}
+                zoom={timelineZoom}
+                onZoomChange={setTimelineZoom}
               />
               <div className="production-timeline-playhead-overlay" aria-hidden="true">
                 <span
@@ -733,6 +743,8 @@ export function ProductionDrawer({
                   </div>
                 );
                 })}
+              </div>
+              </div>
               </div>
               <div className="production-track-nav" aria-label="轨道定位">
                 {orderedTracks.map(({ track, laneNumber }) => {
