@@ -4,6 +4,11 @@ import { useT, type MsgKey } from "../i18n";
 import { ClipPropertiesPanel } from "./ClipPropertiesPanel";
 import type { ClipProperties } from "./clipProps";
 import type { DrawerMode } from "./drawerState";
+import {
+  moveKeyframesAtTime,
+  removeKeyframesAtTime,
+  timelineKeyframeGroups,
+} from "./keyframes";
 import { LayerReviewPanel } from "./LayerReviewPanel";
 import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
@@ -16,6 +21,7 @@ import {
   MIN_CLIP_SECONDS,
   timelineDuration,
   timelineSnapPoints,
+  snapTimeToPoints,
   trackKindForClip,
   type ClipKind,
   type TimelineModel,
@@ -257,6 +263,16 @@ export function ProductionDrawer({
   const tracksScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const handPan = useRef<{ pointerId: number; startX: number; startLeft: number } | null>(null);
+  const keyframeDrag = useRef<{
+    pointerId: number;
+    clipId: string;
+    fromT: number;
+    clipStart: number;
+    clipDuration: number;
+    clipLeft: number;
+    clipWidth: number;
+    props: ClipProperties;
+  } | null>(null);
   const navFlashTimer = useRef<number | null>(null);
   const [navFlashTrackId, setNavFlashTrackId] = useState<string | null>(null);
   const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
@@ -768,6 +784,13 @@ export function ProductionDrawer({
                         {track.clips.map((clip) => {
                           const selected = clip.id === selectedClipId;
                           const preview = razorPreview?.clipId === clip.id ? razorPreview : null;
+                          const keyframeEps = 0.5 / timelineFps;
+                          const keyframes =
+                            selected && clipProperties
+                              ? timelineKeyframeGroups(clipProperties, keyframeEps).filter(
+                                  (group) => group.t >= 0 && group.t <= clip.duration,
+                                )
+                              : [];
                           return (
                             <button
                             key={clip.id}
@@ -825,6 +848,133 @@ export function ProductionDrawer({
                               />
                             ) : null}
                             <span className="production-clip-name">{clipAssetName(clip.id)}</span>
+                            {keyframes.map((group, groupIndex) => (
+                              <span
+                                key={groupIndex}
+                                className="production-clip-keyframe"
+                                style={{ left: `${(group.t / clip.duration) * 100}%` }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={t("drawer.timelineKeyframeTitle", {
+                                  t: group.t.toFixed(2),
+                                  n: group.count,
+                                })}
+                                title={t("drawer.timelineKeyframeTitle", {
+                                  t: group.t.toFixed(2),
+                                  n: group.count,
+                                })}
+                                onClick={(e) => e.stopPropagation()}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!clipProperties || !onSetClipProperties || track.locked) return;
+                                  onSetClipProperties(
+                                    clip.id,
+                                    removeKeyframesAtTime(clipProperties, group.t, keyframeEps),
+                                  );
+                                }}
+                                onKeyDown={(e) => {
+                                  if (
+                                    (e.key !== "Delete" && e.key !== "Backspace") ||
+                                    !clipProperties ||
+                                    !onSetClipProperties ||
+                                    track.locked
+                                  ) {
+                                    return;
+                                  }
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onSetClipProperties(
+                                    clip.id,
+                                    removeKeyframesAtTime(clipProperties, group.t, keyframeEps),
+                                  );
+                                }}
+                                onPointerDown={(e) => {
+                                  if (
+                                    e.button > 0 ||
+                                    timelineTool !== "select" ||
+                                    !clipProperties ||
+                                    !onSetClipProperties ||
+                                    track.locked
+                                  ) {
+                                    return;
+                                  }
+                                  const clipRect = e.currentTarget.parentElement?.getBoundingClientRect();
+                                  if (!clipRect || clipRect.width <= 0) return;
+                                  keyframeDrag.current = {
+                                    pointerId: e.pointerId,
+                                    clipId: clip.id,
+                                    fromT: group.t,
+                                    clipStart: clip.start,
+                                    clipDuration: clip.duration,
+                                    clipLeft: clipRect.left,
+                                    clipWidth: clipRect.width,
+                                    props: clipProperties,
+                                  };
+                                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                }}
+                                onPointerMove={(e) => {
+                                  const drag = keyframeDrag.current;
+                                  if (
+                                    !drag ||
+                                    drag.pointerId !== e.pointerId ||
+                                    drag.clipId !== clip.id ||
+                                    !onSetClipProperties
+                                  ) {
+                                    return;
+                                  }
+                                  let localTime = Math.min(
+                                    drag.clipDuration,
+                                    Math.max(
+                                      0,
+                                      ((e.clientX - drag.clipLeft) / drag.clipWidth) *
+                                        drag.clipDuration,
+                                    ),
+                                  );
+                                  if (e.shiftKey) {
+                                    const absoluteCandidates = [
+                                      ...snapPoints,
+                                      ...keyframes
+                                        .filter((candidate) => candidate.t !== drag.fromT)
+                                        .map((candidate) => drag.clipStart + candidate.t),
+                                    ];
+                                    const toleranceSec =
+                                      (8 / drag.clipWidth) * drag.clipDuration;
+                                    localTime =
+                                      snapTimeToPoints(
+                                        drag.clipStart + localTime,
+                                        absoluteCandidates,
+                                        toleranceSec,
+                                      ) - drag.clipStart;
+                                    localTime = Math.min(
+                                      drag.clipDuration,
+                                      Math.max(0, localTime),
+                                    );
+                                  }
+                                  onSetClipProperties(
+                                    clip.id,
+                                    moveKeyframesAtTime(
+                                      drag.props,
+                                      drag.fromT,
+                                      localTime,
+                                      keyframeEps,
+                                    ),
+                                  );
+                                }}
+                                onPointerUp={(e) => {
+                                  if (keyframeDrag.current?.pointerId === e.pointerId) {
+                                    keyframeDrag.current = null;
+                                  }
+                                  e.stopPropagation();
+                                }}
+                                onPointerCancel={(e) => {
+                                  if (keyframeDrag.current?.pointerId === e.pointerId) {
+                                    keyframeDrag.current = null;
+                                  }
+                                }}
+                              />
+                            ))}
                             {selected ? (
                               <span
                                 className="production-clip-remove"

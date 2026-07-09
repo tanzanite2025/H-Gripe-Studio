@@ -44,6 +44,17 @@ export interface DeviceReport {
    * (videoTrim): the decode device and its own fallback reason, reported
    * separately from the encode half. */
   decode?: { used: DeviceUsed; fallbackReason?: string };
+  props?: {
+    used: "cpu" | "wgpu";
+    backend?: string;
+    fallbackReason?: string;
+    processingTimeMs?: number;
+  };
+  stages?: {
+    decodeMs?: number;
+    propsMs?: number;
+    gradeMs?: number;
+  };
 }
 
 const REQUESTS: DeviceRequest[] = ["auto", "cpu", "cuda", "gpu"];
@@ -184,18 +195,54 @@ export interface ViewportBackendLike {
   /** Adapter name + backend when known (natively presented frames). */
   detail?: string;
   fallback_reason?: string;
+  decode_processing_time_ms?: number;
+  props_backend?: string;
+  props_backend_detail?: string;
+  props_fallback_reason?: string;
+  props_processing_time_ms?: number;
+  grade_processing_time_ms?: number;
 }
 
 /** Normalise a viewport frame's backend report into a `DeviceReport`. */
 export function deviceReportFromViewportBackend(backend: ViewportBackendLike): DeviceReport {
   const actual = backend.actual.trim().toLowerCase();
   const used: DeviceUsed = actual === "wgpu" || actual === "gpu" ? "wgpu" : asUsed(actual) ?? "unknown";
+  const propsUsed = backend.props_backend?.trim().toLowerCase();
+  const props =
+    propsUsed === "gpu" || propsUsed === "cpu"
+      ? {
+          used: propsUsed === "gpu" ? ("wgpu" as const) : ("cpu" as const),
+          backend: asText(backend.props_backend_detail),
+          fallbackReason: asText(backend.props_fallback_reason),
+          processingTimeMs:
+            typeof backend.props_processing_time_ms === "number"
+              ? backend.props_processing_time_ms
+              : undefined,
+        }
+      : undefined;
+  const stages = {
+    decodeMs:
+      typeof backend.decode_processing_time_ms === "number"
+        ? backend.decode_processing_time_ms
+        : undefined,
+    propsMs:
+      typeof backend.props_processing_time_ms === "number"
+        ? backend.props_processing_time_ms
+        : undefined,
+    gradeMs:
+      typeof backend.grade_processing_time_ms === "number"
+        ? backend.grade_processing_time_ms
+        : undefined,
+  };
+  const hasStages = Object.values(stages).some((value) => value != null);
   return {
     requested: asRequest(backend.requested),
     used,
     backend: asText(backend.detail) ?? (actual === "gpu" ? "wgpu" : asText(backend.actual)),
     accelerated: used === "wgpu",
     fallbackReason: asText(backend.fallback_reason),
+    ...(props ? { props } : {}),
+    ...(hasStages ? { stages } : {}),
   };
 }
 
@@ -215,6 +262,24 @@ export function describeDeviceReport(report: DeviceReport): string {
     let decode = `decode ${report.decode.used}`;
     if (report.decode.fallbackReason) decode += ` (fallback: ${report.decode.fallbackReason})`;
     notes.push(decode);
+  }
+  if (report.props) {
+    let props = `props ${report.props.used}`;
+    if (report.props.backend) props += ` ${report.props.backend}`;
+    if (report.props.fallbackReason) {
+      props += ` (fallback: ${report.props.fallbackReason})`;
+    }
+    notes.push(props);
+  }
+  if (report.stages) {
+    const stages = [
+      report.stages.decodeMs != null
+        ? `decode ${report.stages.decodeMs.toFixed(2)}ms`
+        : null,
+      report.stages.propsMs != null ? `props ${report.stages.propsMs.toFixed(2)}ms` : null,
+      report.stages.gradeMs != null ? `grade ${report.stages.gradeMs.toFixed(2)}ms` : null,
+    ].filter(Boolean);
+    if (stages.length > 0) notes.push(`stages ${stages.join(" / ")}`);
   }
   if (notes.length > 0) line += ` (${notes.join("; ")})`;
   return line;

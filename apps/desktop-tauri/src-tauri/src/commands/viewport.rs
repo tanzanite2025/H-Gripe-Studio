@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use image::{Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
@@ -23,9 +24,8 @@ use serde_json::Value;
 
 use crate::resource;
 use crate::studio::{
-    apply_clip_props_srgb_proxy, load_image_srgb_proxy, load_image_srgb_proxy_with_dims,
-    parse_clip_props_doc, parse_grade_doc, resolve_clip_props_at, ClipPropsDoc, ResolvedClipProps,
-    TemporalAccumulator,
+    apply_clip_props_srgb_proxy_preferred, load_image_srgb_proxy, load_image_srgb_proxy_with_dims,
+    parse_grade_doc, ClipPropsBackend, ClipPropsEvaluator, ResolvedClipProps, TemporalAccumulator,
 };
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
@@ -103,6 +103,48 @@ pub(crate) struct ViewportBackend {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode_processing_time_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props_backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props_backend_detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props_fallback_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props_processing_time_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade_processing_time_ms: Option<f64>,
+}
+
+impl ViewportBackend {
+    fn with_clip_props(mut self, backend: Option<ClipPropsBackend>) -> Self {
+        if let Some(backend) = backend {
+            self.props_backend = Some(backend.name.to_string());
+            self.props_backend_detail = backend.detail;
+            self.props_fallback_reason = backend.fallback_reason;
+            self.props_processing_time_ms = Some(backend.processing_time_ms);
+        }
+        self
+    }
+
+    fn with_stage_timings(mut self, decode_ms: f64, grade_ms: Option<f64>) -> Self {
+        self.decode_processing_time_ms = Some(decode_ms);
+        self.grade_processing_time_ms = grade_ms;
+        self
+    }
+
+    fn inherit_processing(mut self, source: &ViewportBackend) -> Self {
+        self.decode_processing_time_ms = source.decode_processing_time_ms;
+        self.props_backend.clone_from(&source.props_backend);
+        self.props_backend_detail
+            .clone_from(&source.props_backend_detail);
+        self.props_fallback_reason
+            .clone_from(&source.props_fallback_reason);
+        self.props_processing_time_ms = source.props_processing_time_ms;
+        self.grade_processing_time_ms = source.grade_processing_time_ms;
+        self
+    }
 }
 
 /// The backend report a CPU-rendered, PNG-transported frame carries. When the
@@ -117,6 +159,12 @@ fn cpu_backend() -> ViewportBackend {
         fallback_reason: Some(
             "png transport (frame not presented on the native surface)".to_string(),
         ),
+        decode_processing_time_ms: None,
+        props_backend: None,
+        props_backend_detail: None,
+        props_fallback_reason: None,
+        props_processing_time_ms: None,
+        grade_processing_time_ms: None,
     }
 }
 
@@ -132,6 +180,12 @@ fn surface_backend_report(requested: &str) -> ViewportBackend {
         actual: "wgpu".to_string(),
         detail: report.backend,
         fallback_reason: None,
+        decode_processing_time_ms: None,
+        props_backend: None,
+        props_backend_detail: None,
+        props_fallback_reason: None,
+        props_processing_time_ms: None,
+        grade_processing_time_ms: None,
     }
 }
 
@@ -261,7 +315,7 @@ struct ViewportState {
     /// Clip property document applied before the grade (video_preview): the
     /// raw doc string (change detection — the parse runs once per document,
     /// not once per frame) beside its parsed form.
-    clip_props: Option<(String, ClipPropsDoc)>,
+    clip_props: Option<(String, ClipPropsEvaluator)>,
     /// Clip-local evaluation time (seconds) for `clip_props`.
     clip_props_time: f64,
 }
@@ -1480,15 +1534,15 @@ pub(crate) fn viewport_set_clip_props(
             state.kind
         ));
     }
-    state.clip_props = match doc {
-        None => None,
-        Some(raw) => match &state.clip_props {
-            Some((existing, parsed)) if *existing == raw => {
-                Some((existing.clone(), parsed.clone()))
-            }
-            _ => Some((raw.clone(), parse_clip_props_doc(&raw)?)),
-        },
-    };
+    match doc {
+        None => state.clip_props = None,
+        Some(raw)
+            if state
+                .clip_props
+                .as_ref()
+                .is_some_and(|(existing, _)| *existing == raw) => {}
+        Some(raw) => state.clip_props = Some((raw.clone(), ClipPropsEvaluator::parse(&raw)?)),
+    }
     state.clip_props_time = time;
     Ok(())
 }
@@ -1786,6 +1840,12 @@ fn grade_backend_report(backend: crate::studio::GradeBackend) -> ViewportBackend
         actual: backend.name.to_string(),
         detail: None,
         fallback_reason: backend.fallback_reason,
+        decode_processing_time_ms: None,
+        props_backend: None,
+        props_backend_detail: None,
+        props_fallback_reason: None,
+        props_processing_time_ms: None,
+        grade_processing_time_ms: None,
     }
 }
 
@@ -1827,11 +1887,11 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
         overlay_scene,
         clip_props,
     ) = {
-        let map = viewports()
+        let mut map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
         let state = map
-            .get(&id)
+            .get_mut(&id)
             .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
         (
             state.target.clone(),
@@ -1846,8 +1906,8 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             // vanish here so a static default document costs nothing.
             state
                 .clip_props
-                .as_ref()
-                .map(|(_, doc)| resolve_clip_props_at(doc, state.clip_props_time))
+                .as_mut()
+                .map(|(_, evaluator)| evaluator.resolve(state.clip_props_time))
                 .filter(|resolved| !resolved.is_identity()),
         )
     };
@@ -2035,7 +2095,7 @@ pub(crate) fn viewport_render_frame_bin(
         encode_frame_png(&rendered.image)?
     };
     let backend = if presented {
-        surface_backend_report(&rendered.backend.requested)
+        surface_backend_report(&rendered.backend.requested).inherit_processing(&rendered.backend)
     } else {
         rendered.backend
     };
@@ -2277,6 +2337,7 @@ fn render_video_path(
             time_bits: Some(time_sec.to_bits()),
             size: detail,
         };
+        let decode_started = Instant::now();
         let (proxy, source_dims) = cached_proxy_with_dims(id, key, || {
             crate::studio::decode_video_srgb_proxy_with_dims(
                 std::path::Path::new(path),
@@ -2284,14 +2345,17 @@ fn render_video_path(
                 detail,
             )
         })?;
-        let proxy = apply_clip_props_to_proxy(proxy, source_dims, clip_props);
+        let decode_ms = decode_started.elapsed().as_secs_f64() * 1000.0;
+        let (proxy, props_backend) = apply_clip_props_to_proxy(proxy, source_dims, clip_props);
         let source = if view.is_identity() {
             None
         } else {
             Some(crop_view(&proxy, view))
         };
         let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
+        let grade_started = Instant::now();
         let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
+        let grade_ms = grade_started.elapsed().as_secs_f64() * 1000.0;
         apply_temporal(id, path, time_sec, &mut surface, temporal_denoise)?;
         if let Some(scene) = overlay_scene {
             // Stroked last: guides sit above the graded frame.
@@ -2300,7 +2364,9 @@ fn render_video_path(
         let image = crate::studio::surface_to_rgba(&surface)?;
         return Ok(RenderedRgba {
             image: Arc::new(image),
-            backend: grade_backend_report(backend),
+            backend: grade_backend_report(backend)
+                .with_clip_props(props_backend)
+                .with_stage_timings(decode_ms, Some(grade_ms)),
             view,
         });
     }
@@ -2315,10 +2381,12 @@ fn render_video_path(
         time_bits: Some(time_sec.to_bits()),
         size,
     };
+    let decode_started = Instant::now();
     let proxy = cached_proxy(id, key, || load_image_srgb_proxy(&frame, size))?;
+    let decode_ms = decode_started.elapsed().as_secs_f64() * 1000.0;
     Ok(RenderedRgba {
         image: proxy,
-        backend: cpu_backend(),
+        backend: cpu_backend().with_stage_timings(decode_ms, None),
         view,
     })
 }
@@ -2331,19 +2399,18 @@ fn apply_clip_props_to_proxy(
     proxy: Arc<RgbaImage>,
     source_dims: (u32, u32),
     clip_props: Option<&ResolvedClipProps>,
-) -> Arc<RgbaImage> {
+) -> (Arc<RgbaImage>, Option<ClipPropsBackend>) {
     let Some(props) = clip_props else {
-        return proxy;
+        return (proxy, None);
     };
     let ratio = if source_dims.0 > 0 {
         proxy.width() as f64 / source_dims.0 as f64
     } else {
         1.0
     };
-    Arc::new(apply_clip_props_srgb_proxy(
-        &proxy,
-        &props.scaled_coords(ratio),
-    ))
+    let (image, backend) =
+        apply_clip_props_srgb_proxy_preferred(&proxy, &props.scaled_coords(ratio));
+    (Arc::new(image), Some(backend))
 }
 
 fn render_image_composite_path(
@@ -2816,17 +2883,21 @@ fn render_image_path(
             time_bits: None,
             size: detail,
         };
+        let decode_started = Instant::now();
         let (proxy, source_dims) = cached_proxy_with_dims(id, key, || {
             load_image_srgb_proxy_with_dims(std::path::Path::new(path), detail)
         })?;
-        let proxy = apply_clip_props_to_proxy(proxy, source_dims, clip_props);
+        let decode_ms = decode_started.elapsed().as_secs_f64() * 1000.0;
+        let (proxy, props_backend) = apply_clip_props_to_proxy(proxy, source_dims, clip_props);
         let source = if view.is_identity() {
             None
         } else {
             Some(crop_view(&proxy, view))
         };
         let mut surface = crate::studio::srgb_proxy_surface(source.as_ref().unwrap_or(&proxy))?;
+        let grade_started = Instant::now();
         let backend = crate::studio::apply_grade_doc(&doc, &mut surface);
+        let grade_ms = grade_started.elapsed().as_secs_f64() * 1000.0;
         if let Some(overlay) = mask_overlay {
             // The overlay tints the *presented* frame: grade first, then
             // composite, so the tint colour is not pushed through the kernel.
@@ -2839,7 +2910,9 @@ fn render_image_path(
         let image = crate::studio::surface_to_rgba(&surface)?;
         return Ok(RenderedRgba {
             image: Arc::new(image),
-            backend: grade_backend_report(backend),
+            backend: grade_backend_report(backend)
+                .with_clip_props(props_backend)
+                .with_stage_timings(decode_ms, Some(grade_ms)),
             view,
         });
     }
@@ -2850,12 +2923,14 @@ fn render_image_path(
         time_bits: None,
         size,
     };
+    let decode_started = Instant::now();
     let proxy = cached_proxy(id, key, || {
         load_image_srgb_proxy(std::path::Path::new(path), size)
     })?;
+    let decode_ms = decode_started.elapsed().as_secs_f64() * 1000.0;
     Ok(RenderedRgba {
         image: proxy,
-        backend: cpu_backend(),
+        backend: cpu_backend().with_stage_timings(decode_ms, None),
         view,
     })
 }

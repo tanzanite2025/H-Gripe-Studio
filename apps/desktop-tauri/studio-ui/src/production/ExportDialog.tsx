@@ -40,10 +40,19 @@ type ExportState =
       durationSec: number;
       gradedFrameCount: number;
       gradeBackend: "cpu" | "gpu" | null;
+      propsFrameCount: number;
+      propsBackend: "cpu" | "gpu" | null;
+      propsFallbackReason: string | null;
       encodeDevice: string | null;
       encodeFallbackReason: string | null;
       audioClipCount: number;
       audioSkippedReason: string | null;
+      timings: {
+        decode: number;
+        props: number;
+        grade: number;
+        encode: number;
+      };
     }
   | { phase: "error"; message: string };
 
@@ -121,10 +130,19 @@ export function ExportDialog({
         durationSec: result.duration_sec,
         gradedFrameCount: result.graded_frame_count ?? 0,
         gradeBackend: result.grade_backend ?? null,
+        propsFrameCount: result.props_frame_count ?? 0,
+        propsBackend: result.props_backend ?? null,
+        propsFallbackReason: result.props_fallback_reason ?? null,
         encodeDevice: result.encode_device ?? null,
         encodeFallbackReason: result.encode_fallback_reason ?? null,
         audioClipCount: result.audio_clip_count ?? 0,
         audioSkippedReason: result.audio_skipped_reason ?? null,
+        timings: {
+          decode: result.decode_time_ms ?? 0,
+          props: result.props_time_ms ?? 0,
+          grade: result.grade_time_ms ?? 0,
+          encode: result.encode_time_ms ?? 0,
+        },
       });
     } catch (err) {
       setState({ phase: "error", message: String(err) });
@@ -217,6 +235,15 @@ export function ExportDialog({
                   })}
                 </>
               ) : null}
+              {state.propsFrameCount > 0 && state.propsBackend ? (
+                <>
+                  {" · "}
+                  {t("export.propsNote", {
+                    n: state.propsFrameCount,
+                    backend: state.propsBackend,
+                  })}
+                </>
+              ) : null}
               {state.encodeDevice === "ffmpeg_hw" ? (
                 <>
                   {" · "}
@@ -229,6 +256,18 @@ export function ExportDialog({
                   {t("export.audioNote", { n: state.audioClipCount })}
                 </>
               ) : null}
+              {" · "}
+              {t("export.stageTiming", {
+                decode: state.timings.decode.toFixed(1),
+                props: state.timings.props.toFixed(1),
+                grade: state.timings.grade.toFixed(1),
+                encode: state.timings.encode.toFixed(1),
+              })}
+            </p>
+          ) : null}
+          {state.phase === "done" && state.propsFallbackReason ? (
+            <p className="export-warning">
+              {t("export.propsFallback", { reason: state.propsFallbackReason })}
             </p>
           ) : null}
           {state.phase === "done" && state.encodeFallbackReason && device === "gpu" ? (

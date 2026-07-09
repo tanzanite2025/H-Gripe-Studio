@@ -31,6 +31,12 @@ export interface ViewportBackend {
   /** Human-readable device detail (adapter name + backend) when known. */
   detail?: string;
   fallback_reason?: string;
+  decode_processing_time_ms?: number;
+  props_backend?: "cpu" | "gpu";
+  props_backend_detail?: string;
+  props_fallback_reason?: string;
+  props_processing_time_ms?: number;
+  grade_processing_time_ms?: number;
 }
 
 export interface ViewportDescriptor {

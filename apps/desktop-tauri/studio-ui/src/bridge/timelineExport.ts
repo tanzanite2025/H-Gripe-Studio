@@ -30,6 +30,11 @@ export interface TimelineExportResult {
   duration_sec: number;
   /** Frames graded before the encode (0 when no clip carried a doc). */
   graded_frame_count: number;
+  /** Frames with a non-identity resolved clip-property document. */
+  props_frame_count: number;
+  props_backend?: "cpu" | "gpu";
+  props_backend_detail?: string;
+  props_fallback_reason?: string;
   /** Backend that ran the grade kernel (`cpu` / `gpu`), when frames were graded. */
   grade_backend?: "cpu" | "gpu";
   /** Encode device (shared DeviceReport vocabulary, e.g. ffmpeg_sw / ffmpeg_hw). */
@@ -40,6 +45,10 @@ export interface TimelineExportResult {
   audio_clip_count: number;
   /** Why the export stayed video-only although audio clips were sent. */
   audio_skipped_reason?: string;
+  decode_time_ms: number;
+  props_time_ms: number;
+  grade_time_ms: number;
+  encode_time_ms: number;
 }
 
 /**

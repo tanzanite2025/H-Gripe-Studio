@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MediaAsset } from "./mediaBin";
 import { ProductionDrawer, type ProductionDrawerProps } from "./ProductionDrawer";
+import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import type { TimelineModel } from "./timeline";
 
 // The program monitor needs a real viewport host (ResizeObserver, frame
@@ -35,6 +36,13 @@ const timeline: TimelineModel = {
     },
   ],
 };
+
+beforeAll(() => {
+  Object.defineProperty(window, "PointerEvent", {
+    configurable: true,
+    value: MouseEvent,
+  });
+});
 
 function drawerProps(overrides: Partial<ProductionDrawerProps> = {}): ProductionDrawerProps {
   return {
@@ -184,5 +192,86 @@ describe("ProductionDrawer clip context menu", () => {
     const menu = container.querySelector(".production-clip-menu")!;
     const labels = Array.from(menu.querySelectorAll("button")).map((b) => b.textContent);
     expect(labels.some((l) => l?.includes("Split to layers"))).toBe(false);
+  });
+
+  it("renders grouped keyframe diamonds for the selected clip and double-click deletes them", () => {
+    const onSetClipProperties = vi.fn();
+    const clipProperties: ClipProperties = {
+      ...defaultClipProperties(),
+      tracks: {
+        "transform.scalePct": [{ t: 2, v: 80 }],
+        "transform.opacityPct": [{ t: 2, v: 50 }],
+        "crop.leftPct": [{ t: 4, v: 10 }],
+      },
+    };
+    const { container } = render(
+      <ProductionDrawer
+        {...drawerProps({
+          selectedClipId: "clip-video",
+          clipProperties,
+          onSetClipProperties,
+        })}
+      />,
+    );
+    const diamonds = container.querySelectorAll<HTMLElement>(".production-clip-keyframe");
+    expect(diamonds).toHaveLength(2);
+    expect(diamonds[0].getAttribute("aria-label")).toContain("2 keyframe(s)");
+
+    fireEvent.doubleClick(diamonds[0]);
+    expect(onSetClipProperties).toHaveBeenCalledTimes(1);
+    const next = onSetClipProperties.mock.calls[0][1] as ClipProperties;
+    expect(next.tracks?.["transform.scalePct"]).toBeUndefined();
+    expect(next.tracks?.["transform.opacityPct"]).toBeUndefined();
+    expect(next.tracks?.["crop.leftPct"]).toEqual([{ t: 4, v: 10 }]);
+  });
+
+  it("drags a keyframe group and Shift-snaps it to timeline snap points", () => {
+    const onSetClipProperties = vi.fn();
+    const clipProperties: ClipProperties = {
+      ...defaultClipProperties(),
+      tracks: {
+        "transform.scalePct": [{ t: 2, v: 80, interp: "hold" }],
+      },
+    };
+    const { container } = render(
+      <ProductionDrawer
+        {...drawerProps({
+          selectedClipId: "clip-video",
+          clipProperties,
+          onSetClipProperties,
+        })}
+      />,
+    );
+    const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+      (el) => el.textContent?.includes("a.mp4"),
+    )!;
+    clip.getBoundingClientRect = () =>
+      ({
+        left: 100,
+        right: 300,
+        width: 200,
+        top: 0,
+        bottom: 24,
+        height: 24,
+        x: 100,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const diamond = clip.querySelector<HTMLElement>(".production-clip-keyframe")!;
+
+    fireEvent.pointerDown(diamond, { button: 0, pointerId: 7, clientX: 140 });
+    fireEvent.pointerMove(diamond, {
+      pointerId: 7,
+      clientX: 256,
+      shiftKey: true,
+    });
+    fireEvent.pointerUp(diamond, { pointerId: 7 });
+
+    expect(onSetClipProperties).toHaveBeenCalled();
+    const lastCall = onSetClipProperties.mock.calls[onSetClipProperties.mock.calls.length - 1];
+    const next = lastCall[1] as ClipProperties;
+    expect(next.tracks?.["transform.scalePct"]).toEqual([
+      { t: 8, v: 80, interp: "hold" },
+    ]);
   });
 });

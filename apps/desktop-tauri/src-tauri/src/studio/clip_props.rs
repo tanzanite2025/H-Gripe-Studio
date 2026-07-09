@@ -117,7 +117,13 @@ impl ResolvedClipProps {
 }
 
 pub(crate) fn parse_clip_props_doc(json: &str) -> Result<ClipPropsDoc, String> {
-    serde_json::from_str(json).map_err(|err| format!("invalid clip props doc: {err}"))
+    let mut doc: ClipPropsDoc =
+        serde_json::from_str(json).map_err(|err| format!("invalid clip props doc: {err}"))?;
+    for keys in doc.tracks.values_mut() {
+        keys.retain(|key| key.t.is_finite() && key.v.is_finite());
+        keys.sort_by(|a, b| a.t.total_cmp(&b.t));
+    }
+    Ok(doc)
 }
 
 fn cubic_bezier_axis(t: f64, p1: f64, p2: f64) -> f64 {
@@ -163,7 +169,7 @@ fn evaluate_track(keys: &[Keyframe], static_value: f64, t: f64) -> f64 {
     let mut sorted: Vec<Keyframe> = keys
         .iter()
         .copied()
-        .filter(|k| k.t.is_finite() && k.v.is_finite())
+        .filter(|key| key.t.is_finite() && key.v.is_finite())
         .collect();
     if sorted.is_empty() {
         return static_value;
@@ -191,6 +197,121 @@ fn evaluate_track(keys: &[Keyframe], static_value: f64, t: f64) -> f64 {
         }
     }
     last.v
+}
+
+/// Parse-once evaluator with one monotonic cursor per property track. Forward
+/// playback advances each cursor through a key at most once; a backward seek
+/// resets the small fixed set of cursors without reparsing or resorting.
+#[derive(Debug, Clone)]
+pub(crate) struct ClipPropsEvaluator {
+    doc: ClipPropsDoc,
+    cursors: BTreeMap<String, usize>,
+    last_t: Option<f64>,
+}
+
+impl ClipPropsEvaluator {
+    pub(crate) fn new(doc: ClipPropsDoc) -> Self {
+        let cursors = doc.tracks.keys().map(|path| (path.clone(), 0)).collect();
+        Self {
+            doc,
+            cursors,
+            last_t: None,
+        }
+    }
+
+    pub(crate) fn parse(json: &str) -> Result<Self, String> {
+        parse_clip_props_doc(json).map(Self::new)
+    }
+
+    fn track_value(&mut self, path: &str, static_value: f64, t: f64) -> f64 {
+        let Some(keys) = self.doc.tracks.get(path) else {
+            return static_value;
+        };
+        if keys.is_empty() {
+            return static_value;
+        }
+        let first = keys[0];
+        let last = keys[keys.len() - 1];
+        if t <= first.t {
+            *self.cursors.get_mut(path).expect("cursor for parsed track") = 0;
+            return first.v;
+        }
+        if t >= last.t {
+            *self.cursors.get_mut(path).expect("cursor for parsed track") = keys.len() - 1;
+            return last.v;
+        }
+        let cursor = self.cursors.get_mut(path).expect("cursor for parsed track");
+        *cursor = (*cursor).min(keys.len() - 2);
+        while *cursor + 1 < keys.len() && t > keys[*cursor + 1].t {
+            *cursor += 1;
+        }
+        let a = keys[*cursor];
+        let b = keys[*cursor + 1];
+        if b.t <= a.t || t == b.t {
+            return b.v;
+        }
+        let alpha = (t - a.t) / (b.t - a.t);
+        a.v + (b.v - a.v) * segment_progress(a, alpha)
+    }
+
+    pub(crate) fn resolve(&mut self, t: f64) -> ResolvedClipProps {
+        if self.last_t.is_some_and(|last| t < last) {
+            self.cursors.values_mut().for_each(|cursor| *cursor = 0);
+        }
+        self.last_t = Some(t);
+        let tr = self.doc.transform;
+        let cr = self.doc.crop;
+        let left_pct = clamp_pct(finite(
+            self.track_value("crop.leftPct", cr.left_pct, t),
+            0.0,
+        ));
+        let top_pct = clamp_pct(finite(self.track_value("crop.topPct", cr.top_pct, t), 0.0));
+        ResolvedClipProps {
+            transform: ClipTransform {
+                position: Vec2 {
+                    x: finite(
+                        self.track_value("transform.position.x", tr.position.x, t),
+                        0.0,
+                    ),
+                    y: finite(
+                        self.track_value("transform.position.y", tr.position.y, t),
+                        0.0,
+                    ),
+                },
+                anchor: Vec2 {
+                    x: finite(self.track_value("transform.anchor.x", tr.anchor.x, t), 0.0),
+                    y: finite(self.track_value("transform.anchor.y", tr.anchor.y, t), 0.0),
+                },
+                scale_pct: finite(
+                    self.track_value("transform.scalePct", tr.scale_pct, t),
+                    100.0,
+                )
+                .clamp(MIN_SCALE_PCT, MAX_SCALE_PCT),
+                rotation_deg: finite(
+                    self.track_value("transform.rotationDeg", tr.rotation_deg, t),
+                    0.0,
+                ),
+                opacity_pct: clamp_pct(finite(
+                    self.track_value("transform.opacityPct", tr.opacity_pct, t),
+                    100.0,
+                )),
+            },
+            crop: ClipCrop {
+                left_pct,
+                top_pct,
+                right_pct: clamp_pct(finite(
+                    self.track_value("crop.rightPct", cr.right_pct, t),
+                    0.0,
+                ))
+                .min(100.0 - left_pct),
+                bottom_pct: clamp_pct(finite(
+                    self.track_value("crop.bottomPct", cr.bottom_pct, t),
+                    0.0,
+                ))
+                .min(100.0 - top_pct),
+            },
+        }
+    }
 }
 
 fn track_value(doc: &ClipPropsDoc, path: &str, static_value: f64, t: f64) -> f64 {
@@ -344,6 +465,34 @@ mod tests {
             resolve_clip_prop_at(&d, "transform.scalePct", 99.0),
             Some(50.0)
         );
+    }
+
+    #[test]
+    fn monotonic_evaluator_matches_random_access_and_resets_after_a_seek() {
+        let raw = r#"{
+            "transform": {
+                "position": {"x": 0, "y": 0}, "anchor": {"x": 0, "y": 0},
+                "scalePct": 100, "rotationDeg": 0, "opacityPct": 100
+            },
+            "crop": {"leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0},
+            "tracks": {
+                "transform.scalePct": [
+                    {"t": 3, "v": 25},
+                    {"t": 0, "v": 100},
+                    {"t": 1, "v": 75}
+                ],
+                "transform.opacityPct": [
+                    {"t": 0, "v": 100},
+                    {"t": 2, "v": 50, "interp": "hold"},
+                    {"t": 4, "v": 0}
+                ]
+            }
+        }"#;
+        let parsed = doc(raw);
+        let mut evaluator = ClipPropsEvaluator::parse(raw).expect("evaluator parses");
+        for t in [0.0, 0.5, 1.0, 2.5, 4.0, 1.5, 3.5] {
+            assert_eq!(evaluator.resolve(t), resolve_clip_props_at(&parsed, t));
+        }
     }
 
     #[test]

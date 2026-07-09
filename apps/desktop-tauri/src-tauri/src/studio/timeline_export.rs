@@ -11,6 +11,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::time::Instant;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -18,8 +19,8 @@ use serde_json::{json, Value};
 use hgripe_grade::GradeSurface;
 
 use super::audio_mix::TimelineAudioSegment;
-use super::clip_props::{parse_clip_props_doc, resolve_clip_props_at, ClipPropsDoc};
-use super::clip_props_raster::apply_clip_props;
+use super::clip_props::ClipPropsEvaluator;
+use super::clip_props_raster::{apply_clip_props_preferred, ClipPropsBackend};
 use super::grade::{apply_grade_doc, grade_space, parse_grade_doc, GradeBackend};
 use super::graph::StudioGraphNode;
 use super::studio_image;
@@ -34,6 +35,17 @@ pub(crate) struct TimelineExportResult {
     pub(crate) duration_sec: f64,
     /// Frames graded before the encode (0 when no clip carried a doc).
     pub(crate) graded_frame_count: u64,
+    /// Frames with a non-identity resolved clip-property document.
+    pub(crate) props_frame_count: u64,
+    /// Backend that ran the clip-property compositor (`cpu` / `gpu`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) props_backend: Option<&'static str>,
+    /// Human-readable GPU adapter detail when the property compositor ran there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) props_backend_detail: Option<String>,
+    /// Why property compositing fell back to CPU, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) props_fallback_reason: Option<String>,
     /// Backend that ran the grade kernel (`cpu` / `gpu`), when frames were
     /// graded. Mirrors the preview's backend report (fallback contract).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +65,10 @@ pub(crate) struct TimelineExportResult {
     /// Why the export stayed video-only although audio clips were sent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) audio_skipped_reason: Option<String>,
+    pub(crate) decode_time_ms: f64,
+    pub(crate) props_time_ms: f64,
+    pub(crate) grade_time_ms: f64,
+    pub(crate) encode_time_ms: f64,
 }
 
 /// Substitute decoded video frames into the frame sequence: each frame with
@@ -109,12 +125,19 @@ pub(super) fn resolve_video_frames(
 /// doc string; identity resolves pass the frame through untouched; frames
 /// resolving to the same quantized values reuse one rendered file
 /// (CLIP_KEYFRAME_MOTION_PIPELINE_PLAN.md Phase 2).
+#[derive(Debug)]
+pub(super) struct PropFrames {
+    pub(super) frames: Vec<String>,
+    pub(super) props_frame_count: u64,
+    pub(super) backend: Option<ClipPropsBackend>,
+}
+
 pub(super) fn resolve_prop_frames(
     frames: Vec<String>,
     prop_docs: &[Option<String>],
     prop_times: &[f64],
     props_dir: &Path,
-) -> Result<Vec<String>, String> {
+) -> Result<PropFrames, String> {
     if prop_docs.len() != frames.len() {
         return Err(format!(
             "prop_docs length {} does not match frames length {}",
@@ -129,31 +152,32 @@ pub(super) fn resolve_prop_frames(
             frames.len()
         ));
     }
-    let mut parsed: HashMap<&str, ClipPropsDoc> = HashMap::new();
+    let mut parsed: HashMap<&str, ClipPropsEvaluator> = HashMap::new();
     let mut rendered: HashMap<(String, String), String> = HashMap::new();
     let mut out = Vec::with_capacity(frames.len());
+    let mut props_frame_count = 0u64;
+    let mut backend: Option<ClipPropsBackend> = None;
     for (i, path) in frames.into_iter().enumerate() {
         let Some(doc_str) = prop_docs[i].as_deref().filter(|d| !d.trim().is_empty()) else {
             out.push(path);
             continue;
         };
-        let doc = match parsed.get(doc_str) {
-            Some(doc) => doc.clone(),
-            None => {
-                let doc = parse_clip_props_doc(doc_str)?;
-                parsed.insert(doc_str, doc.clone());
-                doc
+        let evaluator = match parsed.entry(doc_str) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(ClipPropsEvaluator::parse(doc_str)?)
             }
         };
         let t = prop_times[i];
         if !t.is_finite() || t < 0.0 {
             return Err(format!("invalid prop time {t} at frame {i}"));
         }
-        let resolved = resolve_clip_props_at(&doc, t);
+        let resolved = evaluator.resolve(t);
         if resolved.is_identity() {
             out.push(path);
             continue;
         }
+        props_frame_count += 1;
         // Quantize the resolved values (1e-4) so a slow animation on a still
         // only renders the frames whose values actually change.
         let quantized = {
@@ -184,7 +208,14 @@ pub(super) fn resolve_prop_frames(
             Path::new(path.trim()),
             studio_image::DEFAULT_MAX_DECODE_PIXELS,
         )?;
-        let composited = apply_clip_props(&loaded.image, &resolved);
+        let (composited, frame_backend) = apply_clip_props_preferred(&loaded.image, &resolved);
+        match &backend {
+            None => backend = Some(frame_backend),
+            Some(current) if current.name == "gpu" && frame_backend.name == "cpu" => {
+                backend = Some(frame_backend)
+            }
+            _ => {}
+        }
         std::fs::create_dir_all(props_dir)
             .map_err(|err| format!("failed to create {}: {err}", props_dir.display()))?;
         let out_path = props_dir.join(format!("props_{}.png", rendered.len()));
@@ -193,7 +224,11 @@ pub(super) fn resolve_prop_frames(
         rendered.insert(key, out_str.clone());
         out.push(out_str);
     }
-    Ok(out)
+    Ok(PropFrames {
+        frames: out,
+        props_frame_count,
+        backend,
+    })
 }
 
 /// Frames ready for the encoder, plus the grading backend report.
@@ -293,8 +328,10 @@ pub(crate) fn timeline_export(
     prop_times: Option<Vec<f64>>,
     audio: Option<Vec<TimelineAudioSegment>>,
 ) -> Result<TimelineExportResult, String> {
+    let mut decode_time_ms = 0.0;
     let frames = match frame_times {
         Some(times) if times.iter().any(Option::is_some) => {
+            let started = Instant::now();
             let frames_dir = crate::runtime_paths()?.output_dir.join(format!(
                 "timeline_frames_{}",
                 std::time::SystemTime::now()
@@ -302,12 +339,16 @@ pub(crate) fn timeline_export(
                     .map(|d| d.as_millis())
                     .unwrap_or(0)
             ));
-            resolve_video_frames(frames, &times, &frames_dir)?
+            let frames = resolve_video_frames(frames, &times, &frames_dir)?;
+            decode_time_ms = started.elapsed().as_secs_f64() * 1000.0;
+            frames
         }
         _ => frames,
     };
-    let frames = match (prop_docs, prop_times) {
+    let mut props_time_ms = 0.0;
+    let props = match (prop_docs, prop_times) {
         (Some(docs), Some(times)) if docs.iter().any(Option::is_some) => {
+            let started = Instant::now();
             let props_dir = crate::runtime_paths()?.output_dir.join(format!(
                 "timeline_props_{}",
                 std::time::SystemTime::now()
@@ -315,12 +356,25 @@ pub(crate) fn timeline_export(
                     .map(|d| d.as_millis())
                     .unwrap_or(0)
             ));
-            resolve_prop_frames(frames, &docs, &times, &props_dir)?
+            let props = resolve_prop_frames(frames, &docs, &times, &props_dir)?;
+            props_time_ms = started.elapsed().as_secs_f64() * 1000.0;
+            props
         }
-        _ => frames,
+        _ => PropFrames {
+            frames,
+            props_frame_count: 0,
+            backend: None,
+        },
     };
+    let PropFrames {
+        frames,
+        props_frame_count,
+        backend: props_backend,
+    } = props;
+    let mut grade_time_ms = 0.0;
     let graded = match grade_docs {
         Some(docs) if docs.iter().any(|d| d.is_some()) => {
+            let started = Instant::now();
             let graded_dir = crate::runtime_paths()?.output_dir.join(format!(
                 "timeline_graded_{}",
                 std::time::SystemTime::now()
@@ -328,7 +382,9 @@ pub(crate) fn timeline_export(
                     .map(|d| d.as_millis())
                     .unwrap_or(0)
             ));
-            resolve_graded_frames(frames, &docs, &graded_dir)?
+            let graded = resolve_graded_frames(frames, &docs, &graded_dir)?;
+            grade_time_ms = started.elapsed().as_secs_f64() * 1000.0;
+            graded
         }
         _ => GradedFrames {
             frames,
@@ -360,6 +416,7 @@ pub(crate) fn timeline_export(
     let mut inputs: BTreeMap<String, Value> = BTreeMap::new();
     inputs.insert("frames".to_string(), json!(frames));
 
+    let encode_started = Instant::now();
     let outputs = execute_studio_video_assemble(&node, &inputs)?;
     let video_path = outputs
         .get("video")
@@ -390,6 +447,7 @@ pub(crate) fn timeline_export(
             Err(reason) => audio_skipped_reason = Some(reason),
         }
     }
+    let encode_time_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
 
     Ok(TimelineExportResult {
         video_path,
@@ -399,12 +457,20 @@ pub(crate) fn timeline_export(
             .unwrap_or(0),
         duration_sec,
         graded_frame_count,
+        props_frame_count,
+        props_backend: props_backend.as_ref().map(|b| b.name),
+        props_backend_detail: props_backend.as_ref().and_then(|b| b.detail.clone()),
+        props_fallback_reason: props_backend.and_then(|b| b.fallback_reason),
         grade_backend: backend.as_ref().map(|b| b.name),
         grade_backend_fallback_reason: backend.and_then(|b| b.fallback_reason),
         encode_device,
         encode_fallback_reason,
         audio_clip_count,
         audio_skipped_reason,
+        decode_time_ms,
+        props_time_ms,
+        grade_time_ms,
+        encode_time_ms,
     })
 }
 
@@ -618,16 +684,24 @@ mod tests {
         // so all three frames share one composited file.
         let doc = r#"{"transform": {"position": {"x": 0, "y": 0}, "anchor": {"x": 0, "y": 0}, "scalePct": 100, "rotationDeg": 0, "opacityPct": 50}, "crop": {"leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0}}"#.to_string();
         let props_dir = dir.join("props");
-        let out = resolve_prop_frames(
+        let result = resolve_prop_frames(
             vec![src_str.clone(), src_str.clone(), src_str.clone()],
             &[Some(doc.clone()), Some(doc), None],
             &[0.0, 0.5, 1.0],
             &props_dir,
         )
         .expect("prop compositing succeeds");
+        let out = result.frames;
         assert_eq!(out[0], out[1], "equal resolves reuse one rendered file");
         assert_ne!(out[0], src_str);
         assert_eq!(out[2], src_str, "frames without a doc pass through");
+        assert_eq!(result.props_frame_count, 2);
+        let backend = result.backend.expect("composited frames report a backend");
+        assert!(matches!(backend.name, "cpu" | "gpu"));
+        assert!(
+            backend.name == "gpu" || backend.fallback_reason.is_some(),
+            "a CPU fallback must carry its reason"
+        );
         let composited = image::open(&out[0]).unwrap().to_rgba8();
         assert!(
             composited.get_pixel(0, 0).0[3] < 255,
@@ -636,14 +710,16 @@ mod tests {
 
         // Identity / empty docs never render a composited copy.
         let identity = r#"{"transform": {"position": {"x": 0, "y": 0}, "anchor": {"x": 0, "y": 0}, "scalePct": 100, "rotationDeg": 0, "opacityPct": 100}, "crop": {"leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0}}"#.to_string();
-        let out = resolve_prop_frames(
+        let result = resolve_prop_frames(
             vec![src_str.clone(), src_str.clone()],
             &[Some(String::new()), Some(identity)],
             &[0.0, 0.5],
             &props_dir,
         )
         .expect("identity docs pass through");
-        assert_eq!(out, vec![src_str.clone(), src_str.clone()]);
+        assert_eq!(result.frames, vec![src_str.clone(), src_str.clone()]);
+        assert_eq!(result.props_frame_count, 0);
+        assert!(result.backend.is_none());
 
         // Misaligned inputs are rejected.
         let err =
@@ -765,14 +841,14 @@ mod tests {
         let time = 0.5;
 
         // Export path: composite the working surface and write the frame file.
-        let out = resolve_prop_frames(
+        let result = resolve_prop_frames(
             vec![src_str.clone()],
             &[Some(doc_str.to_string())],
             &[time],
             &dir.join("props"),
         )
         .expect("prop compositing succeeds");
-        let exported = image::open(&out[0]).unwrap().to_rgba8();
+        let exported = image::open(&result.frames[0]).unwrap().to_rgba8();
 
         // Preview path: composite the viewport's sRGB proxy with the same
         // resolved document (full resolution, so the coordinate scale is 1).

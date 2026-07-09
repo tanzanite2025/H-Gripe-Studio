@@ -14,9 +14,46 @@
 //!   `opacity` multiplies the sampled alpha.
 
 use image::RgbaImage;
+use std::time::Instant;
 
 use super::clip_props::ResolvedClipProps;
+use super::clip_props_gpu::apply_clip_props_gpu;
 use super::working_image::{narrow, widen, WorkingImage, WorkingSpace};
+
+#[derive(Debug, Clone)]
+pub(crate) struct ClipPropsBackend {
+    pub(crate) name: &'static str,
+    pub(crate) detail: Option<String>,
+    pub(crate) fallback_reason: Option<String>,
+    pub(crate) processing_time_ms: f64,
+}
+
+pub(super) fn apply_clip_props_preferred(
+    image: &WorkingImage,
+    props: &ResolvedClipProps,
+) -> (WorkingImage, ClipPropsBackend) {
+    let started = Instant::now();
+    match apply_clip_props_gpu(image, props) {
+        Ok((image, detail)) => (
+            image,
+            ClipPropsBackend {
+                name: "gpu",
+                detail: Some(detail),
+                fallback_reason: None,
+                processing_time_ms: started.elapsed().as_secs_f64() * 1000.0,
+            },
+        ),
+        Err(reason) => (
+            apply_clip_props(image, props),
+            ClipPropsBackend {
+                name: "cpu",
+                detail: None,
+                fallback_reason: Some(reason),
+                processing_time_ms: started.elapsed().as_secs_f64() * 1000.0,
+            },
+        ),
+    }
+}
 
 /// Apply `props` to `image`, producing a same-size canvas. Identity documents
 /// must be skipped by the caller ([`ResolvedClipProps::is_identity`]); a zero
@@ -96,6 +133,26 @@ pub(crate) fn apply_clip_props_srgb_proxy(
     let out = apply_clip_props(&working, props);
     let bytes: Vec<u8> = out.pixels.iter().map(|&v| narrow(v)).collect();
     RgbaImage::from_raw(w, h, bytes).expect("same-size canvas")
+}
+
+pub(crate) fn apply_clip_props_srgb_proxy_preferred(
+    proxy: &RgbaImage,
+    props: &ResolvedClipProps,
+) -> (RgbaImage, ClipPropsBackend) {
+    let (w, h) = proxy.dimensions();
+    let working = WorkingImage {
+        width: w,
+        height: h,
+        pixels: proxy.as_raw().iter().map(|&v| widen(v)).collect(),
+        space: WorkingSpace::Srgb,
+        icc: None,
+    };
+    let (out, backend) = apply_clip_props_preferred(&working, props);
+    let bytes: Vec<u8> = out.pixels.iter().map(|&v| narrow(v)).collect();
+    (
+        RgbaImage::from_raw(w, h, bytes).expect("same-size canvas"),
+        backend,
+    )
 }
 
 /// Bilinear sample at continuous source coordinates (pixel centres at .5),

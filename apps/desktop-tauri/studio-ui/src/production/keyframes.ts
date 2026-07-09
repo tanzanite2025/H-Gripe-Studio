@@ -277,6 +277,69 @@ export function keyframeAt(
   return keyframesFor(props, path).find((k) => Math.abs(k.t - t) <= eps);
 }
 
+export interface TimelineKeyframeGroup {
+  t: number;
+  count: number;
+}
+
+/** Property keyframes collapsed by time for the selected clip's lane. */
+export function timelineKeyframeGroups(
+  props: ClipProperties,
+  eps: number,
+): TimelineKeyframeGroup[] {
+  const times = CLIP_PROP_PATHS.flatMap((path) => keyframesFor(props, path).map((key) => key.t))
+    .sort((a, b) => a - b);
+  const groups: TimelineKeyframeGroup[] = [];
+  for (const t of times) {
+    const group = groups[groups.length - 1];
+    if (group && Math.abs(group.t - t) <= eps) {
+      group.count += 1;
+    } else {
+      groups.push({ t, count: 1 });
+    }
+  }
+  return groups;
+}
+
+/** Remove every property keyframe grouped at the given clip-local time. */
+export function removeKeyframesAtTime(
+  props: ClipProperties,
+  t: number,
+  eps: number,
+): ClipProperties {
+  let next = props;
+  for (const path of CLIP_PROP_PATHS) {
+    const keys = keyframesFor(next, path);
+    const remaining = keys.filter((key) => Math.abs(key.t - t) > eps);
+    if (remaining.length !== keys.length) next = withTrack(next, path, remaining);
+  }
+  return next;
+}
+
+/** Retime every property keyframe grouped at `fromT`, preserving its value/easing. */
+export function moveKeyframesAtTime(
+  props: ClipProperties,
+  fromT: number,
+  toT: number,
+  eps: number,
+): ClipProperties {
+  let next = props;
+  for (const path of CLIP_PROP_PATHS) {
+    const keys = keyframesFor(next, path);
+    const moving = keys.find((key) => Math.abs(key.t - fromT) <= eps);
+    if (!moving) continue;
+    const kept = keys.filter(
+      (key) => Math.abs(key.t - fromT) > eps && Math.abs(key.t - toT) > eps,
+    );
+    next = withTrack(
+      next,
+      path,
+      [...kept, { ...moving, t: toT }].sort((a, b) => a.t - b.t),
+    );
+  }
+  return next;
+}
+
 /** Change the interpolation leaving the keyframe at `t`. */
 export function setKeyframeInterpolationAt(
   props: ClipProperties,
