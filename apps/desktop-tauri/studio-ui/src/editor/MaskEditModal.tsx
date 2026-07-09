@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import { useViewportUnderlay, type ViewportUnderlaySource } from "../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW } from "../viewport/view";
 import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
-import { registerResource } from "../bridge/files";
+import { probeImageDims, registerResource } from "../bridge/files";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -83,12 +83,7 @@ import { ContextActionBar } from "./maskEditModal/ContextActionBar";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import { opsAlphaBounds } from "./maskMorphology";
 
-// Default logical canvas size when no backing image is available (browser
-// preview mocks the backend, so the connected image often has no decodable
-// thumbnail). Edits are recorded in this pixel space and the backend rasterises
-// them against the real image on run.
-const DEFAULT_W = 960;
-const DEFAULT_H = 640;
+const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
 const SELECTION_TOP_TOOLS = ["rect", "ellipse", "magnetic_lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
@@ -409,7 +404,7 @@ export function MaskEditModal({
   // `dims` is derived from the viewport hook below; the scene reads the
   // previous render's value through this ref (a selection is only made after
   // the frame — and so `dims` — has settled).
-  const frameDimsRef = useRef({ w: DEFAULT_W, h: DEFAULT_H });
+  const frameDimsRef = useRef(state.current.canvas ?? EMPTY_DOCUMENT_DIMS);
   const frameDims = frameDimsRef.current;
   const viewportOverlayScene = useMemo<ViewportOverlayScene | null>(
     () =>
@@ -429,7 +424,8 @@ export function MaskEditModal({
   );
   const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
   const plainSource = imagePath ?? undefined;
-  const compositeDims = frameDimsRef.current;
+  const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
+  const compositeDims = state.current.canvas ?? sourceDims ?? frameDimsRef.current;
   const needsCompositeSource = workspace === "image" && Boolean(imagePath) && imageDocumentNeedsComposite(state.current);
   const compositeDocument = useMemo(
     () => withActiveLayerDraftTransform(state.current, needsCompositeSource ? moveDraft : null),
@@ -438,17 +434,30 @@ export function MaskEditModal({
   const [compositeResourceId, setCompositeResourceId] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    if (!needsCompositeSource || !imagePath) {
+    if (!imagePath) {
       setCompositeResourceId(null);
+      setSourceDims(null);
       return;
     }
-    registerResource(imagePath).then((resource) => {
-      if (!cancelled) setCompositeResourceId(resource?.id ?? null);
-    });
+    setCompositeResourceId(null);
+    setSourceDims(null);
+    void (async () => {
+      const resource = await registerResource(imagePath);
+      if (cancelled) return;
+      setCompositeResourceId(resource?.id ?? null);
+      if (resource?.width && resource.height) {
+        setSourceDims({ w: resource.width, h: resource.height });
+        return;
+      }
+      const probed = await probeImageDims(imagePath);
+      if (!cancelled) {
+        setSourceDims(probed?.width && probed.height ? { w: probed.width, h: probed.height } : null);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [needsCompositeSource, imagePath]);
+  }, [imagePath]);
   const source = useMemo<ViewportUnderlaySource | undefined>(() => {
     if (!needsCompositeSource) return plainSource;
     if (!compositeResourceId) return undefined;
@@ -557,7 +566,8 @@ export function MaskEditModal({
   const underlay = viewport.underlay;
   const presented = viewport.presented;
   const frameView = viewport.frameView;
-  const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
+  const documentDims = state.current.canvas ?? sourceDims ?? viewport.dims;
+  const dims = documentDims ?? EMPTY_DOCUMENT_DIMS;
   frameDimsRef.current = dims;
   const activeStudioTarget = useMemo(() => {
     const docRef = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
@@ -1411,11 +1421,11 @@ export function MaskEditModal({
           <MaskStage
             canvasRef={canvasRef}
             dims={dims}
+            documentAvailable={documentDims != null}
             view={view}
             underlay={frameHidden ? null : (gradedUnderlay ?? underlay)}
             presented={presented}
             frameHidden={frameHidden}
-            fallbackDims={viewport.dims == null}
             cropView={cropView}
             underlayRef={underlayAnchorRef}
             frameView={frameView}

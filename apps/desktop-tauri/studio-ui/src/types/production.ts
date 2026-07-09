@@ -529,8 +529,8 @@ export function emptyMaskDocument(): MaskDocument {
   return { version: 3, layers: [emptyMaskLayer()], active: 0, matte_strokes: [], points: [], layerGroups: [] };
 }
 
-/** The layer new edits are recorded onto (always present, clamped). */
-export function activeLayer(doc: MaskDocument): MaskLayer {
+/** The layer new edits are recorded onto, when the document has one. */
+export function activeLayer(doc: MaskDocument): MaskLayer | undefined {
   return doc.layers[Math.min(Math.max(doc.active, 0), doc.layers.length - 1)];
 }
 
@@ -542,7 +542,7 @@ export function emptyLayerMask(): LayerMask {
 /** The active layer's target receiving new edits (`"mask"` only when the
  * active layer owns a mask attachment). */
 export function activeTargetKind(doc: MaskDocument): LayerTargetKind {
-  return doc.activeTarget === "mask" && activeLayer(doc).mask ? "mask" : "pixel";
+  return doc.activeTarget === "mask" && activeLayer(doc)?.mask ? "mask" : "pixel";
 }
 
 export function isPathOp(op: EditOp): op is PathOp {

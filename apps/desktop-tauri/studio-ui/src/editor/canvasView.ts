@@ -67,25 +67,16 @@ export function rotateTo(view: CanvasView, deg: number): CanvasView {
 }
 
 /**
- * Clamp the view: zoom into [MIN, MAX]; pan so the scaled canvas never pulls
- * an edge past the stage centre line (the surrounding letterbox shows,
- * PS-style) — at or below fit zoom the image stays centred and the pan
- * collapses to 0. `baseW`/`baseH` are the canvas's *untransformed* displayed
- * CSS size.
+ * Clamp only the zoom. Pan belongs to the workspace, not the finite document:
+ * keeping it unrestricted lets the document move freely across the
+ * surrounding pasteboard at every zoom level.
  */
-export function clampView(view: CanvasView, baseW: number, baseH: number): CanvasView {
+export function clampView(view: CanvasView, _baseW: number, _baseH: number): CanvasView {
   const zoom = Math.min(Math.max(view.zoom, MIN_ZOOM), MAX_ZOOM);
-  // The pan range opens up with zoom: none at or below fit, ramping until at
-  // 2× and beyond an image edge can be pulled all the way to the stage centre
-  // (`zoom / 2`), so the canvas beside it shows — PS scroll bounds.
-  const slack = Math.max(0, Math.min(zoom - 1, zoom / 2));
-  const maxX = baseW * slack;
-  const maxY = baseH * slack;
-  // `+ 0` normalises a clamped-to-`-0` pan so fit views compare equal.
   return {
     zoom,
-    panX: Math.min(Math.max(view.panX, -maxX), maxX) + 0,
-    panY: Math.min(Math.max(view.panY, -maxY), maxY) + 0,
+    panX: view.panX + 0,
+    panY: view.panY + 0,
     ...(view.rotate ? { rotate: view.rotate } : {}),
   };
 }
@@ -174,9 +165,14 @@ export function viewWindow(
   if (zoom <= 1) return IDENTITY_VIEW;
   const cx = 0.5 - view.panX / (baseW * view.zoom);
   const cy = 0.5 - view.panY / (baseH * view.zoom);
-  return clampViewportView({
+  const next = {
     zoom,
     panX: cx - 1 / (2 * zoom),
     panY: cy - 1 / (2 * zoom),
-  });
+  };
+  const windowSize = 1 / zoom;
+  if (next.panX < 0 || next.panY < 0 || next.panX + windowSize > 1 || next.panY + windowSize > 1) {
+    return IDENTITY_VIEW;
+  }
+  return clampViewportView(next);
 }

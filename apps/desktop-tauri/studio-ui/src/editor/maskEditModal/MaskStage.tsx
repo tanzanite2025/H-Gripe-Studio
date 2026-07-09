@@ -7,7 +7,6 @@
 
 import type { MutableRefObject, ReactNode } from "react";
 import type { ViewportBackend } from "../../bridge/viewport";
-import { useT } from "../../i18n";
 import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../../viewport/view";
 import { isFitView, viewTransform, type CanvasView } from "../canvasView";
@@ -16,6 +15,9 @@ import type { TransformParams } from "../maskEdit";
 interface MaskStageProps {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   dims: { w: number; h: number };
+  /** Whether a real document pixel size is known. The workspace remains
+   * available without one, but no arbitrary placeholder document is shown. */
+  documentAvailable: boolean;
   view: CanvasView;
   /** Presented underlay frame (a view window of the image), or null. */
   underlay: string | null;
@@ -39,9 +41,6 @@ interface MaskStageProps {
    * shows the transparency checkerboard instead of the source frame. */
   /** True only when no visible source-backed layer remains. */
   frameHidden?: boolean;
-  /** `dims` is the default fallback space (no decodable backing image):
-   * edits record in it and rasterise against the real image on run. */
-  fallbackDims?: boolean;
   /** Confirmed image crop: show only this original-image rect, PS-style. */
   cropView?: { region: [number, number, number, number] } | null;
   spacePan: boolean;
@@ -58,8 +57,7 @@ interface MaskStageProps {
   contextActionBar?: ReactNode;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, frameHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
-  const t = useT();
+export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, frameHidden, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
   // centre (the op's scale/rotate pivot) sits at `(0.5 − pan) · zoom`.
@@ -90,16 +88,28 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
   return (
     <div
       className={`mask-edit-stage${presented && !overlayOnly ? " presented" : ""}`}
+      style={spacePan || toolId === "hand" ? { cursor: "grab" } : undefined}
       // Nothing on the stage is a native drag source: a stray drag-and-drop
       // shows the no-drop cursor and swallows the tool's pointer events.
       onDragStart={(e) => e.preventDefault()}
+      onPointerDown={(e) => {
+        if ((spacePan || toolId === "hand") && e.target === e.currentTarget) onPointerDown(e);
+      }}
+      onPointerMove={(e) => {
+        if ((spacePan || toolId === "hand") && e.target === e.currentTarget) onPointerMove(e);
+      }}
+      onPointerUp={(e) => {
+        if ((spacePan || toolId === "hand") && e.target === e.currentTarget) onPointerUp();
+      }}
     >
       <div
         className={`mask-edit-frame${frameHidden ? " base-hidden" : ""}${cropRegion ? " cropped" : ""}`}
         style={{
           aspectRatio: `${cropW} / ${cropH}`,
-          maxWidth: `min(100%, ${cropW}px)`,
-          maxHeight: `min(100%, ${cropH}px)`,
+          maxWidth: "100%",
+          maxHeight: "100%",
+          visibility: documentAvailable ? undefined : "hidden",
+          pointerEvents: documentAvailable ? undefined : "none",
           transform: isFitView(view) ? undefined : viewTransform(view),
           transformOrigin: "center",
         }}
@@ -141,11 +151,6 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
           {contextActionBar}
         </div>
       </div>
-      {fallbackDims ? (
-        <span className="mask-dims-fallback muted" title={t("mask.fallbackDimsTitle")}>
-          {t("mask.fallbackDims", { w: dims.w, h: dims.h })}
-        </span>
-      ) : null}
       <ViewportBackendBadge backend={backend} />
     </div>
   );

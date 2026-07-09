@@ -125,6 +125,19 @@ describe("maskEdit normalizeEditPaths", () => {
     expect(e.active).toBe(1); // clamped into range
   });
 
+  it("preserves a version-3 document with no layers", () => {
+    const e = normalizeEditPaths({
+      version: 3,
+      layers: [],
+      active: 0,
+      matte_strokes: [],
+      points: [],
+    });
+    expect(e.layers).toEqual([]);
+    expect(e.active).toBe(-1);
+    expect(activeOps(e)).toEqual([]);
+  });
+
   it("normalizes visual layer groups as tags without changing stack order", () => {
     const e = normalizeEditPaths({
       version: 3,
@@ -520,15 +533,18 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.active).toBe(0);
   });
 
-  it("removes a layer (undoable) but never the last one", () => {
+  it("removes every layer and can add a new layer afterward", () => {
     let s = initEditState();
-    expect(removeLayer(s, 0)).toBe(s); // last layer: no-op
+    s = removeLayer(s, 0);
+    expect(s.current.layers).toEqual([]);
+    expect(s.current.active).toBe(-1);
+    expect(addOperation(s, { type: "invert" })).toBe(s);
+    s = undo(s);
+    expect(s.current.layers).toHaveLength(1);
+    s = removeLayer(s, 0);
     s = addLayer(s);
-    s = removeLayer(s, 1);
     expect(s.current.layers).toHaveLength(1);
     expect(s.current.active).toBe(0);
-    s = undo(s);
-    expect(s.current.layers).toHaveLength(2);
   });
 
   it("selects the active layer without recording an undo step", () => {

@@ -50,6 +50,19 @@ describe("studio command capabilities", () => {
     expect(getCommandCapability("target.delete", { doc, target: maskTarget })).toMatchObject({ enabled: true, danger: true });
   });
 
+  it("allows deleting the final unlocked layer and adding from an empty document", () => {
+    const doc = emptyMaskDocument();
+    doc.layers[0] = { ...doc.layers[0], id: "layer-base" };
+    const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-base" };
+    expect(getCommandCapability("target.delete", { doc, target }).enabled).toBe(true);
+
+    doc.layers = [];
+    doc.active = -1;
+    const documentTarget: StudioTarget = { kind: "document", canvasId: "canvas", documentId: "doc" };
+    expect(getCommandCapability("layer.add", { doc, target: documentTarget }).enabled).toBe(true);
+    expect(getCommandCapability("target.delete", { doc, target: documentTarget }).enabled).toBe(false);
+  });
+
   it("keeps selection and path commands target-specific", () => {
     const doc = docWithTwoLayers();
     const selectionTarget: StudioTarget = { kind: "selection", canvasId: "canvas", documentId: "doc", selectionId: "sel-1" };
