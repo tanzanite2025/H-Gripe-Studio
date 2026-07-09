@@ -1,19 +1,27 @@
 // Premiere-style Properties panel for the selected visual clip: editable
 // Transform (position / anchor / scale / rotation / opacity) and Crop
 // sections over the per-clip property document, each scalar with a keyframe
-// diamond that toggles a key at the playhead (values shown are evaluated at
-// the playhead, `keyframes.ts` semantics). Purely presentational — the
-// document lives in the production store and arrives via props.
+// diamond that toggles a key at the playhead and opens its interpolation menu
+// on right-click (values shown are evaluated at the playhead, `keyframes.ts`
+// semantics). Purely presentational — the document lives in the production
+// store and arrives via props.
 
+import { useState } from "react";
+
+import { ContextMenu, type MenuItem } from "../editor/ContextMenu";
 import { useT, type MsgKey } from "../i18n";
 import type { ClipProperties } from "./clipProps";
 import {
+  effectiveKeyframeInterpolation,
   evaluateClipProp,
   hasKeyframeAt,
+  keyframeAt,
   keyframesFor,
   resetClipPropsSection,
   setClipPropValueAt,
+  setKeyframeInterpolationAt,
   toggleKeyframe,
+  type KeyframeInterpolation,
   type ClipPropPath,
 } from "./keyframes";
 
@@ -78,10 +86,32 @@ function NumberField({
 
 export function ClipPropertiesPanel({ clipName, props, clipLocalSec, onChange }: ClipPropertiesPanelProps) {
   const t = useT();
+  const [interpMenu, setInterpMenu] = useState<{ x: number; y: number; path: ClipPropPath } | null>(null);
 
   const valueOf = (path: ClipPropPath) => evaluateClipProp(props, path, clipLocalSec);
   const commit = (path: ClipPropPath) => (value: number) =>
     onChange(setClipPropValueAt(props, path, clipLocalSec, value, KEYFRAME_EPS));
+  const menuKey = interpMenu
+    ? keyframeAt(props, interpMenu.path, clipLocalSec, KEYFRAME_EPS)
+    : undefined;
+  const currentInterp = menuKey ? effectiveKeyframeInterpolation(menuKey) : "linear";
+  const interpolationItems: Array<[KeyframeInterpolation, MsgKey]> = [
+    ["linear", "drawer.propsInterpLinear"],
+    ["hold", "drawer.propsInterpHold"],
+    ["bezier", "drawer.propsInterpBezier"],
+  ];
+  const menuItems: MenuItem[] = interpMenu
+    ? interpolationItems.map(([interp, labelKey]) => ({
+        label: `${currentInterp === interp ? "✓ " : ""}${t(labelKey)}`,
+        onClick: () => onChange(setKeyframeInterpolationAt(
+          props,
+          interpMenu.path,
+          clipLocalSec,
+          KEYFRAME_EPS,
+          interp,
+        )),
+      }))
+    : [];
 
   function Diamond({ path }: { path: ClipPropPath }) {
     const animated = keyframesFor(props, path).length > 0;
@@ -93,6 +123,11 @@ export function ClipPropertiesPanel({ clipName, props, clipLocalSec, onChange }:
         title={t("drawer.propsKeyframeToggle")}
         aria-pressed={onKey}
         onClick={() => onChange(toggleKeyframe(props, path, clipLocalSec, KEYFRAME_EPS))}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (onKey) setInterpMenu({ x: event.clientX, y: event.clientY, path });
+        }}
       >
         <DiamondIcon />
       </button>
@@ -179,6 +214,14 @@ export function ClipPropertiesPanel({ clipName, props, clipLocalSec, onChange }:
           <Diamond path="crop.bottomPct" />
         </div>
       </section>
+      {interpMenu && menuKey ? (
+        <ContextMenu
+          x={interpMenu.x}
+          y={interpMenu.y}
+          items={menuItems}
+          onClose={() => setInterpMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

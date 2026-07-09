@@ -3,11 +3,15 @@ import { describe, expect, it } from "vitest";
 import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import fixtures from "./clipPropsKeyframeFixtures.json";
 import {
+  DEFAULT_BEZIER_CONTROL_POINTS,
+  effectiveKeyframeInterpolation,
   evaluateClipProp,
   hasKeyframeAt,
+  keyframeAt,
   keyframesFor,
   resolveClipPropertiesAt,
   setClipPropValueAt,
+  setKeyframeInterpolationAt,
   toggleKeyframe,
   type ClipPropPath,
 } from "./keyframes";
@@ -84,5 +88,43 @@ describe("keyframes", () => {
     const set = setClipPropValueAt(defaultClipProperties(), "crop.leftPct", 2, 25, EPS);
     expect(set.tracks).toBeUndefined();
     expect(set.crop.leftPct).toBe(25);
+  });
+
+  it("changes a key's outgoing interpolation and supplies bezier controls", () => {
+    const eased = setKeyframeInterpolationAt(
+      animated(),
+      "transform.scalePct",
+      1,
+      EPS,
+      "bezier",
+    );
+    const key = keyframeAt(eased, "transform.scalePct", 1, EPS);
+    expect(key?.interp).toBe("bezier");
+    expect(key?.bezier).toEqual(DEFAULT_BEZIER_CONTROL_POINTS);
+    expect(effectiveKeyframeInterpolation(key!)).toBe("bezier");
+
+    const held = setKeyframeInterpolationAt(eased, "transform.scalePct", 1, EPS, "hold");
+    expect(keyframeAt(held, "transform.scalePct", 1, EPS)).toEqual({
+      t: 1,
+      v: 100,
+      interp: "hold",
+    });
+  });
+
+  it("preserves interpolation metadata when editing a key's value", () => {
+    const eased = setKeyframeInterpolationAt(
+      animated(),
+      "transform.scalePct",
+      1,
+      EPS,
+      "bezier",
+    );
+    const edited = setClipPropValueAt(eased, "transform.scalePct", 1, 90, EPS);
+    expect(keyframeAt(edited, "transform.scalePct", 1, EPS)).toEqual({
+      t: 1,
+      v: 90,
+      interp: "bezier",
+      bezier: DEFAULT_BEZIER_CONTROL_POINTS,
+    });
   });
 });
