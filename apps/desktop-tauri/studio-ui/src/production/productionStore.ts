@@ -29,6 +29,12 @@ import {
   type TrackKind,
 } from "./timeline";
 import { clampAudioEdit, editedDuration, type AudioClipEdit } from "./audioEdit";
+import {
+  clampClipProperties,
+  defaultClipProperties,
+  isDefaultClipProperties,
+  type ClipProperties,
+} from "./clipProps";
 import { targetKey } from "./productionTarget";
 
 export interface AudioEditEntry {
@@ -48,6 +54,8 @@ export interface ProductionState {
   gradeDocs: Record<string, string>;
   /** Per-clip non-destructive audio edits, keyed by clip id. */
   audioEdits: Record<string, AudioEditEntry>;
+  /** Per-clip property documents (transform / crop), keyed by clip id. */
+  clipProps: Record<string, ClipProperties>;
 }
 
 function initialState(): ProductionState {
@@ -58,6 +66,7 @@ function initialState(): ProductionState {
     selectedClipId: null,
     gradeDocs: {},
     audioEdits: {},
+    clipProps: {},
   };
 }
 
@@ -143,6 +152,7 @@ function withTimeline(state: ProductionState, after: TimelineModel): ProductionS
   const survivors = allClipIds(after);
   let gradeDocs = state.gradeDocs;
   let audioEdits = state.audioEdits;
+  let clipProps = state.clipProps;
   for (const track of state.timeline.tracks) {
     for (const clip of track.clips) {
       if (survivors.has(clip.id)) continue;
@@ -160,11 +170,15 @@ function withTimeline(state: ProductionState, after: TimelineModel): ProductionS
         if (audioEdits === state.audioEdits) audioEdits = { ...audioEdits };
         delete audioEdits[clip.id];
       }
+      if (clip.id in clipProps) {
+        if (clipProps === state.clipProps) clipProps = { ...clipProps };
+        delete clipProps[clip.id];
+      }
     }
   }
   const selectedClipId =
     state.selectedClipId && !survivors.has(state.selectedClipId) ? null : state.selectedClipId;
-  return { ...state, timeline: after, gradeDocs, audioEdits, selectedClipId };
+  return { ...state, timeline: after, gradeDocs, audioEdits, clipProps, selectedClipId };
 }
 
 // --- actions -----------------------------------------------------------------
@@ -295,6 +309,30 @@ export function setClipGradeDoc(store: ProductionStore, clipId: string, doc: str
     const key = clipGradeKey(state.timeline, clipId);
     if (!key) return state;
     return { ...state, gradeDocs: { ...state.gradeDocs, [key]: doc } };
+  });
+}
+
+/** A clip's stored property document, or the defaults. */
+export function clipPropertiesOf(state: ProductionState, clipId: string): ClipProperties {
+  return state.clipProps[clipId] ?? defaultClipProperties();
+}
+
+/** Store a clip's property document (clamped); default docs are pruned. */
+export function setClipProperties(
+  store: ProductionStore,
+  clipId: string,
+  props: ClipProperties,
+): void {
+  store.mutate((state) => {
+    if (!findClip(state.timeline, clipId)) return state;
+    const clamped = clampClipProperties(props);
+    if (isDefaultClipProperties(clamped)) {
+      if (!(clipId in state.clipProps)) return state;
+      const next = { ...state.clipProps };
+      delete next[clipId];
+      return { ...state, clipProps: next };
+    }
+    return { ...state, clipProps: { ...state.clipProps, [clipId]: clamped } };
   });
 }
 

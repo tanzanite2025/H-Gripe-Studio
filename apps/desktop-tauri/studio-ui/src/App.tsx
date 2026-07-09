@@ -91,6 +91,7 @@ import {
 } from "./production/layeredImage";
 import { findClip, type TrackKind } from "./production/timeline";
 import { defaultAudioEdit, type AudioClipEdit } from "./production/audioEdit";
+import { defaultClipProperties, type ClipProperties } from "./production/clipProps";
 import {
   addAssetClip,
   addAssetToBin,
@@ -106,6 +107,7 @@ import {
   selectBinAsset,
   selectClip,
   setClipGradeDoc,
+  setClipProperties,
   splitTimelineClip,
   toggleTimelineMarker,
   toggleTimelineTrackHidden,
@@ -211,6 +213,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const selectedClipId = useProductionState((s) => s.selectedClipId);
   const gradeDocs = useProductionState((s) => s.gradeDocs);
   const audioEdits = useProductionState((s) => s.audioEdits);
+  const clipProps = useProductionState((s) => s.clipProps);
   // Clip whose grade modal is open (clip context menu → “grade”).
   const [gradeClipId, setGradeClipId] = useState<string | null>(null);
   const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
@@ -377,6 +380,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const handleSelectClip = useCallback((clipId: string | null) => {
     selectClip(productionStore, clipId);
   }, []);
+
+  const handleSetClipProperties = useCallback((clipId: string, props: ClipProperties) => {
+    setClipProperties(productionStore, clipId, props);
+  }, []);
+
+  const selectedClipProperties = useMemo(
+    () => (selectedClipId ? (clipProps[selectedClipId] ?? defaultClipProperties()) : undefined),
+    [selectedClipId, clipProps],
+  );
 
   const handleSelectBinAsset = useCallback((assetId: string | null) => {
     selectBinAsset(productionStore, assetId);
@@ -1847,6 +1859,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSplitClipToLayers={handleSplitClipToLayers}
           onOpenExport={() => setExportOpen(true)}
           clipGradeDoc={clipGradeDoc}
+          clipProperties={selectedClipProperties}
+          onSetClipProperties={handleSetClipProperties}
           layeredAsset={layeredAsset}
           selectedLayerId={selectedLayerId}
           onSelectLayer={setSelectedLayerId}
