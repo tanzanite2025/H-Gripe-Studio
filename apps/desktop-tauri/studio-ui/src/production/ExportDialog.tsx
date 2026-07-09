@@ -24,6 +24,8 @@ interface ExportDialogProps {
   assets: MediaAsset[];
   /** A clip's stored grade doc (JSON string), applied at encode time. */
   clipGradeDoc?: (clipId: string) => string | null;
+  /** A clip's property document (JSON string), composited at encode time. */
+  clipPropsDoc?: (clipId: string) => string | null;
   /** A clip's stored audio edit, applied in the mixdown. */
   clipAudioEdit?: (clipId: string) => AudioClipEdit | null;
   onClose: () => void;
@@ -49,6 +51,7 @@ export function ExportDialog({
   timeline,
   assets,
   clipGradeDoc,
+  clipPropsDoc,
   clipAudioEdit,
   onClose,
 }: ExportDialogProps) {
@@ -69,8 +72,8 @@ export function ExportDialog({
   }, [onClose]);
 
   const plan = useMemo(
-    () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc, clipAudioEdit }),
-    [timeline, assets, fps, clipGradeDoc, clipAudioEdit],
+    () => buildRenderPlan(timeline, assets, { fps, clipGradeDoc, clipPropsDoc, clipAudioEdit }),
+    [timeline, assets, fps, clipGradeDoc, clipPropsDoc, clipAudioEdit],
   );
   const frames = useMemo(() => expandPlanFrames(plan), [plan]);
   const canExport = plan.video.length > 0 && frames !== null && state.phase !== "running";
@@ -93,6 +96,8 @@ export function ExportDialog({
         outputName: outputName.trim() || undefined,
         gradeDocs: frames.gradeDocs.some((d) => d !== null) ? frames.gradeDocs : undefined,
         frameTimes: frames.hasVideoFrames ? frames.frameTimes : undefined,
+        propDocs: frames.propDocs.some((d) => d !== null) ? frames.propDocs : undefined,
+        propTimes: frames.propDocs.some((d) => d !== null) ? frames.propTimes : undefined,
         audio:
           plan.audio.length > 0
             ? plan.audio.map((s) => ({

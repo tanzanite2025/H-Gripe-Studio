@@ -55,6 +55,11 @@ export async function timelineExport(
     device?: "auto" | "cpu" | "gpu";
     outputName?: string;
     gradeDocs?: (string | null)[];
+    /** Per-frame clip property doc (JSON string), aligned with `frames`;
+     * resolved at `propTimes` and composited before the grade pass. */
+    propDocs?: (string | null)[];
+    /** Per-frame clip-local property evaluation time, aligned with `frames`. */
+    propTimes?: number[];
     /**
      * Per-frame clip-local decode time, aligned with `frames`: `null` for
      * still frames, seconds into the source for video-clip frames.
@@ -73,6 +78,8 @@ export async function timelineExport(
     outputName: opts.outputName ?? null,
     gradeDocs: opts.gradeDocs ?? null,
     frameTimes: opts.frameTimes ?? null,
+    propDocs: opts.propDocs ?? null,
+    propTimes: opts.propTimes ?? null,
     audio: opts.audio ?? null,
   })) as TimelineExportResult;
 }

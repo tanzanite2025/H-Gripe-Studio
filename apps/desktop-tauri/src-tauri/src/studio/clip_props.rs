@@ -12,7 +12,7 @@
 //!   (scale 0..=10000%, opacity/crop edges 0..=100%, opposite crop edges
 //!   summing to at most 100%).
 
-#![allow(dead_code)] // consumed by the export/preview application step next
+#![allow(dead_code)] // the preview application step (Phase 3) consumes the rest
 
 use std::collections::BTreeMap;
 
