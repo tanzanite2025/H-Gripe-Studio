@@ -126,36 +126,43 @@
 }
 .production-clip-menu button:hover { background: #2a2f3d; }
 .production-drawer-body {
+  --production-side-width: 36px;
   position: relative;
   flex: 1;
   min-height: 0;
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: var(--production-side-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 10px;
   padding: 10px 12px;
   overflow: hidden;
 }
 .production-edit-workspace {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(360px, 1.45fr) minmax(140px, 0.45fr);
-  gap: 10px;
+  display: contents;
 }
 .production-edit-top {
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(520px, 1fr) minmax(260px, 320px);
   gap: 12px;
+  align-items: start;
 }
 .production-asset-side {
-  flex: none;
-  width: 36px;
-  min-height: 0;
+  display: contents;
+}
+.production-side-actions {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  align-self: start;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 .production-asset-toggle {
   position: relative;
@@ -172,6 +179,12 @@
   background: #2a3449;
   color: var(--text);
   border-color: #475a82;
+}
+.production-asset-toggle:disabled {
+  opacity: 0.38;
+}
+.production-export-toggle:not(:disabled) {
+  color: #c7d6ff;
 }
 .production-asset-icon {
   width: 18px;
@@ -204,9 +217,9 @@
   position: absolute;
   z-index: 12;
   left: 56px;
-  top: 10px;
-  height: min(520px, calc(100% - 210px));
-  min-height: 260px;
+  top: clamp(8px, 1.5%, 12px);
+  height: min(62%, calc(100% - clamp(160px, 28%, 240px)));
+  min-height: min(260px, 55%);
   width: min(360px, calc(100% - 80px));
   display: flex;
   pointer-events: auto;
@@ -215,6 +228,7 @@
   min-width: 0;
   min-height: 0;
   display: flex;
+  align-items: flex-start;
 }
 .production-bin {
   width: auto;
@@ -488,6 +502,73 @@
   font-size: 12px;
 }
 .grade-apply-row { display: flex; justify-content: flex-end; }
+.production-timeline-shell {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+.production-timeline-tools {
+  flex: none;
+  width: 34px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  align-content: center;
+  justify-content: space-evenly;
+  gap: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #171b25;
+}
+.production-timeline-side-tools {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: stretch;
+  justify-self: center;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+@media (max-height: 520px) {
+  .production-drawer-body {
+    --production-side-width: 68px;
+  }
+  .production-timeline-side-tools {
+    width: 68px;
+    flex-wrap: wrap;
+  }
+}
+.production-timeline-tool {
+  width: 26px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.production-timeline-tool:hover,
+.production-timeline-tool.active {
+  color: #d9e4ff;
+  background: #253149;
+}
+.production-timeline-tool-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
 .production-timeline {
   flex: 1;
   min-width: 0;
@@ -507,12 +588,13 @@
 .production-timeline-empty { color: var(--muted); font-size: 12px; margin: 0; }
 .production-monitor {
   flex: 1;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 4px;
+  padding: 6px;
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -528,28 +610,33 @@
   font-weight: 600;
 }
 .production-monitor-stage {
-  flex: 1;
+  flex: none;
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: clamp(30px, 3%, 36px) minmax(0, 1fr);
   gap: 8px;
   align-items: stretch;
 }
 .production-monitor-main {
   min-width: 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto auto;
   align-items: center;
-  gap: 6px;
+  justify-items: center;
+  align-content: start;
+  gap: 4px;
 }
 .production-monitor-frame {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: clamp(124px, 22vh, 220px);
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
   background: #000;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -557,10 +644,12 @@
 }
 .production-program-column .production-monitor-frame {
   align-self: center;
+  justify-self: center;
   flex: 0 0 auto;
-  width: min(100%, calc((72dvh - 140px) * 16 / 9));
+  width: 100%;
   max-width: 100%;
   height: auto;
+  max-height: 100%;
   aspect-ratio: 16 / 9;
 }
 .production-monitor-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -595,34 +684,6 @@
   white-space: nowrap;
 }
 .production-monitor-time-end { color: var(--text); text-align: right; }
-.production-monitor-ruler {
-  position: relative;
-  height: 14px;
-  margin-top: -2px;
-  background-color: #1d212b;
-  background:
-    linear-gradient(#7f8492, #7f8492) left 50% / 100% 1px no-repeat,
-    repeating-linear-gradient(
-      to right,
-      #7f8492 0 1px,
-      #1d212b 1px 9px,
-      #555b68 9px 10px,
-      #1d212b 10px 18px
-    );
-  background-color: #1d212b;
-}
-.production-monitor-ruler-marker,
-.production-monitor-ruler-point {
-  position: absolute;
-  top: 1px;
-  width: 2px;
-  height: 12px;
-  transform: translateX(-1px);
-  border-radius: 2px;
-}
-.production-monitor-ruler-marker { background: #61a8ff; }
-.production-monitor-ruler-point.in { background: #9ece6a; }
-.production-monitor-ruler-point.out { background: #f7768e; }
 .production-monitor-controls {
   display: flex;
   flex-direction: column;
@@ -667,8 +728,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.production-monitor-ruler-marker,
-.production-monitor-ruler-point,
 .production-monitor-icon { pointer-events: none; }
 .production-timeline-tracks {
   flex: 1;
@@ -704,9 +763,15 @@
   gap: 2px;
 }
 .production-track-controls button {
-  padding: 0 5px;
-  font-size: 11px;
-  line-height: 16px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .production-track-label {
   width: 24px;

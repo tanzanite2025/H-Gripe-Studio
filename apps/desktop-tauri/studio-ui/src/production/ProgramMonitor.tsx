@@ -261,7 +261,7 @@ export function ProgramMonitor({
   const [playheadSec, setPlayheadSec] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [safeArea, setSafeArea] = useState(false);
-  const [markers, setMarkers] = useState<number[]>([]);
+  const [, setMarkers] = useState<number[]>([]);
   const [inPointSec, setInPointSec] = useState<number | null>(null);
   const [outPointSec, setOutPointSec] = useState<number | null>(null);
   const playheadRef = useRef(0);
@@ -354,7 +354,6 @@ export function ProgramMonitor({
     setPlaying(false);
     setPlayheadSec(clampTime(sec, duration));
   };
-  const markerPercent = (sec: number) => (duration > 0 ? (clampTime(sec, duration) / duration) * 100 : 0);
   const addMarker = () => {
     if (duration <= 0) return;
     const next = Number(clampedSec.toFixed(3));
@@ -473,27 +472,6 @@ export function ProgramMonitor({
           <span className="production-monitor-time production-monitor-time-end">
             {formatTimecode(duration, displayFps)}
           </span>
-        </div>
-        <div className="production-monitor-ruler" aria-hidden={duration <= 0}>
-          {markers.map((sec) => (
-            <span
-              key={`marker-${sec}`}
-              className="production-monitor-ruler-marker"
-              style={{ left: `${markerPercent(sec)}%` }}
-            />
-          ))}
-          {inPointSec != null ? (
-            <span
-              className="production-monitor-ruler-point in"
-              style={{ left: `${markerPercent(inPointSec)}%` }}
-            />
-          ) : null}
-          {outPointSec != null ? (
-            <span
-              className="production-monitor-ruler-point out"
-              style={{ left: `${markerPercent(outPointSec)}%` }}
-            />
-          ) : null}
         </div>
         </div>
       </div>

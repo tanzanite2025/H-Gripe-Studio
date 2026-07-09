@@ -90,6 +90,82 @@ function AssetBinIcon() {
   );
 }
 
+function ExportIcon() {
+  return (
+    <svg className="production-asset-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 4v10" />
+      <path d="m8 10 4 4 4-4" />
+      <path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+type TimelineTool = "select" | "track" | "trim" | "razor" | "pen" | "shape" | "hand" | "type";
+
+const TIMELINE_TOOLS: Array<{ id: TimelineTool; label: string }> = [
+  { id: "select", label: "Selection tool" },
+  { id: "track", label: "Track select tool" },
+  { id: "trim", label: "Trim tool" },
+  { id: "razor", label: "Razor tool" },
+  { id: "pen", label: "Pen tool" },
+  { id: "shape", label: "Shape tool" },
+  { id: "hand", label: "Hand tool" },
+  { id: "type", label: "Type tool" },
+];
+
+function TimelineToolIcon({ tool }: { tool: TimelineTool }) {
+  return (
+    <svg className="production-timeline-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      {tool === "select" ? (
+        <path d="M6 4l11 8-5 1.2 3.2 5.6-2.8 1.6-3.1-5.5L6 18z" />
+      ) : tool === "track" ? (
+        <>
+          <path d="M4 7h10" />
+          <path d="M4 12h16" />
+          <path d="M4 17h10" />
+          <path d="m15 8 4 4-4 4" />
+        </>
+      ) : tool === "trim" ? (
+        <>
+          <path d="M7 5v14" />
+          <path d="M17 5v14" />
+          <path d="m11 8-3 4 3 4" />
+          <path d="m13 8 3 4-3 4" />
+        </>
+      ) : tool === "razor" ? (
+        <>
+          <path d="m5 18 12-12 2 2L7 20z" />
+          <path d="m14 9 3 3" />
+          <path d="M4 4h5" />
+        </>
+      ) : tool === "pen" ? (
+        <>
+          <path d="M5 19l4.5-1 8-8L14 6.5l-8 8z" />
+          <path d="m13 8 3 3" />
+          <path d="M9.5 18 6 14.5" />
+        </>
+      ) : tool === "shape" ? (
+        <>
+          <rect x="5" y="6" width="14" height="12" rx="2" />
+          <path d="M8 10h8" />
+        </>
+      ) : tool === "hand" ? (
+        <>
+          <path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11" />
+          <path d="M11 11V5.5a1.5 1.5 0 0 1 3 0V11" />
+          <path d="M14 11V7a1.5 1.5 0 0 1 3 0v7.5c0 3-2.2 5.5-5.5 5.5H10c-2.3 0-3.6-1.1-4.8-3.1L4 14.8a1.6 1.6 0 0 1 2.7-1.7L8 15" />
+        </>
+      ) : (
+        <>
+          <path d="M5 6h14" />
+          <path d="M12 6v12" />
+          <path d="M9 18h6" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 /**
  * Bottom production drawer (UNIFIED_PRODUCTION_DRAWER_PLAN.md): the resident
  * Edit / Timeline workspace under the node canvas. Image / audio / grade /
@@ -110,7 +186,6 @@ export function ProductionDrawer({
   timeline,
   selectedClipId,
   onSelectClip,
-  onAddActiveToTimeline,
   onAddActiveToTrack,
   onAddTrack,
   onRemoveTrack,
@@ -146,6 +221,9 @@ export function ProductionDrawer({
   const [detailTab, setDetailTab] = useState<"details" | "grade">("details");
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [dragAssetId, setDragAssetId] = useState<string | null>(null);
+  const [timelineTool, setTimelineTool] = useState<TimelineTool>("select");
+  const programColumnRef = useRef<HTMLDivElement | null>(null);
+  const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
 
   useEffect(() => {
     if (closeTimer.current != null) {
@@ -171,6 +249,40 @@ export function ProductionDrawer({
       }
     };
   }, [expanded, renderExpanded]);
+
+  useEffect(() => {
+    if (!renderExpanded) {
+      setMonitorCardHeight(null);
+      return;
+    }
+    let observer: ResizeObserver | null = null;
+    let raf = 0;
+    let cleanupResize: (() => void) | null = null;
+    const attach = () => {
+      const monitor = programColumnRef.current?.querySelector<HTMLElement>(".production-monitor");
+      if (!monitor) {
+        setMonitorCardHeight(null);
+        return;
+      }
+      const syncHeight = () => {
+        const next = Math.ceil(monitor.getBoundingClientRect().height);
+        setMonitorCardHeight((current) => (current === next ? current : next));
+      };
+      syncHeight();
+      window.addEventListener("resize", syncHeight);
+      cleanupResize = () => window.removeEventListener("resize", syncHeight);
+      if (typeof ResizeObserver !== "undefined") {
+        observer = new ResizeObserver(syncHeight);
+        observer.observe(monitor);
+      }
+    };
+    raf = window.requestAnimationFrame(attach);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      cleanupResize?.();
+      observer?.disconnect();
+    };
+  }, [renderExpanded]);
 
   if (!renderExpanded) {
     return (
@@ -315,25 +427,55 @@ export function ProductionDrawer({
 
       <div className="production-drawer-body production-edit">
         <div className="production-asset-side">
-          <button
-            type="button"
-            className={`production-asset-toggle${assetPanelOpen ? " active" : ""}`}
-            onClick={() => setAssetPanelOpen((open) => !open)}
-            title={t("drawer.binTitle")}
-            aria-label={t("drawer.binTitle")}
-          >
-            <AssetBinIcon />
-            <span className="production-asset-count">{assets.length}</span>
-          </button>
+          <div className="production-side-actions">
+            <button
+              type="button"
+              className={`production-asset-toggle${assetPanelOpen ? " active" : ""}`}
+              onClick={() => setAssetPanelOpen((open) => !open)}
+              title={t("drawer.binTitle")}
+              aria-label={t("drawer.binTitle")}
+            >
+              <AssetBinIcon />
+              <span className="production-asset-count">{assets.length}</span>
+            </button>
+            <button
+              type="button"
+              className="production-asset-toggle production-export-toggle"
+              onClick={onOpenExport}
+              disabled={timeline.tracks.every((track) => track.clips.length === 0)}
+              title={t("drawer.exportTitle")}
+              aria-label={t("drawer.exportTitle")}
+            >
+              <ExportIcon />
+            </button>
+          </div>
+          <div className="production-timeline-tools production-timeline-side-tools" role="toolbar" aria-label="Timeline tools">
+            {TIMELINE_TOOLS.map((tool) => (
+              <button
+                key={tool.id}
+                type="button"
+                className={`production-timeline-tool${timelineTool === tool.id ? " active" : ""}`}
+                onClick={() => setTimelineTool(tool.id)}
+                title={tool.label}
+                aria-label={tool.label}
+                aria-pressed={timelineTool === tool.id}
+              >
+                <TimelineToolIcon tool={tool.id} />
+              </button>
+            ))}
+          </div>
         </div>
         {assetPanelOpen ? <div className="production-bin-popover-shell">{assetPanel}</div> : null}
         <div className="production-edit-workspace">
           <div className="production-edit-top">
-          <div className="production-program-column">
+          <div className="production-program-column" ref={programColumnRef}>
             <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
           </div>
 
-          <aside className="production-detail-panel">
+          <aside
+            className="production-detail-panel"
+            style={monitorCardHeight ? { height: `${monitorCardHeight}px`, maxHeight: `${monitorCardHeight}px` } : undefined}
+          >
             <div className="production-detail-tabs" role="tablist" aria-label={t("drawer.detailTabs")}>
               <button
                 type="button"
@@ -407,38 +549,16 @@ export function ProductionDrawer({
           </aside>
           </div>
 
-          <div className="production-timeline">
+          <div className="production-timeline-shell">
+            <div className="production-timeline">
             <div className="production-timeline-head">
               <h3>{t("drawer.timelineTitle")}</h3>
               <span className="production-timeline-duration">
                 {t("drawer.timelineDuration", { s: timelineDuration(timeline).toFixed(1) })}
               </span>
               <div className="spacer" />
-              <button
-                onClick={onAddActiveToTimeline}
-                disabled={!activeAssetId}
-                title={t("drawer.addToTimelineTitle")}
-              >
-                {t("drawer.addToTimeline")}
-              </button>
-              <button onClick={() => onAddTrack("video")} title={t("drawer.addVideoTrackTitle")}>
-                {t("drawer.addVideoTrack")}
-              </button>
-              <button onClick={() => onAddTrack("audio")} title={t("drawer.addAudioTrackTitle")}>
-                {t("drawer.addAudioTrack")}
-              </button>
-              <button
-                onClick={onOpenExport}
-                disabled={timeline.tracks.every((track) => track.clips.length === 0)}
-                title={t("drawer.exportTitle")}
-              >
-                {t("drawer.export")}
-              </button>
-            </div>
-            {timeline.tracks.every((track) => track.clips.length === 0) ? (
-              <p className="production-timeline-empty">{t("drawer.timelineEmpty")}</p>
-            ) : null}
-            <div className="production-timeline-tracks">
+              </div>
+              <div className="production-timeline-tracks">
               {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
                 // Scale every lane to the same overall timeline length so clip
                 // positions line up vertically across tracks.
@@ -455,13 +575,12 @@ export function ProductionDrawer({
                         {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
                       </span>
                       <span className="production-track-controls">
-                        <button
-                          onClick={() => onAddActiveToTrack(track.id)}
-                          disabled={!acceptsActive}
-                          title={t("drawer.addToTrackTitle")}
-                        >
-                          +
-                        </button>
+                          <button
+                            onClick={() => onAddTrack(track.kind)}
+                            title={track.kind === "video" ? t("drawer.addVideoTrackTitle") : t("drawer.addAudioTrackTitle")}
+                          >
+                            +
+                          </button>
                         <button
                           onClick={() => onRemoveTrack(track.id)}
                           disabled={timeline.tracks.length <= 1}
@@ -530,6 +649,7 @@ export function ProductionDrawer({
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
         </div>
