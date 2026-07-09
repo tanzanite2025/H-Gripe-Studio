@@ -255,6 +255,16 @@
   padding: 0;
 }
 .production-bin-empty { color: var(--muted); font-size: 12px; }
+.production-bin-drop-hint {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed #3c4658;
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .production-bin-list {
   list-style: none;
   margin: 8px 0 0;

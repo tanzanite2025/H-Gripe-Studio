@@ -66,14 +66,21 @@ import {
   primeIngest,
   splitLayerMask,
 } from "./bridge/tauri";
-import { ProductionDrawer, type AddableAsset } from "./production/ProductionDrawer";
+import { ProductionDrawer } from "./production/ProductionDrawer";
+import type { AddableAsset } from "./production/MediaWorkspacePopover";
 import {
   loadDrawerMode,
   saveDrawerMode,
   toggleDrawer,
   type DrawerMode,
 } from "./production/drawerState";
-import { assetKindForNodeKind } from "./production/mediaBin";
+import {
+  assetKindForNodeKind,
+  assetKindForPath,
+  IMAGE_MEDIA_EXTS,
+  MEDIA_IMPORT_EXTS,
+  VIDEO_MEDIA_EXTS,
+} from "./production/mediaBin";
 import {
   assetTarget,
   imageLayerTarget,
@@ -136,20 +143,8 @@ import { useT } from "./i18n";
 // land on the generic image card (`imageSource`); videos land on the generic
 // video card (`videoSource`), a separate track that shows a poster frame +
 // metadata (see docs/cards/generic-media-card.md).
-const IMAGE_DROP_EXTS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "bmp",
-  "tif",
-  "tiff",
-  "heic",
-  "heif",
-  "avif",
-]);
-const VIDEO_DROP_EXTS = new Set(["mp4", "mov", "mkv", "webm", "avi", "m4v"]);
+const IMAGE_DROP_EXTS = new Set<string>(IMAGE_MEDIA_EXTS);
+const VIDEO_DROP_EXTS = new Set<string>(VIDEO_MEDIA_EXTS);
 
 function dropExtension(path: string): string {
   const dot = path.lastIndexOf(".");
@@ -298,6 +293,42 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     if (!imagePath) return null;
     return stubLayeredImageAsset({ imagePath, nodeId: selectedNode.id });
   }, [selectedNode, nodes, edges]);
+
+  const importMediaPathsToBin = useCallback(
+    (paths: string[]) => {
+      const imported: string[] = [];
+      let skipped = 0;
+      for (const path of paths) {
+        const kind = assetKindForPath(path);
+        if (!kind) {
+          skipped += 1;
+          continue;
+        }
+        addAssetToBin(productionStore, { kind, path });
+        imported.push(path);
+      }
+      if (imported.length === 0) {
+        setMessage(t("drawer.importUnsupported"));
+        return;
+      }
+      void primeIngest(imported.filter((path) => assetKindForPath(path) === "image"));
+      setMessage(t("drawer.importedMedia", { n: imported.length, skipped }));
+    },
+    [setMessage, t],
+  );
+
+  const handleImportMediaToBin = useCallback(async () => {
+    const path = await pickFile({
+      title: t("drawer.importMediaTitle"),
+      filterName: "Media",
+      extensions: [...MEDIA_IMPORT_EXTS],
+    });
+    if (path) {
+      importMediaPathsToBin([path]);
+      return;
+    }
+    if (!isDesktop) window.alert(t("drawer.importNeedsDesktop"));
+  }, [importMediaPathsToBin, isDesktop, t]);
 
   // Persisted drawer shell state so the drawer reopens how it was left.
   const changeDrawerMode = useCallback((m: DrawerMode) => {
@@ -928,6 +959,11 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const ingestDroppedFiles = useCallback(
     (paths: string[], physical: { x: number; y: number }) => {
       const dpr = window.devicePixelRatio || 1;
+      const dropTarget = document.elementFromPoint(physical.x / dpr, physical.y / dpr);
+      if (dropTarget?.closest(".production-bin-popover")) {
+        importMediaPathsToBin(paths);
+        return;
+      }
       const origin = screenToFlowPosition({ x: physical.x / dpr, y: physical.y / dpr });
       const media = paths.flatMap((path) => {
         const ext = dropExtension(path);
@@ -963,7 +999,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             : t("canvas.dropImages", { n: images });
       setMessage(note);
     },
-    [screenToFlowPosition, setNodes, takeSnapshot, newNodeId, setMessage, t],
+    [importMediaPathsToBin, screenToFlowPosition, setNodes, takeSnapshot, newNodeId, setMessage, t],
   );
 
   // Timeline clip context menu “split to layers” (IMAGE_TO_LAYERED_PSD plan,
@@ -1850,6 +1886,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onRemoveAsset={handleRemoveBinAsset}
           addableAsset={addableAsset}
           onAddSelected={handleAddSelectedToBin}
+          onImportMedia={handleImportMediaToBin}
           timeline={timeline}
           selectedClipId={selectedClipId}
           onSelectClip={handleSelectClip}

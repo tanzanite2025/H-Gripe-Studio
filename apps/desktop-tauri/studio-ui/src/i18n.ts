@@ -793,14 +793,36 @@ export const messages = {
   "drawer.targetAsset": { en: "asset", zh: "素材" },
   "drawer.binTitle": { en: "Media workspace", zh: "素材工作区" },
   "drawer.binEmpty": {
-    en: "No media assets yet — select an Image Source or Video Source node on the canvas and add it here.",
-    zh: "尚无媒体素材——在画布上选中 图片源 或 视频源 节点后添加到这里。",
+    en: "No media assets yet — drag media files here, import from disk, or add a selected media node.",
+    zh: "尚无媒体素材——可把媒体文件拖到这里、从磁盘导入，或添加所选媒体节点。",
+  },
+  "drawer.importMedia": { en: "Import media…", zh: "导入素材…" },
+  "drawer.importMediaTitle": {
+    en: "import image, video, or audio files into the media workspace",
+    zh: "导入图片、视频或音频文件到素材工作区",
+  },
+  "drawer.importDropHint": {
+    en: "Drop image, video, or audio files here to register them as bin references.",
+    zh: "把图片、视频或音频文件拖到这里，即可登记为素材引用。",
+  },
+  "drawer.importUnsupported": {
+    en: "No supported media files found.",
+    zh: "未找到支持的媒体文件。",
+  },
+  "drawer.importNeedsDesktop": {
+    en: "Native media import is available in the desktop app.",
+    zh: "本地素材导入需要在桌面应用中使用。",
+  },
+  "drawer.importedMedia": {
+    en: "Imported {n} media file(s); skipped {skipped}.",
+    zh: "已导入 {n} 个媒体文件；跳过 {skipped} 个。",
   },
   "drawer.addSelected": { en: "Add selected node", zh: "添加所选节点" },
   "drawer.addSelectedTitle": {
     en: "register the selected media node's file in the workspace bin (references only, nothing is copied)",
     zh: "把所选媒体节点的文件登记到素材工作区（仅引用，不复制文件）",
   },
+  "drawer.closeBin": { en: "close media workspace", zh: "关闭素材面板" },
   "drawer.removeTitle": { en: "remove this asset reference from the bin", zh: "从素材区移除该引用" },
   "drawer.kindImage": { en: "image", zh: "图片" },
   "drawer.kindVideo": { en: "video", zh: "视频" },

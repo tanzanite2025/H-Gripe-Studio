@@ -18,10 +18,11 @@ describe("media bin model", () => {
     expect(assetKindForNodeKind("generate")).toBeNull();
   });
 
-  it("recognises audio files by extension", () => {
+  it("recognises image, video, and audio files by extension", () => {
+    expect(assetKindForPath("C:\\media\\still.PNG")).toBe("image");
+    expect(assetKindForPath("/tmp/clip.MOV")).toBe("video");
     expect(assetKindForPath("C:\\media\\song.MP3")).toBe("audio");
     expect(assetKindForPath("/tmp/voice.wav")).toBe("audio");
-    expect(assetKindForPath("/tmp/photo.png")).toBeNull();
     expect(assetKindForPath("noextension")).toBeNull();
   });
 
