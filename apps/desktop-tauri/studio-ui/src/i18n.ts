@@ -488,11 +488,6 @@ export const messages = {
   "mask.titleSubject": { en: "Subject Mask / Matte", zh: "主体蒙版 / 抠像" },
   "mask.titleDefault": { en: "Mask editor", zh: "蒙版编辑器" },
   "mask.editor": { en: "mask editor", zh: "蒙版编辑器" },
-  "mask.fallbackDims": { en: "preview space {w}×{h}", zh: "预览坐标系 {w}×{h}" },
-  "mask.fallbackDimsTitle": {
-    en: "no decodable backing image — edits record in this default pixel space and rasterise against the real image on run",
-    zh: "未取到可解码的底图——编辑记录在此默认像素空间，运行时按真实图像栅格化",
-  },
   "mask.undo": { en: "Undo", zh: "撤销" },
   "mask.undoTitle": { en: "Undo (Ctrl+Z)", zh: "撤销（Ctrl+Z）" },
   "mask.redo": { en: "Redo", zh: "重做" },

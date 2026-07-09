@@ -273,16 +273,15 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
   // beyond the active one; Ctrl/Alt+click toggles, Shift+click ranges.
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const activeStudioTarget = useMemo<StudioTarget | null>(() => {
-    if (!activeLayer) return null;
+  const activeStudioTarget = useMemo<StudioTarget>(() => {
     const ref = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
+    if (!activeLayer) return { kind: "document", ...ref };
     if (activeTarget === "mask" && activeLayer.mask) {
       return { kind: "layer_mask", ...ref, layerId: activeLayer.id, maskId: activeLayer.mask.id };
     }
     return { kind: "pixel_layer", ...ref, layerId: activeLayer.id };
   }, [activeLayer, activeTarget, imagePath]);
-  const commandCapability = (id: CommandId) =>
-    activeStudioTarget ? getCommandCapability(id, { doc, target: activeStudioTarget }) : { enabled: false, reason: "no active target" };
+  const commandCapability = (id: CommandId) => getCommandCapability(id, { doc, target: activeStudioTarget });
 
   const groupById = useMemo(() => new Map(layerGroups.map((group) => [group.id, group])), [layerGroups]);
 
@@ -390,7 +389,6 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
     return reason ? `${title} - ${reason}` : title;
   };
   const runLayerCommand = (id: CommandId) => {
-    if (!activeStudioTarget) return;
     runMaskEditorCommand(id, {
       doc,
       target: activeStudioTarget,
@@ -634,7 +632,7 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
               <button
                 className="mask-layer-delete"
                 title={t("mask.layerDelete")}
-                disabled={layers.length <= 1 || layer.locked}
+                disabled={layer.locked}
                 onClick={(e) => {
                   e.stopPropagation();
                   onBeforeLayerChange();
@@ -719,7 +717,7 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
             )}
             <button
               className="mask-flyout-item"
-              disabled={layers.length <= 1 || activeLayer?.locked}
+              disabled={!activeLayer || activeLayer.locked}
               onClick={() => {
                 onBeforeLayerChange();
                 dispatch({ type: "layer_remove", index: active });

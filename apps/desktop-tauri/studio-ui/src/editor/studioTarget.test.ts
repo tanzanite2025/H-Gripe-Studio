@@ -31,6 +31,13 @@ describe("studio target bounds", () => {
     expect(resolveActiveTarget(doc, ref)).toEqual({ kind: "layer_mask", ...ref, layerId: "layer-base", maskId: "mask-base" });
   });
 
+  it("resolves an empty layer stack to the document target", () => {
+    const doc = docWithLayer();
+    doc.layers = [];
+    doc.active = -1;
+    expect(resolveActiveTarget(doc, ref)).toEqual({ kind: "document", ...ref });
+  });
+
   it("returns a full layer frame unless explicit content bounds exist", () => {
     const doc = docWithLayer();
     const target = { kind: "pixel_layer" as const, ...ref, layerId: "layer-base" };

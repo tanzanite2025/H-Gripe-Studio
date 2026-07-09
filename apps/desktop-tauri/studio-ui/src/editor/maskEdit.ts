@@ -145,8 +145,11 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     if (layers.length < v.layers.length) {
       console.warn(`normalizeEditPaths: dropped ${v.layers.length - layers.length} malformed layer(s) from stored edit_paths`);
     }
-    if (layers.length === 0) layers.push(emptyMaskLayer());
-    const active = typeof v.active === "number" ? Math.min(Math.max(Math.trunc(v.active), 0), layers.length - 1) : 0;
+    const active = layers.length === 0
+      ? -1
+      : typeof v.active === "number"
+        ? Math.min(Math.max(Math.trunc(v.active), 0), layers.length - 1)
+        : 0;
     return {
       version: 3,
       layers,
@@ -411,12 +414,14 @@ export function labelEditOp(op: EditOp | null | undefined): string | null {
  * thumbnail is the active target. */
 export function activeOps(doc: MaskDocument): EditOp[] {
   const layer = activeLayer(doc);
+  if (!layer) return [];
   return activeTargetKind(doc) === "mask" && layer.mask ? layer.mask.ops : layer.ops;
 }
 
 /** Whether the layer receiving new edits is locked (PS "lock all"). */
 export function activeLayerLocked(doc: MaskDocument): boolean {
-  return activeLayer(doc).locked === true;
+  const layer = activeLayer(doc);
+  return !layer || layer.locked === true;
 }
 
 // Replace the active target's ops: the active layer's pixel stack, or its
@@ -457,7 +462,7 @@ export function addOperation(state: EditState, op: MaskOperation): EditState {
   const doc = withActiveOps(state.current, [...activeOps(state.current), op]);
   // PS layer link: a transform recorded on a linked layer mirrors onto every
   // other linked, unlocked mask layer (one undo step for the whole move).
-  if (op.type === "transform" && activeLayer(state.current).linked) {
+  if (op.type === "transform" && activeLayer(state.current)?.linked) {
     return commit(state, {
       ...doc,
       layers: doc.layers.map((l, i) =>
@@ -560,12 +565,16 @@ export function updateLayerAdjustment(state: EditState, index: number, adjustmen
   return withLayer(state, index, { adjustment });
 }
 
-/** Delete one layer (undoable). The last remaining layer and locked layers cannot be deleted. */
+/** Delete one unlocked layer (undoable), including the final layer. */
 export function removeLayer(state: EditState, index: number): EditState {
   const { layers } = state.current;
-  if (layers.length <= 1 || index < 0 || index >= layers.length || layers[index].locked) return state;
+  if (index < 0 || index >= layers.length || layers[index].locked) return state;
   const next = layers.filter((_, i) => i !== index);
   const active = Math.min(state.current.active > index ? state.current.active - 1 : state.current.active, next.length - 1);
+  if (next.length === 0 || index === state.current.active) {
+    const { activeTarget: _, ...doc } = state.current;
+    return commit(state, { ...doc, layers: next, active });
+  }
   return commit(state, { ...state.current, layers: next, active });
 }
 
@@ -582,7 +591,7 @@ export function setActiveLayer(state: EditState, index: number): EditState {
 /** Activate the pixel content or the layer mask of the active layer as the
  * edit target (PS: click the content / mask thumbnail). Not an undo step. */
 export function setActiveTarget(state: EditState, target: LayerTargetKind): EditState {
-  if (target === "mask" && !activeLayer(state.current).mask) return state;
+  if (target === "mask" && !activeLayer(state.current)?.mask) return state;
   if (activeTargetKind(state.current) === target) return state;
   const { activeTarget: _, ...doc } = state.current;
   return { ...state, current: target === "mask" ? { ...doc, activeTarget: "mask" } : doc };

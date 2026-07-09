@@ -33,6 +33,7 @@ export interface StudioDocumentRef {
  */
 export function resolveActiveTarget(doc: MaskDocument, ref: StudioDocumentRef): StudioTarget {
   const layer = activeLayer(doc);
+  if (!layer) return { kind: "document", ...ref };
   if (activeTargetKind(doc) === "mask" && layer.mask) {
     return { kind: "layer_mask", ...ref, layerId: layer.id, maskId: layer.mask.id };
   }

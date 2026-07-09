@@ -124,7 +124,6 @@ export function getCommandCapability(commandId: CommandId, ctx: CommandContext):
       if (target.kind === "layer_mask") return getCommandCapability("mask.delete", ctx);
       const found = targetLayer(doc, target);
       if (!found) return disabled("target is not deletable", command);
-      if (doc.layers.length <= 1) return disabled("cannot delete the last layer", command);
       if (found.layer.locked) return disabled("layer is locked", command);
       return enabled(command);
     }

@@ -9,6 +9,7 @@ export function navigationDown(env: PointerEnv, g: PointerGestures, e: React.Poi
   // Hand tool / Space-hold pans; zoom tool clicks in (Alt+click out)
   // anchored at the cursor.
   if (env.spacePan || tool.id === "hand") {
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     g.panDrag = { x: e.clientX, y: e.clientY };
     return true;
   }

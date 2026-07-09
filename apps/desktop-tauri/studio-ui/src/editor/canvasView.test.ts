@@ -41,18 +41,15 @@ describe("canvasView (M8)", () => {
     expect(max.zoom).toBe(MAX_ZOOM);
   });
 
-  it("pan clamps so the canvas edge never passes the stage centre, collapsing at fit", () => {
-    // At 2× the pan range reaches `zoom / 2`: an edge can be pulled all the
-    // way to the stage centre, revealing the canvas beside it.
+  it("pans freely across the workspace at every zoom level", () => {
     const zoomed = { zoom: 2, panX: 0, panY: 0 };
     const panned = panBy(zoomed, 10_000, -10_000, W, H);
-    expect(panned.panX).toBe(W);
-    expect(panned.panY).toBe(-H);
-    // At fit zoom there is nowhere to pan.
-    expect(panBy(FIT_VIEW, 50, 50, W, H)).toEqual(FIT_VIEW);
-    // Zooming back out re-clamps a large pan.
+    expect(panned.panX).toBe(10_000);
+    expect(panned.panY).toBe(-10_000);
+    expect(panBy(FIT_VIEW, 50, 50, W, H)).toEqual({ zoom: 1, panX: 50, panY: 50 });
     const out = zoomAt(panned, 1 / 2, 0, 0, W, H);
-    expect(out).toEqual(FIT_VIEW);
+    expect(out.panX).toBe(5_000);
+    expect(out.panY).toBe(-5_000);
   });
 
   it("zoomAt keeps the anchor's screen position fixed", () => {
@@ -110,6 +107,7 @@ describe("canvasView (M8)", () => {
     // panX = +max pulls the canvas right, revealing its left edge.
     const max = { zoom: 2, panX: (W * (2 - 1)) / 2, panY: -(H * (2 - 1)) / 2 };
     expect(viewWindow(max, W, H)).toEqual({ zoom: 2, panX: 0, panY: 0.5 });
+    expect(viewWindow({ zoom: 2, panX: W, panY: 0 }, W, H)).toEqual({ zoom: 1, panX: 0, panY: 0 });
     // Canvas zoom past the host's max clamps the window zoom but keeps the
     // window centred on the same visible point.
     const deep = viewWindow({ zoom: MAX_ZOOM, panX: 0, panY: 0 }, W, H);

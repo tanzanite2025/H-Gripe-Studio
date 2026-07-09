@@ -17,7 +17,7 @@ export interface CanvasNavigation {
   setView: React.Dispatch<React.SetStateAction<CanvasView>>;
   /** The current view, readable from event-time handlers. */
   viewRef: React.MutableRefObject<CanvasView>;
-  /** The canvas's untransformed on-screen size (the clamp space for pan). */
+  /** The canvas's untransformed on-screen size for zoom anchoring. */
   viewBase: () => [number, number];
   /** The view window the underlay should render for (un-debounced). */
   targetViewportView: ViewportViewState;
@@ -42,7 +42,7 @@ export function useCanvasNavigation(
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  // The canvas's untransformed on-screen size (the clamp space for pan).
+  // The canvas's untransformed on-screen size for zoom anchoring.
   // `offsetWidth`/`offsetHeight` are layout sizes, unaffected by the view's
   // CSS transform, so they stay correct under rotation.
   const viewBase = useCallback((): [number, number] => {
@@ -88,6 +88,7 @@ export function useCanvasNavigation(
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const wheelTarget = canvas.closest<HTMLElement>(".mask-edit-stage") ?? canvas;
     const onWheel = (e: WheelEvent) => {
       if (!e.altKey && !e.ctrlKey) return;
       e.preventDefault();
@@ -100,8 +101,8 @@ export function useCanvasNavigation(
       const factor = delta < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
       setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
     };
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onWheel);
+    wheelTarget.addEventListener("wheel", onWheel, { passive: false });
+    return () => wheelTarget.removeEventListener("wheel", onWheel);
   }, [canvasRef, viewBase]);
 
   const [spacePan, setSpacePan] = useState(false);
