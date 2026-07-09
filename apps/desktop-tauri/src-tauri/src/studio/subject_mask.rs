@@ -761,14 +761,10 @@ fn adjustment_lut(kind: &str, adjustment: &Value) -> Option<[u8; 256]> {
 /// One blended sample per the layer blend mode (grayscale 0..255; mirrors the
 /// TS `blendValue` in `maskMorphology.ts` so the preview cannot drift).
 fn blend_value(dv: f64, sv: f64, blend: &str) -> f64 {
-    match blend {
-        "multiply" => dv * sv / 255.0,
-        "screen" => 255.0 - (255.0 - dv) * (255.0 - sv) / 255.0,
-        "darken" => dv.min(sv),
-        "lighten" => dv.max(sv),
-        "difference" => (dv - sv).abs(),
-        _ => sv,
-    }
+    let mode = hgripe_grade::BlendMode::from_name(blend)
+        .filter(|mode| mode.is_separable())
+        .unwrap_or(hgripe_grade::BlendMode::Normal);
+    f64::from(hgripe_grade::blend_channel(mode, (dv / 255.0) as f32, (sv / 255.0) as f32) * 255.0)
 }
 
 /// Composite the layer `surface` onto `dst` in place per the layer blend mode,

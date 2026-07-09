@@ -19,6 +19,7 @@ import opsVideo from "../../../../../crates/hgripe-grade/goldens/ops_video.json"
 import opsWarper from "../../../../../crates/hgripe-grade/goldens/ops_warper.json";
 import scopes from "../../../../../crates/hgripe-grade/goldens/scopes.json";
 import temporalDenoiseGoldens from "../../../../../crates/hgripe-grade/goldens/temporal_denoise.json";
+import imageDocumentContracts from "./imageDocumentContractFixtures.json";
 import {
   applyDoc,
   compositeOver,
@@ -48,6 +49,15 @@ interface CompositeCase {
   source: GoldenSurface;
   expected: number[];
   tolerance: number;
+}
+
+interface RgbaCompositeCase {
+  name: string;
+  mode: string;
+  backdrop: number[];
+  source: number[];
+  opacity: number;
+  expected: number[];
 }
 
 interface DocCase {
@@ -103,6 +113,20 @@ describe("grade kernel golden vectors (shared with Rust)", () => {
         c.mask ? Float32Array.from(c.mask) : null,
       );
       assertClose(dst.data, c.expected, c.tolerance);
+    });
+  }
+
+  for (const c of (imageDocumentContracts as { rgbaCompositeCases: RgbaCompositeCase[] }).rgbaCompositeCases) {
+    it(`imageDocumentContractFixtures.json: ${c.name}`, () => {
+      const rgba = (data: number[]): GradeSurface => ({
+        w: 1,
+        h: 1,
+        data: Float32Array.from(data, (value) => value / 255),
+        space: "srgb",
+      });
+      const dst = rgba(c.backdrop);
+      compositeOver(dst, rgba(c.source), c.mode as GradeBlendMode, c.opacity, null);
+      expect(Array.from(dst.data, (value) => Math.round(Math.min(1, Math.max(0, value)) * 255))).toEqual(c.expected);
     });
   }
 

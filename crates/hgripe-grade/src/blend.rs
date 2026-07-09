@@ -33,6 +33,30 @@ pub enum BlendMode {
 }
 
 impl BlendMode {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "normal" => BlendMode::Normal,
+            "multiply" => BlendMode::Multiply,
+            "screen" => BlendMode::Screen,
+            "overlay" => BlendMode::Overlay,
+            "darken" => BlendMode::Darken,
+            "lighten" => BlendMode::Lighten,
+            "color_dodge" => BlendMode::ColorDodge,
+            "color_burn" => BlendMode::ColorBurn,
+            "hard_light" => BlendMode::HardLight,
+            "soft_light" => BlendMode::SoftLight,
+            "difference" => BlendMode::Difference,
+            "exclusion" => BlendMode::Exclusion,
+            "linear_dodge" => BlendMode::LinearDodge,
+            "linear_burn" => BlendMode::LinearBurn,
+            "hue" => BlendMode::Hue,
+            "saturation" => BlendMode::Saturation,
+            "color" => BlendMode::Color,
+            "luminosity" => BlendMode::Luminosity,
+            _ => return None,
+        })
+    }
+
     /// Non-separable modes blend the whole RGB triple; separable ones work
     /// per channel.
     pub fn is_separable(self) -> bool {
