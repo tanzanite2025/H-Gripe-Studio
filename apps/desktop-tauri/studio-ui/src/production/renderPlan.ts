@@ -26,6 +26,9 @@ export interface RenderSegment {
   sourceStartSec: number;
   /** The clip's stored grade doc (JSON string), applied at encode time. */
   gradeDoc: string | null;
+  /** The clip's property document (transform / crop / keyframes, JSON
+   * string), resolved per frame and composited at encode time. */
+  propsDoc: string | null;
 }
 
 /** An audio-track segment plus its non-destructive edit, for the mixdown. */
@@ -69,6 +72,8 @@ export function buildRenderPlan(
   opts: {
     fps?: number;
     clipGradeDoc?: (clipId: string) => string | null;
+    /** A clip's property document (JSON string; null when default). */
+    clipPropsDoc?: (clipId: string) => string | null;
     /** A clip's stored audio edit, applied in the mixdown. */
     clipAudioEdit?: (clipId: string) => AudioClipEdit | null;
   } = {},
@@ -105,6 +110,7 @@ export function buildRenderPlan(
       duration: clip.duration,
       sourceStartSec: clip.sourceStartSec ?? 0,
       gradeDoc: opts.clipGradeDoc?.(clip.id) ?? null,
+      propsDoc: opts.clipPropsDoc?.(clip.id) ?? null,
     });
   }
 
@@ -125,6 +131,7 @@ export function buildRenderPlan(
         duration: clip.duration,
         sourceStartSec: clip.sourceStartSec ?? 0,
         gradeDoc: null,
+        propsDoc: null,
         trimStartSec: (clip.sourceStartSec ?? 0) + edit.trimStartSec,
         gainDb: edit.gainDb,
         fadeInSec: edit.fadeInSec,
@@ -142,6 +149,11 @@ export interface ExpandedFrames {
   paths: string[];
   /** Per-frame grade doc (JSON string), aligned with `paths`. */
   gradeDocs: (string | null)[];
+  /** Per-frame clip property doc (JSON string), aligned with `paths`. */
+  propDocs: (string | null)[];
+  /** Per-frame clip-local time (seconds since the clip's start), aligned
+   * with `paths` — the property keyframe evaluation time. */
+  propTimes: number[];
   /**
    * Per-frame clip-local decode time, aligned with `paths`: `null` for
    * still frames (the path is the frame image), seconds into the source
@@ -162,6 +174,8 @@ export interface ExpandedFrames {
 export function expandPlanFrames(plan: RenderPlan): ExpandedFrames | null {
   const paths: string[] = [];
   const gradeDocs: (string | null)[] = [];
+  const propDocs: (string | null)[] = [];
+  const propTimes: number[] = [];
   const frameTimes: (number | null)[] = [];
   let hasVideoFrames = false;
   for (const segment of plan.video) {
@@ -170,6 +184,8 @@ export function expandPlanFrames(plan: RenderPlan): ExpandedFrames | null {
     for (let i = 0; i < count; i += 1) {
       paths.push(segment.path);
       gradeDocs.push(segment.gradeDoc);
+      propDocs.push(segment.propsDoc);
+      propTimes.push(Math.min(i / plan.fps, segment.duration));
       if (segment.kind === "video") {
         frameTimes.push(segment.sourceStartSec + Math.min(i / plan.fps, segment.duration));
         hasVideoFrames = true;
@@ -178,5 +194,5 @@ export function expandPlanFrames(plan: RenderPlan): ExpandedFrames | null {
       }
     }
   }
-  return { paths, gradeDocs, frameTimes, hasVideoFrames };
+  return { paths, gradeDocs, propDocs, propTimes, frameTimes, hasVideoFrames };
 }

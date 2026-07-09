@@ -870,6 +870,16 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [timeline, gradeDocs],
   );
 
+  // The export composites each clip's property document (transform / crop /
+  // keyframes), resolved per frame Rust-side.
+  const clipPropsDoc = useCallback(
+    (clipId: string): string | null => {
+      const props = clipProps[clipId];
+      return props ? JSON.stringify(props) : null;
+    },
+    [clipProps],
+  );
+
   // The export mixdown applies each audio clip's stored edit (trim / gain /
   // fades) — the same documents the audio edit modal commits.
   const clipAudioEdit = useCallback(
@@ -1935,6 +1945,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           timeline={timeline}
           assets={binAssets}
           clipGradeDoc={clipGradeDoc}
+          clipPropsDoc={clipPropsDoc}
           clipAudioEdit={clipAudioEdit}
           onClose={() => setExportOpen(false)}
         />

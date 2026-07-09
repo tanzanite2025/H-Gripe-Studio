@@ -64,6 +64,7 @@
 mod api_call;
 mod audio_mix;
 mod clip_props;
+mod clip_props_raster;
 mod color;
 mod color_match;
 pub(crate) mod color_match_cpu;

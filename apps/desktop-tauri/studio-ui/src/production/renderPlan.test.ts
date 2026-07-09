@@ -113,6 +113,20 @@ describe("expandPlanFrames", () => {
     expect(frames?.hasVideoFrames).toBe(false);
   });
 
+  it("carries the clip's property doc with clip-local evaluation times", () => {
+    const assets = [asset("a1", "image", "C:/one.png")];
+    const { timeline, clipIds } = withClips(assets);
+    const doc = '{"transform":{"scalePct":50}}';
+    const plan = buildRenderPlan(timeline, assets, {
+      fps: 2,
+      clipPropsDoc: (clipId) => (clipId === clipIds[0] ? doc : null),
+    });
+    const frames = expandPlanFrames(plan);
+    expect(frames?.propDocs).toHaveLength(4);
+    expect(frames?.propDocs.every((d) => d === doc)).toBe(true);
+    expect(frames?.propTimes).toEqual([0, 0.5, 1, 1.5]);
+  });
+
   it("pairs video-clip frames with clip-local decode times", () => {
     const assets = [asset("v1", "video", "C:/clip.mp4"), asset("s1", "image", "C:/still.png")];
     const { timeline } = withClips(assets);

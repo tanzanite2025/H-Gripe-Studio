@@ -18,6 +18,8 @@ use serde_json::{json, Value};
 use hgripe_grade::GradeSurface;
 
 use super::audio_mix::TimelineAudioSegment;
+use super::clip_props::{parse_clip_props_doc, resolve_clip_props_at, ClipPropsDoc};
+use super::clip_props_raster::apply_clip_props;
 use super::grade::{apply_grade_doc, grade_space, parse_grade_doc, GradeBackend};
 use super::graph::StudioGraphNode;
 use super::studio_image;
@@ -94,6 +96,100 @@ pub(super) fn resolve_video_frames(
         let frame_out = frames_dir.join(format!("vframe_{}.png", rendered.len()));
         let written = source.decode_frame(Path::new(path.trim()), time_sec, &frame_out)?;
         let out_str = written.to_string_lossy().to_string();
+        rendered.insert(key, out_str.clone());
+        out.push(out_str);
+    }
+    Ok(out)
+}
+
+/// Substitute property-composited frames into a frame sequence: each frame
+/// carrying a clip property document is resolved at its clip-local time
+/// (`prop_times`, aligned with `frames`) and composited through
+/// [`apply_clip_props`] under `props_dir`. Documents parse once per unique
+/// doc string; identity resolves pass the frame through untouched; frames
+/// resolving to the same quantized values reuse one rendered file
+/// (CLIP_KEYFRAME_MOTION_PIPELINE_PLAN.md Phase 2).
+pub(super) fn resolve_prop_frames(
+    frames: Vec<String>,
+    prop_docs: &[Option<String>],
+    prop_times: &[f64],
+    props_dir: &Path,
+) -> Result<Vec<String>, String> {
+    if prop_docs.len() != frames.len() {
+        return Err(format!(
+            "prop_docs length {} does not match frames length {}",
+            prop_docs.len(),
+            frames.len()
+        ));
+    }
+    if prop_times.len() != frames.len() {
+        return Err(format!(
+            "prop_times length {} does not match frames length {}",
+            prop_times.len(),
+            frames.len()
+        ));
+    }
+    let mut parsed: HashMap<&str, ClipPropsDoc> = HashMap::new();
+    let mut rendered: HashMap<(String, String), String> = HashMap::new();
+    let mut out = Vec::with_capacity(frames.len());
+    for (i, path) in frames.into_iter().enumerate() {
+        let Some(doc_str) = prop_docs[i].as_deref().filter(|d| !d.trim().is_empty()) else {
+            out.push(path);
+            continue;
+        };
+        let doc = match parsed.get(doc_str) {
+            Some(doc) => doc.clone(),
+            None => {
+                let doc = parse_clip_props_doc(doc_str)?;
+                parsed.insert(doc_str, doc.clone());
+                doc
+            }
+        };
+        let t = prop_times[i];
+        if !t.is_finite() || t < 0.0 {
+            return Err(format!("invalid prop time {t} at frame {i}"));
+        }
+        let resolved = resolve_clip_props_at(&doc, t);
+        if resolved.is_identity() {
+            out.push(path);
+            continue;
+        }
+        // Quantize the resolved values (1e-4) so a slow animation on a still
+        // only renders the frames whose values actually change.
+        let quantized = {
+            let tr = &resolved.transform;
+            let cr = &resolved.crop;
+            let q = |v: f64| (v * 1e4).round() as i64;
+            format!(
+                "{},{},{},{},{},{},{},{},{},{},{}",
+                q(tr.position.x),
+                q(tr.position.y),
+                q(tr.anchor.x),
+                q(tr.anchor.y),
+                q(tr.scale_pct),
+                q(tr.rotation_deg),
+                q(tr.opacity_pct),
+                q(cr.left_pct),
+                q(cr.top_pct),
+                q(cr.right_pct),
+                q(cr.bottom_pct)
+            )
+        };
+        let key = (path.clone(), quantized);
+        if let Some(existing) = rendered.get(&key) {
+            out.push(existing.clone());
+            continue;
+        }
+        let loaded = studio_image::load_working(
+            Path::new(path.trim()),
+            studio_image::DEFAULT_MAX_DECODE_PIXELS,
+        )?;
+        let composited = apply_clip_props(&loaded.image, &resolved);
+        std::fs::create_dir_all(props_dir)
+            .map_err(|err| format!("failed to create {}: {err}", props_dir.display()))?;
+        let out_path = props_dir.join(format!("props_{}.png", rendered.len()));
+        studio_image::write_working_output(&out_path, &composited)?;
+        let out_str = out_path.to_string_lossy().to_string();
         rendered.insert(key, out_str.clone());
         out.push(out_str);
     }
@@ -179,7 +275,10 @@ pub(super) fn resolve_graded_frames(
 /// their source at that clip-local time. When `grade_docs` is given (aligned
 /// with `frames`), each clip's stored grade document is applied to its frames
 /// before the encode — the export carries the same grades the program monitor
-/// and grade preview show. Backed by the same encoder as the `videoAssemble`
+/// and grade preview show. When `prop_docs` + `prop_times` are given (aligned
+/// with `frames`), each clip's property document (transform / crop /
+/// keyframes) is resolved at the frame's clip-local time and composited
+/// before the grade pass. Backed by the same encoder as the `videoAssemble`
 /// node executor.
 #[tauri::command]
 pub(crate) fn timeline_export(
@@ -190,6 +289,8 @@ pub(crate) fn timeline_export(
     output_name: Option<String>,
     grade_docs: Option<Vec<Option<String>>>,
     frame_times: Option<Vec<Option<f64>>>,
+    prop_docs: Option<Vec<Option<String>>>,
+    prop_times: Option<Vec<f64>>,
     audio: Option<Vec<TimelineAudioSegment>>,
 ) -> Result<TimelineExportResult, String> {
     let frames = match frame_times {
@@ -202,6 +303,19 @@ pub(crate) fn timeline_export(
                     .unwrap_or(0)
             ));
             resolve_video_frames(frames, &times, &frames_dir)?
+        }
+        _ => frames,
+    };
+    let frames = match (prop_docs, prop_times) {
+        (Some(docs), Some(times)) if docs.iter().any(Option::is_some) => {
+            let props_dir = crate::runtime_paths()?.output_dir.join(format!(
+                "timeline_props_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            ));
+            resolve_prop_frames(frames, &docs, &times, &props_dir)?
         }
         _ => frames,
     };
@@ -345,7 +459,8 @@ mod tests {
 
     #[test]
     fn rejects_empty_frames() {
-        let err = timeline_export(vec![], 24.0, None, None, None, None, None, None).unwrap_err();
+        let err = timeline_export(vec![], 24.0, None, None, None, None, None, None, None, None)
+            .unwrap_err();
         assert!(err.contains("needs at least one frame"), "{err}");
     }
 
@@ -354,6 +469,8 @@ mod tests {
         let err = timeline_export(
             vec!["Z:/definitely/missing-frame.png".to_string()],
             24.0,
+            None,
+            None,
             None,
             None,
             None,
@@ -479,6 +596,59 @@ mod tests {
         assert_eq!(result.frames, vec![src_str.clone(), src_str]);
         assert_eq!(result.graded_frame_count, 0);
         assert!(result.backend.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn composites_prop_frames_once_per_resolve_and_passes_identity_through() {
+        let dir = std::env::temp_dir().join(format!("hgripe_export_props_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("still.png");
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            4,
+            4,
+            image::Rgba([100, 100, 100, 255]),
+        ))
+        .save(&src)
+        .unwrap();
+        let src_str = src.to_string_lossy().to_string();
+
+        // A static half-opacity doc: every frame resolves to the same values,
+        // so all three frames share one composited file.
+        let doc = r#"{"transform": {"position": {"x": 0, "y": 0}, "anchor": {"x": 0, "y": 0}, "scalePct": 100, "rotationDeg": 0, "opacityPct": 50}, "crop": {"leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0}}"#.to_string();
+        let props_dir = dir.join("props");
+        let out = resolve_prop_frames(
+            vec![src_str.clone(), src_str.clone(), src_str.clone()],
+            &[Some(doc.clone()), Some(doc), None],
+            &[0.0, 0.5, 1.0],
+            &props_dir,
+        )
+        .expect("prop compositing succeeds");
+        assert_eq!(out[0], out[1], "equal resolves reuse one rendered file");
+        assert_ne!(out[0], src_str);
+        assert_eq!(out[2], src_str, "frames without a doc pass through");
+        let composited = image::open(&out[0]).unwrap().to_rgba8();
+        assert!(
+            composited.get_pixel(0, 0).0[3] < 255,
+            "opacity halves the alpha"
+        );
+
+        // Identity / empty docs never render a composited copy.
+        let identity = r#"{"transform": {"position": {"x": 0, "y": 0}, "anchor": {"x": 0, "y": 0}, "scalePct": 100, "rotationDeg": 0, "opacityPct": 100}, "crop": {"leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0}}"#.to_string();
+        let out = resolve_prop_frames(
+            vec![src_str.clone(), src_str.clone()],
+            &[Some(String::new()), Some(identity)],
+            &[0.0, 0.5],
+            &props_dir,
+        )
+        .expect("identity docs pass through");
+        assert_eq!(out, vec![src_str.clone(), src_str.clone()]);
+
+        // Misaligned inputs are rejected.
+        let err =
+            resolve_prop_frames(vec![src_str], &[None, None], &[0.0], &props_dir).unwrap_err();
+        assert!(err.contains("does not match"), "{err}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
