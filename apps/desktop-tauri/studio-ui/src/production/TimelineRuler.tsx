@@ -1,4 +1,4 @@
-import { DEFAULT_TIMELINE_FPS, snapTimeToFrame } from "./timeline";
+import { DEFAULT_TIMELINE_FPS, snapTimeToFrame, snapTimeToPoints } from "./timeline";
 
 export function formatTimelineTimecode(sec: number, fps: number): string {
   const safeFps = Math.max(1, Math.round(fps));
@@ -16,14 +16,24 @@ export function timelineRulerDuration(durationSec: number, playheadSec: number):
   return Math.max(8, Math.ceil(Math.max(durationSec, playheadSec)));
 }
 
+/** Snap capture radius around clip edges / markers, in ruler pixels. */
+export const RULER_SNAP_THRESHOLD_PX = 8;
+
 export function rulerClientXToTime(
   clientX: number,
   rect: Pick<DOMRect, "left" | "width">,
   durationSec: number,
   fps: number,
+  snap?: { points: number[]; thresholdPx?: number },
 ): number {
   const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
-  return snapTimeToFrame(Math.min(1, Math.max(0, ratio)) * durationSec, fps);
+  const raw = Math.min(1, Math.max(0, ratio)) * durationSec;
+  if (snap && rect.width > 0) {
+    const toleranceSec = ((snap.thresholdPx ?? RULER_SNAP_THRESHOLD_PX) / rect.width) * durationSec;
+    const snapped = snapTimeToPoints(raw, snap.points, toleranceSec);
+    if (snapped !== raw) return snapped;
+  }
+  return snapTimeToFrame(raw, fps);
 }
 
 export interface TimelineRulerProps {
@@ -31,6 +41,8 @@ export interface TimelineRulerProps {
   durationSec: number;
   playheadSec: number;
   onPlayheadSecChange: (sec: number) => void;
+  /** Shift-drag snap targets (clip edges, markers), in seconds. */
+  snapPoints?: number[];
 }
 
 export function TimelineRuler({
@@ -38,6 +50,7 @@ export function TimelineRuler({
   durationSec,
   playheadSec,
   onPlayheadSecChange,
+  snapPoints,
 }: TimelineRulerProps) {
   const timelineFps = fps || DEFAULT_TIMELINE_FPS;
   const rulerDuration = timelineRulerDuration(durationSec, playheadSec);
@@ -47,10 +60,10 @@ export function TimelineRuler({
   const minorTicks = Array.from({ length: Math.floor(rulerDuration / minorStepSec) + 1 }, (_, i) => i * minorStepSec);
   const playheadRatio = rulerDuration > 0 ? Math.min(1, Math.max(0, playheadSec / rulerDuration)) : 0;
 
-  const scrub = (clientX: number, ruler: HTMLElement) => {
+  const scrub = (clientX: number, ruler: HTMLElement, shiftKey: boolean) => {
     const rect = ruler.getBoundingClientRect();
-    const next = rulerClientXToTime(clientX, rect, rulerDuration, timelineFps);
-    onPlayheadSecChange(next);
+    const snap = shiftKey && snapPoints && snapPoints.length > 0 ? { points: snapPoints } : undefined;
+    onPlayheadSecChange(rulerClientXToTime(clientX, rect, rulerDuration, timelineFps, snap));
   };
 
   return (
@@ -64,11 +77,11 @@ export function TimelineRuler({
       title={formatTimelineTimecode(playheadSec, timelineFps)}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
-        scrub(e.clientX, e.currentTarget);
+        scrub(e.clientX, e.currentTarget, e.shiftKey);
       }}
       onPointerMove={(e) => {
         if (e.buttons !== 1) return;
-        scrub(e.clientX, e.currentTarget);
+        scrub(e.clientX, e.currentTarget, e.shiftKey);
       }}
     >
       {minorTicks.map((sec) => (
@@ -87,7 +100,9 @@ export function TimelineRuler({
           <span>{formatTimelineTimecode(sec, timelineFps)}</span>
         </span>
       ))}
-      <span className="production-timeline-playhead" style={{ left: `${playheadRatio * 100}%` }} />
+      <span className="production-timeline-playhead" style={{ left: `${playheadRatio * 100}%` }}>
+        <span className="production-timeline-playhead-head" />
+      </span>
     </div>
   );
 }

@@ -12,8 +12,10 @@ import {
   removeClip,
   removeClipsForAsset,
   removeTrack,
+  snapTimeToPoints,
   splitClip,
   timelineDuration,
+  timelineSnapPoints,
   trackKindForClip,
   trimClip,
 } from "./timeline";
@@ -104,6 +106,26 @@ describe("timeline model", () => {
     const later = findClip(trimClip(trimmed, r.clip.id, { start: 2.5 }), r.clip.id)!.clip;
     expect(later.start).toBe(2.5);
     expect(later.duration).toBe(MIN_CLIP_SECONDS);
+  });
+
+  it("collects sorted unique clip-edge snap points", () => {
+    expect(timelineSnapPoints(createTimeline())).toEqual([0]);
+    const a = appendClip(createTimeline(), imageAsset)!;
+    const b = appendClip(a.timeline, videoAsset)!;
+    const c = appendClip(b.timeline, audioAsset, { duration: 5 })!;
+    expect(timelineSnapPoints(c.timeline)).toEqual([
+      0,
+      DEFAULT_STILL_SECONDS,
+      DEFAULT_STILL_SECONDS + DEFAULT_MEDIA_SECONDS,
+    ]);
+  });
+
+  it("snaps to the nearest point only within tolerance", () => {
+    const points = [0, 5, 15];
+    expect(snapTimeToPoints(4.8, points, 0.5)).toBe(5);
+    expect(snapTimeToPoints(5.4, points, 0.5)).toBe(5);
+    expect(snapTimeToPoints(7, points, 0.5)).toBe(7);
+    expect(snapTimeToPoints(14.6, points, 0.5)).toBe(15);
   });
 
   it("splits a clip while preserving source continuity", () => {
