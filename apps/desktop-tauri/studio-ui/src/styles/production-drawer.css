@@ -590,6 +590,37 @@
   color: var(--muted);
   font-size: 10px;
 }
+.production-props-diamond {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.production-props-diamond:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.production-props-diamond.animated {
+  color: #58a6ff;
+}
+.production-props-diamond-icon {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.production-props-diamond.on-key .production-props-diamond-icon {
+  fill: currentColor;
+}
 .grade-apply-row { display: flex; justify-content: flex-end; }
 .production-timeline-shell {
   grid-column: 2;

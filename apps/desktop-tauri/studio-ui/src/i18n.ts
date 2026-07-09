@@ -831,6 +831,10 @@ export const messages = {
   "drawer.propsTransform": { en: "Transform", zh: "变换" },
   "drawer.propsCrop": { en: "Crop", zh: "裁剪" },
   "drawer.propsResetSection": { en: "reset this section", zh: "重置这一栏" },
+  "drawer.propsKeyframeToggle": {
+    en: "add / remove keyframe at the playhead",
+    zh: "在播放头处添加/删除关键帧",
+  },
   "drawer.propsPosition": { en: "Position", zh: "位置" },
   "drawer.propsAnchor": { en: "Anchor", zh: "锚点" },
   "drawer.propsScale": { en: "Scale", zh: "比例" },
