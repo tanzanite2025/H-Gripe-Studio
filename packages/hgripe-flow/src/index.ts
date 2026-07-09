@@ -13,9 +13,12 @@ export {
 
 export {
   cachedChamferPath,
+  cachedRoutedEdgePath,
   chamferPath,
   chamferPoints,
   pointsToPath,
+  routedEdgePath,
+  routedEdgePoints,
   type Pt,
 } from "./hgripe/edgeRouting";
 export {

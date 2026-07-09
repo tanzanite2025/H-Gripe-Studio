@@ -2,6 +2,7 @@
 // unit-testable without a renderer.
 
 import { normalizeHgripeEdges, type Edge, type Node } from "@hgripe/flow";
+import { offsetEdgeWaypoints } from "./edgeWaypoints";
 import { orderNodes } from "./grouping";
 import type { HgripeNodeData } from "./HgripeNode";
 
@@ -64,13 +65,18 @@ export function buildPaste(
   const edges = normalizeHgripeEdges(
     clip.edges
       .filter((e) => idMap.has(e.source) && idMap.has(e.target))
-      .map((e, i) => ({
-        ...e,
-        id: `e-${idMap.get(e.source)}-${idMap.get(e.target)}-${i}`,
-        source: idMap.get(e.source) as string,
-        target: idMap.get(e.target) as string,
-        selected: true,
-      })),
+      .map((e, i) =>
+        offsetEdgeWaypoints(
+          {
+            ...e,
+            id: `e-${idMap.get(e.source)}-${idMap.get(e.target)}-${i}`,
+            source: idMap.get(e.source) as string,
+            target: idMap.get(e.target) as string,
+            selected: true,
+          },
+          offset,
+        ),
+      ),
   );
   // Group frames must precede their children for React Flow.
   return { nodes: orderNodes(nodes), edges };

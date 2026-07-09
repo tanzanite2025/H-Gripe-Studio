@@ -10,7 +10,10 @@
 > low zoom / reduced motion), and failed/cancelled paths use a static red
 > dashed treatment. Steps 8-9 have also landed: `cachedChamferPath` caches
 > geometry-derived paths and `isEdgeLodActive` simplifies low-zoom edges.
-> Remaining: explicit bend points and tidy routing.
+> Explicit bend points have landed: double-clicking a wire adds a persistent
+> waypoint, selected wires expose draggable waypoint handles, double-clicking
+> a handle removes it, and Shift+double-click clears the route. Remaining:
+> selected-area tidy routing.
 > Purpose: define the long-term wire style for the H-Gripe Studio node canvas,
 > so connection lines stay readable, performant, and aligned with product-level
 > node cards.
@@ -372,5 +375,4 @@ At very low zoom:
 7. ✅ Add selected / hover / running / error visual states.
 8. ✅ Add path caching based on source/target geometry.
 9. ✅ Add LOD simplification.
-10. Add explicit bend points or tidy routing only after the default route is
-   stable.
+10. 🟡 Explicit bend points are landed; selected-area tidy routing remains.

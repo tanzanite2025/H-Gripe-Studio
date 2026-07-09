@@ -14,6 +14,7 @@ import { GRAPH_VERSION } from "../graph/model";
 import { defaultParams } from "../graph/nodeSpecs";
 import { GROUP_KIND, DEFAULT_GROUP_WIDTH, DEFAULT_GROUP_HEIGHT, orderNodes } from "./grouping";
 import type { HgripeNodeData } from "./HgripeNode";
+import { edgeWaypoints } from "./edgeWaypoints";
 
 export function toWorkflowGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   const graphNodes: GraphNode[] = nodes.map((n) => {
@@ -33,13 +34,18 @@ export function toWorkflowGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
     return node;
   });
 
-  const graphEdges: GraphEdge[] = edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    sourcePort: e.sourceHandle ?? "",
-    target: e.target,
-    targetPort: e.targetHandle ?? "",
-  }));
+  const graphEdges: GraphEdge[] = edges.map((e) => {
+    const edge: GraphEdge = {
+      id: e.id,
+      source: e.source,
+      sourcePort: e.sourceHandle ?? "",
+      target: e.target,
+      targetPort: e.targetHandle ?? "",
+    };
+    const waypoints = edgeWaypoints(e);
+    if (waypoints.length > 0) edge.waypoints = waypoints.map((point) => ({ ...point }));
+    return edge;
+  });
 
   return { version: GRAPH_VERSION, nodes: graphNodes, edges: graphEdges };
 }
@@ -74,13 +80,16 @@ export function fromWorkflowGraph(graph: WorkflowGraph): { nodes: Node[]; edges:
   });
 
   const edges: Edge[] = graph.edges.map((e) => {
-    const edge = {
+    const edge: Edge = {
       id: e.id,
       source: e.source,
       sourceHandle: e.sourcePort || null,
       target: e.target,
       targetHandle: e.targetPort || null,
     };
+    if (e.waypoints?.length) {
+      edge.data = { waypoints: e.waypoints.map((point) => ({ ...point })) };
+    }
     // Binding edges (media source -> bound edit node) are rendered with the
     // distinct binding style. The graph model carries no edge type, so we
     // restore it from the `binding-` id prefix `addBoundEdit` stamps on them.

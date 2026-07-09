@@ -61,6 +61,23 @@ describe("adapter round-trip", () => {
     expect(restored).toEqual(graph);
   });
 
+  it("persists explicit edge waypoints through the graph model", () => {
+    const routedEdges: Edge[] = [
+      {
+        ...edges[0],
+        data: { waypoints: [{ x: 80, y: 120 }, { x: 160, y: 120 }] },
+      },
+    ];
+    const graph = toWorkflowGraph(nodes, routedEdges);
+    const back = fromWorkflowGraph(deserializeGraph(serializeGraph(graph)));
+
+    expect(graph.edges[0].waypoints).toEqual([{ x: 80, y: 120 }, { x: 160, y: 120 }]);
+    expect(back.edges[0].data?.waypoints).toEqual([
+      { x: 80, y: 120 },
+      { x: 160, y: 120 },
+    ]);
+  });
+
   it("merges saved params over the kind's current defaults", () => {
     // A graph saved before `steps`/`seed` existed should still get defaults.
     const graph = toWorkflowGraph(

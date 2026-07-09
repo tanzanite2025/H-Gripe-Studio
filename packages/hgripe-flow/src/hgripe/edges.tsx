@@ -1,8 +1,9 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import {
   addEdge,
   BaseEdge,
   ReactFlow,
+  useReactFlow,
   useStore,
   type Connection,
   type ConnectionLineComponentProps,
@@ -11,7 +12,7 @@ import {
   type Node,
   type ReactFlowProps,
 } from "@xyflow/react";
-import { cachedChamferPath, chamferPath } from "./edgeRouting";
+import { cachedRoutedEdgePath, chamferPath, type Pt } from "./edgeRouting";
 import {
   EDGE_ARROW_MARKER,
   EDGE_STROKE_WIDTH,
@@ -161,6 +162,66 @@ function edgePathClassName(state: HgripeEdgeVisualState, lod: boolean) {
   return undefined;
 }
 
+function WaypointHandles({
+  waypoints,
+  selected,
+  onDragStart,
+  onChange,
+  onRemove,
+}: {
+  waypoints: readonly Pt[];
+  selected: boolean | undefined;
+  onDragStart?: () => void;
+  onChange?: (index: number, point: Pt) => void;
+  onRemove?: (index: number) => void;
+}) {
+  const { screenToFlowPosition } = useReactFlow();
+  const dragStarted = useRef(false);
+
+  if (!selected || waypoints.length === 0) return null;
+
+  return (
+    <>
+      {waypoints.map((point, index) => (
+        <circle
+          key={index}
+          className="hgripe-edge-waypoint nodrag nopan"
+          cx={point.x}
+          cy={point.y}
+          r={6}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            dragStarted.current = false;
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+            if (!dragStarted.current) {
+              dragStarted.current = true;
+              onDragStart?.();
+            }
+            onChange?.(
+              index,
+              screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+            );
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            onRemove?.(index);
+          }}
+        >
+          <title>Drag waypoint; double-click to remove</title>
+        </circle>
+      ))}
+    </>
+  );
+}
+
 export function HgripeFlow<NodeType extends Node = Node, EdgeType extends Edge = Edge>({
   edges,
   children,
@@ -194,7 +255,12 @@ export const ChamferEdge = memo(function ChamferEdge({
   style,
 }: EdgeProps<Edge<HgripeEdgeData>>) {
   const lod = useStore(selectEdgeLod) && !selected;
-  const path = cachedChamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const waypoints = data?.waypoints ?? [];
+  const path = cachedRoutedEdgePath(
+    { x: sourceX, y: sourceY },
+    { x: targetX, y: targetY },
+    waypoints,
+  );
   const state = hgripeEdgeVisualState(data);
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
   const markerId = customStroke ? edgeMarkerId(DATA_ARROW_ID, id) : edgeMarker("data", state, selected);
@@ -220,6 +286,15 @@ export const ChamferEdge = memo(function ChamferEdge({
           ...style,
         }}
       />
+      {waypoints.length > 0 ? (
+        <WaypointHandles
+          waypoints={waypoints}
+          selected={selected}
+          onDragStart={data?.onWaypointDragStart}
+          onChange={data?.onWaypointChange}
+          onRemove={data?.onWaypointRemove}
+        />
+      ) : null}
     </>
   );
 });
@@ -235,7 +310,12 @@ export const BindingEdge = memo(function BindingEdge({
   style,
 }: EdgeProps<Edge<HgripeEdgeData>>) {
   const lod = useStore(selectEdgeLod) && !selected;
-  const path = cachedChamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const waypoints = data?.waypoints ?? [];
+  const path = cachedRoutedEdgePath(
+    { x: sourceX, y: sourceY },
+    { x: targetX, y: targetY },
+    waypoints,
+  );
   const state = hgripeEdgeVisualState(data);
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
   const markerId = customStroke
@@ -263,6 +343,15 @@ export const BindingEdge = memo(function BindingEdge({
           ...style,
         }}
       />
+      {waypoints.length > 0 ? (
+        <WaypointHandles
+          waypoints={waypoints}
+          selected={selected}
+          onDragStart={data?.onWaypointDragStart}
+          onChange={data?.onWaypointChange}
+          onRemove={data?.onWaypointRemove}
+        />
+      ) : null}
     </>
   );
 });

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   cachedChamferPath,
+  cachedRoutedEdgePath,
   chamferPath,
   chamferPoints,
   EDGE_LOD_ZOOM_THRESHOLD,
   isEdgeLodActive,
   pointsToPath,
+  routedEdgePath,
+  routedEdgePoints,
 } from "@hgripe/flow";
 
 const s = { x: 0, y: 0 };
@@ -45,6 +48,31 @@ describe("cachedChamferPath", () => {
     expect(first).toBe(chamferPath(s, t));
     expect(cachedChamferPath(s, t)).toBe(first);
     expect(cachedChamferPath({ x: 0, y: 0 }, { x: 200, y: 50 })).toBe(first);
+  });
+});
+
+describe("explicit edge waypoints", () => {
+  it("routes through persisted bend points in order", () => {
+    const waypoints = [
+      { x: 60, y: 20 },
+      { x: 120, y: 80 },
+    ];
+    expect(routedEdgePoints(s, { x: 200, y: 100 }, waypoints)).toEqual([
+      s,
+      ...waypoints,
+      { x: 200, y: 100 },
+    ]);
+    expect(routedEdgePath(s, { x: 200, y: 100 }, waypoints)).toBe(
+      "M 0,0 L 60,20 L 120,80 L 200,100",
+    );
+  });
+
+  it("caches waypoint routes separately from the default route", () => {
+    const target = { x: 200, y: 50 };
+    expect(cachedRoutedEdgePath(s, target, [{ x: 80, y: 80 }])).toBe(
+      "M 0,0 L 80,80 L 200,50",
+    );
+    expect(cachedRoutedEdgePath(s, target)).toBe(cachedChamferPath(s, target));
   });
 });
 
