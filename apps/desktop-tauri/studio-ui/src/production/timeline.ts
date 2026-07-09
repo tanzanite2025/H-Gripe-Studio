@@ -226,6 +226,32 @@ export function removeClipsForAsset(timeline: TimelineModel, assetId: string): T
   };
 }
 
+/** Sorted unique snap points: timeline start plus every clip edge. */
+export function timelineSnapPoints(timeline: TimelineModel): number[] {
+  const points = new Set<number>([0]);
+  for (const track of timeline.tracks) {
+    for (const clip of track.clips) {
+      points.add(clip.start);
+      points.add(clip.start + clip.duration);
+    }
+  }
+  return [...points].sort((a, b) => a - b);
+}
+
+/** Nearest snap point within tolerance, else the original time. */
+export function snapTimeToPoints(sec: number, points: number[], toleranceSec: number): number {
+  let best = sec;
+  let bestDist = toleranceSec;
+  for (const point of points) {
+    const dist = Math.abs(point - sec);
+    if (dist <= bestDist) {
+      bestDist = dist;
+      best = point;
+    }
+  }
+  return best;
+}
+
 /** Non-ripple trim: clamps start >= 0 and duration >= MIN_CLIP_SECONDS. */
 export function trimClip(
   timeline: TimelineModel,

@@ -7,13 +7,13 @@ import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 import { ProgramMonitor } from "./ProgramMonitor";
 import type { ProductionTarget } from "./productionTarget";
-import { TimelineRuler } from "./TimelineRuler";
+import { TimelineRuler, timelineRulerDuration } from "./TimelineRuler";
 import {
   clipKindForAsset,
   DEFAULT_TIMELINE_FPS,
   MIN_CLIP_SECONDS,
   timelineDuration,
-  trackEnd,
+  timelineSnapPoints,
   trackKindForClip,
   type ClipKind,
   type TimelineModel,
@@ -318,6 +318,11 @@ export function ProductionDrawer({
   const selectedClipAsset = selectedClip ? (assets.find((a) => a.id === selectedClip.assetId) ?? null) : null;
   const timelineFps = timeline.fps ?? DEFAULT_TIMELINE_FPS;
   const timelineLen = timelineDuration(timeline);
+  // One shared horizontal scale for the ruler and every lane, so the playhead
+  // line and clip positions stay vertically aligned across tracks.
+  const rulerDuration = timelineRulerDuration(timelineLen, playheadSec);
+  const snapPoints = timelineSnapPoints(timeline);
+  const playheadRatio = Math.min(1, Math.max(0, playheadSec / rulerDuration));
 
   // Premiere-style track stack: video tracks on top with the highest lane
   // first (V2 above V1), audio tracks below in ascending order (A1 first).
@@ -584,12 +589,17 @@ export function ProductionDrawer({
                 durationSec={timelineLen}
                 playheadSec={playheadSec}
                 onPlayheadSecChange={setPlayheadSec}
+                snapPoints={snapPoints}
               />
+              <div className="production-timeline-playhead-overlay" aria-hidden="true">
+                <span
+                  className="production-timeline-playhead-line"
+                  style={{ left: `${playheadRatio * 100}%` }}
+                />
+              </div>
               <div className="production-timeline-tracks">
               {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
-                // Scale every lane to the same overall timeline length so clip
-                // positions line up vertically across tracks.
-                const total = Math.max(timelineDuration(timeline), Math.max(trackEnd(track), 1));
+                const total = rulerDuration;
                 const acceptsActive =
                   !!activeAsset && trackKindForClip(clipKindForAsset(activeAsset.kind)) === track.kind;
                 return (

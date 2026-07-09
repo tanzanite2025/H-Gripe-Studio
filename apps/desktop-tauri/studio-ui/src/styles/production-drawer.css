@@ -635,6 +635,39 @@
   box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.28);
   pointer-events: none;
 }
+/* Blue triangle playhead head, sitting in the ruler like Premiere's. */
+.production-timeline-playhead-head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #5b8cff;
+}
+/* Playhead line extended from the ruler down across every track lane.
+   left/right mirror the card padding (8px / 42px) plus the 94px header
+   column; top clears the 34px ruler. */
+.production-timeline-playhead-overlay {
+  position: absolute;
+  top: 42px;
+  bottom: 8px;
+  left: 102px;
+  right: 42px;
+  pointer-events: none;
+  z-index: 2;
+}
+.production-timeline-playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  background: #5b8cff;
+  opacity: 0.85;
+}
 .production-monitor {
   flex: 1;
   width: 100%;
