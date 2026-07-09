@@ -792,8 +792,11 @@ export function ProductionDrawer({
                                 )
                               : [];
                           return (
-                            <button
+                            <div
                             key={clip.id}
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={selected}
                             className={`production-clip clip-${clip.kind}${selected ? " active" : ""}${timelineTool === "razor" ? " razor-ready" : ""}`}
                             style={{
                               left: `${(clip.start / total) * 100}%`,
@@ -811,6 +814,12 @@ export function ProductionDrawer({
                                 }
                                 return;
                               }
+                              onSelectClip(selected ? null : clip.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              if (track.locked || timelineTool !== "select") return;
+                              e.preventDefault();
                               onSelectClip(selected ? null : clip.id);
                             }}
                             onMouseMove={(e) => {
@@ -849,12 +858,11 @@ export function ProductionDrawer({
                             ) : null}
                             <span className="production-clip-name">{clipAssetName(clip.id)}</span>
                             {keyframes.map((group, groupIndex) => (
-                              <span
+                              <button
                                 key={groupIndex}
+                                type="button"
                                 className="production-clip-keyframe"
                                 style={{ left: `${(group.t / clip.duration) * 100}%` }}
-                                role="button"
-                                tabIndex={0}
                                 aria-label={t("drawer.timelineKeyframeTitle", {
                                   t: group.t.toFixed(2),
                                   n: group.count,
@@ -988,9 +996,9 @@ export function ProductionDrawer({
                                 ×
                               </span>
                             ) : null}
-                          </button>
-                        );
-                      })}
+                            </div>
+                          );
+                        })}
                     </div>
                   </div>
                 );
