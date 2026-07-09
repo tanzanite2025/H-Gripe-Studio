@@ -11,6 +11,11 @@ import { describeDeviceReport, deviceReportFromViewportBackend } from "../runtim
 import { useViewControls } from "../viewport/useViewControls";
 import { useVideoPreview, type VideoPreviewTarget } from "../viewport/useVideoPreview";
 import { useViewportPlacement } from "../viewport/useViewportPlacement";
+import {
+  ExportFrameDialog,
+  type ExportFrameRequest,
+  type ExportFrameResult,
+} from "./ExportFrameDialog";
 import type { MediaAsset } from "./mediaBin";
 import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
 import { findClip, timelineDuration, type TimelineModel } from "./timeline";
@@ -160,6 +165,18 @@ function SafeAreaIcon() {
   );
 }
 
+function ExportFrameIcon() {
+  return (
+    <MonitorIcon>
+      <rect x="4" y="5" width="16" height="11" rx="1.5" />
+      <path d="M8 19h8" />
+      <path d="M12 16v3" />
+      <path d="M12 8v5" />
+      <path d="m9.5 10.5 2.5 2.5 2.5-2.5" />
+    </MonitorIcon>
+  );
+}
+
 function clampTime(sec: number, duration: number) {
   return Math.max(0, Math.min(duration, sec));
 }
@@ -259,6 +276,7 @@ export function ProgramMonitor({
   clipPropsDoc,
   playheadSec: controlledPlayheadSec,
   onPlayheadSecChange,
+  onExportedFrame,
 }: {
   timeline: TimelineModel;
   assets: MediaAsset[];
@@ -270,6 +288,7 @@ export function ProgramMonitor({
   clipPropsDoc?: (clipId: string) => string | null;
   playheadSec?: number;
   onPlayheadSecChange?: (sec: number) => void;
+  onExportedFrame?: (asset: { path: string; name: string }) => void;
 }) {
   const t = useT();
   const [localPlayheadSec, setLocalPlayheadSec] = useState(0);
@@ -277,6 +296,7 @@ export function ProgramMonitor({
   const setPlayheadSec = onPlayheadSecChange ?? setLocalPlayheadSec;
   const [playing, setPlaying] = useState(false);
   const [safeArea, setSafeArea] = useState(false);
+  const [exportFrameOpen, setExportFrameOpen] = useState(false);
   const [, setMarkers] = useState<number[]>([]);
   const [inPointSec, setInPointSec] = useState<number | null>(null);
   const [outPointSec, setOutPointSec] = useState<number | null>(null);
@@ -411,6 +431,11 @@ export function ProgramMonitor({
     setOutPointSec(clampedSec);
     if (inPointSec != null && inPointSec > clampedSec) setInPointSec(null);
   };
+  const exportFrameName = `frame_${formatTimecode(clampedSec, displayFps).replace(/:/g, "-")}`;
+  const exportFrame = async (request: ExportFrameRequest): Promise<ExportFrameResult> => {
+    if (!host) throw new Error(t("exportFrame.noFrame"));
+    return host.exportFrame(request.path, request.format);
+  };
 
   return (
     <div className="production-monitor">
@@ -461,6 +486,16 @@ export function ProgramMonitor({
             <FastForwardIcon />
           </button>
           <span className="production-monitor-control-separator" />
+          <button
+            type="button"
+            className="production-monitor-control"
+            onClick={() => setExportFrameOpen(true)}
+            disabled={!target || !host}
+            title={t("exportFrame.openTitle")}
+            aria-label={t("exportFrame.openTitle")}
+          >
+            <ExportFrameIcon />
+          </button>
           <button
             type="button"
             className={`production-monitor-control production-monitor-safe-area${safeArea ? " active" : ""}`}
@@ -514,6 +549,14 @@ export function ProgramMonitor({
         </div>
         </div>
       </div>
+      {exportFrameOpen ? (
+        <ExportFrameDialog
+          defaultName={exportFrameName}
+          onClose={() => setExportFrameOpen(false)}
+          onExport={exportFrame}
+          onAddToProject={onExportedFrame}
+        />
+      ) : null}
     </div>
   );
 }

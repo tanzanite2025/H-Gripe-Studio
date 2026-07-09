@@ -14,11 +14,13 @@
 //! without changing the product-facing protocol.
 
 use std::collections::HashMap;
+use std::fs::{self, File};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use image::{Rgba, RgbaImage};
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1875,6 +1877,13 @@ fn rgba_to_frame(rendered: RenderedRgba) -> Result<ViewportFrame, String> {
 /// the shared ingress of both egress paths: PNG transport and native surface
 /// presentation.
 fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
+    viewport_render_rgba_with_overlay(viewport_id, true)
+}
+
+fn viewport_render_rgba_with_overlay(
+    viewport_id: &str,
+    include_overlay_scene: bool,
+) -> Result<RenderedRgba, String> {
     let id = parse_id(viewport_id)?;
     let (
         target,
@@ -1901,7 +1910,11 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             state.view,
             state.temporal_denoise,
             state.mask_overlay.clone(),
-            state.overlay_scene.clone(),
+            if include_overlay_scene {
+                state.overlay_scene.clone()
+            } else {
+                None
+            },
             // Resolve at the stored clip-local time; identity resolves
             // vanish here so a static default document costs nothing.
             state
@@ -2057,6 +2070,90 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             )
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ViewportFrameExportFormat {
+    Png,
+    Jpeg,
+    Bmp,
+}
+
+impl ViewportFrameExportFormat {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpeg",
+            Self::Bmp => "bmp",
+        }
+    }
+
+    fn image_format(self) -> ImageFormat {
+        match self {
+            Self::Png => ImageFormat::Png,
+            Self::Jpeg => ImageFormat::Jpeg,
+            Self::Bmp => ImageFormat::Bmp,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ViewportFrameExportResult {
+    path: String,
+    width: u32,
+    height: u32,
+    format: String,
+}
+
+fn write_export_frame(
+    path: &Path,
+    image: &RgbaImage,
+    format: ViewportFrameExportFormat,
+) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| "export path must include a parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    let mut file =
+        File::create(path).map_err(|err| format!("failed to create {}: {err}", path.display()))?;
+    match format {
+        ViewportFrameExportFormat::Jpeg => {
+            let rgb = DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+            DynamicImage::ImageRgb8(rgb)
+                .write_to(&mut file, format.image_format())
+                .map_err(|err| format!("failed to encode jpeg frame: {err}"))?;
+        }
+        ViewportFrameExportFormat::Png | ViewportFrameExportFormat::Bmp => {
+            DynamicImage::ImageRgba8(image.clone())
+                .write_to(&mut file, format.image_format())
+                .map_err(|err| format!("failed to encode {} frame: {err}", format.as_str()))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn viewport_export_frame(
+    viewport_id: String,
+    path: String,
+    format: ViewportFrameExportFormat,
+) -> Result<ViewportFrameExportResult, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("export path is empty".to_string());
+    }
+    let rendered = viewport_render_rgba_with_overlay(&viewport_id, false)?;
+    let (width, height) = rendered.image.dimensions();
+    write_export_frame(Path::new(trimmed), &rendered.image, format)?;
+    Ok(ViewportFrameExportResult {
+        path: trimmed.to_string(),
+        width,
+        height,
+        format: format.as_str().to_string(),
+    })
 }
 
 /// Binary frame transport: the same render as [`viewport_render_frame`], but

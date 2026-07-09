@@ -330,6 +330,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     if (!isDesktop) window.alert(t("drawer.importNeedsDesktop"));
   }, [importMediaPathsToBin, isDesktop, t]);
 
+  const handleAddExportedFrame = useCallback((asset: { path: string; name: string }) => {
+    addAssetToBin(productionStore, { kind: "image", path: asset.path, name: asset.name });
+    void primeIngest([asset.path]);
+    setMessage(t("exportFrame.addedToProject"));
+  }, [setMessage, t]);
+
   // Persisted drawer shell state so the drawer reopens how it was left.
   const changeDrawerMode = useCallback((m: DrawerMode) => {
     setDrawerMode(m);
@@ -1905,6 +1911,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onOpenClipGrade={handleOpenClipGrade}
           onSplitClipToLayers={handleSplitClipToLayers}
           onOpenExport={() => setExportOpen(true)}
+          onAddExportedFrame={handleAddExportedFrame}
           clipGradeDoc={clipGradeDoc}
           clipPropsDoc={clipPropsDoc}
           clipProperties={selectedClipProperties}

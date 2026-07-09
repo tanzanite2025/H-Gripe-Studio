@@ -78,6 +78,8 @@ export interface ProductionDrawerProps {
   onSplitClipToLayers: (clipId: string) => void;
   /** Export command: open the on-demand export dialog for the timeline. */
   onOpenExport: () => void;
+  /** Register a monitor frame export as a media-bin image. */
+  onAddExportedFrame?: (asset: { path: string; name: string }) => void;
   /** A clip's stored grade doc (JSON string), for the program monitor. */
   clipGradeDoc?: (clipId: string) => string | null;
   /** A clip's property document (JSON string), resolved at the playhead
@@ -220,6 +222,7 @@ export function ProductionDrawer({
   onOpenClipGrade,
   onSplitClipToLayers,
   onOpenExport,
+  onAddExportedFrame,
   clipGradeDoc,
   clipPropsDoc,
   clipProperties,
@@ -516,6 +519,10 @@ export function ProductionDrawer({
               clipPropsDoc={clipPropsDoc}
               playheadSec={playheadSec}
               onPlayheadSecChange={setPlayheadSec}
+              onExportedFrame={(asset) => {
+                onAddExportedFrame?.(asset);
+                setAssetPanelOpen(true);
+              }}
             />
           </div>
 

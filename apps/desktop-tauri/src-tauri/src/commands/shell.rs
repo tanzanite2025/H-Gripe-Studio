@@ -33,6 +33,25 @@ pub(crate) fn pick_file(
     builder.blocking_pick_file().map(|path| path.to_string())
 }
 
+/// Open a native folder picker and return the chosen directory, or `None` if
+/// the user cancelled.
+#[tauri::command]
+pub(crate) fn pick_folder(
+    app: tauri::AppHandle,
+    title: Option<String>,
+    dir: Option<String>,
+) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut builder = app.dialog().file();
+    if let Some(title) = title {
+        builder = builder.set_title(title);
+    }
+    if let Some(dir) = dir.as_deref().filter(|d| !d.trim().is_empty()) {
+        builder = builder.set_directory(dir);
+    }
+    builder.blocking_pick_folder().map(|path| path.to_string())
+}
+
 /// Read a text file, truncating to `max_bytes` so large files cannot freeze
 /// the UI. A truncation marker is appended when the file is clipped.
 #[tauri::command]
