@@ -1,5 +1,5 @@
 {
-  "description": "Shared keyframe-evaluation contract between the TS panel (keyframes.ts) and the Rust backend (studio/clip_props.rs). Both evaluators must produce these exact samples: no keys -> static value, one key -> constant, before/after the span -> endpoint hold, inside -> linear interpolation, resolved values clamped like the static document.",
+  "description": "Shared keyframe-evaluation contract between the TS panel (keyframes.ts) and the Rust backend (studio/clip_props.rs). Both evaluators must produce these exact samples: no keys -> static value, one key -> constant, before/after the span -> endpoint hold, missing interp -> linear, and each source key may select linear/hold/bezier interpolation to the next key. Resolved values are clamped like the static document.",
   "cases": [
     {
       "name": "no tracks falls back to the static document",
@@ -96,6 +96,59 @@
       "samples": [
         { "path": "transform.rotationDeg", "t": 1, "expected": 15 },
         { "path": "transform.rotationDeg", "t": 3, "expected": 60 }
+      ]
+    },
+    {
+      "name": "hold interpolation keeps the source value until the next key",
+      "doc": {
+        "transform": {
+          "position": { "x": 0, "y": 0 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 100,
+          "rotationDeg": 0,
+          "opacityPct": 100
+        },
+        "crop": { "leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0 },
+        "tracks": {
+          "transform.position.x": [
+            { "t": 0, "v": 10, "interp": "hold" },
+            { "t": 2, "v": 30 }
+          ]
+        }
+      },
+      "samples": [
+        { "path": "transform.position.x", "t": 0.5, "expected": 10 },
+        { "path": "transform.position.x", "t": 1.999, "expected": 10 },
+        { "path": "transform.position.x", "t": 2, "expected": 30 }
+      ]
+    },
+    {
+      "name": "bezier interpolation applies normalized timing control points",
+      "doc": {
+        "transform": {
+          "position": { "x": 0, "y": 0 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 100,
+          "rotationDeg": 0,
+          "opacityPct": 100
+        },
+        "crop": { "leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0 },
+        "tracks": {
+          "transform.position.x": [
+            {
+              "t": 0,
+              "v": 0,
+              "interp": "bezier",
+              "bezier": [[0.42, 0], [0.58, 1]]
+            },
+            { "t": 2, "v": 100 }
+          ]
+        }
+      },
+      "samples": [
+        { "path": "transform.position.x", "t": 0.5, "expected": 12.916193104740456 },
+        { "path": "transform.position.x", "t": 1, "expected": 50 },
+        { "path": "transform.position.x", "t": 1.5, "expected": 87.08380689525954 }
       ]
     },
     {

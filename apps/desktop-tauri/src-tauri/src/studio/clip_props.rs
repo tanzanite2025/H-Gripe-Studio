@@ -7,7 +7,7 @@
 //! `studio-ui/src/production/clipPropsKeyframeFixtures.json`):
 //! - a property without keyframes takes its static document value;
 //! - keyframes are evaluated sorted by time, held before the first and after
-//!   the last key, and linearly interpolated in between;
+//!   the last key, with each key selecting interpolation to the next key;
 //! - resolved values pass through the same clamps as the static document
 //!   (scale 0..=10000%, opacity/crop edges 0..=100%, opposite crop edges
 //!   summing to at most 100%).
@@ -46,11 +46,24 @@ pub(crate) struct ClipCrop {
     pub(crate) bottom_pct: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum KeyframeInterpolation {
+    #[default]
+    Linear,
+    Hold,
+    Bezier,
+}
+
 /// One keyframe on a property track: value `v` at clip-local time `t` seconds.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub(crate) struct Keyframe {
     pub(crate) t: f64,
     pub(crate) v: f64,
+    #[serde(default)]
+    pub(crate) interp: KeyframeInterpolation,
+    #[serde(default)]
+    pub(crate) bezier: Option<[[f64; 2]; 2]>,
 }
 
 /// The serialized document as the TS store keeps it (`ClipProperties`),
@@ -107,8 +120,45 @@ pub(crate) fn parse_clip_props_doc(json: &str) -> Result<ClipPropsDoc, String> {
     serde_json::from_str(json).map_err(|err| format!("invalid clip props doc: {err}"))
 }
 
+fn cubic_bezier_axis(t: f64, p1: f64, p2: f64) -> f64 {
+    let one_minus_t = 1.0 - t;
+    3.0 * one_minus_t * one_minus_t * t * p1 + 3.0 * one_minus_t * t * t * p2 + t * t * t
+}
+
+fn cubic_bezier_progress(alpha: f64, points: [[f64; 2]; 2]) -> Option<f64> {
+    let [[x1, y1], [x2, y2]] = points;
+    if ![x1, y1, x2, y2].iter().all(|v| v.is_finite())
+        || !(0.0..=1.0).contains(&x1)
+        || !(0.0..=1.0).contains(&x2)
+    {
+        return None;
+    }
+    let mut low = 0.0;
+    let mut high = 1.0;
+    for _ in 0..40 {
+        let mid = (low + high) / 2.0;
+        if cubic_bezier_axis(mid, x1, x2) < alpha {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    Some(cubic_bezier_axis((low + high) / 2.0, y1, y2))
+}
+
+fn segment_progress(key: Keyframe, alpha: f64) -> f64 {
+    match key.interp {
+        KeyframeInterpolation::Linear => alpha,
+        KeyframeInterpolation::Hold => 0.0,
+        KeyframeInterpolation::Bezier => key
+            .bezier
+            .and_then(|points| cubic_bezier_progress(alpha, points))
+            .unwrap_or(alpha),
+    }
+}
+
 /// Evaluate one track at `t`: keys sorted by time, endpoint hold outside the
-/// span, linear interpolation inside. Empty tracks yield the static value.
+/// span, source-key interpolation inside. Empty tracks yield the static value.
 fn evaluate_track(keys: &[Keyframe], static_value: f64, t: f64) -> f64 {
     let mut sorted: Vec<Keyframe> = keys
         .iter()
@@ -133,8 +183,11 @@ fn evaluate_track(keys: &[Keyframe], static_value: f64, t: f64) -> f64 {
             if b.t <= a.t {
                 return b.v;
             }
+            if t == b.t {
+                return b.v;
+            }
             let alpha = (t - a.t) / (b.t - a.t);
-            return a.v + (b.v - a.v) * alpha;
+            return a.v + (b.v - a.v) * segment_progress(a, alpha);
         }
     }
     last.v
@@ -290,6 +343,22 @@ mod tests {
         assert_eq!(
             resolve_clip_prop_at(&d, "transform.scalePct", 99.0),
             Some(50.0)
+        );
+    }
+
+    #[test]
+    fn missing_interp_defaults_to_linear() {
+        let d = doc(r#"{
+            "transform": {
+                "position": {"x": 0, "y": 0}, "anchor": {"x": 0, "y": 0},
+                "scalePct": 100, "rotationDeg": 0, "opacityPct": 100
+            },
+            "crop": {"leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0},
+            "tracks": {"transform.scalePct": [{"t": 0, "v": 100}, {"t": 2, "v": 50}]}
+        }"#);
+        assert_eq!(
+            d.tracks["transform.scalePct"][0].interp,
+            KeyframeInterpolation::Linear
         );
     }
 

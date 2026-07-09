@@ -5,16 +5,28 @@
 // shared fixtures in `clipPropsKeyframeFixtures.json`:
 // - a property without keyframes takes its static document value;
 // - keyframes evaluate sorted by time, held before the first and after the
-//   last key, linearly interpolated in between;
+//   last key, with each key selecting the interpolation to the next key;
 // - resolved values pass through the same clamps as the static document.
 
 import { clampClipProperties, defaultClipProperties, type ClipProperties } from "./clipProps";
+
+export type KeyframeInterpolation = "linear" | "hold" | "bezier";
+export type BezierControlPoints = [[number, number], [number, number]];
+
+export const DEFAULT_BEZIER_CONTROL_POINTS: BezierControlPoints = [
+  [0.42, 0],
+  [0.58, 1],
+];
 
 export interface Keyframe {
   /** Clip-local time, seconds. */
   t: number;
   /** Property value at that time. */
   v: number;
+  /** Interpolation from this key to the next key (absent = linear). */
+  interp?: KeyframeInterpolation;
+  /** Normalized cubic-bezier timing control points when `interp` is `bezier`. */
+  bezier?: BezierControlPoints;
 }
 
 export const CLIP_PROP_PATHS = [
@@ -124,6 +136,50 @@ export function keyframesFor(props: ClipProperties, path: ClipPropPath): Keyfram
   return usableKeys(props.tracks?.[path]);
 }
 
+export function effectiveKeyframeInterpolation(key: Keyframe): KeyframeInterpolation {
+  return key.interp === "hold" || key.interp === "bezier" ? key.interp : "linear";
+}
+
+function validBezier(points: BezierControlPoints | undefined): points is BezierControlPoints {
+  if (!points) return false;
+  const [[x1, y1], [x2, y2]] = points;
+  return [x1, y1, x2, y2].every(Number.isFinite)
+    && x1 >= 0
+    && x1 <= 1
+    && x2 >= 0
+    && x2 <= 1;
+}
+
+function cubicBezierAxis(t: number, p1: number, p2: number): number {
+  const oneMinusT = 1 - t;
+  return 3 * oneMinusT * oneMinusT * t * p1
+    + 3 * oneMinusT * t * t * p2
+    + t * t * t;
+}
+
+function cubicBezierProgress(alpha: number, points: BezierControlPoints): number {
+  const [[x1, y1], [x2, y2]] = points;
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < 40; i += 1) {
+    const mid = (low + high) / 2;
+    if (cubicBezierAxis(mid, x1, x2) < alpha) low = mid;
+    else high = mid;
+  }
+  return cubicBezierAxis((low + high) / 2, y1, y2);
+}
+
+function segmentProgress(key: Keyframe, alpha: number): number {
+  switch (effectiveKeyframeInterpolation(key)) {
+    case "hold":
+      return 0;
+    case "bezier":
+      return validBezier(key.bezier) ? cubicBezierProgress(alpha, key.bezier) : alpha;
+    case "linear":
+      return alpha;
+  }
+}
+
 function evaluateTrack(keys: Keyframe[], staticValue: number, t: number): number {
   if (keys.length === 0) return staticValue;
   const first = keys[0];
@@ -135,7 +191,9 @@ function evaluateTrack(keys: Keyframe[], staticValue: number, t: number): number
     const b = keys[i];
     if (t <= b.t) {
       if (b.t <= a.t) return b.v;
-      return a.v + ((b.v - a.v) * (t - a.t)) / (b.t - a.t);
+      if (t === b.t) return b.v;
+      const alpha = (t - a.t) / (b.t - a.t);
+      return a.v + (b.v - a.v) * segmentProgress(a, alpha);
     }
   }
   return last.v;
@@ -209,6 +267,41 @@ export function hasKeyframeAt(
   return keyframesFor(props, path).some((k) => Math.abs(k.t - t) <= eps);
 }
 
+/** The keyframe within `eps` seconds of `t`, when present. */
+export function keyframeAt(
+  props: ClipProperties,
+  path: ClipPropPath,
+  t: number,
+  eps: number,
+): Keyframe | undefined {
+  return keyframesFor(props, path).find((k) => Math.abs(k.t - t) <= eps);
+}
+
+/** Change the interpolation leaving the keyframe at `t`. */
+export function setKeyframeInterpolationAt(
+  props: ClipProperties,
+  path: ClipPropPath,
+  t: number,
+  eps: number,
+  interp: KeyframeInterpolation,
+): ClipProperties {
+  const keys = keyframesFor(props, path);
+  let changed = false;
+  const next = keys.map((key) => {
+    if (changed || Math.abs(key.t - t) > eps) return key;
+    changed = true;
+    if (interp === "bezier") {
+      const bezier = effectiveKeyframeInterpolation(key) === "bezier" && validBezier(key.bezier)
+        ? key.bezier
+        : DEFAULT_BEZIER_CONTROL_POINTS.map((point) => [...point]) as BezierControlPoints;
+      return { ...key, interp, bezier };
+    }
+    const { bezier: _bezier, ...rest } = key;
+    return { ...rest, interp };
+  });
+  return changed ? withTrack(props, path, next) : props;
+}
+
 /**
  * Toggle a keyframe at clip-local time `t` (the panel's diamond button):
  * removes a key within `eps` seconds of `t`, otherwise adds one carrying the
@@ -249,10 +342,11 @@ export function setClipPropValueAt(
   if (keys.length === 0) {
     return setClipPropValue(props, path, value);
   }
+  const replaced = keys.find((k) => Math.abs(k.t - t) <= eps);
   const kept = keys.filter((k) => Math.abs(k.t - t) > eps);
   return withTrack(
     props,
     path,
-    [...kept, { t, v: value }].sort((a, b) => a.t - b.t),
+    [...kept, { ...replaced, t, v: value }].sort((a, b) => a.t - b.t),
   );
 }
