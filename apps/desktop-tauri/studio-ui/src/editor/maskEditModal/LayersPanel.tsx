@@ -4,15 +4,19 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { LayerBlend, LayerGroup, LayerTargetKind, MaskLayer } from "../../types/production";
+import type { LayerBlend, LayerGroup, LayerTargetKind, MaskDocument, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
 import { LAYER_GROUP_COLORS } from "../maskEdit";
+import { runMaskEditorCommand } from "../maskEditorCommandRunner";
 import { buildLayerThumb } from "../maskMorphology";
+import { getCommand, getCommandCapability, type CommandId } from "../studioCommands";
+import type { StudioTarget } from "../studioTarget";
 import type { MaskEditDispatch } from "./actions";
 
 const LAYER_MIME = "application/x-hgripe-layer";
 
 interface LayersPanelProps {
+  doc: MaskDocument;
   layers: readonly MaskLayer[];
   layerGroups: readonly LayerGroup[];
   active: number;
@@ -173,7 +177,7 @@ function LayerActionIcon({ icon }: { icon: "invert" | "link" | "mask" | "duplica
   );
 }
 
-export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
+export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   const [renaming, setRenaming] = useState<number | null>(null);
@@ -183,6 +187,16 @@ export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, i
   // beyond the active one; Ctrl/Alt+click toggles, Shift+click ranges.
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const activeStudioTarget = useMemo<StudioTarget | null>(() => {
+    if (!activeLayer) return null;
+    const ref = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
+    if (activeTarget === "mask" && activeLayer.mask) {
+      return { kind: "layer_mask", ...ref, layerId: activeLayer.id, maskId: activeLayer.mask.id };
+    }
+    return { kind: "pixel_layer", ...ref, layerId: activeLayer.id };
+  }, [activeLayer, activeTarget, imagePath]);
+  const commandCapability = (id: CommandId) =>
+    activeStudioTarget ? getCommandCapability(id, { doc, target: activeStudioTarget }) : { enabled: false, reason: "no active target" };
 
   const groupById = useMemo(() => new Map(layerGroups.map((group) => [group.id, group])), [layerGroups]);
 
@@ -275,6 +289,28 @@ export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, i
     if (!Number.isInteger(from)) return;
     e.preventDefault();
     dispatch({ type: "layer_move", from, to });
+  };
+
+  const invertCommand: CommandId = activeTarget === "mask" ? "mask.invert" : "layer.invert";
+  const deleteCommand: CommandId = activeTarget === "mask" ? "mask.delete" : "target.delete";
+  const invertCapability = commandCapability(invertCommand);
+  const linkCapability = commandCapability("layer.link");
+  const addMaskCapability = commandCapability("layer.addMask");
+  const duplicateCapability = commandCapability("layer.duplicate");
+  const addLayerCapability = commandCapability("layer.add");
+  const deleteCapability = commandCapability(deleteCommand);
+  const titleFor = (id: CommandId, reason?: string) => {
+    const title = t(getCommand(id).titleKey);
+    return reason ? `${title} - ${reason}` : title;
+  };
+  const runLayerCommand = (id: CommandId) => {
+    if (!activeStudioTarget) return;
+    runMaskEditorCommand(id, {
+      doc,
+      target: activeStudioTarget,
+      dispatch,
+      beforeStructuralChange: onBeforeLayerChange,
+    });
   };
 
   return (
@@ -603,54 +639,55 @@ export function LayersPanel({ layers, layerGroups, active, activeTarget, dims, i
       <div className="mask-layer-actions">
         <button
           className="mask-layer-action"
-          title={t("mask.layerInvertTitle")}
-          aria-label={t("mask.layerInvertTitle")}
-          disabled={!activeLayer || activeLayer.locked}
-          onClick={() => dispatch({ type: "op", op: { type: "invert" } })}
+          title={titleFor(invertCommand, invertCapability.reason)}
+          aria-label={titleFor(invertCommand, invertCapability.reason)}
+          disabled={!invertCapability.enabled}
+          onClick={() => runLayerCommand(invertCommand)}
         >
           <LayerActionIcon icon="invert" />
         </button>
         <button
           className={`mask-layer-action${activeLayer?.linked ? " on" : ""}`}
-          title={activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
-          aria-label={activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
-          disabled={!activeLayer}
-          onClick={() => dispatch({ type: "layer_link", index: active })}
+          title={linkCapability.reason ? `${activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")} - ${linkCapability.reason}` : activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
+          aria-label={linkCapability.reason ? `${activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")} - ${linkCapability.reason}` : activeLayer?.linked ? t("mask.layerUnlink") : t("mask.layerLink")}
+          disabled={!linkCapability.enabled}
+          onClick={() => runLayerCommand("layer.link")}
         >
           <LayerActionIcon icon="link" />
         </button>
         <button
           className="mask-layer-action"
-          title={t("mask.layerMaskAddTitle")}
-          aria-label={t("mask.layerMaskAddTitle")}
-          disabled={!activeLayer || Boolean(activeLayer.mask) || activeLayer.kind === "adjustment" || activeLayer.locked}
-          onClick={() => {
-            onBeforeLayerChange();
-            dispatch({ type: "layer_mask_add", index: active });
-          }}
+          title={titleFor("layer.addMask", addMaskCapability.reason)}
+          aria-label={titleFor("layer.addMask", addMaskCapability.reason)}
+          disabled={!addMaskCapability.enabled}
+          onClick={() => runLayerCommand("layer.addMask")}
         >
           <LayerActionIcon icon="mask" />
         </button>
         <button
           className="mask-layer-action"
-          title={t("mask.layerDuplicate")}
-          aria-label={t("mask.layerDuplicate")}
-          onClick={() => dispatch({ type: "layer_duplicate" })}
+          title={titleFor("layer.duplicate", duplicateCapability.reason)}
+          aria-label={titleFor("layer.duplicate", duplicateCapability.reason)}
+          disabled={!duplicateCapability.enabled}
+          onClick={() => runLayerCommand("layer.duplicate")}
         >
           <LayerActionIcon icon="duplicate" />
         </button>
-        <button className="mask-layer-action" title={t("mask.layerAddTitle")} aria-label={t("mask.layerAddTitle")} onClick={() => dispatch({ type: "layer_add" })}>
+        <button
+          className="mask-layer-action"
+          title={titleFor("layer.add", addLayerCapability.reason)}
+          aria-label={titleFor("layer.add", addLayerCapability.reason)}
+          disabled={!addLayerCapability.enabled}
+          onClick={() => runLayerCommand("layer.add")}
+        >
           <LayerActionIcon icon="add" />
         </button>
         <button
           className="mask-layer-action"
-          title={t("mask.layerDelete")}
-          aria-label={t("mask.layerDelete")}
-          disabled={layers.length <= 1 || activeLayer?.locked}
-          onClick={() => {
-            onBeforeLayerChange();
-            dispatch({ type: "layer_remove", index: active });
-          }}
+          title={titleFor(deleteCommand, deleteCapability.reason)}
+          aria-label={titleFor(deleteCommand, deleteCapability.reason)}
+          disabled={!deleteCapability.enabled}
+          onClick={() => runLayerCommand(deleteCommand)}
         >
           <LayerActionIcon icon="delete" />
         </button>

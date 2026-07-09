@@ -210,6 +210,303 @@ Commands should be separated:
 This prevents the current "click mask -> new layer appears" confusion from
 becoming a permanent product rule.
 
+## Canvas Target Overlay And Context Commands
+
+Selecting a layer in the layer panel must become a real editor target, not only
+a highlighted row in the right rail.
+
+The user needs an immediate answer to:
+
+```text
+What object will the next command affect?
+```
+
+For image editing this answer must be visible on the canvas and reflected in
+the available commands. The correct architecture is not to patch a dashed box
+or a floating toolbar into `LayersPanel`. The correct architecture is:
+
+```text
+active target
+  -> target bounds
+  -> overlay scene
+  -> command capabilities
+  -> context action bar / right rail / context menu / shortcuts
+```
+
+Every surface should read from the same target and command model. Otherwise
+the editor will drift into conflicting behavior where a command is available
+from one menu, hidden from another, and implemented differently in a floating
+panel.
+
+### Target Feedback On Canvas
+
+When a layer, mask, selection, or path is active, the canvas should be able to
+show a lightweight target overlay.
+
+Suggested visual states:
+
+| State | Canvas feedback | Purpose |
+| --- | --- | --- |
+| Layer selected, no transform tool | Low-emphasis dashed or hairline bounds. | Confirms which layer/object is active without making the canvas noisy. |
+| Move/transform tool active | Solid transform frame with handles and rotation affordance. | Indicates direct manipulation is available. |
+| Mask target active | Bounds/tint should indicate the mask attachment, not the pixel layer. | Prevents editing pixel content by mistake. |
+| Selection active | Marching ants remain the primary overlay. | Selection is a floating edit constraint, not a layer. |
+| Path active | Anchors and path outline are shown. | Path can be edited or converted. |
+| Multiple layers selected | Combined bounds plus multi-select state in the layer panel. | Commands apply to a target set. |
+
+The selected layer should not always show full transform handles. Handles mean
+"you are transforming this object now." A quiet target outline means "this is
+the active object."
+
+### Bounds Must Be First-Class
+
+Do not treat every target as the document rectangle. The editor needs separate
+bound types:
+
+```text
+document bounds
+layer frame
+content bounds
+mask bounds
+selection bounds
+path bounds
+node-output bounds
+timeline-clip frame bounds
+```
+
+This distinction matters immediately:
+
+- a full-size image layer may contain a small visible object;
+- a mask may hide most of a layer;
+- a selection may cover only part of the active layer;
+- a PSD layer may carry its own offset and trimmed pixel bounds;
+- a node output preview may return an image artifact with no editor layer yet;
+- a video frame target may share the same editor tools but live in a timeline
+  context.
+
+Suggested API shape:
+
+```ts
+type TargetBounds =
+  | { kind: "none" }
+  | { kind: "document"; rect: Rect }
+  | { kind: "layer_frame"; rect: Rect; layerId: string }
+  | { kind: "content"; rect: Rect; layerId: string; source: "alpha" | "ops" | "asset" }
+  | { kind: "mask"; rect: Rect; layerId: string; maskId: string }
+  | { kind: "selection"; rect: Rect; selectionId: string }
+  | { kind: "path"; rect: Rect; pathId: string };
+```
+
+The bounds resolver must be pure and testable. It should not read DOM geometry
+or panel state. Canvas placement converts document-space bounds into screen
+coordinates later.
+
+### Overlay Scene Ownership
+
+All canvas outlines should come from one overlay scene builder:
+
+```text
+document state + active target + active tool + draft state
+  -> overlay scene
+  -> renderer
+```
+
+Do not let each feature draw its own private frame. Crop, path edit, marquee,
+layer bounds, transform handles, magnetic-lasso work paths, and mask overlays
+must share ordering rules.
+
+Required overlay classes:
+
+| Overlay | Owner | Notes |
+| --- | --- | --- |
+| Target bounds | active target resolver | Quiet outline for selected layer/mask/object. |
+| Transform frame | transform/move tool state | Handles only when direct transform is active. |
+| Selection ants | selection state | Already separate from layer/mask. |
+| Work path | path/lasso/pen state | Solid outline before "make selection"; ants only after selection exists. |
+| Crop frame | crop tool state | Blue crop frame and size panel remain crop-owned. |
+| Mask tint | mask preview/quick-mask state | Must not obscure target bounds. |
+
+The renderer can still be DOM canvas now and WGPU later. The important rule is
+that the scene model is independent of the rendering backend.
+
+### Context Action Bar
+
+The floating bar near the active object should be a command view, not a feature
+owner.
+
+It should receive:
+
+```ts
+interface ContextActionBarModel {
+  anchor: Rect | Point;
+  target: StudioTarget;
+  primaryActions: CommandId[];
+  overflowActions: CommandId[];
+}
+```
+
+It should not decide whether "remove background" is valid. It only renders
+commands that the capability resolver already approved.
+
+Examples:
+
+| Active target | Primary actions |
+| --- | --- |
+| Pixel layer | Select subject, remove background, add mask, duplicate, transform. |
+| Layer mask | Invert mask, refine edge, disable/enable mask, delete mask. |
+| Selection | Add to mask, fill, delete, invert selection, feather. |
+| Path | Make selection, convert to mask, edit anchors, delete path. |
+| Node output preview | Open editor, quick mask, quick crop, accept/apply. |
+
+The action bar should use icons. Text belongs in tooltips and command search,
+not in the compact canvas overlay.
+
+### Command Registry And Capabilities
+
+Commands must be centralized.
+
+Suggested shape:
+
+```ts
+interface StudioCommand {
+  id: CommandId;
+  titleKey: string;
+  icon: IconId;
+  group: "selection" | "layer" | "mask" | "path" | "transform" | "ai" | "file";
+  run: (ctx: CommandContext) => void | Promise<void>;
+}
+
+interface CommandCapability {
+  enabled: boolean;
+  reason?: string;
+  danger?: boolean;
+  requiresPreview?: boolean;
+}
+```
+
+Every command surface should use the same registry:
+
+- context action bar;
+- right-click menu;
+- right rail buttons;
+- top menu;
+- keyboard shortcuts;
+- Studio Action / assistant action runtime.
+
+Do not duplicate "can this command run?" logic in React components.
+
+Capability resolver inputs:
+
+```text
+active target
+document state
+layer lock/visibility/mask state
+selection/path state
+active tool
+workspace kind
+backend availability
+```
+
+Capability examples:
+
+| Command | Enabled when |
+| --- | --- |
+| Add mask | active target is editable pixel layer and no mask exists. |
+| Delete mask | active target is layer mask and layer is not locked. |
+| Remove background | target can resolve to image pixels and model/compute backend is available. |
+| Refine edge | target is selection or mask artifact. |
+| Transform | target has transformable bounds and is not locked. |
+| Delete | target is not document, not locked, and deletion is target-safe. |
+
+### Right Rail Relationship
+
+The right rail should not permanently consume space with generic settings.
+
+Recommended separation:
+
+| Surface | Role |
+| --- | --- |
+| Canvas overlay | Shows active target and direct manipulation affordances. |
+| Context action bar | Short, high-frequency commands for the active target. |
+| Right rail | Detailed properties, numeric fields, advanced settings, history/layers. |
+| Context menu | Full target-specific command list. |
+
+Selecting a layer can reveal a target outline and action bar, but detailed
+properties should stay in the right rail panel. The action bar is for short
+actions only.
+
+### Studio Action Integration
+
+Studio Action should call commands through the same registry. It should not
+click UI.
+
+Correct path:
+
+```text
+assistant/user intent
+  -> resolve StudioTarget
+  -> choose StudioCommand
+  -> capability check
+  -> dry run / preview artifact
+  -> commit transaction
+  -> history entry
+```
+
+This is how quick operations can remain safe:
+
+- "remove the background from this layer" resolves to the selected pixel layer;
+- "invert this mask" resolves to the active layer-mask target;
+- "turn this selection into a mask" resolves selection + layer target;
+- "use SAM 2 on this object" resolves image target + prompt hints.
+
+If the target is ambiguous, the action must ask for clarification or show a
+target picker. It must not guess by reading whichever panel was last clicked.
+
+### Implementation Phases
+
+Phase 1: Target and bounds foundation.
+
+- Normalize `StudioTarget` so pixel layer, layer mask, selection, path, and
+  node output are distinct.
+- Add a pure target-bounds resolver.
+- Add tests for layer frame vs content bounds vs selection/path bounds.
+
+Phase 2: Overlay scene.
+
+- Build a shared overlay scene model.
+- Move active-layer target outline into the overlay scene.
+- Keep crop, selection ants, path edit, and mask tint ordered by scene rules.
+
+Phase 3: Command registry.
+
+- Define command ids, icons, titles, groups, and run handlers.
+- Move layer action buttons, context menus, and shortcuts onto the registry.
+- Add capability resolver tests.
+
+Phase 4: Context action bar.
+
+- Render high-frequency actions near the active target bounds.
+- Keep text out of the compact bar; use icons + tooltip/aria labels.
+- Add overflow menu for less common actions.
+
+Phase 5: Studio Action bridge.
+
+- Let assistant/agent actions call the command registry by target id.
+- Require preview/dry-run for destructive or model-backed commands.
+- Commit through normal history, not hidden mutable UI state.
+
+### Non-Negotiable Rules
+
+- Do not implement layer target outlines as a one-off DOM element.
+- Do not let the layer panel own canvas overlays.
+- Do not let floating toolbars decide command availability.
+- Do not duplicate command logic between right rail, context menu, shortcuts,
+  and future Studio Action.
+- Do not collapse pixel layer, layer mask, selection, and path into one
+  generic "current edit" state.
+- Do not make expensive AI/model commands run merely because a target is
+  selected; run them only when the command is invoked.
+
 ## SAM 2 As A Compute Block
 
 SAM 2 is one of the best early compute blocks for Studio Action because it is

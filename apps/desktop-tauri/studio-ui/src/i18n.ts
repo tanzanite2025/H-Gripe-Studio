@@ -1182,6 +1182,10 @@ export const messages = {
   "models.health.missing_weights": { en: "missing weights", zh: "缺少权重" },
   "models.health.unsupported_runtime": { en: "unsupported runtime", zh: "运行时不支持" },
   "models.health.device_fallback": { en: "device fallback", zh: "设备回退" },
+  "mask.selectInvert": { en: "Invert selection", zh: "反选选区" },
+  "mask.pathMakeSelection": { en: "Make selection from path", zh: "从路径建立选区" },
+  "mask.selectSubject": { en: "Select subject", zh: "选择主体" },
+  "mask.removeBackground": { en: "Remove background", zh: "移除背景" },
 } satisfies Record<string, { en: string; zh: string }>;
 
 export type MsgKey = keyof typeof messages;

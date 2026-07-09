@@ -69,6 +69,10 @@ import { ImageSizeDialog } from "./maskEditModal/ImageSizeDialog";
 import { CropPanel } from "./maskEditModal/CropPanel";
 import { MarqueeSizePanel } from "./maskEditModal/MarqueeSizePanel";
 import { ToolIcon } from "./maskEditModal/toolIcons";
+import { resolveActiveTarget, resolveTargetBounds } from "./studioTarget";
+import { getCommand, getCommandCapability, type CommandId } from "./studioCommands";
+import { ContextActionBar } from "./maskEditModal/ContextActionBar";
+import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -78,6 +82,7 @@ const DEFAULT_W = 960;
 const DEFAULT_H = 640;
 const SELECTION_TOP_TOOLS = ["rect", "ellipse", "magnetic_lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
+const IMAGE_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "layer.addMask", "layer.duplicate", "target.transform", "target.delete"];
 
 function toolKeyBadge(toolId: string): string {
   const combo = toolCombo(toolId);
@@ -516,6 +521,19 @@ export function MaskEditModal({
   const frameView = viewport.frameView;
   const dims = viewport.dims ?? { w: DEFAULT_W, h: DEFAULT_H };
   frameDimsRef.current = dims;
+  const activeStudioTarget = useMemo(() => {
+    const docRef = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
+    return resolveActiveTarget(state.current, docRef);
+  }, [state.current, imagePath]);
+  const targetBounds = useMemo(() => {
+    return resolveTargetBounds(state.current, activeStudioTarget, { dims });
+  }, [state.current, activeStudioTarget, dims.w, dims.h]);
+  const contextActionItems = useMemo(() => {
+    if (workspace !== "image") return [];
+    return IMAGE_CONTEXT_COMMANDS
+      .map((id) => ({ command: getCommand(id), capability: getCommandCapability(id, { doc: state.current, target: activeStudioTarget }) }))
+      .filter((item) => item.capability.enabled);
+  }, [workspace, state.current, activeStudioTarget]);
   const cropView = useMemo(() => {
     if (!cropRegion) return null;
     const x0 = Math.max(0, Math.min(cropRegion[0], cropRegion[2], dims.w - 1));
@@ -975,12 +993,13 @@ export function MaskEditModal({
       quadDraft,
       cropDraft,
       cropRegion: null,
+      targetBounds: workspace === "image" ? targetBounds : null,
       lastMarquee,
       workSelection: penAnchors.length > 0 ? null : workSelection,
       antsPhase,
       gestures,
     });
-  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, workSelection, antsPhase]);
+  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, targetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, workSelection, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -1051,6 +1070,18 @@ export function MaskEditModal({
     else commitPath(toolId, penAnchors);
     setPenAnchors([]);
   };
+
+  const runContextCommand = useCallback((id: CommandId) => {
+    runMaskEditorCommand(id, {
+      doc: stateRef.current.current,
+      target: activeStudioTarget,
+      dispatch,
+      beforeStructuralChange: () => {
+        if (editingPathRef.current != null) cancelPathEdit();
+      },
+      setToolId,
+    });
+  }, [activeStudioTarget, cancelPathEdit, editingPathRef, stateRef, setToolId]);
 
   // Pointer gestures: the shell only captures the pointer, serves one-shot
   // requests (the armed colour pick) and keeps the brush ring on the cursor;
@@ -1337,6 +1368,16 @@ export function MaskEditModal({
             onContextMenu={openSelectionContextMenu}
             brushCursor={usesBrushCursor && !spacePan ? { diameter: brushSize * 2 } : null}
             brushCursorRef={brushCursorEl}
+            contextActionBar={
+              workspace === "image" ? (
+                <ContextActionBar
+                  bounds={targetBounds}
+                  dims={dims}
+                  items={contextActionItems}
+                  onCommand={runContextCommand}
+                />
+              ) : null
+            }
           />
           {selectionMenu ? (
             <ContextMenu
@@ -1489,6 +1530,7 @@ export function MaskEditModal({
                   label: t("mask.layers", { count: layers.length }),
                   content: (
               <LayersPanel
+                doc={state.current}
                 layers={layers}
                 layerGroups={state.current.layerGroups}
                 active={state.current.active}

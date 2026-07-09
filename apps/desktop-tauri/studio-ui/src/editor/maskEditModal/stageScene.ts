@@ -8,6 +8,7 @@ import { activeTargetKind, isBrushOp, isPathOp, type MaskDocument, type EditPath
 import { layerOpStacks } from "../maskEdit";
 import type { MaskTool, PaintTarget, ShapeKind } from "../maskTools";
 import type { ProxyMask } from "../maskMorphology";
+import type { TargetBounds } from "../studioTarget";
 import { hexToRgb } from "./ColorPicker";
 import { flattenEditPath } from "./pathGeometry";
 import type { PointerGestures } from "./pointer/types";
@@ -30,6 +31,7 @@ import {
   paintSamPoints,
   paintShapeDraft,
   paintStroke,
+  paintTargetBounds,
   paintWorkSelection,
   retouchBandColor,
   type ColorSample,
@@ -211,6 +213,7 @@ export interface StagePaintArgs {
   quadDraft: [number, number][] | null;
   cropDraft: [number, number, number, number] | null;
   cropRegion: [number, number, number, number] | null;
+  targetBounds: TargetBounds | null;
   lastMarquee: MarqueeSelection | null;
   workSelection: MarqueeSelection | null;
   antsPhase: number;
@@ -249,6 +252,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     quadDraft,
     cropDraft,
     cropRegion,
+    targetBounds,
     lastMarquee,
     workSelection,
     antsPhase,
@@ -284,6 +288,7 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (workspace === "image" && !lastMarquee && workSelection) {
     paintWorkSelection(ctx, workSelection);
   }
+  if (targetBounds) paintTargetBounds(ctx, targetBounds, antsPhase);
   const live = gestures.drawing;
   if (live) {
     if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {

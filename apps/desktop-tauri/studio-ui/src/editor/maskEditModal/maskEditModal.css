@@ -1312,6 +1312,37 @@
 .mask-layer-action:disabled { opacity: 0.4; cursor: default; }
 .mask-layer-action.on { background: var(--ps-active-overlay); color: var(--text); }
 .mask-layer-action svg { width: 16px; height: 16px; display: block; }
+.mask-context-action-bar {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px;
+  background: rgba(42,44,49,0.92);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.28);
+  transform: translate(-50%, 8px);
+  pointer-events: auto;
+}
+.mask-context-action {
+  width: 28px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mask-context-action:hover:not(:disabled) { background: var(--ps-hover); color: var(--text); }
+.mask-context-action:disabled { opacity: 0.38; cursor: default; }
+.mask-context-action.danger:hover:not(:disabled) { color: #ff8b8b; }
+.mask-context-action svg { width: 16px; height: 16px; display: block; }
 /* The ◐ adjustment picker rendered as one more icon slot. */
 .mask-layer-adjustment-add {
   width: 30px;

@@ -5,7 +5,7 @@
 // viewport host's rendered window at its rect in the full frame, so a zoomed
 // canvas shows a frame decoded at matching detail (WGPU migration Phase 2).
 
-import type { MutableRefObject } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import type { ViewportBackend } from "../../bridge/viewport";
 import { useT } from "../../i18n";
 import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
@@ -54,9 +54,10 @@ interface MaskStageProps {
    * `brushCursorRef` (left/top %) to avoid re-rendering per pointer move. */
   brushCursor: { diameter: number } | null;
   brushCursorRef: MutableRefObject<HTMLDivElement | null>;
+  contextActionBar?: ReactNode;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
   const t = useT();
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
@@ -136,6 +137,7 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
               }}
             />
           ) : null}
+          {contextActionBar}
         </div>
       </div>
       {fallbackDims ? (

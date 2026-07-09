@@ -5,6 +5,7 @@
 import type { EditPath, EditPathPoint } from "../../types/production";
 import type { ProxyMask } from "../maskMorphology";
 import { shapeVertices, type ShapeKind } from "../maskTools";
+import type { TargetBounds } from "../studioTarget";
 
 export interface StrokeLike {
   mode: string;
@@ -160,6 +161,29 @@ export function paintWorkSelection(ctx: CanvasRenderingContext2D, selection: Sel
   ctx.strokeStyle = "rgba(47,124,246,0.96)";
   traceSelectionOutline(ctx, selection);
   ctx.stroke();
+  ctx.restore();
+}
+
+export function paintTargetBounds(ctx: CanvasRenderingContext2D, bounds: TargetBounds, phase = 0) {
+  if (bounds.kind === "none" || bounds.kind === "document" || bounds.kind === "selection" || bounds.kind === "path") return;
+  const [x0, y0, x1, y1] = bounds.rect;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w <= 0 || h <= 0) return;
+  const color =
+    bounds.kind === "mask"
+      ? "rgba(82,214,255,0.92)"
+      : bounds.kind === "node_output"
+        ? "rgba(190,120,255,0.86)"
+        : "rgba(255,255,255,0.82)";
+  ctx.save();
+  ctx.lineWidth = 1.25;
+  ctx.setLineDash([6, 4]);
+  ctx.lineDashOffset = -phase * 0.5;
+  ctx.strokeStyle = "rgba(0,0,0,0.7)";
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+  ctx.strokeStyle = color;
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
   ctx.restore();
 }
 
