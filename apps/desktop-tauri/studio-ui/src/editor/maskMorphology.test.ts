@@ -37,7 +37,14 @@ import {
   type ProxyMask,
 } from "./maskMorphology";
 import { normalizeEditPaths } from "./maskEdit";
-import { emptyMaskDocument, type EditOp, type MaskDocument, type MaskLayer } from "../types/production";
+import {
+  emptyMaskDocument,
+  type EditOp,
+  type LayerBlend,
+  type MaskDocument,
+  type MaskLayer,
+} from "../types/production";
+import fixtures from "./imageDocumentContractFixtures.json";
 
 /** A single-layer v3 document whose background layer holds `ops`. */
 function doc(ops: EditOp[], layerPatch: Partial<MaskLayer> = {}): MaskDocument {
@@ -691,6 +698,23 @@ describe("buildProxyMask", () => {
     expect(thumb.data.every((v) => v === 255)).toBe(true); // invert from empty ⇒ all on
     const empty = buildLayerThumb({ ...layer, ops: [] }, dims);
     expect(empty.data.every((v) => v === 0)).toBe(true);
+  });
+
+  it("matches the shared image-document blend contract", () => {
+    expect(fixtures.blendCases.length).toBeGreaterThan(0);
+    for (const testCase of fixtures.blendCases) {
+      const d = emptyMaskDocument();
+      d.layers[0].ops = [{ type: "fill", amount: (testCase.backdrop / 255) * 100 }];
+      d.layers.push({
+        ...emptyMaskDocument().layers[0],
+        id: `source-${testCase.mode}`,
+        blend: testCase.mode as LayerBlend,
+        opacity: testCase.opacity,
+        ops: [{ type: "fill", amount: (testCase.source / 255) * 100 }],
+      });
+      const mask = buildProxyMask(d, { w: 16, h: 16 }, { proxyWidth: 16 }).mask;
+      expect.soft(mask.data[0], testCase.name).toBe(testCase.expected);
+    }
   });
 
   it("composites upper layers per blend mode and opacity", () => {

@@ -1,0 +1,397 @@
+{
+  "description": "Shared image-document contract for the TypeScript editor proxy and Rust render paths. Migration cases pin the persisted version-3 envelope; blend cases pin the common grayscale/channel result after layer opacity.",
+  "migrationCases": [
+    {
+      "name": "version 1 preserves every legacy edit family in replay order",
+      "input": {
+        "version": 1,
+        "paths": [
+          {
+            "id": "path-1",
+            "mode": "add",
+            "tool": "lasso",
+            "closed": true,
+            "points": [
+              { "x": 0, "y": 0 },
+              { "x": 4, "y": 0 },
+              { "x": 4, "y": 4 }
+            ]
+          }
+        ],
+        "ops": [
+          { "type": "wand", "x": 1, "y": 2, "tolerance": 300 },
+          { "type": "invert" }
+        ],
+        "brush_strokes": [
+          {
+            "id": "stroke-1",
+            "mode": "subtract",
+            "radius": 3,
+            "points": [[1, 1]]
+          }
+        ],
+        "operations": [{ "type": "feather", "amount": 2 }],
+        "matte_strokes": [
+          {
+            "id": "matte-1",
+            "mode": "add",
+            "radius": 2,
+            "points": [[5, 5]]
+          }
+        ],
+        "points": [[10, 20], { "x": 30, "y": 40, "label": 0 }]
+      },
+      "expected": {
+        "version": 3,
+        "layerCount": 1,
+        "active": 0,
+        "layerOps": [
+          [
+            {
+              "id": "path-1",
+              "mode": "add",
+              "tool": "lasso",
+              "closed": true,
+              "points": [
+                { "x": 0, "y": 0 },
+                { "x": 4, "y": 0 },
+                { "x": 4, "y": 4 }
+              ],
+              "type": "path"
+            },
+            { "type": "wand", "region": [1, 2], "amount": 255 },
+            { "type": "invert" },
+            {
+              "id": "stroke-1",
+              "mode": "subtract",
+              "radius": 3,
+              "points": [[1, 1]],
+              "type": "brush"
+            },
+            { "type": "feather", "amount": 2 }
+          ]
+        ],
+        "layerProps": [
+          {
+            "name": "Background",
+            "kind": "mask",
+            "blend": "normal",
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "linked": false,
+            "groupId": null,
+            "adjustment": null,
+            "mask": null
+          }
+        ],
+        "matteStrokes": [
+          {
+            "id": "matte-1",
+            "mode": "add",
+            "radius": 2,
+            "points": [[5, 5]]
+          }
+        ],
+        "points": [
+          { "x": 10, "y": 20, "label": 1 },
+          { "x": 30, "y": 40, "label": 0 }
+        ],
+        "canvas": null,
+        "layerGroups": [],
+        "activeTarget": "pixel"
+      }
+    },
+    {
+      "name": "unversioned inline wand keeps legacy seed semantics",
+      "input": {
+        "ops": [{ "type": "wand", "x": 7, "y": 9, "tolerance": 18 }]
+      },
+      "expected": {
+        "version": 3,
+        "layerCount": 1,
+        "active": 0,
+        "layerOps": [[{ "type": "wand", "region": [7, 9], "amount": 18 }]],
+        "layerProps": [
+          {
+            "name": "Background",
+            "kind": "mask",
+            "blend": "normal",
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "linked": false,
+            "groupId": null,
+            "adjustment": null,
+            "mask": null
+          }
+        ],
+        "matteStrokes": [],
+        "points": [],
+        "canvas": null,
+        "layerGroups": [],
+        "activeTarget": "pixel"
+      }
+    },
+    {
+      "name": "version 2 keeps its recorded operation order",
+      "input": {
+        "version": 2,
+        "ops": [
+          { "type": "invert" },
+          {
+            "type": "brush",
+            "id": "stroke-2",
+            "mode": "add",
+            "radius": 1,
+            "points": [[2, 2]]
+          }
+        ],
+        "matte_strokes": [],
+        "points": []
+      },
+      "expected": {
+        "version": 3,
+        "layerCount": 1,
+        "active": 0,
+        "layerOps": [
+          [
+            { "type": "invert" },
+            {
+              "type": "brush",
+              "id": "stroke-2",
+              "mode": "add",
+              "radius": 1,
+              "points": [[2, 2]]
+            }
+          ]
+        ],
+        "layerProps": [
+          {
+            "name": "Background",
+            "kind": "mask",
+            "blend": "normal",
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "linked": false,
+            "groupId": null,
+            "adjustment": null,
+            "mask": null
+          }
+        ],
+        "matteStrokes": [],
+        "points": [],
+        "canvas": null,
+        "layerGroups": [],
+        "activeTarget": "pixel"
+      }
+    },
+    {
+      "name": "version 3 preserves an intentionally empty layer stack",
+      "input": {
+        "version": 3,
+        "layers": [],
+        "active": 0,
+        "matte_strokes": [],
+        "points": [],
+        "layerGroups": []
+      },
+      "expected": {
+        "version": 3,
+        "layerCount": 0,
+        "active": -1,
+        "layerOps": [],
+        "layerProps": [],
+        "matteStrokes": [],
+        "points": [],
+        "canvas": null,
+        "layerGroups": [],
+        "activeTarget": "pixel"
+      }
+    },
+    {
+      "name": "version 3 clamps selection and keeps canvas groups and mask target",
+      "input": {
+        "version": 3,
+        "layers": [
+          {
+            "id": "background",
+            "name": "Background",
+            "ops": [],
+            "groupId": "subject"
+          },
+          {
+            "id": "detail",
+            "name": "Detail",
+            "blend": "screen",
+            "opacity": 2,
+            "ops": [{ "type": "invert" }],
+            "groupId": "light",
+            "mask": {
+              "id": "detail-mask",
+              "ops": [{ "type": "rect", "region": [1, 2, 8, 9] }]
+            }
+          }
+        ],
+        "active": 99,
+        "activeTarget": "mask",
+        "canvas": { "w": 320.4, "h": 200, "resample": "bicubic" },
+        "layerGroups": [
+          { "id": "subject", "name": "Subject", "color": "#FFAA00" },
+          { "id": "light", "name": "Light", "color": "#59c98f" },
+          { "id": "invalid", "name": "", "color": "#000000" }
+        ],
+        "matte_strokes": [],
+        "points": [[4, 5]]
+      },
+      "expected": {
+        "version": 3,
+        "layerCount": 2,
+        "active": 1,
+        "layerOps": [[], [{ "type": "invert" }]],
+        "layerProps": [
+          {
+            "name": "Background",
+            "kind": "mask",
+            "blend": "normal",
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "linked": false,
+            "groupId": "subject",
+            "adjustment": null,
+            "mask": null
+          },
+          {
+            "name": "Detail",
+            "kind": "mask",
+            "blend": "screen",
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "linked": false,
+            "groupId": "light",
+            "adjustment": null,
+            "mask": {
+              "ops": [{ "type": "rect", "region": [1, 2, 8, 9] }],
+              "disabled": false,
+              "unlinked": false
+            }
+          }
+        ],
+        "matteStrokes": [],
+        "points": [{ "x": 4, "y": 5, "label": 1 }],
+        "canvas": { "w": 320, "h": 200, "resample": "bicubic" },
+        "layerGroups": [
+          { "id": "subject", "name": "Subject", "color": "#ffaa00" },
+          { "id": "light", "name": "Light", "color": "#59c98f" }
+        ],
+        "activeTarget": "mask"
+      }
+    },
+    {
+      "name": "mask target is cleared when the active layer has no mask",
+      "input": {
+        "version": 3,
+        "layers": [{ "id": "background", "name": "Background", "ops": [] }],
+        "active": 0,
+        "activeTarget": "mask",
+        "matte_strokes": [],
+        "points": [],
+        "layerGroups": []
+      },
+      "expected": {
+        "version": 3,
+        "layerCount": 1,
+        "active": 0,
+        "layerOps": [[]],
+        "layerProps": [
+          {
+            "name": "Background",
+            "kind": "mask",
+            "blend": "normal",
+            "opacity": 1.0,
+            "visible": true,
+            "locked": false,
+            "linked": false,
+            "groupId": null,
+            "adjustment": null,
+            "mask": null
+          }
+        ],
+        "matteStrokes": [],
+        "points": [],
+        "canvas": null,
+        "layerGroups": [],
+        "activeTarget": "pixel"
+      }
+    }
+  ],
+  "blendCases": [
+    {
+      "name": "normal replaces the backdrop",
+      "mode": "normal",
+      "backdrop": 64,
+      "source": 192,
+      "opacity": 1,
+      "expected": 192
+    },
+    {
+      "name": "normal opacity interpolates",
+      "mode": "normal",
+      "backdrop": 64,
+      "source": 192,
+      "opacity": 0.5,
+      "expected": 128
+    },
+    {
+      "name": "multiply darkens",
+      "mode": "multiply",
+      "backdrop": 128,
+      "source": 64,
+      "opacity": 1,
+      "expected": 32
+    },
+    {
+      "name": "multiply opacity interpolates",
+      "mode": "multiply",
+      "backdrop": 128,
+      "source": 64,
+      "opacity": 0.5,
+      "expected": 80
+    },
+    {
+      "name": "screen lightens",
+      "mode": "screen",
+      "backdrop": 64,
+      "source": 192,
+      "opacity": 1,
+      "expected": 208
+    },
+    {
+      "name": "darken chooses the lower value",
+      "mode": "darken",
+      "backdrop": 64,
+      "source": 192,
+      "opacity": 1,
+      "expected": 64
+    },
+    {
+      "name": "lighten chooses the higher value",
+      "mode": "lighten",
+      "backdrop": 64,
+      "source": 192,
+      "opacity": 1,
+      "expected": 192
+    },
+    {
+      "name": "difference uses absolute distance",
+      "mode": "difference",
+      "backdrop": 64,
+      "source": 192,
+      "opacity": 1,
+      "expected": 128
+    }
+  ]
+}

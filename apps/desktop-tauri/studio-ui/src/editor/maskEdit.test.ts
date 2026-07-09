@@ -39,6 +39,7 @@ import {
 } from "./maskEdit";
 import type { BrushStroke, MaskDocument } from "../types/production";
 import { isBrushOp, isMaskOperation, isPathOp } from "../types/production";
+import fixtures from "./imageDocumentContractFixtures.json";
 
 const stackPaths = (doc: MaskDocument) => activeOps(doc).filter(isPathOp);
 const stackBrushStrokes = (doc: MaskDocument) => activeOps(doc).filter(isBrushOp);
@@ -70,6 +71,43 @@ describe("maskEdit composeTransforms", () => {
 });
 
 describe("maskEdit normalizeEditPaths", () => {
+  it("matches the shared image-document migration contract", () => {
+    expect(fixtures.migrationCases.length).toBeGreaterThan(0);
+    for (const testCase of fixtures.migrationCases) {
+      const normalized = normalizeEditPaths(testCase.input);
+      const summary = {
+        version: normalized.version,
+        layerCount: normalized.layers.length,
+        active: normalized.active,
+        layerOps: normalized.layers.map((layer) => layer.ops),
+        layerProps: normalized.layers.map((layer) => ({
+          name: layer.name,
+          kind: layer.kind,
+          blend: layer.blend,
+          opacity: layer.opacity,
+          visible: layer.visible,
+          locked: layer.locked ?? false,
+          linked: layer.linked ?? false,
+          groupId: layer.groupId ?? null,
+          adjustment: layer.adjustment ?? null,
+          mask: layer.mask
+            ? {
+                ops: layer.mask.ops,
+                disabled: layer.mask.disabled ?? false,
+                unlinked: layer.mask.unlinked ?? false,
+              }
+            : null,
+        })),
+        matteStrokes: normalized.matte_strokes,
+        points: normalized.points,
+        canvas: normalized.canvas ?? null,
+        layerGroups: normalized.layerGroups,
+        activeTarget: normalized.activeTarget ?? "pixel",
+      };
+      expect.soft(summary, testCase.name).toEqual(testCase.expected);
+    }
+  });
+
   it("returns an empty, well-formed single-layer document for junk input", () => {
     for (const bad of [null, undefined, 42, "x", {}]) {
       const e = normalizeEditPaths(bad);
