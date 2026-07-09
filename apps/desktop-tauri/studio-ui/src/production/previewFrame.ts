@@ -1,11 +1,12 @@
 // Program-monitor frame resolution: which media the timeline shows at a
 // playhead time. Pure functions over the timeline + media bin (like
 // renderPlan) so the mapping is unit testable without React or the viewport
-// host. The first video track is the program output — the same rule the
-// render plan uses for export — so preview and export agree on what plays.
+// host. Image tracks over the first video track form the program output —
+// the same rule the render plan uses for export — so preview and export
+// agree on what plays.
 
 import type { MediaAsset } from "./mediaBin";
-import type { TimelineModel } from "./timeline";
+import type { TimelineClip, TimelineModel } from "./timeline";
 
 /** What the monitor should present at a playhead time. */
 export type PreviewFrameTarget =
@@ -23,23 +24,30 @@ export type PreviewFrameTarget =
     };
 
 /**
- * Resolve the clip under `timeSec` on the first video track to its media.
- * Video clips map the playhead to clip-local source time (no in/out trim
- * yet). Gaps, audio-only regions, and missing assets resolve to `null`
- * (black frame).
+ * Resolve the clip under `timeSec` to its media. Image tracks sit above the
+ * video tracks in the program output (topmost image track wins), the first
+ * visible video track is the fallback; hidden tracks are skipped. Video
+ * clips map the playhead to clip-local source time (no in/out trim yet).
+ * Gaps, audio-only regions, and missing assets resolve to `null` (black
+ * frame).
  */
 export function resolvePreviewFrame(
   timeline: TimelineModel,
   assets: MediaAsset[],
   timeSec: number,
 ): PreviewFrameTarget | null {
-  const track = timeline.tracks.find((t) => t.kind === "video");
-  if (!track) return null;
-  // Later-starting clips win overlaps, matching their stacking in the lane.
-  const clip = [...track.clips]
-    .sort((a, b) => a.start - b.start)
-    .filter((c) => timeSec >= c.start && timeSec < c.start + c.duration)
-    .pop();
+  const imageTracks = timeline.tracks.filter((t) => t.kind === "image" && !t.hidden).reverse();
+  const videoTrack = timeline.tracks.find((t) => t.kind === "video" && !t.hidden);
+  let clip: TimelineClip | null = null;
+  for (const track of [...imageTracks, ...(videoTrack ? [videoTrack] : [])]) {
+    // Later-starting clips win overlaps, matching their stacking in the lane.
+    clip =
+      [...track.clips]
+        .sort((a, b) => a.start - b.start)
+        .filter((c) => timeSec >= c.start && timeSec < c.start + c.duration)
+        .pop() ?? null;
+    if (clip) break;
+  }
   if (!clip) return null;
   const asset = assets.find((a) => a.id === clip.assetId);
   if (!asset) return null;

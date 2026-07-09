@@ -177,8 +177,9 @@ function formatTimecode(sec: number, fps: number) {
 }
 
 /**
- * Register the first video track's clips with the viewport host so playhead
- * frames present as `video_clip` reference targets (resolved Rust-side).
+ * Register the program tracks' clips (image tracks plus the first video
+ * track) with the viewport host so playhead frames present as `video_clip`
+ * reference targets (resolved Rust-side).
  * Returns the timeline id once registration lands — a re-registration after
  * an edit replaces the host's clip set — or null while pending / after a
  * failure (the monitor falls back to webview-resolved media targets).
@@ -186,8 +187,12 @@ function formatTimecode(sec: number, fps: number) {
 function useRegisteredTimeline(timeline: TimelineModel, assets: MediaAsset[]): string | null {
   const [registered, setRegistered] = useState<string | null>(null);
   const clips = useMemo<TimelineClipRef[]>(() => {
-    const track = timeline.tracks.find((t) => t.kind === "video");
-    return (track?.clips ?? []).flatMap((clip) => {
+    const videoTrack = timeline.tracks.find((t) => t.kind === "video" && !t.hidden);
+    const programClips = [
+      ...timeline.tracks.filter((t) => t.kind === "image" && !t.hidden).flatMap((t) => t.clips),
+      ...(videoTrack?.clips ?? []),
+    ];
+    return programClips.flatMap((clip) => {
       if (clip.kind === "audio") return [];
       const asset = assets.find((a) => a.id === clip.assetId);
       if (!asset) return [];

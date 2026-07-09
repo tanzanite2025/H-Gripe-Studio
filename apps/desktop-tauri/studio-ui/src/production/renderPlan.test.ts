@@ -54,7 +54,9 @@ describe("buildRenderPlan", () => {
     ];
     const { timeline } = withClips(assets);
     const plan = buildRenderPlan(timeline, assets);
-    expect(plan.video.map((s) => s.kind)).toEqual(["video", "still"]);
+    // The still routes to an image track, both program clips start at 0;
+    // image-track segments come first in the plan.
+    expect(plan.video.map((s) => s.kind)).toEqual(["still", "video"]);
     expect(plan.audio).toHaveLength(1);
     expect(plan.durationSec).toBeCloseTo(4);
     expect(plan.warnings).toEqual([]);
@@ -117,16 +119,16 @@ describe("expandPlanFrames", () => {
     const plan = buildRenderPlan(timeline, assets, { fps: 2 });
     const frames = expandPlanFrames(plan);
     expect(frames?.paths).toEqual([
-      "C:/clip.mp4",
-      "C:/clip.mp4",
-      "C:/clip.mp4",
-      "C:/clip.mp4",
       "C:/still.png",
       "C:/still.png",
       "C:/still.png",
       "C:/still.png",
+      "C:/clip.mp4",
+      "C:/clip.mp4",
+      "C:/clip.mp4",
+      "C:/clip.mp4",
     ]);
-    expect(frames?.frameTimes).toEqual([0, 0.5, 1, 1.5, null, null, null, null]);
+    expect(frames?.frameTimes).toEqual([null, null, null, null, 0, 0.5, 1, 1.5]);
     expect(frames?.hasVideoFrames).toBe(true);
   });
 

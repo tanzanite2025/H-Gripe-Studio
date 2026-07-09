@@ -34,7 +34,7 @@ describe("timeline model", () => {
     expect(clipKindForAsset("image")).toBe("still");
     expect(clipKindForAsset("video")).toBe("video");
     expect(clipKindForAsset("audio")).toBe("audio");
-    expect(trackKindForClip("still")).toBe("video");
+    expect(trackKindForClip("still")).toBe("image");
     expect(trackKindForClip("video")).toBe("video");
     expect(trackKindForClip("audio")).toBe("audio");
   });
@@ -47,33 +47,41 @@ describe("timeline model", () => {
 
   it("appends clips end-to-end on the first compatible track", () => {
     const tl = createTimeline();
+    // Stills route to an image track, auto-created on first drop.
     const first = appendClip(tl, imageAsset);
-    expect(first).not.toBeNull();
-    expect(first!.clip.kind).toBe("still");
-    expect(first!.clip.start).toBe(0);
-    expect(first!.clip.duration).toBe(DEFAULT_STILL_SECONDS);
-    expect(first!.clip.sourceStartSec).toBe(0);
-    const second = appendClip(first!.timeline, videoAsset);
-    expect(second!.trackId).toBe(first!.trackId);
-    expect(second!.clip.start).toBe(DEFAULT_STILL_SECONDS);
-    expect(second!.clip.duration).toBe(DEFAULT_MEDIA_SECONDS);
-    const audio = appendClip(second!.timeline, audioAsset);
-    expect(audio!.trackId).not.toBe(second!.trackId);
-    expect(audio!.clip.start).toBe(0);
-    expect(timelineDuration(audio!.timeline)).toBe(DEFAULT_STILL_SECONDS + DEFAULT_MEDIA_SECONDS);
+    expect(first.clip.kind).toBe("still");
+    expect(first.clip.start).toBe(0);
+    expect(first.clip.duration).toBe(DEFAULT_STILL_SECONDS);
+    expect(first.clip.sourceStartSec).toBe(0);
+    expect(findClip(first.timeline, first.clip.id)!.track.kind).toBe("image");
+    const second = appendClip(first.timeline, videoAsset);
+    expect(second.trackId).not.toBe(first.trackId);
+    expect(findClip(second.timeline, second.clip.id)!.track.kind).toBe("video");
+    expect(second.clip.start).toBe(0);
+    expect(second.clip.duration).toBe(DEFAULT_MEDIA_SECONDS);
+    const nextVideo = appendClip(second.timeline, videoAsset);
+    expect(nextVideo.trackId).toBe(second.trackId);
+    expect(nextVideo.clip.start).toBe(DEFAULT_MEDIA_SECONDS);
+    const audio = appendClip(nextVideo.timeline, audioAsset);
+    expect(audio.trackId).not.toBe(nextVideo.trackId);
+    expect(audio.clip.start).toBe(0);
+    expect(timelineDuration(audio.timeline)).toBe(2 * DEFAULT_MEDIA_SECONDS);
   });
 
   it("routes an incompatible requested track to a compatible one", () => {
     const tl = createTimeline();
     const audioTrack = tl.tracks.find((t) => t.kind === "audio")!;
-    const r = appendClip(tl, imageAsset, { trackId: audioTrack.id });
-    expect(r!.trackId).not.toBe(audioTrack.id);
-    expect(findClip(r!.timeline, r!.clip.id)!.track.kind).toBe("video");
+    const r = appendClip(tl, videoAsset, { trackId: audioTrack.id });
+    expect(r.trackId).not.toBe(audioTrack.id);
+    expect(findClip(r.timeline, r.clip.id)!.track.kind).toBe("video");
   });
 
-  it("returns null when no compatible track exists", () => {
+  it("auto-creates a track of the right kind when none exists", () => {
     const tl = { id: "t", fps: 24, tracks: [] };
-    expect(appendClip(tl, imageAsset)).toBeNull();
+    const r = appendClip(tl, imageAsset);
+    expect(r.timeline.tracks).toHaveLength(1);
+    expect(r.timeline.tracks[0].kind).toBe("image");
+    expect(findClip(r.timeline, r.clip.id)!.track.id).toBe(r.trackId);
   });
 
   it("adds tracks on demand", () => {
@@ -82,12 +90,13 @@ describe("timeline model", () => {
   });
 
   it("removes a track with its clips but keeps the last track", () => {
-    const withClip = appendClip(createTimeline(), imageAsset)!;
+    const withClip = appendClip(createTimeline(), imageAsset);
     const removed = removeTrack(withClip.timeline, withClip.trackId);
-    expect(removed.tracks.map((t) => t.kind)).toEqual(["audio"]);
+    expect(removed.tracks.map((t) => t.kind)).toEqual(["video", "audio"]);
     expect(findClip(removed, withClip.clip.id)).toBeNull();
-    const last = removeTrack(removed, removed.tracks[0].id);
-    expect(last).toBe(removed);
+    const one = removeTrack(removed, removed.tracks[0].id);
+    const last = removeTrack(one, one.tracks[0].id);
+    expect(last).toBe(one);
     expect(removeTrack(withClip.timeline, "missing")).toBe(withClip.timeline);
   });
 
@@ -115,14 +124,10 @@ describe("timeline model", () => {
 
   it("collects sorted unique clip-edge snap points", () => {
     expect(timelineSnapPoints(createTimeline())).toEqual([0]);
-    const a = appendClip(createTimeline(), imageAsset)!;
-    const b = appendClip(a.timeline, videoAsset)!;
+    const a = appendClip(createTimeline(), imageAsset);
+    const b = appendClip(a.timeline, videoAsset);
     const c = appendClip(b.timeline, audioAsset, { duration: 5 })!;
-    expect(timelineSnapPoints(c.timeline)).toEqual([
-      0,
-      DEFAULT_STILL_SECONDS,
-      DEFAULT_STILL_SECONDS + DEFAULT_MEDIA_SECONDS,
-    ]);
+    expect(timelineSnapPoints(c.timeline)).toEqual([0, DEFAULT_STILL_SECONDS, DEFAULT_MEDIA_SECONDS]);
   });
 
   it("toggles track lock / hidden flags", () => {
@@ -141,13 +146,15 @@ describe("timeline model", () => {
     const tl = createTimeline();
     const video = tl.tracks.find((t) => t.kind === "video")!;
     const locked = toggleTrackLock(tl, video.id);
-    // Only one video track and it is locked: the clip has nowhere to go.
-    expect(appendClip(locked, imageAsset)).toBeNull();
+    // The only video track is locked: a new video track is auto-created.
+    const autod = appendClip(locked, videoAsset);
+    expect(autod.trackId).not.toBe(video.id);
+    expect(findClip(autod.timeline, autod.clip.id)!.track.kind).toBe("video");
     // A second unlocked video track picks up the clip instead.
     const twoTracks = addTrack(locked, "video");
-    const r = appendClip(twoTracks, imageAsset, { trackId: video.id });
-    expect(r).not.toBeNull();
-    expect(r!.trackId).not.toBe(video.id);
+    const r = appendClip(twoTracks, videoAsset, { trackId: video.id });
+    expect(r.trackId).not.toBe(video.id);
+    expect(r.timeline.tracks).toHaveLength(twoTracks.tracks.length);
   });
 
   it("toggles frame-snapped markers and removes them by id", () => {

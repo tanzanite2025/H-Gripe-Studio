@@ -894,6 +894,9 @@
 .production-track-nav-button.nav-audio {
   background: #2e3a33;
 }
+.production-track-nav-button.nav-image {
+  background: #3a3044;
+}
 .production-track-nav-button:hover {
   filter: brightness(1.16);
 }
@@ -959,6 +962,7 @@
 }
 .production-track-label.track-video { background: #2c3444; color: var(--text); }
 .production-track-label.track-audio { background: #2e3a33; color: var(--text); }
+.production-track-label.track-image { background: #3a3044; color: var(--text); }
 .production-track-lane {
   position: relative;
   flex: 1;

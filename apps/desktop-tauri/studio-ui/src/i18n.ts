@@ -852,6 +852,7 @@ export const messages = {
   },
   "drawer.trackVideo": { en: "V", zh: "视" },
   "drawer.trackAudio": { en: "A", zh: "音" },
+  "drawer.trackImage": { en: "I", zh: "图" },
   "drawer.timelineToolSelect": { en: "Selection tool", zh: "选择工具" },
   "drawer.timelineToolRazor": { en: "Razor tool", zh: "剃刀 / 切割工具" },
   "drawer.timelineToolHand": { en: "Hand tool (drag to pan the zoomed timeline)", zh: "抓手工具（按住拖动平移缩放后的时间线）" },
@@ -859,6 +860,7 @@ export const messages = {
   "drawer.addVideoTrackTitle": { en: "add a video track", zh: "新增一条视频轨" },
   "drawer.addAudioTrack": { en: "+A", zh: "+音频轨" },
   "drawer.addAudioTrackTitle": { en: "add an audio track", zh: "新增一条音频轨" },
+  "drawer.addImageTrackTitle": { en: "add an image track", zh: "新增一条图片轨" },
   "drawer.addToTrackTitle": {
     en: "append the selected bin asset at the end of this track",
     zh: "将选中的素材追加到该轨道末尾",
@@ -880,8 +882,8 @@ export const messages = {
     zh: "显示该轨道",
   },
   "drawer.removeTrackTitle": {
-    en: "remove this track and its clips (the last track stays)",
-    zh: "删除该轨道及其上的 clip（最后一条轨道不可删）",
+    en: "remove this track and its clips (the last track of each kind stays)",
+    zh: "删除该轨道及其上的 clip（每类最后一条轨道不可删）",
   },
   "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
   "drawer.imageEditHint": { en: "right-click to open the image editor", zh: "右键打开图片编辑" },

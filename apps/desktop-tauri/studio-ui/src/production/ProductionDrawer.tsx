@@ -339,17 +339,23 @@ export function ProductionDrawer({
   const snapPoints = timelineSnapPoints(timeline);
   const playheadRatio = Math.min(1, Math.max(0, playheadSec / rulerDuration));
 
-  // Premiere-style track stack: video tracks on top with the highest lane
-  // first (V2 above V1), audio tracks below in ascending order (A1 first).
+  // Track stack: image tracks on top (they override video in the program
+  // output), then video tracks with the highest lane first (V2 above V1),
+  // then audio tracks in ascending order (A1 first).
+  const imageTracks = timeline.tracks.filter((track) => track.kind === "image");
   const videoTracks = timeline.tracks.filter((track) => track.kind === "video");
   const audioTracks = timeline.tracks.filter((track) => track.kind === "audio");
   const orderedTracks = [
+    ...imageTracks.map((track, i) => ({ track, laneNumber: i + 1 })).reverse(),
     ...videoTracks.map((track, i) => ({ track, laneNumber: i + 1 })).reverse(),
     ...audioTracks.map((track, i) => ({ track, laneNumber: i + 1 })),
   ].map((entry, i, all) => ({
     ...entry,
     groupBoundary: i > 0 && all[i - 1].track.kind !== entry.track.kind,
   }));
+
+  const trackKindLabel = (kind: TrackKind): string =>
+    t(kind === "video" ? "drawer.trackVideo" : kind === "audio" ? "drawer.trackAudio" : "drawer.trackImage");
 
   const clipAssetName = (clipId: string): string => {
     for (const track of timeline.tracks) {
@@ -676,7 +682,7 @@ export function ProductionDrawer({
                     >
                     <span className="production-track-head">
                       <span className={`production-track-label track-${track.kind}`}>
-                        {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
+                        {trackKindLabel(track.kind) + laneNumber}
                       </span>
                       <span className="production-track-controls">
                         {onToggleTrackHidden ? (
@@ -699,13 +705,19 @@ export function ProductionDrawer({
                         ) : null}
                           <button
                             onClick={() => onAddTrack(track.kind)}
-                            title={track.kind === "video" ? t("drawer.addVideoTrackTitle") : t("drawer.addAudioTrackTitle")}
+                            title={t(
+                              track.kind === "video"
+                                ? "drawer.addVideoTrackTitle"
+                                : track.kind === "audio"
+                                  ? "drawer.addAudioTrackTitle"
+                                  : "drawer.addImageTrackTitle",
+                            )}
                           >
                             +
                           </button>
                         <button
                           onClick={() => onRemoveTrack(track.id)}
-                          disabled={timeline.tracks.length <= 1}
+                          disabled={timeline.tracks.filter((t) => t.kind === track.kind).length <= 1}
                           title={t("drawer.removeTrackTitle")}
                         >
                           ×
@@ -811,14 +823,14 @@ export function ProductionDrawer({
               </div>
               <div className="production-track-nav" aria-label="轨道定位">
                 {orderedTracks.map(({ track, laneNumber }) => {
-                  const label = `${track.kind === "video" ? "V" : "A"}${laneNumber}`;
+                  const label = `${track.kind === "video" ? "V" : track.kind === "audio" ? "A" : "I"}${laneNumber}`;
                   return (
                     <button
                       key={`nav-${track.id}`}
                       type="button"
                       className={`production-track-nav-button nav-${track.kind}`}
                       onClick={() => scrollTrackIntoView(track.id)}
-                      title={track.kind === "video" ? `${t("drawer.trackVideo")}${laneNumber}` : `${t("drawer.trackAudio")}${laneNumber}`}
+                      title={`${trackKindLabel(track.kind)}${laneNumber}`}
                     >
                       {label}
                     </button>

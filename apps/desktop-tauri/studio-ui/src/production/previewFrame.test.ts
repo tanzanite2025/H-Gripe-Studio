@@ -11,13 +11,15 @@ function setup(): { timeline: TimelineModel; assets: MediaAsset[] } {
   const video = addAsset(assets, { kind: "video", path: "C:/media/b.mp4" });
   assets = video.assets;
   let timeline = createTimeline();
-  timeline = appendClip(timeline, still.asset)!.timeline; // still: 0..5
-  timeline = appendClip(timeline, video.asset)!.timeline; // video: 5..15
+  // Strict routing: the still lands on an auto-created image track (0..5,
+  // overriding the video track while it lasts), the video on V1 (0..10).
+  timeline = appendClip(timeline, still.asset).timeline;
+  timeline = appendClip(timeline, video.asset).timeline;
   return { timeline, assets };
 }
 
 describe("resolvePreviewFrame", () => {
-  it("resolves a still clip to its image path", () => {
+  it("resolves a still clip to its image path, over the video track", () => {
     const { timeline, assets } = setup();
     const frame = resolvePreviewFrame(timeline, assets, 2);
     expect(frame).toMatchObject({ kind: "still", path: "C:/media/a.png" });
@@ -29,7 +31,7 @@ describe("resolvePreviewFrame", () => {
     expect(frame).toMatchObject({
       kind: "video",
       path: "C:/media/b.mp4",
-      sourceTimeSec: 3.5,
+      sourceTimeSec: 8.5,
     });
   });
 
@@ -37,11 +39,11 @@ describe("resolvePreviewFrame", () => {
     const { timeline, assets } = setup();
     const videoTrack = timeline.tracks.find((t) => t.kind === "video")!;
     const videoClip = videoTrack.clips.find((c) => c.kind === "video")!;
-    const split = splitClip(timeline, videoClip.id, 9)!;
-    const frame = resolvePreviewFrame(split.timeline, assets, 10);
+    const split = splitClip(timeline, videoClip.id, 7)!;
+    const frame = resolvePreviewFrame(split.timeline, assets, 8);
     expect(frame).toMatchObject({
       kind: "video",
-      sourceTimeSec: 5,
+      sourceTimeSec: 8,
     });
   });
 
@@ -55,12 +57,12 @@ describe("resolvePreviewFrame", () => {
 describe("paceToFrameGrid", () => {
   it("snaps a playing video request onto the source frame grid", () => {
     const { timeline, assets } = setup();
-    const target = resolvePreviewFrame(timeline, assets, 8.5); // video: 5..15
-    // 3.5s clip-local at 24fps -> frame 84 -> 3.5s; 3.51s stays on frame 84.
-    expect(paceToFrameGrid(target, 8.5, 24)).toBeCloseTo(5 + 84 / 24, 10);
-    expect(paceToFrameGrid(target, 8.51, 24)).toBeCloseTo(5 + 84 / 24, 10);
+    const target = resolvePreviewFrame(timeline, assets, 8.5); // video: 0..10
+    // 8.5s clip-local at 24fps -> frame 204 -> 8.5s; 8.51s stays on frame 204.
+    expect(paceToFrameGrid(target, 8.5, 24)).toBeCloseTo(204 / 24, 10);
+    expect(paceToFrameGrid(target, 8.51, 24)).toBeCloseTo(204 / 24, 10);
     // The next frame boundary advances exactly one frame.
-    expect(paceToFrameGrid(target, 8.55, 24)).toBeCloseTo(5 + 85 / 24, 10);
+    expect(paceToFrameGrid(target, 8.55, 24)).toBeCloseTo(205 / 24, 10);
   });
 
   it("passes through non-video targets and unknown frame rates", () => {

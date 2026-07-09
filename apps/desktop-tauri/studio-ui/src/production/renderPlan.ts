@@ -1,10 +1,12 @@
 // Timeline render plan (UNIFIED_PRODUCTION_DRAWER_PLAN.md step 9): a pure,
 // serializable description of what the export encodes, built from the timeline
-// plus the media bin. The encode path covers the video track's still and
-// video clips (expanded to one frame per output frame at the chosen fps —
-// stills repeat their image path, video clips carry a clip-local decode time
-// the backend resolves through the media engine) and the audio tracks' clips
-// (mixed down with their trim/gain/fade edits and muxed into the output).
+// plus the media bin. The encode path covers the program tracks' clips —
+// stills from the image tracks and video clips from the first video track,
+// expanded to one frame per output frame at the chosen fps (stills repeat
+// their image path, video clips carry a clip-local decode time the backend
+// resolves through the media engine) — and the audio tracks' clips (mixed
+// down with their trim/gain/fade edits and muxed into the output). Hidden
+// tracks are excluded throughout.
 
 import { defaultAudioEdit, type AudioClipEdit } from "./audioEdit";
 import type { MediaAsset } from "./mediaBin";
@@ -43,7 +45,7 @@ export type RenderWarning =
 export interface RenderPlan {
   timelineId: string;
   fps: number;
-  /** Encodable segments (stills and video clips) of the first video track. */
+  /** Encodable segments: image-track stills plus the first video track's clips. */
   video: RenderSegment[];
   /** Audio-track segments, mixed down and muxed into the output. */
   audio: AudioRenderSegment[];
@@ -56,10 +58,10 @@ export const DEFAULT_EXPORT_FPS = 24;
 export const MAX_EXPORT_FRAMES = 20000;
 
 /**
- * Build the render plan for a timeline: order the first video track's clips,
- * resolve their bin assets, collect the audio clips with their edits, and
- * report anything the encode path cannot carry (missing assets, gaps
- * between clips).
+ * Build the render plan for a timeline: order the program clips (image
+ * tracks plus the first visible video track), resolve their bin assets,
+ * collect the audio clips with their edits, and report anything the encode
+ * path cannot carry (missing assets, gaps between clips).
  */
 export function buildRenderPlan(
   timeline: TimelineModel,
@@ -77,8 +79,12 @@ export function buildRenderPlan(
   const video: RenderSegment[] = [];
   const audio: AudioRenderSegment[] = [];
 
-  const videoTrack = timeline.tracks.find((t) => t.kind === "video");
-  const ordered = [...(videoTrack?.clips ?? [])].sort((a, b) => a.start - b.start);
+  const videoTrack = timeline.tracks.find((t) => t.kind === "video" && !t.hidden);
+  const programClips = [
+    ...timeline.tracks.filter((t) => t.kind === "image" && !t.hidden).flatMap((t) => t.clips),
+    ...(videoTrack?.clips ?? []),
+  ];
+  const ordered = [...programClips].sort((a, b) => a.start - b.start);
   let cursor = 0;
   for (const clip of ordered) {
     const asset = byId.get(clip.assetId);
@@ -102,7 +108,7 @@ export function buildRenderPlan(
     });
   }
 
-  for (const track of timeline.tracks.filter((t) => t.kind === "audio")) {
+  for (const track of timeline.tracks.filter((t) => t.kind === "audio" && !t.hidden)) {
     for (const clip of [...track.clips].sort((a, b) => a.start - b.start)) {
       const asset = byId.get(clip.assetId);
       if (!asset) {
