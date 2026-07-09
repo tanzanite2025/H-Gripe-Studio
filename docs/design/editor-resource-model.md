@@ -141,10 +141,10 @@ too. This section is now a changelog of the rollout.
    thread and the GPU compute queue.
 6. ✅ **Native ffmpeg backend** (PR #150) — a second `FrameSource`
    (`studio/ffmpeg_native.rs`) decoding in-process with **vendored** LGPL-shared
-   libav (`third_party/ffmpeg`, git-lfs; `native-ffmpeg` cargo feature, off by
-   default at the time). The PyAV fallback wrapper was removed in Phase 7;
-   native ffmpeg is the only decoder. Trim / **export / encode** have since
-   landed (Video Trim / Video Assemble).
+   libav (`third_party/ffmpeg`, git-lfs). `native-ffmpeg` is now a default Cargo
+   feature and native ffmpeg is the only decoder; the PyAV fallback wrapper was
+   removed in Phase 7. Trim / **export / encode** have since landed (Video Trim /
+   Video Assemble), along with timeline audio mixdown/AAC mux.
 
 ## Non-goals (for now)
 

@@ -7,6 +7,15 @@
 - `completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md` + `completed/WGPU_SURFACE_SWAP_PLAN.md`（viewport host 呈现边界）
 - `active/GPU_DEVICE_STRATEGY_PLAN.md`（设备报告词汇）
 
+> Status: implementation landed, not archived yet. Phases 1-5 landed across
+> #612, #616, #617, and #618: Rust/TS keyframe evaluation, export property
+> compositing, shared preview/export pixel path, linear/hold/bezier
+> interpolation, timeline keyframe lane, hit targets, and property-compositor
+> performance/device reporting are present in code. Keep this document active
+> only until native end-to-end preview/export evidence is captured with the
+> repository-maintained FFmpeg binaries restored from Git LFS. Do not use
+> external FFmpeg libraries to satisfy that evidence gap.
+
 ---
 
 ## 1. 对标分析：Premiere / Resolve 哪些是本质设计，哪些是历史包袱
@@ -36,15 +45,17 @@
 
 ---
 
-## 2. 现状（Phase 1，已完成，#611 / #612）
+## 2. 现状（Phases 1-5，代码已落地，待 native 证据补齐）
 
 - 文档模型：`ClipProperties`（transform / crop）+ 可选 `tracks`；clamp 规则统一（scale 0..10000%，opacity/crop 0..100%，对边 crop 之和 ≤ 100%）。
-- Rust 权威求值器：`src-tauri/src/studio/clip_props.rs` — `parse_clip_props_doc` / `resolve_clip_props_at(doc, t)`；键按时间排序、端点保持、线性插值、非法键过滤。
-- TS 镜像：`studio-ui/src/production/keyframes.ts` — 同一语义 + 面板辅助（`toggleKeyframe` / `setClipPropValueAt` / `resetClipPropsSection`）。
+- Rust 权威求值器：`src-tauri/src/studio/clip_props.rs` — `parse_clip_props_doc` / `resolve_clip_props_at(doc, t)`；键按时间排序、端点保持、`linear` / `hold` / `bezier` 插值、非法键过滤。
+- TS 镜像：`studio-ui/src/production/keyframes.ts` — 同一语义 + 面板辅助（`toggleKeyframe` / `setClipPropValueAt` / `resetClipPropsSection` / `setKeyframeInterpolationAt`）。
 - 对齐契约：`clipPropsKeyframeFixtures.json`，Rust 测试与 vitest 同时逐样本断言到 1e-9，两边永不静默漂移。
-- 面板：每个标量旁菱形按钮（播放头处打/删键），数值显示为播放头处求值结果；动画属性上改值 = upsert 关键帧。
-
-尚未发生的：**求值结果还没有作用到任何像素**。预览与导出仍按未变换的原始帧输出。
+- 面板：每个标量旁菱形按钮（播放头处打/删键），右键菜单选择插值类型；数值显示为播放头处求值结果；动画属性上改值 = upsert 关键帧。
+- 像素路径：`timeline_export` 接收 `prop_docs` / `prop_times`，逐帧 resolve 后调用 `apply_clip_props_preferred`；`ProgramMonitor` 预览复用 `apply_clip_props_srgb_proxy_preferred`，预览与导出共用同一 Rust 属性合成语义。
+- GPU / fallback：`clip_props_gpu.rs` 是 wgpu 属性合成路径，`clip_props_raster.rs` 保留 CPU fallback 与金样本基准；导出报告 `props_frame_count` / `props_time_ms` / `props_backend` / fallback reason。
+- 时间线 lane：选中 clip 时显示关键帧组菱形，可点击、拖动改时、Shift 吸附、双击删除；#618 修正了菱形独立点击命中。
+- 仍待补证据：native 预览/导出录屏和导出产物验收被 Git LFS FFmpeg 配额阻断；仓库维护的 `third_party/ffmpeg/**` 恢复后补跑，再决定是否归档。
 
 ---
 
@@ -61,7 +72,7 @@
 
 ## 4. 路线图
 
-### Phase 2 — 导出管线应用属性（下一步）
+### Phase 2 — 导出管线应用属性（已落地，#617）
 Rust：
 - 新增 `apply_clip_props` 光栅算子：输入解码帧 + `ResolvedClipProps`，输出同尺寸合成帧（crop → 仿射变换（anchor/position/scale/rotation）→ opacity 混合到画布）。首版 CPU 参考实现 + 单测（恒等跳过、裁剪、缩放、不透明度各金样本），为 Phase 3 的 GPU kernel 定语义。
 - `timeline_export` 增加 `prop_docs: Option<Vec<Option<String>>>`（与 frames 对齐，每 clip 一份文档字符串）+ `prop_times: Option<Vec<f64>>`（每帧 clip 本地时间）；在 decode 之后、grade 之前插入 `resolve_prop_frames`（文档 parse 每 clip 一次；§3 的缓存与恒等跳过）。
@@ -70,18 +81,18 @@ TS：
 - App 导出调用透传两个新数组。
 验收：带关键帧的导出逐帧可见动画；无属性文档的工程走原路径（零新增开销）；`cargo test` 金样本 + vitest 展开对齐测试。
 
-### Phase 3 — 预览同一像素路径
+### Phase 3 — 预览同一像素路径（已落地，#617）
 - viewport host 新增 `set_clip_props` 命令（与 `set_grade` 同形：doc JSON + 帧时间），`video_preview` 呈现前跑同一个 `apply_clip_props`（wgpu kernel 落地在这一步，导出同时切换到 GPU 路径，CPU 参考实现降级为 fallback + 测试基准）。
 - `ProgramMonitor.showFrame` 增加 `propsDoc` + clip 本地时间（跳过恒等文档，避免无谓命令）。
 - 金帧测试：预览呈现 vs 导出帧容差断言（复用既有 grade 对齐测试模式）。
 验收：拖动播放头即见动画；预览/导出像素级一致（容差内）；DeviceReport 报告属性合成的 cpu/gpu 与 fallback 原因。
 
-### Phase 4 — 插值升级（缓动）
+### Phase 4 — 插值升级（缓动，已落地，#616）
 - schema：`Keyframe` 增加可选 `interp`（`"linear"`（默认）/ `"hold"` / `"bezier"`，bezier 带两个控制点）；旧文档缺省即 linear——schema 演进靠缺省值，不留兼容分支。
 - fixtures 扩展 bezier/hold 样本；Rust 与 TS 同步实现，1e-9 契约不变。
 - 面板：关键帧右键菜单选择插值类型。
 
-### Phase 5 — 时间线关键帧 lane 与性能仪表
+### Phase 5 — 时间线关键帧 lane 与性能仪表（已落地，#617 / #618）
 - clip 条上渲染关键帧菱形（选中 clip 时），拖动改 `t`，双击删除；与 Shift 吸附集成（关键帧成为吸附源）。
 - 性能仪表：导出报告属性合成帧数/耗时；预览路径把 decode+props+grade 各段耗时并入 DeviceReport，为 4K 帧预算（GPU 合成 < 2ms/帧）提供量测。
 

@@ -327,7 +327,7 @@ one processing card
   defines the global manager UI and two-tab source of truth.
 - [`API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md)
   defines the reference and resolution layer.
-- [`NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](NODE_CARD_PRODUCT_BOUNDARY_PLAN.md)
+- [`NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](../active/NODE_CARD_PRODUCT_BOUNDARY_PLAN.md)
   defines which concepts are allowed to become visible node cards.
 
 ## Implementation Order

@@ -3,8 +3,11 @@
 > Status: complete（已归档）。**第一阶段（下方 1–9）已全部落地**（PR #294–#300）：底部抽屉、
 > `ProductionTarget`、Edit/Timeline 工作区、多轨模型、可嵌入 `GradePanel`
 > （image + video_clip）、图片/音频右键按需编辑、timeline render plan +
-> FFmpeg 导出弹窗。后续方向（音频混音/封装、视频 clip 参与导出、keyframe
-> 调色等）尚未排期。
+> FFmpeg 导出弹窗。归档后的扩展也已继续落地：视频 clip 参与导出、音频
+> mixdown/AAC mux、clip transform/crop/opacity keyframes、素材工作区本地文件导入、
+> 监视器导出帧与循环播放。仍未实现的是 **GradeDoc 参数本身的关键帧动画**；
+> 不要把已经完成的音视频导出项继续当作待办。所有 FFmpeg 路径继续使用仓库维护的
+> `third_party/ffmpeg` vendored build。
 
 ## 目的
 

@@ -80,7 +80,16 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 | **In-app account / config editor** | ⛔ Not planned | The desktop shell has no H-Gripe account/login surface and no Credentials / Profiles tabs. Third-party API keys and provider profiles stay as local config files + CLI until a cleaner API configuration surface is deliberately designed. |
 | Per-card `engine` seams (matcher) | 🟡 Partial | Image Enhance, Detail Watchdog, Detail Repaint, Match Light & Color and Refine Mask Edge keep their `engine` seams (param + report fields + probe), but only the native baselines exist post Phase 7 (#314) — the Python ML backends behind the seams were deleted. Native (`ort`) backends remain ⛔ (see §2). |
 
-## 5. Packaging & verification gaps
+## 5. Production drawer / timeline / monitor
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Clip keyframe / motion pipeline | ✅ Landed (code), evidence pending | Phases 1-5 landed across #612, #616-#618: Rust/TS keyframe evaluation, export and preview property compositing, easing interpolation, timeline keyframe lane, hit targets, and compositor reporting. The plan stays active only because native FFmpeg-backed preview/export evidence still needs to be captured after repo-maintained `third_party/ffmpeg` LFS binaries are restored. |
+| Media workspace direct file import | ✅ Landed | `MediaWorkspacePopover` owns the media-bin popup; users can drag/select local video, audio, and image files into the workspace and then place assets on the timeline (#619). |
+| Program monitor export frame | ✅ Landed | Left monitor toolbar has Export Frame; the dialog supports name, format, output path, and "add to project" default-on, then registers the exported still in the media workspace (#620). |
+| Program monitor loop playback | ✅ Landed | Left monitor toolbar has Loop Playback; playback wraps within explicit in/out marks or the current timeline duration (#621). |
+
+## 6. Packaging & verification gaps
 
 | Item | Status | Notes |
 | --- | --- | --- |
@@ -88,13 +97,13 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 | **Big-tier weights bundling** (Issue #2) | ⛔ Planned | BiRefNet lite / SAM 2 / ViTMatte downloaded post-install; not in the installer. Installer packaging story undecided. |
 | **ViTMatte real inference in CI** | 🟡 Partial | Weight-gated unit test + opt-in `tauri (vitmatte e2e)` job exists, but it's `workflow_dispatch` and skipped on normal PRs — real inference is only verified on manual trigger. |
 
-## 6. Internationalisation (cards)
+## 7. Internationalisation (cards)
 
 | Item | Status | Notes |
 | --- | --- | --- |
 | Node-card / Inspector / Palette / search / Mask-Edit i18n (中/英) | ✅ Landed | English `NODE_SPECS` source + `nodeSpecsI18n` / `maskToolsI18n` zh overlays + `localizeSpec` resolver. A coverage test fails CI if any node/param/port/tool ships without a zh entry. |
 
-## 7. Editor resource & threading model — [`design/editor-resource-model.md`](design/editor-resource-model.md)
+## 8. Editor resource & threading model — [`design/editor-resource-model.md`](design/editor-resource-model.md)
 
 The full staged rollout of the editor compute/threading model has **landed**.
 
@@ -109,12 +118,12 @@ The full staged rollout of the editor compute/threading model has **landed**.
 | Video **export / encode** | ✅ Landed | The **Video Assemble** output card encodes an ordered frame sequence to video natively (`studio/video_assemble.rs`, vendored ffmpeg encoders; fps / encoder / output params). |
 | Video **trim** | ✅ Landed | The **Video Trim** output card cuts a `[start_sec, end_sec)` range out of a video natively (`studio/video_trim.rs`, frame-accurate decode-and-re-encode; audio not carried over). |
 
-## 8. Out of scope (explicit product-direction decisions)
+## 9. Out of scope (explicit product-direction decisions)
 
 These were floated in early vision/research notes but are **not** committed
 work. The product today is PSD-first, single-image, native Rust.
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Video **subject** axis (temporal mask tracking / flicker smoothing) | ⛔ Not planned | Would need a video predictor (SAM 2 memory bank); the bundled SAM 2 ONNX is the **image** variant. Distinct from the decode/scrub **media engine**, which *has* landed (§7) — this row is about propagating a *mask* across frames, not playback. Needs a separate product decision. |
+| Video **subject** axis (temporal mask tracking / flicker smoothing) | ⛔ Not planned | Would need a video predictor (SAM 2 memory bank); the bundled SAM 2 ONNX is the **image** variant. Distinct from the decode/scrub **media engine**, which *has* landed (§8) — this row is about propagating a *mask* across frames, not playback. Needs a separate product decision. |
 | Private local SD video content-aware fill | ⛔ Not planned | Video axis is out of scope; the *still-image* local SD inpaint engine that once existed on the Python bridge was deleted in Phase 7 (see §2). |
