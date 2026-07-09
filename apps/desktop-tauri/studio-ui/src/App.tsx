@@ -653,15 +653,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   }, []);
 
   // Persist the project manifest (debounced) so the tab set survives a
-  // restart; this is the workspace autosave, and `saved` drives the
-  // status-bar autosave indicator.
-  const [saved, setSaved] = useState(true);
+  // restart. View-only state such as viewport pan/zoom and selection is
+  // exported when real content changes, but does not itself trigger a save.
+  const exportCanvases = canvas.exportCanvases;
   useEffect(() => {
     if (!manifestReady) return;
-    setSaved(false);
     let cancelled = false;
     const timer = setTimeout(() => {
-      const { activeCanvasId, canvases } = canvas.exportCanvases({
+      const { activeCanvasId, canvases } = exportCanvases({
         path: currentFile,
         dirty: fileDirty,
       });
@@ -685,22 +684,18 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       };
       if (isDesktop) {
         void writeStudioProjectManifest(serializeProjectManifest(manifest))
-          .then(() => {
-            if (!cancelled) setSaved(true);
-          })
           .catch((err) => {
             if (!cancelled) setMessage(`project manifest save failed: ${String(err)}`);
           });
       } else {
         saveLocalProjectManifest(manifest);
-        setSaved(true);
       }
     }, 500);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [manifestReady, canvas, nodes, edges, selectedId, currentFile, fileDirty, mediaDraftRevision, isDesktop, setMessage]);
+  }, [manifestReady, exportCanvases, canvas.documentId, canvas.tabs, nodes, edges, currentFile, fileDirty, mediaDraftRevision, isDesktop, setMessage]);
 
   // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
   // graph in tab order. Defined below the run controller (see runAllCanvases).
@@ -1625,8 +1620,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onOpenImageEdit={openImageEditor}
         drawerOpen={drawerMode !== "collapsed"}
         onToggleDrawer={() => changeDrawerMode(toggleDrawer(drawerMode))}
-        showProject={showProject}
-        setShowProject={setShowProject}
         showSnapshots={showSnapshots}
         setShowSnapshots={setShowSnapshots}
         showLog={showLog}
@@ -1765,9 +1758,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                     {message}
                   </span>
                 )}
-                <span className="canvas-status-autosave" title={t("status.autosaveTitle")}>
-                  {saved ? t("status.autosaved") : t("status.saving")}
-                </span>
                 <button
                   className="canvas-status-history"
                   onClick={undo}

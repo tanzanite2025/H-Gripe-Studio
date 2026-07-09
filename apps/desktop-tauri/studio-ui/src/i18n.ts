@@ -21,6 +21,10 @@ export const messages = {
   "canvasTabs.new": { en: "New canvas", zh: "新建画布" },
   "canvasTabs.close": { en: "Close canvas", zh: "关闭画布" },
   "canvasTabs.save": { en: "Save", zh: "保存" },
+  "canvasTabs.savedState": { en: "Saved", zh: "已保存" },
+  "canvasTabs.unsavedState": { en: "Unsaved changes", zh: "未保存更改" },
+  "canvasTabs.savedTitle": { en: "saved — click to save again", zh: "已保存 — 点击可再次保存" },
+  "canvasTabs.unsavedTitle": { en: "unsaved changes — click to save", zh: "有未保存更改 — 点击保存" },
   "canvasTabs.saveAs": { en: "Save as…", zh: "另存为…" },
   "canvasTabs.rename": { en: "Rename", zh: "重命名" },
   "canvasTabs.more": { en: "More actions", zh: "更多操作" },
@@ -107,6 +111,11 @@ export const messages = {
   "runhistory.noLog": { en: "No log lines for this run.", zh: "此次运行没有日志。" },
   "btn.imageEdit": { en: "Image Editor", zh: "图片编辑" },
   "btn.drawer": { en: "Edit / Grade", zh: "剪辑调色" },
+  "btn.settings": { en: "Settings", zh: "设置" },
+  "btn.settingsTitle": {
+    en: "settings entry placeholder",
+    zh: "设置入口占位",
+  },
   "btn.drawerTitle": {
     en: "open the production drawer (edit / timeline and grade)",
     zh: "打开制作抽屉（剪辑 / 时间线与调色）",
@@ -175,8 +184,8 @@ export const messages = {
   },
   "label.map": { en: "Map", zh: "缩略图" },
   "label.mapTitle": { en: "toggle the minimap", zh: "切换小地图" },
-  "label.lang": { en: "中文", zh: "EN" },
-  "label.langTitle": { en: "switch to Chinese", zh: "Switch to English" },
+  "label.lang": { en: "EN", zh: "中" },
+  "label.langTitle": { en: "current language: English; click to switch to Chinese", zh: "当前语言：中文；点击切换为英文" },
 
   "issues.one": { en: "issue", zh: "个问题" },
   "issues.many": { en: "issues", zh: "个问题" },

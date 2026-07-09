@@ -33,23 +33,6 @@ interface CanvasTabsProps {
   running: boolean;
 }
 
-// Per-tab action icons; open strokes so they read at 14px on the dark pills.
-function SaveIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path
-        d="M5 4 H16 L20 8 V19 A1 1 0 0 1 19 20 H5 A1 1 0 0 1 4 19 V5 A1 1 0 0 1 5 4 Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path d="M8 4 V9 H15 V4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <rect x="8" y="13" width="8" height="7" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
 function SaveAsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -85,6 +68,10 @@ function RenameIcon() {
       <path d="M14 7 L17 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
+}
+
+function SaveStateLight({ dirty }: { dirty: boolean }) {
+  return <span className={`canvas-tab-save-light ${dirty ? "dirty" : "saved"}`} aria-hidden="true" />;
 }
 
 // Sentinel menu id for the "+" (new/open) dropdown, distinct from any tab id.
@@ -157,18 +144,17 @@ export function CanvasTabs({
             >
               <span className="canvas-tab-title">
                 {title}
-                {dirty ? " *" : ""}
               </span>
               <button
-                className="canvas-tab-action"
-                aria-label={t("canvasTabs.save")}
-                title={t("canvasTabs.save")}
+                className={`canvas-tab-action canvas-tab-save-state ${dirty ? "dirty" : "saved"}`}
+                aria-label={dirty ? t("canvasTabs.unsavedState") : t("canvasTabs.savedState")}
+                title={dirty ? t("canvasTabs.unsavedTitle") : t("canvasTabs.savedTitle")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSaveTab(tab.id);
                 }}
               >
-                <SaveIcon />
+                <SaveStateLight dirty={dirty} />
               </button>
               <button
                 className="canvas-tab-action"

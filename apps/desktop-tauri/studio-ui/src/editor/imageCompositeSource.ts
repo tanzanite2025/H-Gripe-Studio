@@ -1,7 +1,7 @@
 import type { MaskDocument, MaskLayer } from "../types/production";
 import type { ViewportTarget } from "../bridge/viewport";
 import { composeTransforms, hasSourceImageContent, type TransformParams } from "./maskEdit";
-import { layerAlphaBounds, type AlphaBounds } from "./maskMorphology";
+import { layerAlphaBounds, type AlphaBounds, type LayerAlphaBoundsOptions } from "./maskMorphology";
 
 export interface ImageCompositeDims {
   w: number;
@@ -35,9 +35,10 @@ export function imageLayerContentBounds(
   layer: MaskLayer,
   index: number,
   dims: ImageCompositeDims,
+  options: Pick<LayerAlphaBoundsOptions, "proxyWidth" | "alphaThreshold"> = {},
 ): AlphaBounds | null {
   if (layer.kind === "adjustment") return null;
-  return layerAlphaBounds(layer, dims, { implicitSource: index === 0, ignoreTransforms: true });
+  return layerAlphaBounds(layer, dims, { ...options, implicitSource: index === 0, ignoreTransforms: true });
 }
 
 export function imageCompositeDocumentKey(doc: MaskDocument, dims: ImageCompositeDims): string {

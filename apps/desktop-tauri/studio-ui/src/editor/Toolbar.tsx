@@ -49,6 +49,50 @@ export function EditGradeIcon() {
   );
 }
 
+/** Model/API manager: connected local/API endpoints. */
+export function ModelApiIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="4" y="5" width="6" height="6" rx="1.5" />
+      <rect x="14" y="13" width="6" height="6" rx="1.5" />
+      <path d="M10 8h2.5a3.5 3.5 0 0 1 3.5 3.5V13M14 16h-2.5A3.5 3.5 0 0 1 8 12.5V11" />
+      <path d="M6.5 17.5h3M8 16v3" />
+    </svg>
+  );
+}
+
+/** Snapshots: named saved states. */
+export function SnapshotIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M8 5.5 9.4 3h5.2L16 5.5" />
+      <circle cx="12" cy="12" r="3.2" />
+    </svg>
+  );
+}
+
+/** Run log: stacked text lines. */
+export function LogIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M8 9h8M8 13h8M8 17h5" />
+    </svg>
+  );
+}
+
+/** System settings module: a compact gear, placeholder until settings opens. */
+export function SettingsIcon() {
+  return (
+    <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 3.5v2M12 18.5v2M4.6 7.8l1.7 1M17.7 15.2l1.7 1M4.6 16.2l1.7-1M17.7 8.8l1.7-1" />
+      <path d="M7.3 4.8 8.5 7M15.5 17l1.2 2.2M4.8 12h2.4M16.8 12h2.4" />
+    </svg>
+  );
+}
+
 function startWindowDrag(e: MouseEvent<HTMLElement>) {
   if (e.button !== 0) return;
   const win = tauriWindow();
@@ -76,8 +120,6 @@ export interface ToolbarProps {
   onToggleDrawer: () => void;
 
   // Panels
-  showProject: boolean;
-  setShowProject: Dispatch<SetStateAction<boolean>>;
   showSnapshots: boolean;
   setShowSnapshots: Dispatch<SetStateAction<boolean>>;
   showLog: boolean;
@@ -105,8 +147,6 @@ export function Toolbar({
   onOpenImageEdit,
   drawerOpen,
   onToggleDrawer,
-  showProject,
-  setShowProject,
   showSnapshots,
   setShowSnapshots,
   showLog,
@@ -151,23 +191,46 @@ export function Toolbar({
           >
             <EditGradeIcon />
           </button>
-          {isDesktop && (
-            <button onClick={() => setShowProject((s) => !s)} title={t("btn.projectTitle")}>
-              {showProject ? t("btn.hideProject") : t("btn.project")}
-            </button>
-          )}
-          <button onClick={() => setShowSnapshots((s) => !s)} title={t("btn.snapshotsTitle")}>
-            {showSnapshots ? t("btn.hideSnapshots") : t("btn.snapshots")}
-            {snapshotCount > 0 ? ` (${snapshotCount})` : ""}
+          <button
+            type="button"
+            title={t("btn.settingsTitle")}
+            aria-label={t("btn.settings")}
+            className="module-btn module-settings"
+          >
+            <SettingsIcon />
           </button>
-          <button onClick={() => setShowLog((s) => !s)} title={t("btn.logTitle")}>
-            {showLog ? t("btn.hideLog") : t("btn.log")}
-            {logCount > 0 ? ` (${logCount})` : ""}
+          <button
+            onClick={() => setShowSnapshots((s) => !s)}
+            title={t("btn.snapshotsTitle")}
+            aria-label={`${showSnapshots ? t("btn.hideSnapshots") : t("btn.snapshots")}${snapshotCount > 0 ? ` (${snapshotCount})` : ""}`}
+            className={`module-btn module-snapshots${showSnapshots ? " active" : ""}`}
+          >
+            <SnapshotIcon />
+            {snapshotCount > 0 ? <span className="module-count-badge">{snapshotCount}</span> : null}
           </button>
-          <button onClick={onOpenModels} title={t("btn.modelsTitle")}>
-            {t("btn.models")}
+          <button
+            onClick={() => setShowLog((s) => !s)}
+            title={t("btn.logTitle")}
+            aria-label={`${showLog ? t("btn.hideLog") : t("btn.log")}${logCount > 0 ? ` (${logCount})` : ""}`}
+            className={`module-btn module-log${showLog ? " active" : ""}`}
+          >
+            <LogIcon />
+            {logCount > 0 ? <span className="module-count-badge">{logCount}</span> : null}
           </button>
-          <button onClick={onToggleLang} title={t("label.langTitle")} className="lang-toggle">
+          <button
+            onClick={onOpenModels}
+            title={t("btn.modelsTitle")}
+            aria-label={t("btn.models")}
+            className="module-btn module-model"
+          >
+            <ModelApiIcon />
+          </button>
+          <button
+            onClick={onToggleLang}
+            title={t("label.langTitle")}
+            aria-label={t("label.langTitle")}
+            className="module-btn module-lang lang-toggle"
+          >
             {t("label.lang")}
           </button>
         </div>

@@ -15,6 +15,7 @@
   --t-image: #5b8cff;
   --t-text: #3ecf8e;
   --t-model: #c084fc;
+  --t-api: #2dd4bf;
   --t-number: #f5c451;
   --t-latent: #ff8fab;
   --t-any: #8b90a0;
@@ -48,6 +49,7 @@ body {
   align-items: center;
   gap: 12px;
   width: 100%;
+  min-height: 34px;
 }
 .toolbar-command-zone {
   justify-self: start;
@@ -75,6 +77,7 @@ body {
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
+  min-height: 34px;
   white-space: nowrap;
 }
 .toolbar-action-row {
@@ -181,45 +184,86 @@ button:disabled { opacity: 0.6; cursor: default; }
   opacity: 1;
 }
 .toolbar-title-status .module-btn {
-  width: 34px;
-  height: 34px;
+  position: relative;
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: #232633;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
 }
 .toolbar-title-status .module-btn .toolbar-icon {
-  width: 18px;
-  height: 18px;
-}
-.toolbar-title-status .module-image {
-  border-color: rgba(91, 140, 255, 0.35);
-  background: rgba(91, 140, 255, 0.12);
+  width: 22px;
+  height: 22px;
 }
 .toolbar-title-status .module-image .toolbar-icon {
   stroke: var(--t-image);
 }
 .toolbar-title-status .module-image:hover {
-  border-color: rgba(91, 140, 255, 0.7);
-  background: rgba(91, 140, 255, 0.2);
-}
-.toolbar-title-status .module-grade {
-  border-color: rgba(192, 132, 252, 0.35);
-  background: rgba(192, 132, 252, 0.12);
+  background: rgba(91, 140, 255, 0.12);
 }
 .toolbar-title-status .module-grade .toolbar-icon {
   stroke: var(--t-model);
 }
 .toolbar-title-status .module-grade:hover {
-  border-color: rgba(192, 132, 252, 0.7);
-  background: rgba(192, 132, 252, 0.2);
+  background: rgba(192, 132, 252, 0.12);
+}
+.toolbar-title-status .module-snapshots .toolbar-icon {
+  stroke: #fbbf24;
+}
+.toolbar-title-status .module-snapshots:hover {
+  background: rgba(251, 191, 36, 0.12);
+}
+.toolbar-title-status .module-log .toolbar-icon {
+  stroke: #60a5fa;
+}
+.toolbar-title-status .module-log:hover {
+  background: rgba(96, 165, 250, 0.12);
+}
+.toolbar-title-status .module-model .toolbar-icon {
+  stroke: var(--t-api);
+}
+.toolbar-title-status .module-model:hover {
+  background: rgba(45, 212, 191, 0.12);
+}
+.toolbar-title-status .module-settings .toolbar-icon {
+  stroke: var(--muted);
+}
+.toolbar-title-status .module-settings:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+.toolbar-title-status .module-lang {
+  min-width: 32px;
+  color: #fbbf24;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+.toolbar-title-status .module-lang:hover {
+  background: rgba(245, 158, 11, 0.12);
+}
+.toolbar-title-status .module-count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid var(--bg);
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 13px;
+  pointer-events: none;
 }
 .toolbar-title-status .module-btn.active {
-  border-color: var(--accent);
-  background: rgba(91, 140, 255, 0.18);
+  border-color: transparent;
+  background: rgba(91, 140, 255, 0.14);
   color: var(--accent);
 }
 .toolbar-title-status .module-btn.active .toolbar-icon {
@@ -291,6 +335,23 @@ button:disabled { opacity: 0.6; cursor: default; }
 .canvas-tab-action svg {
   width: 14px;
   height: 14px;
+}
+.canvas-tab-save-state {
+  cursor: pointer;
+}
+.canvas-tab-save-light {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06), 0 0 10px currentColor;
+}
+.canvas-tab-save-light.saved {
+  color: var(--ok);
+  background: var(--ok);
+}
+.canvas-tab-save-light.dirty {
+  color: var(--danger);
+  background: var(--danger);
 }
 .canvas-tab-action:hover,
 .canvas-tab-close:hover {
@@ -376,7 +437,6 @@ button:disabled { opacity: 0.6; cursor: default; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.canvas-status-autosave { flex: none; }
 .canvas-status-history {
   pointer-events: auto;
   flex: none;

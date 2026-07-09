@@ -47,6 +47,10 @@ import {
   type StudioWorkflowFile,
 } from "../bridge/tauri";
 
+function graphSaveSignature(nodes: Node[], edges: Edge[]): string {
+  return serializeGraph(toWorkflowGraph(nodes, edges));
+}
+
 export interface StudioFileControllerOptions {
   /** Live editor graph (serialized on save / autosave / snapshot capture). */
   nodes: Node[];
@@ -165,6 +169,7 @@ export function useStudioFileController({
   // Skips the next dirty-mark when the graph is swapped programmatically
   // (mount restore, open, new) rather than by a user edit.
   const skipDirty = useRef(true);
+  const cleanGraphSignature = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const suppressNextDirty = useCallback(() => {
@@ -238,7 +243,7 @@ export function useStudioFileController({
   // Browser-preview download: there is no native filesystem, so Save / Save As
   // fall back to a JSON download.
   const downloadWorkflow = useCallback(() => {
-    const json = serializeGraph(toWorkflowGraph(nodes, edges));
+    const json = graphSaveSignature(nodes, edges);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -246,6 +251,8 @@ export function useStudioFileController({
     a.download = currentFile ? baseName(currentFile) : "workflow.json";
     a.click();
     URL.revokeObjectURL(url);
+    cleanGraphSignature.current = json;
+    setFileDirty(false);
   }, [nodes, edges, currentFile]);
 
   // Guard destructive actions that would replace the current graph. Returns
@@ -380,6 +387,7 @@ export function useStudioFileController({
     async (path: string) => {
       try {
         await writeStudioWorkflow(path, toWorkflowGraph(nodes, edges));
+        cleanGraphSignature.current = graphSaveSignature(nodes, edges);
         setCurrentFile(path);
         setFileDirty(false);
         rememberFile(path);
@@ -588,12 +596,17 @@ export function useStudioFileController({
     });
   }, [isDesktop, recentsReady, projectDir, currentFile, recentFiles]);
 
-  // Flag the current file dirty on user edits (programmatic swaps set skipDirty).
+  // Flag the current file dirty on durable workflow edits. Renderer-only
+  // state (selection, drag flags, measured sizes) does not enter the workflow
+  // signature, so it cannot turn the save light red.
   useEffect(() => {
+    const signature = graphSaveSignature(nodes, edges);
     if (skipDirty.current) {
       skipDirty.current = false;
+      cleanGraphSignature.current = signature;
       return;
     }
+    if (signature === cleanGraphSignature.current) return;
     setFileDirty(true);
   }, [nodes, edges]);
 

@@ -1062,7 +1062,7 @@ export function buildLayerThumb(layer: MaskLayer, dims: { w: number; h: number }
   return renderLayerSurface(layer, w, h, scale);
 }
 
-interface LayerAlphaBoundsOptions {
+export interface LayerAlphaBoundsOptions {
   proxyWidth?: number;
   implicitSource?: boolean;
   ignoreTransforms?: boolean;
@@ -1113,6 +1113,22 @@ export function layerAlphaBounds(
   const x1 = Math.min(docW, Math.ceil((maxX + 1) / scale));
   const y1 = Math.min(docH, Math.ceil((maxY + 1) / scale));
   return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+}
+
+export function opsAlphaBounds(
+  ops: EditOp[],
+  dims: { w: number; h: number },
+  options: LayerAlphaBoundsOptions = {},
+): AlphaBounds | null {
+  return layerAlphaBounds({
+    id: "__bounds__",
+    name: "Bounds",
+    kind: "mask",
+    blend: "normal",
+    opacity: 1,
+    visible: true,
+    ops,
+  }, dims, options);
 }
 
 function applyLayerMask(surface: ProxyMask, layer: MaskLayer, scale: number): ProxyMask {

@@ -87,6 +87,17 @@ describe("useStudioFileController", () => {
     expect(result.current.fileDirty).toBe(true);
   });
 
+  it("does not mark dirty for renderer-only node selection changes", () => {
+    const node = makeNode("p1", "promptOptimize");
+    const { options } = setup([node]);
+    const { result, rerender } = renderHook((props) => useStudioFileController(props), {
+      initialProps: options,
+    });
+
+    rerender({ ...options, nodes: [{ ...node, selected: true }] });
+    expect(result.current.fileDirty).toBe(false);
+  });
+
   it("suppresses the next dirty-mark for a programmatic swap", () => {
     const { options } = setup([makeNode("p1", "promptOptimize")]);
     const { result, rerender } = renderHook((props) => useStudioFileController(props), {

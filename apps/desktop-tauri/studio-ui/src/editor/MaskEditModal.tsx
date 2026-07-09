@@ -83,6 +83,7 @@ import { resolveActiveTarget, resolveTargetBounds, transformLayerTargetBounds } 
 import { getCommand, getCommandCapability, type CommandId } from "./studioCommands";
 import { ContextActionBar } from "./maskEditModal/ContextActionBar";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
+import { opsAlphaBounds } from "./maskMorphology";
 
 // Default logical canvas size when no backing image is available (browser
 // preview mocks the backend, so the connected image often has no decodable
@@ -90,9 +91,11 @@ import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 // them against the real image on run.
 const DEFAULT_W = 960;
 const DEFAULT_H = 640;
+const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
 const SELECTION_TOP_TOOLS = ["rect", "ellipse", "magnetic_lasso", "polygon_lasso", "pen", "object_select", "quick_select", "wand", "point"] as const;
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
-const IMAGE_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "layer.addMask", "layer.duplicate", "target.transform"];
+const IMAGE_PIXEL_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "layer.addMask", "layer.duplicate", "target.transform"];
+const IMAGE_MASK_CONTEXT_COMMANDS: CommandId[] = ["mask.invert", "mask.disable"];
 
 function toolKeyBadge(toolId: string): string {
   const combo = toolCombo(toolId);
@@ -562,25 +565,37 @@ export function MaskEditModal({
     const docRef = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
     return resolveActiveTarget(state.current, docRef);
   }, [state.current, imagePath]);
+  const activeTargetMask = useMemo(() => {
+    if (activeStudioTarget.kind !== "layer_mask") return null;
+    const layer = state.current.layers.find((layer) => layer.id === activeStudioTarget.layerId);
+    return layer?.mask?.id === activeStudioTarget.maskId ? layer.mask : null;
+  }, [activeStudioTarget, state.current.layers]);
+  const layerMaskBounds = useMemo(() => {
+    if (!activeTargetMask || activeTargetMask.ops.length === 0) return undefined;
+    const rect = opsAlphaBounds(activeTargetMask.ops, dims, { proxyWidth: ACTIVE_TARGET_BOUNDS_PROXY_WIDTH });
+    return rect ? { [activeTargetMask.id]: rect } : undefined;
+  }, [activeTargetMask, dims.w, dims.h]);
   const targetBounds = useMemo(() => {
     if (workspace === "image" && activeStudioTarget.kind === "pixel_layer") {
       const index = state.current.layers.findIndex((layer) => layer.id === activeStudioTarget.layerId);
       const layer = index >= 0 ? state.current.layers[index] : null;
       if (!layer || !imageLayerDrawsSource(layer, index)) return { kind: "none" } as const;
-      const rect = imageLayerContentBounds(layer, index, dims);
+      const rect = imageLayerContentBounds(layer, index, dims, { proxyWidth: ACTIVE_TARGET_BOUNDS_PROXY_WIDTH });
       return rect
         ? { kind: "content", rect, layerId: layer.id, source: "alpha" } as const
         : { kind: "none" } as const;
     }
-    return resolveTargetBounds(state.current, activeStudioTarget, { dims });
-  }, [workspace, state.current, activeStudioTarget, dims.w, dims.h]);
-  const targetDisplayTransform = workspace === "image" ? (needsCompositeSource ? activeCompositeTransform : imageTransform) : null;
+    return resolveTargetBounds(state.current, activeStudioTarget, { dims, layerMaskBounds });
+  }, [workspace, state.current, activeStudioTarget, layerMaskBounds, dims.w, dims.h]);
+  const targetMaskUnlinked = activeTargetMask?.unlinked === true;
+  const targetDisplayTransform = workspace === "image" && !targetMaskUnlinked ? (needsCompositeSource ? activeCompositeTransform : imageTransform) : null;
   const displayTargetBounds = useMemo(() => {
     return transformLayerTargetBounds(targetBounds, targetDisplayTransform, dims);
   }, [targetBounds, targetDisplayTransform, dims.w, dims.h]);
   const contextActionItems = useMemo(() => {
     if (workspace !== "image") return [];
-    return IMAGE_CONTEXT_COMMANDS
+    const commandIds = activeStudioTarget.kind === "layer_mask" ? IMAGE_MASK_CONTEXT_COMMANDS : IMAGE_PIXEL_CONTEXT_COMMANDS;
+    return commandIds
       .map((id) => ({ command: getCommand(id), capability: getCommandCapability(id, { doc: state.current, target: activeStudioTarget }) }))
       .filter((item) => item.capability.enabled);
   }, [workspace, state.current, activeStudioTarget]);

@@ -19,6 +19,7 @@ import {
   invert,
   isPreviewableOp,
   layerAlphaBounds,
+  opsAlphaBounds,
   patchRegion,
   patternStampStroke,
   perspectiveCrop,
@@ -590,6 +591,14 @@ describe("buildProxyMask", () => {
     };
     expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20 })).toEqual([8, 5, 13, 16]);
     expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20, ignoreTransforms: true })).toEqual([4, 5, 13, 16]);
+  });
+
+  it("resolves alpha bounds directly from an op stack", () => {
+    expect(opsAlphaBounds([
+      { type: "rect", region: [3, 4, 8, 9] },
+      { type: "transform", dx: 2, dy: 1, scale: 1, rotate: 0 },
+    ], { w: 20, h: 20 }, { proxyWidth: 20 })).toEqual([5, 5, 11, 11]);
+    expect(opsAlphaBounds([], { w: 20, h: 20 }, { proxyWidth: 20 })).toBeNull();
   });
 
   it("skips disabled history steps on replay", () => {

@@ -54,6 +54,15 @@ function CommandIcon({ icon }: { icon: string }) {
       </svg>
     );
   }
+  if (icon === "visibility-off") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.2 8s2-3.4 5.8-3.4S13.8 8 13.8 8s-2 3.4-5.8 3.4S2.2 8 2.2 8z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+        <circle cx="8" cy="8" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.25" />
+        <path d="M3.2 12.8 12.8 3.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

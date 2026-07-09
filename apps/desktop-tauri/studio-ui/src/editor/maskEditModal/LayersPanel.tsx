@@ -15,6 +15,8 @@ import { imageLayerHasSourceContent } from "../imageCompositeSource";
 import type { MaskEditDispatch } from "./actions";
 
 const LAYER_MIME = "application/x-hgripe-layer";
+const MAX_THUMBNAIL_CACHE = 64;
+const thumbnailCache = new Map<string, Promise<string | null>>();
 
 interface LayersPanelProps {
   doc: MaskDocument;
@@ -36,11 +38,31 @@ interface LayersPanelProps {
   onBeforeLayerChange: () => void;
 }
 
+function loadLayerThumbnail(imagePath: string, size = 96): Promise<string | null> {
+  const key = `${size}:${imagePath}`;
+  let cached = thumbnailCache.get(key);
+  if (!cached) {
+    cached = generateThumbnail({ path: imagePath, size })
+      .then((thumb) => thumb.data_url || null)
+      .catch(() => {
+        thumbnailCache.delete(key);
+        return null;
+      });
+    thumbnailCache.set(key, cached);
+    while (thumbnailCache.size > MAX_THUMBNAIL_CACHE) {
+      const oldest = thumbnailCache.keys().next().value;
+      if (!oldest) break;
+      thumbnailCache.delete(oldest);
+    }
+  }
+  return cached;
+}
+
 // A real mask thumbnail: the layer's own ops replayed into a tiny grayscale
 // surface. It is used for actual edit/mask layers, not for the base image.
 function LayerThumb({ layer, dims }: { layer: MaskLayer; dims: { w: number; h: number } }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const thumb = useMemo(() => buildLayerThumb(layer, dims), [layer.ops, dims]);
+  const thumb = useMemo(() => buildLayerThumb(layer, dims), [layer, dims.w, dims.h]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -68,13 +90,9 @@ function BaseImageThumb({ imagePath }: { imagePath: string }) {
   useEffect(() => {
     let alive = true;
     setSrc(null);
-    generateThumbnail({ path: imagePath, size: 96 })
-      .then((thumb) => {
-        if (alive) setSrc(thumb.data_url || null);
-      })
-      .catch(() => {
-        if (alive) setSrc(null);
-      });
+    loadLayerThumbnail(imagePath).then((thumb) => {
+      if (alive) setSrc(thumb);
+    });
     return () => {
       alive = false;
     };
@@ -104,18 +122,14 @@ function SourceImageLayerThumb({
     if (!implicitSource || hasSourceImageContent(layer)) return layer;
     return { ...layer, ops: [{ type: SOURCE_IMAGE_OP_TYPE }, ...layer.ops] };
   }, [implicitSource, layer]);
-  const thumb = useMemo(() => buildLayerThumb(thumbLayer, dims), [thumbLayer, dims]);
+  const thumb = useMemo(() => buildLayerThumb(thumbLayer, dims), [thumbLayer, dims.w, dims.h]);
 
   useEffect(() => {
     let alive = true;
     setSrc(null);
-    generateThumbnail({ path: imagePath, size: 96 })
-      .then((thumb) => {
-        if (alive) setSrc(thumb.data_url || null);
-      })
-      .catch(() => {
-        if (alive) setSrc(null);
-      });
+    loadLayerThumbnail(imagePath).then((thumb) => {
+      if (alive) setSrc(thumb);
+    });
     return () => {
       alive = false;
     };

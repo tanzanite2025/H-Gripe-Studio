@@ -45,6 +45,8 @@ describe("studio command capabilities", () => {
     const maskTarget: StudioTarget = { kind: "layer_mask", canvasId: "canvas", documentId: "doc", layerId: "layer-1", maskId: "mask-1" };
 
     expect(getCommandCapability("mask.invert", { doc, target: maskTarget }).enabled).toBe(true);
+    expect(getCommandCapability("mask.disable", { doc, target: maskTarget }).enabled).toBe(true);
+    expect(getCommandCapability("target.transform", { doc, target: maskTarget }).enabled).toBe(false);
     expect(getCommandCapability("target.delete", { doc, target: maskTarget })).toMatchObject({ enabled: true, danger: true });
   });
 
