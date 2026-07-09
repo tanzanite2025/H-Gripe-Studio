@@ -7,8 +7,12 @@ import {
   playheadTimeForKey,
   playheadTimeForWheel,
   rulerClientXToTime,
+  TIMELINE_ZOOM_MAX,
+  TIMELINE_ZOOM_MIN,
+  TIMELINE_ZOOM_STEP,
   TimelineRuler,
   timelineRulerDuration,
+  timelineZoomStep,
 } from "./TimelineRuler";
 
 describe("TimelineRuler", () => {
@@ -50,9 +54,18 @@ describe("TimelineRuler", () => {
     expect(playheadTimeForWheel(0, false, 1, 24)).toBe(1);
   });
 
+  it("steps the zoom level within its clamped range", () => {
+    expect(timelineZoomStep(1, 1)).toBe(TIMELINE_ZOOM_STEP);
+    expect(timelineZoomStep(TIMELINE_ZOOM_STEP, -1)).toBe(1);
+    expect(timelineZoomStep(TIMELINE_ZOOM_MIN, -1)).toBe(TIMELINE_ZOOM_MIN);
+    expect(timelineZoomStep(TIMELINE_ZOOM_MAX, 1)).toBe(TIMELINE_ZOOM_MAX);
+    expect(timelineZoomStep(2, 0)).toBe(2);
+  });
+
   it("handles keyboard navigation and the marker toggle on the focused ruler", () => {
     const onPlayheadSecChange = vi.fn();
     const onToggleMarker = vi.fn();
+    const onZoomChange = vi.fn();
     const { container } = render(
       <TimelineRuler
         fps={24}
@@ -61,6 +74,8 @@ describe("TimelineRuler", () => {
         onPlayheadSecChange={onPlayheadSecChange}
         onToggleMarker={onToggleMarker}
         markers={[{ id: "m1", sec: 2 }]}
+        zoom={1}
+        onZoomChange={onZoomChange}
       />,
     );
     const ruler = container.querySelector<HTMLElement>(".production-timeline-ruler")!;
@@ -72,6 +87,12 @@ describe("TimelineRuler", () => {
     expect(onToggleMarker).toHaveBeenCalledTimes(1);
     fireEvent.wheel(ruler, { deltaY: 120 });
     expect(onPlayheadSecChange).toHaveBeenLastCalledWith(1 + 1 / 24);
+    fireEvent.keyDown(ruler, { key: "=" });
+    expect(onZoomChange).toHaveBeenLastCalledWith(TIMELINE_ZOOM_STEP);
+    fireEvent.keyDown(ruler, { key: "\\" });
+    expect(onZoomChange).toHaveBeenLastCalledWith(TIMELINE_ZOOM_MIN);
+    fireEvent.wheel(ruler, { deltaY: -120, ctrlKey: true });
+    expect(onZoomChange).toHaveBeenLastCalledWith(TIMELINE_ZOOM_STEP);
   });
 
   it("renders a slider ruler with ticks and playhead", () => {
