@@ -1869,6 +1869,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSplitClipToLayers={handleSplitClipToLayers}
           onOpenExport={() => setExportOpen(true)}
           clipGradeDoc={clipGradeDoc}
+          clipPropsDoc={clipPropsDoc}
           clipProperties={selectedClipProperties}
           onSetClipProperties={handleSetClipProperties}
           layeredAsset={layeredAsset}

@@ -126,6 +126,8 @@ interface MockViewport {
   width: number;
   height: number;
   gradeDoc: unknown | null;
+  clipPropsDoc: string | null;
+  clipPropsTimeSec: number;
   maskOverlay: ViewportMaskOverlay | null;
   overlayScene: ViewportOverlayScene | null;
   view: { zoom: number; panX: number; panY: number };
@@ -167,6 +169,8 @@ export async function createViewport(kind: ViewportKind): Promise<ViewportDescri
     width: 0,
     height: 0,
     gradeDoc: null,
+    clipPropsDoc: null,
+    clipPropsTimeSec: 0,
     maskOverlay: null,
     overlayScene: null,
     view: { zoom: 1, panX: 0, panY: 0 },
@@ -378,6 +382,33 @@ export async function setViewportGrade(
     throw new Error(`temporal_denoise must be between 0 and 1, got ${temporalDenoise}`);
   }
   vp.gradeDoc = doc;
+}
+
+/**
+ * Set (or clear) the clip property document (serialized `ClipProperties`
+ * JSON) a video-preview viewport applies to frames before the grade, with
+ * the clip-local evaluation time in seconds. Identity documents should be
+ * cleared by the caller (pass null) so a static default costs nothing.
+ */
+export async function setViewportClipProps(
+  viewportId: string,
+  doc: string | null,
+  timeSec = 0,
+): Promise<void> {
+  const invoke = tauriInvoke();
+  if (invoke) {
+    await invoke("viewport_set_clip_props", { viewportId, doc, timeSec });
+    return;
+  }
+  const vp = mockGet(viewportId);
+  if (vp.kind !== "video_preview") {
+    throw new Error(`viewport ${viewportId} (kind=${vp.kind}) does not accept a clip props doc`);
+  }
+  if (!Number.isFinite(timeSec) || timeSec < 0) {
+    throw new Error(`invalid clip props time ${timeSec}`);
+  }
+  vp.clipPropsDoc = doc;
+  vp.clipPropsTimeSec = timeSec;
 }
 
 /** A working-scale mask the host tints over rendered frames (image_edit

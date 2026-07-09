@@ -731,4 +731,69 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn export_clip_props_match_preview_within_tolerance() {
+        // Golden-frame alignment for the clip property pipeline
+        // (CLIP_KEYFRAME_MOTION_PIPELINE_PLAN.md Phase 3): the export
+        // composites the 16-bit working surface while the preview composites
+        // the viewport's 8-bit sRGB proxy — same kernel, so at equal
+        // resolution the two paths may differ only by quantization.
+        let dir = std::env::temp_dir().join(format!("hgripe_props_parity_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("still.png");
+        let mut img = image::RgbaImage::new(8, 8);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgba([(x * 32) as u8, (y * 32) as u8, 128, 255]);
+        }
+        image::DynamicImage::ImageRgba8(img.clone())
+            .save(&src)
+            .unwrap();
+        let src_str = src.to_string_lossy().to_string();
+
+        // Animated document sampled mid-track: scale + rotation + opacity all
+        // land between keyframes, so the resolve is interpolation-dependent.
+        let doc_str = r#"{
+            "transform": {"position": {"x": 1, "y": 0}, "anchor": {"x": 0, "y": 0}, "scalePct": 100, "rotationDeg": 0, "opacityPct": 100},
+            "crop": {"leftPct": 12.5, "topPct": 0, "rightPct": 0, "bottomPct": 0},
+            "tracks": {
+                "transform.scalePct": [{"t": 0, "v": 100}, {"t": 1, "v": 50}],
+                "transform.rotationDeg": [{"t": 0, "v": 0}, {"t": 1, "v": 90}],
+                "transform.opacityPct": [{"t": 0, "v": 100}, {"t": 1, "v": 60}]
+            }
+        }"#;
+        let time = 0.5;
+
+        // Export path: composite the working surface and write the frame file.
+        let out = resolve_prop_frames(
+            vec![src_str.clone()],
+            &[Some(doc_str.to_string())],
+            &[time],
+            &dir.join("props"),
+        )
+        .expect("prop compositing succeeds");
+        let exported = image::open(&out[0]).unwrap().to_rgba8();
+
+        // Preview path: composite the viewport's sRGB proxy with the same
+        // resolved document (full resolution, so the coordinate scale is 1).
+        let doc = crate::studio::parse_clip_props_doc(doc_str).expect("doc parses");
+        let resolved = crate::studio::resolve_clip_props_at(&doc, time);
+        assert!(!resolved.is_identity());
+        let previewed = crate::studio::apply_clip_props_srgb_proxy(&img, &resolved);
+
+        assert_eq!(exported.dimensions(), previewed.dimensions());
+        let max_diff = exported
+            .pixels()
+            .zip(previewed.pixels())
+            .flat_map(|(a, b)| a.0.iter().zip(b.0.iter()))
+            .map(|(&a, &b)| (i16::from(a) - i16::from(b)).unsigned_abs())
+            .max()
+            .unwrap();
+        assert!(
+            max_diff <= 2,
+            "export and preview clip props diverge by {max_diff}/255"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

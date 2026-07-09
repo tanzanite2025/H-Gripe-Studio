@@ -415,8 +415,19 @@ fn downscale_srgb(srgb: RgbaImage, max_dim: u32) -> RgbaImage {
 /// so callers (the viewport host) can cache the proxy across parameter-only
 /// re-renders such as slider drags.
 pub(crate) fn load_image_srgb_proxy(path: &Path, max_dim: u32) -> Result<RgbaImage, String> {
+    Ok(load_image_srgb_proxy_with_dims(path, max_dim)?.0)
+}
+
+/// [`load_image_srgb_proxy`] that also reports the source's full-resolution
+/// dimensions, for callers mapping source-pixel coordinates onto the proxy.
+pub(crate) fn load_image_srgb_proxy_with_dims(
+    path: &Path,
+    max_dim: u32,
+) -> Result<(RgbaImage, (u32, u32)), String> {
     let loaded = studio_image::load_working(path, studio_image::DEFAULT_MAX_DECODE_PIXELS)?;
-    Ok(downscale_srgb(loaded.image.to_srgb_rgba8(), max_dim))
+    let srgb = loaded.image.to_srgb_rgba8();
+    let dims = srgb.dimensions();
+    Ok((downscale_srgb(srgb, max_dim), dims))
 }
 
 /// Decode one video frame through the native media engine and produce its
@@ -428,8 +439,21 @@ pub(crate) fn decode_video_srgb_proxy(
     timestamp_sec: f64,
     max_dim: u32,
 ) -> Result<RgbaImage, String> {
+    Ok(decode_video_srgb_proxy_with_dims(video, timestamp_sec, max_dim)?.0)
+}
+
+/// [`decode_video_srgb_proxy`] that also reports the source frame's
+/// full-resolution dimensions.
+#[cfg(feature = "native-ffmpeg")]
+pub(crate) fn decode_video_srgb_proxy_with_dims(
+    video: &Path,
+    timestamp_sec: f64,
+    max_dim: u32,
+) -> Result<(RgbaImage, (u32, u32)), String> {
     let working = super::ffmpeg_native::decode_frame_working(video, timestamp_sec)?;
-    Ok(downscale_srgb(working.to_srgb_rgba8(), max_dim))
+    let srgb = working.to_srgb_rgba8();
+    let dims = srgb.dimensions();
+    Ok((downscale_srgb(srgb, max_dim), dims))
 }
 
 /// Grade an sRGB 8-bit proxy and encode it as a PNG data URL — the shared tail

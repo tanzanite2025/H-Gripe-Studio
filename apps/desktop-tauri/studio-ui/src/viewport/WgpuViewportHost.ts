@@ -10,6 +10,7 @@ import {
   readViewportPixels,
   renderViewportFrame,
   resizeViewport,
+  setViewportClipProps,
   setViewportGrade,
   setViewportMaskOverlay,
   setViewportOverlayScene,
@@ -36,6 +37,10 @@ export type ViewportCommand =
    * `temporalDenoise` (`0..=1`) blends graded video frames against the
    * previous graded frame during continuous playback. */
   | { kind: "set_grade"; doc: unknown | null; temporalDenoise?: number }
+  /** Clip property document (serialized `ClipProperties` JSON) applied to
+   * frames before the grade (video_preview viewports), evaluated at the
+   * clip-local `timeSec`. */
+  | { kind: "set_clip_props"; doc: string | null; timeSec?: number }
   /** Mask overlay composited over rendered frames (image_edit viewports):
    * the mask editor's selection tint, presented by the host at the view
    * window's detail. */
@@ -89,6 +94,9 @@ export class WgpuViewportHost {
         return;
       case "set_grade":
         await setViewportGrade(this.id(), cmd.doc, cmd.temporalDenoise ?? 0);
+        return;
+      case "set_clip_props":
+        await setViewportClipProps(this.id(), cmd.doc, cmd.timeSec ?? 0);
         return;
       case "set_view":
         await setViewportView(this.id(), cmd.zoom, cmd.panX, cmd.panY);
