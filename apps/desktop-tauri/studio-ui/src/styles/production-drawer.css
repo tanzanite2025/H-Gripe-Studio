@@ -25,13 +25,18 @@
   align-items: center;
   gap: 10px;
   padding: 2px 12px;
+  background: #2b2235;
 }
 .production-drawer-handle {
-  background: none;
+  background: #2b2235;
   border: none;
   color: var(--text);
   padding: 4px 6px;
   font-size: 12px;
+}
+.production-drawer-handle:hover {
+  background: #3a2d48;
+  color: #fff;
 }
 .production-drawer-rail-meta { color: var(--muted); font-size: 11px; }
 .production-drawer-open {
@@ -56,6 +61,7 @@
   align-items: center;
   gap: 10px;
   padding: 4px 12px;
+  background: #2b2235;
   border-bottom: 1px solid var(--border);
 }
 .production-drawer-head .spacer { flex: 1; }
@@ -71,12 +77,12 @@
   padding: 6px 18px;
   border: none;
   border-radius: 8px;
-  background: transparent;
+  background: #2b2235;
   color: #8fb2ff;
 }
 .production-drawer-collapse:hover {
   color: #c9d8ff;
-  background: rgba(143, 178, 255, 0.12);
+  background: #3a2d48;
 }
 .production-drawer-title { font-size: 12px; font-weight: 600; }
 .production-drawer-target {

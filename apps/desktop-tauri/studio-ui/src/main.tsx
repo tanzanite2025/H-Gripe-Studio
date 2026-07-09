@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import NodeEditor from "./App";
 import { LangContext, loadLang, saveLang, type Lang } from "./i18n";
 import "./styles.css";
+import "./styles/canvas.css";
 import "./styles/modals.css";
 import "./styles/production-drawer.css";
 

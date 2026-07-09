@@ -35,8 +35,6 @@ import {
 } from "./imageCompositeSource";
 import {
   activeOps,
-  canRedo,
-  canUndo,
   composeTransforms,
   currentHistoryIndex,
   editCount,
@@ -1348,12 +1346,6 @@ export function MaskEditModal({
             </div>
           ) : null}
           <div className="media-viewer-actions">
-            <button disabled={!canUndo(state)} onClick={() => dispatch({ type: "undo" })} title={t("mask.undoTitle")}>
-              ↶ {t("mask.undo")}
-            </button>
-            <button disabled={!canRedo(state)} onClick={() => dispatch({ type: "redo" })} title={t("mask.redoTitle")}>
-              ↷ {t("mask.redo")}
-            </button>
             {workspace === "mask" ? (
               <>
                 <button disabled={count === 0} onClick={() => dispatch({ type: "clear" })} title={t("mask.clearTitle")}>

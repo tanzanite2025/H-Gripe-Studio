@@ -190,6 +190,11 @@
    in-flow items don't fight the space-between distribution. */
 .media-viewer-bar:has(.media-viewer-bar-center) { justify-content: flex-start; }
 .media-viewer-bar:has(.media-viewer-bar-center) .media-viewer-actions { margin-left: auto; }
+.media-viewer-bar:has(.media-edit-collapse) {
+  min-height: 25px;
+  padding: 2px 12px;
+  background: #142d36;
+}
 .media-viewer-bar-center {
   position: absolute;
   left: 50%;
@@ -200,14 +205,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  min-width: 64px;
+  height: 20px;
+  background: #142d36;
   color: var(--muted);
   border: none;
   border-radius: 6px;
-  padding: 6px 24px;
+  padding: 0 18px;
   cursor: pointer;
 }
-.media-edit-collapse:hover { color: var(--text); background: #2a2f3d; }
+.media-edit-collapse:hover { color: var(--text); background: #1e4652; }
 
 /* Unified image editor: PS-style open-document tabs on their own row */
 .media-viewer-tabs-row {
