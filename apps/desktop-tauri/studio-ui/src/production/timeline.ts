@@ -7,7 +7,7 @@
 
 import type { MediaAssetKind } from "./mediaBin";
 
-export type TrackKind = "video" | "audio";
+export type TrackKind = "video" | "audio" | "image";
 export type ClipKind = "still" | "video" | "audio";
 
 export interface TimelineClip {
@@ -65,8 +65,9 @@ export function clipKindForAsset(kind: MediaAssetKind): ClipKind {
   return kind === "image" ? "still" : kind === "video" ? "video" : "audio";
 }
 
+/** Strict routing: stills only on image tracks, video only on video tracks. */
 export function trackKindForClip(kind: ClipKind): TrackKind {
-  return kind === "audio" ? "audio" : "video";
+  return kind === "audio" ? "audio" : kind === "still" ? "image" : "video";
 }
 
 export function defaultClipDuration(kind: ClipKind): number {
@@ -100,7 +101,10 @@ export function createTimeline(): TimelineModel {
 export function addTrack(timeline: TimelineModel, kind: TrackKind): TimelineModel {
   return {
     ...timeline,
-    tracks: [...timeline.tracks, { id: freshId(kind === "video" ? "track-v" : "track-a"), kind, clips: [] }],
+    tracks: [
+      ...timeline.tracks,
+      { id: freshId(kind === "video" ? "track-v" : kind === "audio" ? "track-a" : "track-i"), kind, clips: [] },
+    ],
   };
 }
 
@@ -143,22 +147,27 @@ export interface AppendClipResult {
 
 /**
  * Append an asset as a clip at the end of a compatible track (the given track
- * when provided and compatible, else the first compatible one). Returns the
- * model unchanged when no compatible track exists.
+ * when provided and compatible, else the first compatible unlocked one).
+ * Premiere-style auto-routing: when no unlocked compatible track exists (none
+ * of the kind, or all locked), a new track of the right kind is created.
  */
 export function appendClip(
   timeline: TimelineModel,
   asset: { id: string; kind: MediaAssetKind },
   opts: { trackId?: string; duration?: number } = {},
-): AppendClipResult | null {
+): AppendClipResult {
   const clipKind = clipKindForAsset(asset.kind);
   const wantTrackKind = trackKindForClip(clipKind);
   const requested = opts.trackId ? timeline.tracks.find((t) => t.id === opts.trackId) : undefined;
-  const track =
+  let base = timeline;
+  let track =
     requested && requested.kind === wantTrackKind && !requested.locked
       ? requested
       : timeline.tracks.find((t) => t.kind === wantTrackKind && !t.locked);
-  if (!track) return null;
+  if (!track) {
+    base = addTrack(timeline, wantTrackKind);
+    track = base.tracks[base.tracks.length - 1];
+  }
   const clip: TimelineClip = {
     id: freshId("clip"),
     kind: clipKind,
@@ -169,8 +178,8 @@ export function appendClip(
   };
   return {
     timeline: {
-      ...timeline,
-      tracks: timeline.tracks.map((t) => (t.id === track.id ? { ...t, clips: [...t.clips, clip] } : t)),
+      ...base,
+      tracks: base.tracks.map((t) => (t.id === track.id ? { ...t, clips: [...t.clips, clip] } : t)),
     },
     clip,
     trackId: track.id,

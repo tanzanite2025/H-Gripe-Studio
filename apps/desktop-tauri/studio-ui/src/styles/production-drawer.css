@@ -590,7 +590,7 @@
 .production-timeline-ruler {
   position: relative;
   height: 34px;
-  margin-left: 122px;
+  margin-left: 134px;
   border-bottom: 1px solid #343946;
   background:
     linear-gradient(#5f6675, #5f6675) left bottom 8px / 100% 1px no-repeat,
@@ -668,6 +668,9 @@
   display: flex;
   flex-direction: column;
 }
+/* Hand tool: drag anywhere in the viewport to pan the zoomed timeline. */
+.production-timeline-scroll.hand-pan { cursor: grab; }
+.production-timeline-scroll.hand-pan:active { cursor: grabbing; }
 .production-timeline-scroll-inner {
   position: relative;
   flex: 1;
@@ -678,13 +681,13 @@
   gap: 8px;
 }
 /* Playhead line extended from the ruler down across every track lane.
-   left mirrors the header column (116px + 6px gap); top starts at the ruler's
+   left mirrors the header column (128px + 6px gap); top starts at the ruler's
    bottom edge so the line meets the ruler's own playhead without a seam. */
 .production-timeline-playhead-overlay {
   position: absolute;
   top: 34px;
   bottom: 0;
-  left: 122px;
+  left: 134px;
   right: 0;
   pointer-events: none;
   z-index: 2;
@@ -891,6 +894,9 @@
 .production-track-nav-button.nav-audio {
   background: #2e3a33;
 }
+.production-track-nav-button.nav-image {
+  background: #3a3044;
+}
 .production-track-nav-button:hover {
   filter: brightness(1.16);
 }
@@ -914,7 +920,7 @@
   position: sticky;
   left: 0;
   z-index: 3;
-  width: 116px;
+  width: 128px;
   flex: none;
   display: flex;
   align-items: center;
@@ -932,11 +938,11 @@
   gap: 2px;
 }
 .production-track-controls button {
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
   padding: 0;
-  font-size: 15px;
+  font-size: 13px;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -956,6 +962,7 @@
 }
 .production-track-label.track-video { background: #2c3444; color: var(--text); }
 .production-track-label.track-audio { background: #2e3a33; color: var(--text); }
+.production-track-label.track-image { background: #3a3044; color: var(--text); }
 .production-track-lane {
   position: relative;
   flex: 1;
