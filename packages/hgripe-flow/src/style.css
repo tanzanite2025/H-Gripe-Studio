@@ -1,1 +1,28 @@
 @import "./upstream/style.css";
+
+.react-flow__edge-chamfer:hover .react-flow__edge-path,
+.react-flow__edge-binding:hover .react-flow__edge-path {
+  filter: brightness(1.22);
+  stroke-width: 3px !important;
+}
+
+.hgripe-edge-path-running {
+  stroke-dasharray: 8 5;
+  animation: hgripe-edge-running 0.7s linear infinite;
+}
+
+.hgripe-edge-path-error {
+  filter: saturate(1.08);
+}
+
+@keyframes hgripe-edge-running {
+  to {
+    stroke-dashoffset: -13;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hgripe-edge-path-running {
+    animation: none;
+  }
+}

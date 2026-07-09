@@ -17,7 +17,10 @@ import {
   EDGE_STROKE_WIDTH,
   EDGE_STROKE_WIDTH_SELECTED,
   edgeMarkerId,
+  hgripeEdgeVisualState,
   isEdgeLodActive,
+  type HgripeEdgeData,
+  type HgripeEdgeVisualState,
 } from "./edgeVisual";
 
 // Boolean zoom selector: edges re-render only when crossing the LOD
@@ -42,6 +45,10 @@ const EDGE_STROKE = "#aeb4c2";
 const EDGE_STROKE_SELECTED = "#8fb2ff";
 const BINDING_STROKE = "#7c5cff";
 const BINDING_STROKE_SELECTED = "#a58fff";
+const RUNNING_STROKE = "#4cc9f0";
+const RUNNING_STROKE_SELECTED = "#7bdff2";
+const ERROR_STROKE = "#ff6b6b";
+const ERROR_STROKE_SELECTED = "#ff9191";
 const DRAG_STROKE_VALID = "#8fb2ff";
 const DRAG_STROKE_INVALID = "#ff6b6b";
 
@@ -53,6 +60,10 @@ const DATA_ARROW_ID = "hgripe-edge-arrow";
 const DATA_ARROW_SELECTED_ID = "hgripe-edge-arrow-selected";
 const BINDING_ARROW_ID = "hgripe-binding-arrow";
 const BINDING_ARROW_SELECTED_ID = "hgripe-binding-arrow-selected";
+const RUNNING_ARROW_ID = "hgripe-edge-arrow-running";
+const RUNNING_ARROW_SELECTED_ID = "hgripe-edge-arrow-running-selected";
+const ERROR_ARROW_ID = "hgripe-edge-arrow-error";
+const ERROR_ARROW_SELECTED_ID = "hgripe-edge-arrow-error-selected";
 const DRAG_ARROW_VALID_ID = "hgripe-drag-arrow-valid";
 const DRAG_ARROW_INVALID_ID = "hgripe-drag-arrow-invalid";
 
@@ -80,6 +91,10 @@ const SharedEdgeMarkers = memo(function SharedEdgeMarkers() {
         <ArrowMarker id={DATA_ARROW_SELECTED_ID} fill={EDGE_STROKE_SELECTED} />
         <ArrowMarker id={BINDING_ARROW_ID} fill={BINDING_STROKE} />
         <ArrowMarker id={BINDING_ARROW_SELECTED_ID} fill={BINDING_STROKE_SELECTED} />
+        <ArrowMarker id={RUNNING_ARROW_ID} fill={RUNNING_STROKE} />
+        <ArrowMarker id={RUNNING_ARROW_SELECTED_ID} fill={RUNNING_STROKE_SELECTED} />
+        <ArrowMarker id={ERROR_ARROW_ID} fill={ERROR_STROKE} />
+        <ArrowMarker id={ERROR_ARROW_SELECTED_ID} fill={ERROR_STROKE_SELECTED} />
         <ArrowMarker id={DRAG_ARROW_VALID_ID} fill={DRAG_STROKE_VALID} />
         <ArrowMarker id={DRAG_ARROW_INVALID_ID} fill={DRAG_STROKE_INVALID} />
       </defs>
@@ -118,6 +133,34 @@ export function addHgripeDataEdge(edge: Connection | Edge, edges: Edge[]): Edge[
   return addEdge(withHgripeDataEdge(edge), edges);
 }
 
+function edgeStroke(
+  kind: "data" | "binding",
+  state: HgripeEdgeVisualState,
+  selected: boolean | undefined,
+) {
+  if (state === "running") return selected ? RUNNING_STROKE_SELECTED : RUNNING_STROKE;
+  if (state === "error") return selected ? ERROR_STROKE_SELECTED : ERROR_STROKE;
+  if (kind === "binding") return selected ? BINDING_STROKE_SELECTED : BINDING_STROKE;
+  return selected ? EDGE_STROKE_SELECTED : EDGE_STROKE;
+}
+
+function edgeMarker(
+  kind: "data" | "binding",
+  state: HgripeEdgeVisualState,
+  selected: boolean | undefined,
+) {
+  if (state === "running") return selected ? RUNNING_ARROW_SELECTED_ID : RUNNING_ARROW_ID;
+  if (state === "error") return selected ? ERROR_ARROW_SELECTED_ID : ERROR_ARROW_ID;
+  if (kind === "binding") return selected ? BINDING_ARROW_SELECTED_ID : BINDING_ARROW_ID;
+  return selected ? DATA_ARROW_SELECTED_ID : DATA_ARROW_ID;
+}
+
+function edgePathClassName(state: HgripeEdgeVisualState, lod: boolean) {
+  if (state === "running" && !lod) return "hgripe-edge-path-running";
+  if (state === "error") return "hgripe-edge-path-error";
+  return undefined;
+}
+
 export function HgripeFlow<NodeType extends Node = Node, EdgeType extends Edge = Edge>({
   edges,
   children,
@@ -147,16 +190,14 @@ export const ChamferEdge = memo(function ChamferEdge({
   targetX,
   targetY,
   selected,
+  data,
   style,
-}: EdgeProps) {
+}: EdgeProps<Edge<HgripeEdgeData>>) {
   const lod = useStore(selectEdgeLod) && !selected;
   const path = cachedChamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const state = hgripeEdgeVisualState(data);
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
-  const markerId = customStroke
-    ? edgeMarkerId(DATA_ARROW_ID, id)
-    : selected
-      ? DATA_ARROW_SELECTED_ID
-      : DATA_ARROW_ID;
+  const markerId = customStroke ? edgeMarkerId(DATA_ARROW_ID, id) : edgeMarker("data", state, selected);
 
   return (
     <>
@@ -168,12 +209,14 @@ export const ChamferEdge = memo(function ChamferEdge({
       <BaseEdge
         id={id}
         path={path}
+        className={edgePathClassName(state, lod)}
         markerEnd={lod ? undefined : `url(#${markerId})`}
         style={{
-          stroke: selected ? EDGE_STROKE_SELECTED : EDGE_STROKE,
+          stroke: edgeStroke("data", state, selected),
           strokeWidth: selected ? EDGE_STROKE_WIDTH_SELECTED : EDGE_STROKE_WIDTH,
           strokeLinecap: "round",
           strokeLinejoin: "round",
+          strokeDasharray: state === "running" ? "8 5" : state === "error" ? "7 4" : undefined,
           ...style,
         }}
       />
@@ -188,16 +231,16 @@ export const BindingEdge = memo(function BindingEdge({
   targetX,
   targetY,
   selected,
+  data,
   style,
-}: EdgeProps) {
+}: EdgeProps<Edge<HgripeEdgeData>>) {
   const lod = useStore(selectEdgeLod) && !selected;
   const path = cachedChamferPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
+  const state = hgripeEdgeVisualState(data);
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
   const markerId = customStroke
     ? edgeMarkerId(BINDING_ARROW_ID, id)
-    : selected
-      ? BINDING_ARROW_SELECTED_ID
-      : BINDING_ARROW_ID;
+    : edgeMarker("binding", state, selected);
 
   return (
     <>
@@ -209,13 +252,14 @@ export const BindingEdge = memo(function BindingEdge({
       <BaseEdge
         id={id}
         path={path}
+        className={edgePathClassName(state, lod)}
         markerEnd={lod ? undefined : `url(#${markerId})`}
         style={{
-          stroke: selected ? BINDING_STROKE_SELECTED : BINDING_STROKE,
+          stroke: edgeStroke("binding", state, selected),
           strokeWidth: selected ? EDGE_STROKE_WIDTH_SELECTED : EDGE_STROKE_WIDTH,
           strokeLinecap: "round",
           strokeLinejoin: "round",
-          strokeDasharray: "4 3",
+          strokeDasharray: state === "running" ? "8 5" : state === "error" ? "7 4" : "4 3",
           ...style,
         }}
       />

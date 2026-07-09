@@ -4,12 +4,13 @@
 > owns `chamferPath` (unit-tested), `ChamferEdge` / `BindingEdge` are the only
 > workflow edge types, Studio renders through `HgripeFlow`, edges are stamped
 > via the `withHgripe*Edge` / `addHgripeDataEdge` helpers, and
-> `normalizeHgripeEdges` remains only as a legacy guard. From step 7, the
-> **selected** visual state has landed (higher-contrast stroke + slightly
-> heavier weight + matching arrow marker on both edge types). Steps 8-9 have
-> also landed: `cachedChamferPath` caches geometry-derived paths and
-> `isEdgeLodActive` simplifies low-zoom edges. Remaining: hover / running /
-> error states, explicit bend points, and tidy routing.
+> `normalizeHgripeEdges` remains only as a legacy guard. Step 7 visual states
+> have landed: selected edges use higher contrast and weight, hover brightens
+> and widens the path, running paths use a low-cost moving dash (disabled at
+> low zoom / reduced motion), and failed/cancelled paths use a static red
+> dashed treatment. Steps 8-9 have also landed: `cachedChamferPath` caches
+> geometry-derived paths and `isEdgeLodActive` simplifies low-zoom edges.
+> Remaining: explicit bend points and tidy routing.
 > Purpose: define the long-term wire style for the H-Gripe Studio node canvas,
 > so connection lines stay readable, performant, and aligned with product-level
 > node cards.
@@ -368,8 +369,7 @@ At very low zoom:
 5. Stamp app-created, restored, copied, and binding edges through
    `@hgripe/flow` helpers instead of ad hoc `type` strings.
 6. Keep `normalizeHgripeEdges` only as a legacy/runtime guard for stale edges.
-7. Add selected / hover / running / error visual states. Selected is landed;
-   hover / running / error remain.
+7. ✅ Add selected / hover / running / error visual states.
 8. ✅ Add path caching based on source/target geometry.
 9. ✅ Add LOD simplification.
 10. Add explicit bend points or tidy routing only after the default route is

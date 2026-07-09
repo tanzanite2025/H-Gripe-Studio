@@ -19,6 +19,7 @@ import { useGraphEdges, useGraphHelperLines, useGraphNodes, useGraphView } from 
 import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
+import { withEdgeExecutionStates } from "./edgeExecutionState";
 import { miniMapColor } from "./minimap";
 import { DND_NODE_KIND } from "./Palette";
 import { nodeSpec } from "../graph/nodeSpecs";
@@ -117,6 +118,7 @@ export function FlowCanvas({
     () => toWorkflowGraph(graphView.nodes, graphView.edges),
     [graphView],
   );
+  const renderedEdges = useMemo(() => withEdgeExecutionStates(edges, nodes), [edges, nodes]);
   const isValidConnection: IsValidConnection = useCallback(
     (c: Connection | Edge) => {
       const sourceType = portType(c.source, c.sourceHandle, "out");
@@ -195,7 +197,7 @@ export function FlowCanvas({
     <HgripeFlow
       className={gpuBusy ? "gpu-busy" : undefined}
       nodes={nodes}
-      edges={edges}
+      edges={renderedEdges}
       nodeTypes={NODE_TYPES}
       onNodeContextMenu={handleNodeContextMenu}
       onPaneContextMenu={handlePaneContextMenu}
