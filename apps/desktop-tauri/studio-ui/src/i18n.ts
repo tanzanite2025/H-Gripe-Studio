@@ -1055,6 +1055,18 @@ export const messages = {
     en: "{n} frames graded ({backend})",
     zh: "已调色 {n} 帧（{backend}）",
   },
+  "export.propsNote": {
+    en: "{n} property frames composited ({backend})",
+    zh: "已合成 {n} 个属性帧（{backend}）",
+  },
+  "export.stageTiming": {
+    en: "decode {decode}ms · props {props}ms · grade {grade}ms · encode {encode}ms",
+    zh: "解码 {decode}ms · 属性 {props}ms · 调色 {grade}ms · 编码 {encode}ms",
+  },
+  "export.propsFallback": {
+    en: "property compositing used CPU fallback: {reason}",
+    zh: "属性合成已回退到 CPU：{reason}",
+  },
   "export.audioNote": {
     en: "{n} audio clip(s) mixed in",
     zh: "已混入 {n} 个音频 clip",
@@ -1062,6 +1074,10 @@ export const messages = {
   "export.audioSkipped": {
     en: "audio skipped — the export is video-only: {reason}",
     zh: "音频已跳过——本次导出仅含视频：{reason}",
+  },
+  "drawer.timelineKeyframeTitle": {
+    en: "{n} keyframe(s) at {t}s · drag to retime · Shift snaps · double-click deletes",
+    zh: "{t} 秒处 {n} 个关键帧 · 拖动改时 · Shift 吸附 · 双击删除",
   },
   "drawer.targetLayeredImage": { en: "layered image", zh: "分层图像" },
   "drawer.targetImageLayer": { en: "image layer", zh: "图像图层" },

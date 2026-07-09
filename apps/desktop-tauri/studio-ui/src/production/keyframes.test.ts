@@ -9,10 +9,13 @@ import {
   hasKeyframeAt,
   keyframeAt,
   keyframesFor,
+  moveKeyframesAtTime,
+  removeKeyframesAtTime,
   resolveClipPropertiesAt,
   setClipPropValueAt,
   setKeyframeInterpolationAt,
   toggleKeyframe,
+  timelineKeyframeGroups,
   type ClipPropPath,
 } from "./keyframes";
 
@@ -126,5 +129,42 @@ describe("keyframes", () => {
       interp: "bezier",
       bezier: DEFAULT_BEZIER_CONTROL_POINTS,
     });
+  });
+
+  it("groups lane diamonds by time and retimes every property in the group", () => {
+    const props: ClipProperties = {
+      ...defaultClipProperties(),
+      tracks: {
+        "transform.scalePct": [{ t: 1, v: 80, interp: "hold" }],
+        "transform.opacityPct": [{ t: 1, v: 50 }],
+        "crop.leftPct": [{ t: 3, v: 10 }],
+      },
+    };
+    expect(timelineKeyframeGroups(props, EPS)).toEqual([
+      { t: 1, count: 2 },
+      { t: 3, count: 1 },
+    ]);
+
+    const moved = moveKeyframesAtTime(props, 1, 2, EPS);
+    expect(keyframesFor(moved, "transform.scalePct")).toEqual([
+      { t: 2, v: 80, interp: "hold" },
+    ]);
+    expect(keyframesFor(moved, "transform.opacityPct")).toEqual([{ t: 2, v: 50 }]);
+    expect(keyframesFor(moved, "crop.leftPct")).toEqual([{ t: 3, v: 10 }]);
+  });
+
+  it("deletes every property keyframe at a lane diamond", () => {
+    const props: ClipProperties = {
+      ...defaultClipProperties(),
+      tracks: {
+        "transform.scalePct": [{ t: 1, v: 80 }],
+        "transform.opacityPct": [{ t: 1, v: 50 }],
+        "crop.leftPct": [{ t: 3, v: 10 }],
+      },
+    };
+    const removed = removeKeyframesAtTime(props, 1, EPS);
+    expect(keyframesFor(removed, "transform.scalePct")).toEqual([]);
+    expect(keyframesFor(removed, "transform.opacityPct")).toEqual([]);
+    expect(keyframesFor(removed, "crop.leftPct")).toEqual([{ t: 3, v: 10 }]);
   });
 });

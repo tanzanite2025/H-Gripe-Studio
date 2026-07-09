@@ -64,6 +64,7 @@
 mod api_call;
 mod audio_mix;
 mod clip_props;
+mod clip_props_gpu;
 mod clip_props_raster;
 mod color;
 mod color_match;
@@ -130,10 +131,12 @@ pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
 // resolving from `main.rs`'s `generate_handler!`. A plain `use exec::cmd` only
 // re-exports the function, not the hidden `__cmd__cmd` helper that the Tauri
 // command macro generates beside it; the glob carries both.
-pub(crate) use clip_props::{
-    parse_clip_props_doc, resolve_clip_props_at, ClipPropsDoc, ResolvedClipProps,
-};
+#[cfg(test)]
+pub(crate) use clip_props::{parse_clip_props_doc, resolve_clip_props_at};
+pub(crate) use clip_props::{ClipPropsEvaluator, ResolvedClipProps};
+#[cfg(test)]
 pub(crate) use clip_props_raster::apply_clip_props_srgb_proxy;
+pub(crate) use clip_props_raster::{apply_clip_props_srgb_proxy_preferred, ClipPropsBackend};
 pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;

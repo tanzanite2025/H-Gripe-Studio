@@ -92,6 +92,35 @@ describe("deviceReportFromViewportBackend", () => {
     });
   });
 
+  it("folds clip-property backend and timing into the viewport device report", () => {
+    const report = deviceReportFromViewportBackend({
+      requested: "auto",
+      actual: "wgpu",
+      props_backend: "cpu",
+      props_fallback_reason: "adapter unavailable",
+      decode_processing_time_ms: 0.75,
+      props_processing_time_ms: 1.25,
+      grade_processing_time_ms: 0.5,
+    });
+    expect(report.props).toEqual({
+      used: "cpu",
+      backend: undefined,
+      fallbackReason: "adapter unavailable",
+      processingTimeMs: 1.25,
+    });
+    expect(report.stages).toEqual({
+      decodeMs: 0.75,
+      propsMs: 1.25,
+      gradeMs: 0.5,
+    });
+    expect(describeDeviceReport(report)).toContain(
+      "props cpu (fallback: adapter unavailable)",
+    );
+    expect(describeDeviceReport(report)).toContain(
+      "stages decode 0.75ms / props 1.25ms / grade 0.50ms",
+    );
+  });
+
   it("carries the adapter detail into the backend text when present", () => {
     const report = deviceReportFromViewportBackend({
       requested: "auto",
