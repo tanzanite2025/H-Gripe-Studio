@@ -74,6 +74,9 @@ export interface ProductionDrawerProps {
   onOpenExport: () => void;
   /** A clip's stored grade doc (JSON string), for the program monitor. */
   clipGradeDoc?: (clipId: string) => string | null;
+  /** A clip's property document (JSON string), resolved at the playhead
+   * time and composited by the program monitor. */
+  clipPropsDoc?: (clipId: string) => string | null;
   /** The selected clip's property document (transform / crop), when a
    * visual clip is selected. */
   clipProperties?: ClipProperties;
@@ -215,6 +218,7 @@ export function ProductionDrawer({
   onSplitClipToLayers,
   onOpenExport,
   clipGradeDoc,
+  clipPropsDoc,
   clipProperties,
   onSetClipProperties,
   layeredAsset,
@@ -543,6 +547,7 @@ export function ProductionDrawer({
               timeline={timeline}
               assets={assets}
               clipGradeDoc={clipGradeDoc}
+              clipPropsDoc={clipPropsDoc}
               playheadSec={playheadSec}
               onPlayheadSecChange={setPlayheadSec}
             />

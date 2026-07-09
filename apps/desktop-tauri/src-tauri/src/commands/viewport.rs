@@ -22,7 +22,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::resource;
-use crate::studio::{load_image_srgb_proxy, parse_grade_doc, TemporalAccumulator};
+use crate::studio::{
+    apply_clip_props_srgb_proxy, load_image_srgb_proxy, load_image_srgb_proxy_with_dims,
+    parse_clip_props_doc, parse_grade_doc, resolve_clip_props_at, ClipPropsDoc, ResolvedClipProps,
+    TemporalAccumulator,
+};
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -164,6 +168,10 @@ struct ProxyKey {
 struct SourceProxy {
     key: ProxyKey,
     srgb: Arc<RgbaImage>,
+    /// The source's full-resolution dimensions, recorded when the decode
+    /// path reports them — the clip-property pass maps source-pixel
+    /// coordinates onto the proxy through this ratio.
+    source_dims: Option<(u32, u32)>,
 }
 
 /// Per-viewport proxy cache depth (Phase 4 bounded frame cache): scrubbing
@@ -250,6 +258,12 @@ struct ViewportState {
     temporal_denoise: f32,
     /// The previous graded frame and its identity, for continuity checks.
     temporal: Option<TemporalChain>,
+    /// Clip property document applied before the grade (video_preview): the
+    /// raw doc string (change detection — the parse runs once per document,
+    /// not once per frame) beside its parsed form.
+    clip_props: Option<(String, ClipPropsDoc)>,
+    /// Clip-local evaluation time (seconds) for `clip_props`.
+    clip_props_time: f64,
 }
 
 /// A single-channel mask the host tints over rendered frames. The buffer is
@@ -904,11 +918,55 @@ fn cached_proxy(
             SourceProxy {
                 key,
                 srgb: srgb.clone(),
+                source_dims: None,
             },
         );
         state.proxies.truncate(PROXY_CACHE_DEPTH);
     }
     Ok(srgb)
+}
+
+/// [`cached_proxy`] for callers that also need the source's full-resolution
+/// dimensions (the clip-property pass). A hit stored without dimensions (by
+/// the plain path) re-decodes once and upgrades the entry.
+fn cached_proxy_with_dims(
+    id: u64,
+    key: ProxyKey,
+    decode: impl FnOnce() -> Result<(RgbaImage, (u32, u32)), String>,
+) -> Result<(Arc<RgbaImage>, (u32, u32)), String> {
+    {
+        let mut map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        if let Some(state) = map.get_mut(&id) {
+            if let Some(pos) = state.proxies.iter().position(|proxy| proxy.key == key) {
+                if let Some(dims) = state.proxies[pos].source_dims {
+                    let hit = state.proxies.remove(pos);
+                    let srgb = hit.srgb.clone();
+                    state.proxies.insert(0, hit);
+                    return Ok((srgb, dims));
+                }
+            }
+        }
+    }
+    let (srgb, dims) = decode()?;
+    let srgb = Arc::new(srgb);
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    if let Some(state) = map.get_mut(&id) {
+        state.proxies.retain(|proxy| proxy.key != key);
+        state.proxies.insert(
+            0,
+            SourceProxy {
+                key,
+                srgb: srgb.clone(),
+                source_dims: Some(dims),
+            },
+        );
+        state.proxies.truncate(PROXY_CACHE_DEPTH);
+    }
+    Ok((srgb, dims))
 }
 
 /// Cap on registered layered assets. Entries are small (ids and paths), but
@@ -1249,6 +1307,8 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             proxies: Vec::new(),
             temporal_denoise: 0.0,
             temporal: None,
+            clip_props: None,
+            clip_props_time: 0.0,
         },
     );
     eprintln!(
@@ -1388,6 +1448,48 @@ pub(crate) fn viewport_set_grade(
     if amount == 0.0 {
         state.temporal = None;
     }
+    Ok(())
+}
+
+/// Set (or clear) the clip property document a video-preview viewport applies
+/// to frames before the grade (CLIP_KEYFRAME_MOTION_PIPELINE_PLAN.md Phase 3
+/// — the preview half of the export's `resolve_prop_frames`). `doc` is the
+/// serialized `ClipProperties` JSON; `time_sec` the clip-local evaluation
+/// time. The doc parses once per distinct string: playhead-only updates reuse
+/// the parsed document and only move the time.
+#[tauri::command]
+pub(crate) fn viewport_set_clip_props(
+    viewport_id: String,
+    doc: Option<String>,
+    time_sec: Option<f64>,
+) -> Result<(), String> {
+    let time = time_sec.unwrap_or(0.0);
+    if !time.is_finite() || time < 0.0 {
+        return Err(format!("invalid clip props time {time}"));
+    }
+    let id = parse_id(&viewport_id)?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    if state.kind != "video_preview" {
+        return Err(format!(
+            "viewport {viewport_id} (kind={}) does not accept a clip props doc",
+            state.kind
+        ));
+    }
+    state.clip_props = match doc {
+        None => None,
+        Some(raw) => match &state.clip_props {
+            Some((existing, parsed)) if *existing == raw => {
+                Some((existing.clone(), parsed.clone()))
+            }
+            _ => Some((raw.clone(), parse_clip_props_doc(&raw)?)),
+        },
+    };
+    state.clip_props_time = time;
     Ok(())
 }
 
@@ -1714,7 +1816,17 @@ fn rgba_to_frame(rendered: RenderedRgba) -> Result<ViewportFrame, String> {
 /// presentation.
 fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
     let id = parse_id(viewport_id)?;
-    let (target, width, height, grade_doc, view, temporal_denoise, mask_overlay, overlay_scene) = {
+    let (
+        target,
+        width,
+        height,
+        grade_doc,
+        view,
+        temporal_denoise,
+        mask_overlay,
+        overlay_scene,
+        clip_props,
+    ) = {
         let map = viewports()
             .lock()
             .map_err(|_| "viewport registry poisoned")?;
@@ -1730,6 +1842,13 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
             state.temporal_denoise,
             state.mask_overlay.clone(),
             state.overlay_scene.clone(),
+            // Resolve at the stored clip-local time; identity resolves
+            // vanish here so a static default document costs nothing.
+            state
+                .clip_props
+                .as_ref()
+                .map(|(_, doc)| resolve_clip_props_at(doc, state.clip_props_time))
+                .filter(|resolved| !resolved.is_identity()),
         )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
@@ -1746,6 +1865,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 view,
                 mask_overlay.as_deref(),
                 overlay_scene.as_deref(),
+                clip_props.as_ref(),
             )
         }
         ViewportTarget::ImageLayer { asset_id, layer_id } => {
@@ -1761,6 +1881,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 view,
                 mask_overlay.as_deref(),
                 overlay_scene.as_deref(),
+                None,
             )
         }
         ViewportTarget::ImageComposite {
@@ -1805,6 +1926,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 view,
                 temporal_denoise,
                 overlay_scene.as_deref(),
+                clip_props.as_ref(),
             )
         }
         #[cfg(not(feature = "native-ffmpeg"))]
@@ -1830,6 +1952,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                     view,
                     None,
                     overlay_scene.as_deref(),
+                    clip_props.as_ref(),
                 );
             }
             let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
@@ -1845,6 +1968,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                     view,
                     temporal_denoise,
                     overlay_scene.as_deref(),
+                    clip_props.as_ref(),
                 )
             }
             #[cfg(not(feature = "native-ffmpeg"))]
@@ -1869,6 +1993,7 @@ fn viewport_render_rgba(viewport_id: &str) -> Result<RenderedRgba, String> {
                 view,
                 mask_overlay.as_deref(),
                 overlay_scene.as_deref(),
+                None,
             )
         }
     }
@@ -2136,12 +2261,14 @@ fn render_video_path(
     view: ViewportView,
     temporal_denoise: f32,
     overlay_scene: Option<&OverlayScene>,
+    clip_props: Option<&ResolvedClipProps>,
 ) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
     if grade_doc.is_some()
         || !view.is_identity()
         || temporal_denoise > 0.0
         || overlay_scene.is_some()
+        || clip_props.is_some()
     {
         let doc = parse_grade_doc(grade_doc.as_ref())?;
         let detail = proxy_detail_size(size, view);
@@ -2150,9 +2277,14 @@ fn render_video_path(
             time_bits: Some(time_sec.to_bits()),
             size: detail,
         };
-        let proxy = cached_proxy(id, key, || {
-            crate::studio::decode_video_srgb_proxy(std::path::Path::new(path), time_sec, detail)
+        let (proxy, source_dims) = cached_proxy_with_dims(id, key, || {
+            crate::studio::decode_video_srgb_proxy_with_dims(
+                std::path::Path::new(path),
+                time_sec,
+                detail,
+            )
         })?;
+        let proxy = apply_clip_props_to_proxy(proxy, source_dims, clip_props);
         let source = if view.is_identity() {
             None
         } else {
@@ -2189,6 +2321,29 @@ fn render_video_path(
         backend: cpu_backend(),
         view,
     })
+}
+
+/// Run the clip property raster over a decoded proxy. `source_dims` are the
+/// source's full-resolution dimensions: position/anchor are authored in
+/// source pixels, so they scale by the proxy ratio before the pass — the
+/// preview then composes identically to the full-resolution export.
+fn apply_clip_props_to_proxy(
+    proxy: Arc<RgbaImage>,
+    source_dims: (u32, u32),
+    clip_props: Option<&ResolvedClipProps>,
+) -> Arc<RgbaImage> {
+    let Some(props) = clip_props else {
+        return proxy;
+    };
+    let ratio = if source_dims.0 > 0 {
+        proxy.width() as f64 / source_dims.0 as f64
+    } else {
+        1.0
+    };
+    Arc::new(apply_clip_props_srgb_proxy(
+        &proxy,
+        &props.scaled_coords(ratio),
+    ))
 }
 
 fn render_image_composite_path(
@@ -2643,12 +2798,14 @@ fn render_image_path(
     view: ViewportView,
     mask_overlay: Option<&MaskOverlay>,
     overlay_scene: Option<&OverlayScene>,
+    clip_props: Option<&ResolvedClipProps>,
 ) -> Result<RenderedRgba, String> {
     let size = width.max(height).clamp(64, 2048);
     if grade_doc.is_some()
         || !view.is_identity()
         || mask_overlay.is_some()
         || overlay_scene.is_some()
+        || clip_props.is_some()
     {
         // Graded and/or viewed frame: run the grading kernel (identity when
         // no doc is set) over the view window of the source's sRGB proxy.
@@ -2659,9 +2816,10 @@ fn render_image_path(
             time_bits: None,
             size: detail,
         };
-        let proxy = cached_proxy(id, key, || {
-            load_image_srgb_proxy(std::path::Path::new(path), detail)
+        let (proxy, source_dims) = cached_proxy_with_dims(id, key, || {
+            load_image_srgb_proxy_with_dims(std::path::Path::new(path), detail)
         })?;
+        let proxy = apply_clip_props_to_proxy(proxy, source_dims, clip_props);
         let source = if view.is_identity() {
             None
         } else {

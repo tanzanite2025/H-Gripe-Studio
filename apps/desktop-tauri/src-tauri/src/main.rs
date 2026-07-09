@@ -130,6 +130,7 @@ fn main() {
             commands::viewport::viewport_set_target,
             commands::viewport::viewport_resize,
             commands::viewport::viewport_set_grade,
+            commands::viewport::viewport_set_clip_props,
             commands::viewport::viewport_set_mask_overlay,
             commands::viewport::viewport_set_overlay_scene,
             commands::viewport::viewport_set_view,

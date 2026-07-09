@@ -13,8 +13,10 @@
 //! - sampling is bilinear with neighbours clamped to the crop rectangle;
 //!   `opacity` multiplies the sampled alpha.
 
+use image::RgbaImage;
+
 use super::clip_props::ResolvedClipProps;
-use super::working_image::WorkingImage;
+use super::working_image::{narrow, widen, WorkingImage, WorkingSpace};
 
 /// Apply `props` to `image`, producing a same-size canvas. Identity documents
 /// must be skipped by the caller ([`ResolvedClipProps::is_identity`]); a zero
@@ -72,6 +74,28 @@ pub(super) fn apply_clip_props(image: &WorkingImage, props: &ResolvedClipProps) 
         }
     }
     out
+}
+
+/// Apply `props` to an 8-bit sRGB display proxy — the preview host's frame
+/// format. The proxy widens to the canonical 16-bit working surface, runs
+/// the same [`apply_clip_props`] kernel the export path uses, and narrows
+/// back; widen/narrow round-trip exactly, so preview equals export up to the
+/// proxy's own downscale.
+pub(crate) fn apply_clip_props_srgb_proxy(
+    proxy: &RgbaImage,
+    props: &ResolvedClipProps,
+) -> RgbaImage {
+    let (w, h) = proxy.dimensions();
+    let working = WorkingImage {
+        width: w,
+        height: h,
+        pixels: proxy.as_raw().iter().map(|&v| widen(v)).collect(),
+        space: WorkingSpace::Srgb,
+        icc: None,
+    };
+    let out = apply_clip_props(&working, props);
+    let bytes: Vec<u8> = out.pixels.iter().map(|&v| narrow(v)).collect();
+    RgbaImage::from_raw(w, h, bytes).expect("same-size canvas")
 }
 
 /// Bilinear sample at continuous source coordinates (pixel centres at .5),

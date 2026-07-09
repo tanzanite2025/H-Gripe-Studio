@@ -130,6 +130,10 @@ pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
 // resolving from `main.rs`'s `generate_handler!`. A plain `use exec::cmd` only
 // re-exports the function, not the hidden `__cmd__cmd` helper that the Tauri
 // command macro generates beside it; the glob carries both.
+pub(crate) use clip_props::{
+    parse_clip_props_doc, resolve_clip_props_at, ClipPropsDoc, ResolvedClipProps,
+};
+pub(crate) use clip_props_raster::apply_clip_props_srgb_proxy;
 pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;

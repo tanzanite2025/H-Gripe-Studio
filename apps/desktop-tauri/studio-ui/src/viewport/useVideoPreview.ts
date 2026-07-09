@@ -45,6 +45,9 @@ interface MonitorState {
   resources: Map<string, string>;
   /** Grade doc (JSON string) currently set on the viewport, to skip no-op sets. */
   gradeDoc: string | null;
+  /** Clip props doc (JSON string) + clip-local time set on the viewport. */
+  propsDoc: string | null;
+  propsTimeSec: number;
   /** View last sent to the viewport, to skip no-op `set_view` commands. */
   view: ViewportViewState;
   /** Overlay scene last sent to the viewport (by reference), to skip no-op sets. */
@@ -65,6 +68,11 @@ export interface VideoPreviewRequest {
   target: VideoPreviewTarget;
   /** The clip's stored grade doc (JSON string), applied to the frame. */
   gradeDoc: string | null;
+  /** The clip's property document (serialized `ClipProperties` JSON) with
+   * the clip-local evaluation time; null (or omitted) when the document is
+   * identity — callers skip identity docs so a default clip costs nothing. */
+  propsDoc?: string | null;
+  propsTimeSec?: number;
   /** Monitor zoom/pan (viewport state); identity when omitted. */
   view?: ViewportViewState;
   /** Vector overlay stroked over the frame host-side (safe-area guides).
@@ -130,7 +138,14 @@ export function useVideoPreview(size = 1280): {
         setState((s) => ({ ...s, frame: null, presented: false, pending: false, error: null }));
         return;
       }
-      const { target, gradeDoc, view = IDENTITY_VIEW, overlayScene = null } = request;
+      const {
+        target,
+        gradeDoc,
+        propsDoc = null,
+        propsTimeSec = 0,
+        view = IDENTITY_VIEW,
+        overlayScene = null,
+      } = request;
       if (!monitorRef.current) {
         monitorRef.current = (async () => {
           const host = await WgpuViewportHost.open("video_preview");
@@ -141,6 +156,8 @@ export function useVideoPreview(size = 1280): {
             hidden: false,
             resources: new Map<string, string>(),
             gradeDoc: null,
+            propsDoc: null,
+            propsTimeSec: 0,
             view: IDENTITY_VIEW,
             overlayScene: null,
           };
@@ -175,6 +192,11 @@ export function useVideoPreview(size = 1280): {
       if (gradeDoc !== monitor.gradeDoc) {
         await monitor.host.command({ kind: "set_grade", doc: parseGradeDoc(gradeDoc) });
         monitor.gradeDoc = gradeDoc;
+      }
+      if (propsDoc !== monitor.propsDoc || propsTimeSec !== monitor.propsTimeSec) {
+        await monitor.host.command({ kind: "set_clip_props", doc: propsDoc, timeSec: propsTimeSec });
+        monitor.propsDoc = propsDoc;
+        monitor.propsTimeSec = propsTimeSec;
       }
       if (
         view.zoom !== monitor.view.zoom ||

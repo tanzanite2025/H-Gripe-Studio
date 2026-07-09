@@ -88,6 +88,19 @@ impl ResolvedClipProps {
             && c.right_pct == 0.0
             && c.bottom_pct == 0.0
     }
+
+    /// The same resolved properties with `position` / `anchor` scaled by `k`.
+    /// Pixel-space coordinates are authored against the full-resolution
+    /// source; a caller applying them to a uniformly downscaled proxy scales
+    /// them by `proxy / source` so the composition lands identically.
+    pub(crate) fn scaled_coords(&self, k: f64) -> ResolvedClipProps {
+        let mut out = *self;
+        out.transform.position.x *= k;
+        out.transform.position.y *= k;
+        out.transform.anchor.x *= k;
+        out.transform.anchor.y *= k;
+        out
+    }
 }
 
 pub(crate) fn parse_clip_props_doc(json: &str) -> Result<ClipPropsDoc, String> {

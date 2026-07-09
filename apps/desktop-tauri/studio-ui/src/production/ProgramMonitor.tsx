@@ -13,7 +13,7 @@ import { useVideoPreview, type VideoPreviewTarget } from "../viewport/useVideoPr
 import { useViewportPlacement } from "../viewport/useViewportPlacement";
 import type { MediaAsset } from "./mediaBin";
 import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
-import { timelineDuration, type TimelineModel } from "./timeline";
+import { findClip, timelineDuration, type TimelineModel } from "./timeline";
 import { useSourceFps } from "./useSourceFps";
 
 /** Safe-area guides (WGPU plan item 3): action-safe 90% (solid) and
@@ -256,6 +256,7 @@ export function ProgramMonitor({
   timeline,
   assets,
   clipGradeDoc,
+  clipPropsDoc,
   playheadSec: controlledPlayheadSec,
   onPlayheadSecChange,
 }: {
@@ -263,6 +264,10 @@ export function ProgramMonitor({
   assets: MediaAsset[];
   /** The clip's stored grade doc (JSON string), applied to its frames. */
   clipGradeDoc?: (clipId: string) => string | null;
+  /** The clip's property document (JSON string) — transform / crop /
+   * keyframes — resolved at the clip-local playhead time and composited
+   * into its frames (the same document the export resolves per frame). */
+  clipPropsDoc?: (clipId: string) => string | null;
   playheadSec?: number;
   onPlayheadSecChange?: (sec: number) => void;
 }) {
@@ -308,6 +313,16 @@ export function ProgramMonitor({
 
   const registeredTimelineId = useRegisteredTimeline(timeline, assets);
   const gradeDoc = target ? (clipGradeDoc?.(target.clipId) ?? null) : null;
+  const propsDoc = target ? (clipPropsDoc?.(target.clipId) ?? null) : null;
+  // Clip-local time for keyframe evaluation: playhead minus the clip's
+  // timeline start (stills included — their keyframes animate too).
+  const clipStartSec =
+    target?.kind === "video"
+      ? target.clipStartSec
+      : target
+        ? (findClip(timeline, target.clipId)?.clip.start ?? 0)
+        : 0;
+  const propsTimeSec = Math.max(0, requestSec - clipStartSec);
   useEffect(() => {
     if (!target) {
       showFrame(null);
@@ -325,10 +340,23 @@ export function ProgramMonitor({
     showFrame({
       target: previewTarget,
       gradeDoc,
+      propsDoc,
+      propsTimeSec,
       view,
       overlayScene: safeArea ? SAFE_AREA_SCENE : null,
     });
-  }, [target, registeredTimelineId, timeline.id, requestSec, gradeDoc, view, safeArea, showFrame]);
+  }, [
+    target,
+    registeredTimelineId,
+    timeline.id,
+    requestSec,
+    gradeDoc,
+    propsDoc,
+    propsTimeSec,
+    view,
+    safeArea,
+    showFrame,
+  ]);
 
   useEffect(() => {
     if (!playing || duration <= 0) return;
