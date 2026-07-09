@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   registerTimeline,
@@ -63,6 +63,118 @@ export const SAFE_AREA_SCENE: ViewportOverlayScene = {
     },
   ],
 };
+
+function MonitorIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg className="production-monitor-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      {children}
+    </svg>
+  );
+}
+
+function MarkerIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M7 4h10v10l-5 4-5-4z" />
+    </MonitorIcon>
+  );
+}
+
+function MarkInIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M8 5v14" />
+      <path d="M16 7 11 12l5 5" />
+    </MonitorIcon>
+  );
+}
+
+function MarkOutIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M16 5v14" />
+      <path d="m8 7 5 5-5 5" />
+    </MonitorIcon>
+  );
+}
+
+function StepBackIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M8 6v12" />
+      <path d="m17 7-7 5 7 5z" />
+    </MonitorIcon>
+  );
+}
+
+function StepForwardIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M16 6v12" />
+      <path d="m7 7 7 5-7 5z" />
+    </MonitorIcon>
+  );
+}
+
+function RewindIcon() {
+  return (
+    <MonitorIcon>
+      <path d="m11 7-7 5 7 5z" />
+      <path d="m20 7-7 5 7 5z" />
+    </MonitorIcon>
+  );
+}
+
+function FastForwardIcon() {
+  return (
+    <MonitorIcon>
+      <path d="m4 7 7 5-7 5z" />
+      <path d="m13 7 7 5-7 5z" />
+    </MonitorIcon>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <MonitorIcon>
+      <path d="m8 5 11 7-11 7z" />
+    </MonitorIcon>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <MonitorIcon>
+      <path d="M8 5v14" />
+      <path d="M16 5v14" />
+    </MonitorIcon>
+  );
+}
+
+function SafeAreaIcon() {
+  return (
+    <MonitorIcon>
+      <rect x="5" y="6" width="14" height="12" rx="1.5" />
+      <rect x="8" y="8.5" width="8" height="7" rx="1" />
+    </MonitorIcon>
+  );
+}
+
+function clampTime(sec: number, duration: number) {
+  return Math.max(0, Math.min(duration, sec));
+}
+
+function formatTimecode(sec: number, fps: number) {
+  const safeFps = Math.max(1, Math.round(fps));
+  const totalFrames = Math.max(0, Math.round(sec * safeFps));
+  const frames = totalFrames % safeFps;
+  const totalSeconds = Math.floor(totalFrames / safeFps);
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
+}
 
 /**
  * Register the first video track's clips with the viewport host so playhead
@@ -149,6 +261,9 @@ export function ProgramMonitor({
   const [playheadSec, setPlayheadSec] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [safeArea, setSafeArea] = useState(false);
+  const [markers, setMarkers] = useState<number[]>([]);
+  const [inPointSec, setInPointSec] = useState<number | null>(null);
+  const [outPointSec, setOutPointSec] = useState<number | null>(null);
   const playheadRef = useRef(0);
   playheadRef.current = playheadSec;
   const { state, showFrame, host } = useVideoPreview();
@@ -172,6 +287,8 @@ export function ProgramMonitor({
     [timeline, assets, clampedSec],
   );
   const sourceFps = useSourceFps(playheadTarget?.kind === "video" ? playheadTarget.path : null);
+  const displayFps = sourceFps && sourceFps > 0 ? sourceFps : 24;
+  const frameStep = 1 / displayFps;
   const requestSec = playing ? paceToFrameGrid(playheadTarget, clampedSec, sourceFps) : clampedSec;
   const target = useMemo(
     () => resolvePreviewFrame(timeline, assets, requestSec),
@@ -233,65 +350,152 @@ export function ProgramMonitor({
     if (!playing && playheadRef.current >= duration) setPlayheadSec(0);
     setPlaying((p) => !p);
   };
+  const seekTo = (sec: number) => {
+    setPlaying(false);
+    setPlayheadSec(clampTime(sec, duration));
+  };
+  const markerPercent = (sec: number) => (duration > 0 ? (clampTime(sec, duration) / duration) * 100 : 0);
+  const addMarker = () => {
+    if (duration <= 0) return;
+    const next = Number(clampedSec.toFixed(3));
+    setMarkers((prev) => {
+      const deduped = prev.filter((sec) => Math.abs(sec - next) > frameStep / 2);
+      return [...deduped, next].sort((a, b) => a - b).slice(-24);
+    });
+  };
+  const setInPoint = () => {
+    if (duration <= 0) return;
+    setInPointSec(clampedSec);
+    if (outPointSec != null && outPointSec < clampedSec) setOutPointSec(null);
+  };
+  const setOutPoint = () => {
+    if (duration <= 0) return;
+    setOutPointSec(clampedSec);
+    if (inPointSec != null && inPointSec > clampedSec) setInPointSec(null);
+  };
 
   return (
     <div className="production-monitor">
-      <div className="production-monitor-head">
-        <h3>{t("drawer.monitorTitle")}</h3>
-      </div>
-      <div
-        className={`production-monitor-frame${state.presented ? " presented" : ""}`}
-        {...stageProps}
-      >
-        {state.presented && target ? null : state.frame && target ? (
-          <img src={state.frame} alt={t("drawer.monitorTitle")} />
-        ) : (
-          <span className="production-monitor-empty muted">
-            {state.error ?? (target && state.pending ? "…" : t("drawer.monitorEmpty"))}
-          </span>
-        )}
-        {backendReport ? (
-          <span className="production-monitor-backend" title={describeDeviceReport(backendReport)}>
-            {backendReport.used}
-            {backendReport.fallbackReason ? " ⚠" : null}
-            {view.zoom > 1 ? <> · {Math.round(view.zoom * 100)}%</> : null}
-          </span>
-        ) : null}
-      </div>
-      <div className="production-monitor-scrub">
-        <button
-          type="button"
-          className="production-monitor-play"
-          onClick={togglePlay}
-          title={t(playing ? "drawer.monitorPause" : "drawer.monitorPlay")}
-          aria-pressed={playing}
-          disabled={duration <= 0}
+      <div className="production-monitor-stage">
+        <div className="production-monitor-controls" aria-label="program monitor controls">
+          <button type="button" className="production-monitor-control" onClick={addMarker} disabled={duration <= 0} title="添加标记">
+            <MarkerIcon />
+          </button>
+          <button
+            type="button"
+            className={`production-monitor-control${inPointSec != null ? " active" : ""}`}
+            onClick={setInPoint}
+            disabled={duration <= 0}
+            title="添加入点"
+          >
+            <MarkInIcon />
+          </button>
+          <button
+            type="button"
+            className={`production-monitor-control${outPointSec != null ? " active" : ""}`}
+            onClick={setOutPoint}
+            disabled={duration <= 0}
+            title="添加出点"
+          >
+            <MarkOutIcon />
+          </button>
+          <span className="production-monitor-control-separator" />
+          <button type="button" className="production-monitor-control" onClick={() => seekTo(clampedSec - 1)} disabled={duration <= 0} title="快退 1 秒">
+            <RewindIcon />
+          </button>
+          <button type="button" className="production-monitor-control" onClick={() => seekTo(clampedSec - frameStep)} disabled={duration <= 0} title="后退一帧">
+            <StepBackIcon />
+          </button>
+          <button
+            type="button"
+            className={`production-monitor-control production-monitor-control-play${playing ? " active" : ""}`}
+            onClick={togglePlay}
+            title={t(playing ? "drawer.monitorPause" : "drawer.monitorPlay")}
+            aria-pressed={playing}
+            disabled={duration <= 0}
+          >
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <button type="button" className="production-monitor-control" onClick={() => seekTo(clampedSec + frameStep)} disabled={duration <= 0} title="前进一帧">
+            <StepForwardIcon />
+          </button>
+          <button type="button" className="production-monitor-control" onClick={() => seekTo(clampedSec + 1)} disabled={duration <= 0} title="快进 1 秒">
+            <FastForwardIcon />
+          </button>
+          <span className="production-monitor-control-separator" />
+          <button
+            type="button"
+            className={`production-monitor-control production-monitor-safe-area${safeArea ? " active" : ""}`}
+            onClick={() => setSafeArea((on) => !on)}
+            title={t("drawer.monitorSafeAreaTitle")}
+            aria-pressed={safeArea}
+          >
+            <SafeAreaIcon />
+          </button>
+        </div>
+        <div className="production-monitor-main">
+        <div
+          className={`production-monitor-frame${state.presented ? " presented" : ""}`}
+          {...stageProps}
         >
-          {playing ? "⏸" : "▶"}
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(duration, 0.001)}
-          step={0.05}
-          value={clampedSec}
-          onChange={(e) => {
-            setPlaying(false);
-            setPlayheadSec(Number(e.target.value));
-          }}
-          title={t("drawer.monitorScrubTitle")}
-          disabled={duration <= 0}
-        />
-        <span className="production-monitor-time">{clampedSec.toFixed(2)}s</span>
-        <button
-          type="button"
-          className="production-monitor-safe-area"
-          onClick={() => setSafeArea((on) => !on)}
-          title={t("drawer.monitorSafeAreaTitle")}
-          aria-pressed={safeArea}
-        >
-          {t("drawer.monitorSafeArea")}
-        </button>
+          {state.presented && target ? null : state.frame && target ? (
+            <img src={state.frame} alt={t("drawer.monitorTitle")} />
+          ) : (
+            <span className="production-monitor-empty muted">
+              {state.error ?? (target && state.pending ? "…" : t("drawer.monitorEmpty"))}
+            </span>
+          )}
+          {backendReport ? (
+            <span className="production-monitor-backend" title={describeDeviceReport(backendReport)}>
+              {backendReport.used}
+              {backendReport.fallbackReason ? " ⚠" : null}
+              {view.zoom > 1 ? <> · {Math.round(view.zoom * 100)}%</> : null}
+            </span>
+          ) : null}
+        </div>
+        <div className="production-monitor-scrub">
+          <span className="production-monitor-time production-monitor-time-start">
+            {formatTimecode(clampedSec, displayFps)}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(duration, 0.001)}
+            step={0.05}
+            value={clampedSec}
+            onChange={(e) => {
+              setPlaying(false);
+              setPlayheadSec(Number(e.target.value));
+            }}
+            title={t("drawer.monitorScrubTitle")}
+            disabled={duration <= 0}
+          />
+          <span className="production-monitor-time production-monitor-time-end">
+            {formatTimecode(duration, displayFps)}
+          </span>
+        </div>
+        <div className="production-monitor-ruler" aria-hidden={duration <= 0}>
+          {markers.map((sec) => (
+            <span
+              key={`marker-${sec}`}
+              className="production-monitor-ruler-marker"
+              style={{ left: `${markerPercent(sec)}%` }}
+            />
+          ))}
+          {inPointSec != null ? (
+            <span
+              className="production-monitor-ruler-point in"
+              style={{ left: `${markerPercent(inPointSec)}%` }}
+            />
+          ) : null}
+          {outPointSec != null ? (
+            <span
+              className="production-monitor-ruler-point out"
+              style={{ left: `${markerPercent(outPointSec)}%` }}
+            />
+          ) : null}
+        </div>
+        </div>
       </div>
     </div>
   );

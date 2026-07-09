@@ -79,6 +79,17 @@ function kindKey(kind: MediaAssetKind): MsgKey {
   return kind === "image" ? "drawer.kindImage" : kind === "video" ? "drawer.kindVideo" : "drawer.kindAudio";
 }
 
+function AssetBinIcon() {
+  return (
+    <svg className="production-asset-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7.5h5l1.4 2H20v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+      <path d="M4 7.5V6a2 2 0 0 1 2-2h3.2l1.4 2H18a2 2 0 0 1 2 2v1.5" />
+      <path d="M8 14h8" />
+      <path d="M8 17h5" />
+    </svg>
+  );
+}
+
 /**
  * Bottom production drawer (UNIFIED_PRODUCTION_DRAWER_PLAN.md): the resident
  * Edit / Timeline workspace under the node canvas. Image / audio / grade /
@@ -133,6 +144,8 @@ export function ProductionDrawer({
     kind: ClipKind;
   } | null>(null);
   const [detailTab, setDetailTab] = useState<"details" | "grade">("details");
+  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
+  const [dragAssetId, setDragAssetId] = useState<string | null>(null);
 
   useEffect(() => {
     if (closeTimer.current != null) {
@@ -218,6 +231,68 @@ export function ProductionDrawer({
                   }`
                 : target.kind;
 
+  const assetPanel = (
+    <aside className="production-bin production-bin-popover" aria-label={t("drawer.binTitle")}>
+      <div className="production-bin-head">
+        <h3>{t("drawer.binTitle")}</h3>
+        <div className="spacer" />
+        <button
+          onClick={onAddSelected}
+          disabled={!addableAsset}
+          title={t("drawer.addSelectedTitle")}
+        >
+          {t("drawer.addSelected")}
+        </button>
+        <button
+          className="production-bin-close"
+          onClick={() => setAssetPanelOpen(false)}
+          title="关闭素材面板"
+        >
+          ×
+        </button>
+      </div>
+      {assets.length === 0 ? (
+        <p className="production-bin-empty">{t("drawer.binEmpty")}</p>
+      ) : (
+        <ul className="production-bin-list">
+          {assets.map((a) => (
+            <li key={a.id} className={a.id === activeAssetId ? "active" : ""}>
+              <button
+                className="production-bin-item"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "copy";
+                  e.dataTransfer.setData("application/x-hgripe-asset", a.id);
+                  onSelectAsset(a.id);
+                  setDragAssetId(a.id);
+                }}
+                onDragEnd={() => setDragAssetId(null)}
+                onClick={() => onSelectAsset(a.id === activeAssetId ? null : a.id)}
+                onContextMenu={(e) => {
+                  if (a.kind !== "image") return;
+                  e.preventDefault();
+                  onSelectAsset(a.id);
+                  onOpenImageEdit(a.id);
+                }}
+                title={a.kind === "image" ? `${a.path} · ${t("drawer.imageEditHint")}` : a.path}
+              >
+                <span className={`production-bin-kind kind-${a.kind}`}>{t(kindKey(a.kind))}</span>
+                <span className="production-bin-name">{a.name}</span>
+              </button>
+              <button
+                className="production-bin-remove"
+                onClick={() => onRemoveAsset(a.id)}
+                title={t("drawer.removeTitle")}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </aside>
+  );
+
   return (
     <div className={`production-drawer production-drawer-open${closing ? " production-drawer-closing" : ""}`}>
       <div className="production-drawer-head">
@@ -239,53 +314,21 @@ export function ProductionDrawer({
       </div>
 
       <div className="production-drawer-body production-edit">
+        <div className="production-asset-side">
+          <button
+            type="button"
+            className={`production-asset-toggle${assetPanelOpen ? " active" : ""}`}
+            onClick={() => setAssetPanelOpen((open) => !open)}
+            title={t("drawer.binTitle")}
+            aria-label={t("drawer.binTitle")}
+          >
+            <AssetBinIcon />
+            <span className="production-asset-count">{assets.length}</span>
+          </button>
+        </div>
+        {assetPanelOpen ? <div className="production-bin-popover-shell">{assetPanel}</div> : null}
         <div className="production-edit-workspace">
           <div className="production-edit-top">
-          <div className="production-bin">
-            <div className="production-bin-head">
-              <h3>{t("drawer.binTitle")}</h3>
-              <div className="spacer" />
-              <button
-                onClick={onAddSelected}
-                disabled={!addableAsset}
-                title={t("drawer.addSelectedTitle")}
-              >
-                {t("drawer.addSelected")}
-              </button>
-            </div>
-            {assets.length === 0 ? (
-              <p className="production-bin-empty">{t("drawer.binEmpty")}</p>
-            ) : (
-              <ul className="production-bin-list">
-                {assets.map((a) => (
-                  <li key={a.id} className={a.id === activeAssetId ? "active" : ""}>
-                    <button
-                      className="production-bin-item"
-                      onClick={() => onSelectAsset(a.id === activeAssetId ? null : a.id)}
-                      onContextMenu={(e) => {
-                        if (a.kind !== "image") return;
-                        e.preventDefault();
-                        onSelectAsset(a.id);
-                        onOpenImageEdit(a.id);
-                      }}
-                      title={a.kind === "image" ? `${a.path} · ${t("drawer.imageEditHint")}` : a.path}
-                    >
-                      <span className={`production-bin-kind kind-${a.kind}`}>{t(kindKey(a.kind))}</span>
-                      <span className="production-bin-name">{a.name}</span>
-                    </button>
-                    <button
-                      className="production-bin-remove"
-                      onClick={() => onRemoveAsset(a.id)}
-                      title={t("drawer.removeTitle")}
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
           <div className="production-program-column">
             <ProgramMonitor timeline={timeline} assets={assets} clipGradeDoc={clipGradeDoc} />
           </div>
@@ -428,7 +471,20 @@ export function ProductionDrawer({
                         </button>
                       </span>
                     </span>
-                    <div className="production-track-lane">
+                    <div
+                      className={`production-track-lane${dragAssetId && acceptsActive ? " drop-ready" : ""}`}
+                      onDragOver={(e) => {
+                        if (!acceptsActive) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                      }}
+                      onDrop={(e) => {
+                        if (!acceptsActive) return;
+                        e.preventDefault();
+                        onAddActiveToTrack(track.id);
+                        setDragAssetId(null);
+                      }}
+                    >
                       {track.clips.map((clip) => {
                         const selected = clip.id === selectedClipId;
                         return (
