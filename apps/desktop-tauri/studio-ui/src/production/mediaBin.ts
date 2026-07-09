@@ -19,7 +19,33 @@ export interface MediaAsset {
   addedAt: number;
 }
 
-const AUDIO_EXTS = new Set(["mp3", "wav", "flac", "ogg", "m4a", "aac", "opus"]);
+export const IMAGE_MEDIA_EXTS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tif",
+  "tiff",
+  "heic",
+  "heif",
+  "avif",
+] as const;
+
+export const VIDEO_MEDIA_EXTS = ["mp4", "mov", "mkv", "webm", "avi", "m4v"] as const;
+
+export const AUDIO_MEDIA_EXTS = ["mp3", "wav", "flac", "ogg", "m4a", "aac", "opus"] as const;
+
+export const MEDIA_IMPORT_EXTS = [
+  ...IMAGE_MEDIA_EXTS,
+  ...VIDEO_MEDIA_EXTS,
+  ...AUDIO_MEDIA_EXTS,
+] as const;
+
+const IMAGE_EXTS = new Set<string>(IMAGE_MEDIA_EXTS);
+const VIDEO_EXTS = new Set<string>(VIDEO_MEDIA_EXTS);
+const AUDIO_EXTS = new Set<string>(AUDIO_MEDIA_EXTS);
 
 /** Map a canvas node kind to the bin asset kind it can register as. */
 export function assetKindForNodeKind(nodeKind: string): MediaAssetKind | null {
@@ -32,6 +58,8 @@ export function assetKindForNodeKind(nodeKind: string): MediaAssetKind | null {
 export function assetKindForPath(path: string): MediaAssetKind | null {
   const dot = path.lastIndexOf(".");
   const ext = dot >= 0 ? path.slice(dot + 1).toLowerCase() : "";
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (VIDEO_EXTS.has(ext)) return "video";
   if (AUDIO_EXTS.has(ext)) return "audio";
   return null;
 }

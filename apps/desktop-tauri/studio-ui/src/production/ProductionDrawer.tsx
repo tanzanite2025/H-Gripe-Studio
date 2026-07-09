@@ -11,7 +11,12 @@ import {
 } from "./keyframes";
 import { LayerReviewPanel } from "./LayerReviewPanel";
 import { findLayer, type LayeredImageAsset } from "./layeredImage";
-import type { MediaAsset, MediaAssetKind } from "./mediaBin";
+import type { MediaAsset } from "./mediaBin";
+import {
+  MediaWorkspacePopover,
+  mediaAssetKindLabel,
+  type AddableAsset,
+} from "./MediaWorkspacePopover";
 import { ProgramMonitor } from "./ProgramMonitor";
 import type { ProductionTarget } from "./productionTarget";
 import { TimelineRuler, timelineRulerDuration } from "./TimelineRuler";
@@ -28,12 +33,6 @@ import {
   type TrackKind,
 } from "./timeline";
 
-export interface AddableAsset {
-  kind: MediaAssetKind;
-  path: string;
-  sourceNodeId: string;
-}
-
 export interface ProductionDrawerProps {
   mode: DrawerMode;
   onSetMode: (mode: DrawerMode) => void;
@@ -47,6 +46,7 @@ export interface ProductionDrawerProps {
   /** The selected canvas node as a bin-addable media reference, when it is one. */
   addableAsset: AddableAsset | null;
   onAddSelected: () => void;
+  onImportMedia?: () => void;
   timeline: TimelineModel;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
@@ -101,10 +101,6 @@ export interface ProductionDrawerProps {
   onSplitLayer?: (layerId: string) => void;
   /** Mark / unmark a layer as protected (pure asset transform, runs anywhere). */
   onToggleProtected?: (layerId: string) => void;
-}
-
-function kindKey(kind: MediaAssetKind): MsgKey {
-  return kind === "image" ? "drawer.kindImage" : kind === "video" ? "drawer.kindVideo" : "drawer.kindAudio";
 }
 
 function AssetBinIcon() {
@@ -206,6 +202,7 @@ export function ProductionDrawer({
   onRemoveAsset,
   addableAsset,
   onAddSelected,
+  onImportMedia,
   timeline,
   selectedClipId,
   onSelectClip,
@@ -434,65 +431,18 @@ export function ProductionDrawer({
                 : target.kind;
 
   const assetPanel = (
-    <aside className="production-bin production-bin-popover" aria-label={t("drawer.binTitle")}>
-      <div className="production-bin-head">
-        <h3>{t("drawer.binTitle")}</h3>
-        <div className="spacer" />
-        <button
-          onClick={onAddSelected}
-          disabled={!addableAsset}
-          title={t("drawer.addSelectedTitle")}
-        >
-          {t("drawer.addSelected")}
-        </button>
-        <button
-          className="production-bin-close"
-          onClick={() => setAssetPanelOpen(false)}
-          title="关闭素材面板"
-        >
-          ×
-        </button>
-      </div>
-      {assets.length === 0 ? (
-        <p className="production-bin-empty">{t("drawer.binEmpty")}</p>
-      ) : (
-        <ul className="production-bin-list">
-          {assets.map((a) => (
-            <li key={a.id} className={a.id === activeAssetId ? "active" : ""}>
-              <button
-                className="production-bin-item"
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "copy";
-                  e.dataTransfer.setData("application/x-hgripe-asset", a.id);
-                  onSelectAsset(a.id);
-                  setDragAssetId(a.id);
-                }}
-                onDragEnd={() => setDragAssetId(null)}
-                onClick={() => onSelectAsset(a.id === activeAssetId ? null : a.id)}
-                onContextMenu={(e) => {
-                  if (a.kind !== "image") return;
-                  e.preventDefault();
-                  onSelectAsset(a.id);
-                  onOpenImageEdit(a.id);
-                }}
-                title={a.kind === "image" ? `${a.path} · ${t("drawer.imageEditHint")}` : a.path}
-              >
-                <span className={`production-bin-kind kind-${a.kind}`}>{t(kindKey(a.kind))}</span>
-                <span className="production-bin-name">{a.name}</span>
-              </button>
-              <button
-                className="production-bin-remove"
-                onClick={() => onRemoveAsset(a.id)}
-                title={t("drawer.removeTitle")}
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </aside>
+    <MediaWorkspacePopover
+      assets={assets}
+      activeAssetId={activeAssetId}
+      addableAsset={addableAsset}
+      onAddSelected={onAddSelected}
+      onImportMedia={onImportMedia}
+      onClose={() => setAssetPanelOpen(false)}
+      onSelectAsset={onSelectAsset}
+      onRemoveAsset={onRemoveAsset}
+      onOpenImageEdit={onOpenImageEdit}
+      onDragAssetChange={setDragAssetId}
+    />
   );
 
   return (
@@ -642,7 +592,7 @@ export function ProductionDrawer({
                     </div>
                     <div>
                       <dt>{t("drawer.detailKind")}</dt>
-                      <dd>{t(kindKey(activeAsset.kind))}</dd>
+                      <dd>{mediaAssetKindLabel(activeAsset.kind, t)}</dd>
                     </div>
                     <div>
                       <dt>{t("drawer.detailPath")}</dt>
