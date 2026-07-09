@@ -1,4 +1,11 @@
-import { DEFAULT_TIMELINE_FPS, snapTimeToFrame, snapTimeToPoints } from "./timeline";
+import {
+  DEFAULT_TIMELINE_FPS,
+  frameToSeconds,
+  secondsToFrame,
+  snapTimeToFrame,
+  snapTimeToPoints,
+  type TimelineMarker,
+} from "./timeline";
 
 export function formatTimelineTimecode(sec: number, fps: number): string {
   const safeFps = Math.max(1, Math.round(fps));
@@ -36,6 +43,41 @@ export function rulerClientXToTime(
   return snapTimeToFrame(raw, fps);
 }
 
+/** Frames stepped per arrow key press; Shift multiplies (Premiere-style). */
+export const KEY_STEP_FRAMES = 1;
+export const KEY_STEP_FRAMES_SHIFT = 5;
+
+/** Playhead time after a navigation key, or null when the key is not one.
+ * Arrows step by frames (Shift = 5), Home / End jump to start / end. */
+export function playheadTimeForKey(
+  key: string,
+  shiftKey: boolean,
+  playheadSec: number,
+  durationSec: number,
+  fps: number,
+): number | null {
+  if (key === "Home") return 0;
+  if (key === "End") return snapTimeToFrame(durationSec, fps);
+  if (key !== "ArrowLeft" && key !== "ArrowRight") return null;
+  const step = (shiftKey ? KEY_STEP_FRAMES_SHIFT : KEY_STEP_FRAMES) * (key === "ArrowLeft" ? -1 : 1);
+  const frame = Math.max(0, secondsToFrame(playheadSec, fps) + step);
+  return frameToSeconds(frame, fps);
+}
+
+/** Playhead time after a wheel notch: down / right advances one frame
+ * (Shift = 5), up / left steps back. */
+export function playheadTimeForWheel(
+  delta: number,
+  shiftKey: boolean,
+  playheadSec: number,
+  fps: number,
+): number {
+  const direction = delta > 0 ? 1 : delta < 0 ? -1 : 0;
+  const step = (shiftKey ? KEY_STEP_FRAMES_SHIFT : KEY_STEP_FRAMES) * direction;
+  const frame = Math.max(0, secondsToFrame(playheadSec, fps) + step);
+  return frameToSeconds(frame, fps);
+}
+
 export interface TimelineRulerProps {
   fps?: number;
   durationSec: number;
@@ -43,6 +85,12 @@ export interface TimelineRulerProps {
   onPlayheadSecChange: (sec: number) => void;
   /** Shift-drag snap targets (clip edges, markers), in seconds. */
   snapPoints?: number[];
+  /** Sequence markers rendered on the ruler. */
+  markers?: TimelineMarker[];
+  /** M key: add / clear a marker at the playhead. */
+  onToggleMarker?: () => void;
+  /** Right-click a marker to remove it. */
+  onRemoveMarker?: (markerId: string) => void;
 }
 
 export function TimelineRuler({
@@ -51,6 +99,9 @@ export function TimelineRuler({
   playheadSec,
   onPlayheadSecChange,
   snapPoints,
+  markers,
+  onToggleMarker,
+  onRemoveMarker,
 }: TimelineRulerProps) {
   const timelineFps = fps || DEFAULT_TIMELINE_FPS;
   const rulerDuration = timelineRulerDuration(durationSec, playheadSec);
@@ -75,6 +126,23 @@ export function TimelineRuler({
       aria-valuemax={rulerDuration}
       aria-valuenow={playheadSec}
       title={formatTimelineTimecode(playheadSec, timelineFps)}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if ((e.key === "m" || e.key === "M") && onToggleMarker) {
+          e.preventDefault();
+          onToggleMarker();
+          return;
+        }
+        const next = playheadTimeForKey(e.key, e.shiftKey, playheadSec, durationSec, timelineFps);
+        if (next === null) return;
+        e.preventDefault();
+        onPlayheadSecChange(next);
+      }}
+      onWheel={(e) => {
+        const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+        if (delta === 0) return;
+        onPlayheadSecChange(playheadTimeForWheel(delta, e.shiftKey, playheadSec, timelineFps));
+      }}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         scrub(e.clientX, e.currentTarget, e.shiftKey);
@@ -99,6 +167,20 @@ export function TimelineRuler({
         >
           <span>{formatTimelineTimecode(sec, timelineFps)}</span>
         </span>
+      ))}
+      {(markers ?? []).map((marker) => (
+        <span
+          key={marker.id}
+          className="production-timeline-marker"
+          style={{ left: `${(marker.sec / rulerDuration) * 100}%` }}
+          title={formatTimelineTimecode(marker.sec, timelineFps)}
+          onContextMenu={(e) => {
+            if (!onRemoveMarker) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onRemoveMarker(marker.id);
+          }}
+        />
       ))}
       <span className="production-timeline-playhead" style={{ left: `${playheadRatio * 100}%` }}>
         <span className="production-timeline-playhead-head" />

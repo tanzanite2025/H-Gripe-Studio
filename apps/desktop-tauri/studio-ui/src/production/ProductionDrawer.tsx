@@ -52,6 +52,10 @@ export interface ProductionDrawerProps {
   onRemoveTrack: (trackId: string) => void;
   onRemoveClip: (clipId: string) => void;
   onSplitClipAt: (clipId: string, atSec: number) => void;
+  /** M key on the ruler: add / clear a sequence marker at the playhead. */
+  onToggleMarkerAt?: (sec: number) => void;
+  /** Right-click a ruler marker to remove it. */
+  onRemoveMarker?: (markerId: string) => void;
   /** Right-click on an image asset / still clip: open the existing image editor. */
   onOpenImageEdit: (assetId: string) => void;
   /** Right-click on an audio clip: open the minimal trim/gain/fade editor. */
@@ -195,6 +199,8 @@ export function ProductionDrawer({
   onRemoveTrack,
   onRemoveClip,
   onSplitClipAt,
+  onToggleMarkerAt,
+  onRemoveMarker,
   onOpenImageEdit,
   onOpenAudioEdit,
   onOpenClipGrade,
@@ -590,6 +596,9 @@ export function ProductionDrawer({
                 playheadSec={playheadSec}
                 onPlayheadSecChange={setPlayheadSec}
                 snapPoints={snapPoints}
+                markers={timeline.markers}
+                onToggleMarker={onToggleMarkerAt ? () => onToggleMarkerAt(playheadSec) : undefined}
+                onRemoveMarker={onRemoveMarker}
               />
               <div className="production-timeline-playhead-overlay" aria-hidden="true">
                 <span
