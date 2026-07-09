@@ -29,13 +29,14 @@ use super::studio_image;
 use super::subject_matte;
 use super::subject_sam2::Sam2Variant;
 use super::subject_segment::{segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest};
-use super::working_image::WorkingImage;
 
 mod document;
 use document::{
     migrate_edit_paths, normalise_edit_paths, parse_canvas_size, parse_edit_paths,
     parse_point_prompts,
 };
+mod outputs;
+use outputs::{compose_alpha, cutout_to_bbox, mask_coverage, save_png, DynamicGray};
 
 const MASK_ON: u8 = 255;
 const MASK_OFF: u8 = 0;
@@ -2341,61 +2342,6 @@ fn morphology(mask: &GrayImage, radius: u32, grow: bool) -> GrayImage {
     GrayImage::from_raw(width, height, out).expect("morphology buffer matches dimensions")
 }
 
-fn mask_coverage(mask: &GrayImage) -> f64 {
-    let total = mask.pixels().len();
-    if total == 0 {
-        return 0.0;
-    }
-    let on = mask
-        .pixels()
-        .filter(|p| p.0[0] >= SELECTED_THRESHOLD)
-        .count();
-    on as f64 / total as f64
-}
-
-fn compose_alpha(image: &WorkingImage, mask: &GrayImage) -> WorkingImage {
-    // Full-resolution "cutout" on the 16-bit canonical surface: keep the RGB at
-    // full precision, take alpha from the mask (widened to 16-bit). The space /
-    // ICC tag carries through so a ProPhoto surface stays wide-gamut. Shared
-    // (rayon-parallel) with the rest of the compute lane via `pixel_ops`.
-    pixel_ops::apply_alpha_mask_working(image, mask)
-}
-
-fn cutout_to_bbox(alpha_image: &WorkingImage, mask: &GrayImage) -> WorkingImage {
-    match selection_bbox(mask) {
-        Some((x0, y0, x1, y1)) => {
-            pixel_ops::crop_working(alpha_image, x0, y0, x1 - x0 + 1, y1 - y0 + 1)
-        }
-        // Empty selection: a valid 1x1 transparent cutout (never panic). Keep
-        // the source space / ICC so it egresses like every other output.
-        None => WorkingImage {
-            width: 1,
-            height: 1,
-            pixels: vec![0u16; 4],
-            space: alpha_image.space,
-            icc: alpha_image.icc.clone(),
-        },
-    }
-}
-
-fn selection_bbox(mask: &GrayImage) -> Option<(u32, u32, u32, u32)> {
-    let (width, height) = mask.dimensions();
-    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
-    let mut any = false;
-    for y in 0..height {
-        for x in 0..width {
-            if mask.get_pixel(x, y).0[0] >= SELECTED_THRESHOLD {
-                any = true;
-                x0 = x0.min(x);
-                y0 = y0.min(y);
-                x1 = x1.max(x);
-                y1 = y1.max(y);
-            }
-        }
-    }
-    any.then_some((x0, y0, x1, y1))
-}
-
 /// How a rasterised pen / lasso path combines with the mask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PathMode {
@@ -2634,18 +2580,6 @@ fn json_f32(value: Option<&Value>) -> Option<f32> {
     value.and_then(Value::as_f64).map(|n| n as f32)
 }
 
-// --- PNG save helper -------------------------------------------------------
-
-/// A thin wrapper so a `GrayImage` saves through the same `.save()` path as the
-/// RGBA surfaces without an extra `DynamicImage` clone elsewhere.
-struct DynamicGray<'a>(&'a GrayImage);
-
-fn save_png(gray: &DynamicGray, path: &Path) -> Result<(), String> {
-    gray.0
-        .save(path)
-        .map_err(|err| format!("failed to write {}: {err}", path.display()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2847,38 +2781,6 @@ mod tests {
             }
         }
         out
-    }
-
-    #[test]
-    fn parallel_compose_alpha_matches_serial_reference() {
-        // Deterministic LCG fills so the check needs no RNG dependency.
-        let mut state: u32 = 0x0bad_c0de;
-        let mut next = || {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            (state >> 24) as u8
-        };
-        let (w, h) = (13u32, 11u32);
-        let mut image = RgbaImage::new(w, h);
-        for p in image.pixels_mut() {
-            p.0 = [next(), next(), next(), next()];
-        }
-        let mut mask = GrayImage::new(w, h);
-        for p in mask.pixels_mut() {
-            p.0[0] = next();
-        }
-        // compose_alpha now walks the 16-bit surface; widen/narrow round-trips
-        // 8-bit values exactly, so narrowing back reproduces the 8-bit contract.
-        use super::super::working_image::WorkingSpace;
-        let working = WorkingImage::from_rgba8(&image, WorkingSpace::Srgb, None);
-        let got = compose_alpha(&working, &mask).to_rgba8();
-        // Serial reference: RGB preserved, alpha taken from the mask.
-        for y in 0..h {
-            for x in 0..w {
-                let src = image.get_pixel(x, y).0;
-                let a = mask.get_pixel(x, y).0[0];
-                assert_eq!(got.get_pixel(x, y).0, [src[0], src[1], src[2], a]);
-            }
-        }
     }
 
     #[test]
@@ -3211,21 +3113,6 @@ mod tests {
         heal_region(&mut mask, &coverage);
         assert!(mask.get_pixel(15, 15).0[0] > 200);
         assert_eq!(mask.get_pixel(2, 2).0[0], MASK_ON);
-    }
-
-    #[test]
-    fn empty_selection_yields_transparent_cutout() {
-        use super::super::working_image::WorkingSpace;
-        let image = RgbaImage::from_pixel(4, 4, Rgba([10, 20, 30, 255]));
-        let mask = solid(4, 4, MASK_OFF);
-        let working = WorkingImage::from_rgba8(&image, WorkingSpace::Srgb, None);
-        let alpha = compose_alpha(&working, &mask);
-        // Alpha is the (16-bit) mask sample: MASK_OFF -> fully transparent.
-        assert_eq!(alpha.pixels[3], 0);
-        let cutout = cutout_to_bbox(&alpha, &mask);
-        assert_eq!((cutout.width, cutout.height), (1, 1));
-        assert_eq!(cutout.pixels[3], 0);
-        assert_eq!(mask_coverage(&mask), 0.0);
     }
 
     #[test]
