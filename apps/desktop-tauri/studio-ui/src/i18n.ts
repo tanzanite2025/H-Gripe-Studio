@@ -888,6 +888,10 @@ export const messages = {
     en: "pause",
     zh: "暂停",
   },
+  "drawer.monitorLoopPlayback": {
+    en: "loop playback",
+    zh: "循环播放",
+  },
   "drawer.monitorSafeArea": { en: "Safe area", zh: "安全框" },
   "drawer.monitorSafeAreaTitle": {
     en: "Show safe-area guides (action safe 90%, title safe 80%) over the frame",
