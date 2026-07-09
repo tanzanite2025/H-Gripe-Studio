@@ -1150,6 +1150,8 @@
   background: #2c3444;
   color: var(--text);
   font-size: 11px;
+  text-align: left;
+  cursor: pointer;
   overflow: hidden;
 }
 .production-clip.clip-still { background: #35402e; }
@@ -1181,16 +1183,28 @@
   position: absolute;
   z-index: 3;
   top: 50%;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+}
+.production-clip-keyframe::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
   width: 9px;
   height: 9px;
   border: 1px solid #ffcf67;
   background: #e89b32;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
   transform: translate(-50%, -50%) rotate(45deg);
-  cursor: ew-resize;
 }
-.production-clip-keyframe:hover,
-.production-clip-keyframe:focus-visible {
+.production-clip-keyframe:hover::before,
+.production-clip-keyframe:focus-visible::before {
   background: #ffd77a;
   outline: 1px solid #fff2bd;
 }

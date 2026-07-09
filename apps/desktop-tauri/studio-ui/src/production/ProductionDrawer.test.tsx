@@ -79,7 +79,7 @@ function drawerProps(overrides: Partial<ProductionDrawerProps> = {}): Production
 }
 
 function openClipMenu(container: HTMLElement, clipName: string): void {
-  const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+  const clip = Array.from(container.querySelectorAll<HTMLElement>(".production-clip")).find(
     (el) => el.textContent?.includes(clipName),
   );
   expect(clip).toBeDefined();
@@ -113,7 +113,7 @@ describe("ProductionDrawer clip context menu", () => {
     );
     expect(razor).toBeDefined();
     fireEvent.click(razor!);
-    const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+    const clip = Array.from(container.querySelectorAll<HTMLElement>(".production-clip")).find(
       (el) => el.textContent?.includes("a.mp4"),
     )!;
     clip.getBoundingClientRect = () =>
@@ -139,7 +139,7 @@ describe("ProductionDrawer clip context menu", () => {
       (button) => button.title === "Razor tool",
     );
     fireEvent.click(razor!);
-    const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+    const clip = Array.from(container.querySelectorAll<HTMLElement>(".production-clip")).find(
       (el) => el.textContent?.includes("a.mp4"),
     )!;
     clip.getBoundingClientRect = () =>
@@ -225,6 +225,33 @@ describe("ProductionDrawer clip context menu", () => {
     expect(next.tracks?.["crop.leftPct"]).toEqual([{ t: 4, v: 10 }]);
   });
 
+  it("gives keyframe diamonds their own click target without toggling clip selection", () => {
+    const onSelectClip = vi.fn();
+    const onSetClipProperties = vi.fn();
+    const clipProperties: ClipProperties = {
+      ...defaultClipProperties(),
+      tracks: {
+        "transform.scalePct": [{ t: 2, v: 80 }],
+      },
+    };
+    const { container } = render(
+      <ProductionDrawer
+        {...drawerProps({
+          selectedClipId: "clip-video",
+          clipProperties,
+          onSelectClip,
+          onSetClipProperties,
+        })}
+      />,
+    );
+    const diamond = container.querySelector<HTMLButtonElement>(".production-clip-keyframe")!;
+    expect(diamond.tagName).toBe("BUTTON");
+
+    fireEvent.click(diamond);
+    expect(onSelectClip).not.toHaveBeenCalled();
+    expect(onSetClipProperties).not.toHaveBeenCalled();
+  });
+
   it("drags a keyframe group and Shift-snaps it to timeline snap points", () => {
     const onSetClipProperties = vi.fn();
     const clipProperties: ClipProperties = {
@@ -242,7 +269,7 @@ describe("ProductionDrawer clip context menu", () => {
         })}
       />,
     );
-    const clip = Array.from(container.querySelectorAll<HTMLButtonElement>(".production-clip")).find(
+    const clip = Array.from(container.querySelectorAll<HTMLElement>(".production-clip")).find(
       (el) => el.textContent?.includes("a.mp4"),
     )!;
     clip.getBoundingClientRect = () =>
