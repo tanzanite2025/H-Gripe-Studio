@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useT, type MsgKey } from "../i18n";
+import { ClipPropertiesPanel } from "./ClipPropertiesPanel";
+import type { ClipProperties } from "./clipProps";
 import type { DrawerMode } from "./drawerState";
 import { LayerReviewPanel } from "./LayerReviewPanel";
 import { findLayer, type LayeredImageAsset } from "./layeredImage";
@@ -72,6 +74,11 @@ export interface ProductionDrawerProps {
   onOpenExport: () => void;
   /** A clip's stored grade doc (JSON string), for the program monitor. */
   clipGradeDoc?: (clipId: string) => string | null;
+  /** The selected clip's property document (transform / crop), when a
+   * visual clip is selected. */
+  clipProperties?: ClipProperties;
+  /** Commit the selected clip's property document. */
+  onSetClipProperties?: (clipId: string, props: ClipProperties) => void;
   /** Layered asset of the selected split node, when one is targeted. */
   layeredAsset: LayeredImageAsset | null;
   /** Selected layer inside `layeredAsset` (`image_layer` target), if any. */
@@ -208,6 +215,8 @@ export function ProductionDrawer({
   onSplitClipToLayers,
   onOpenExport,
   clipGradeDoc,
+  clipProperties,
+  onSetClipProperties,
   layeredAsset,
   selectedLayerId,
   onSelectLayer,
@@ -575,22 +584,31 @@ export function ProductionDrawer({
                     onToggleProtected={onToggleProtected}
                   />
                 ) : selectedClip ? (
-                  <dl className="production-detail-list">
-                    <div>
-                      <dt>{t("drawer.detailClip")}</dt>
-                      <dd>{selectedClipAsset?.name ?? selectedClip.assetId}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("drawer.detailKind")}</dt>
-                      <dd>{selectedClip.kind}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("drawer.detailRange")}</dt>
-                      <dd>
-                        {selectedClip.start.toFixed(2)}s - {(selectedClip.start + selectedClip.duration).toFixed(2)}s
-                      </dd>
-                    </div>
-                  </dl>
+                  <>
+                    <dl className="production-detail-list">
+                      <div>
+                        <dt>{t("drawer.detailClip")}</dt>
+                        <dd>{selectedClipAsset?.name ?? selectedClip.assetId}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("drawer.detailKind")}</dt>
+                        <dd>{selectedClip.kind}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("drawer.detailRange")}</dt>
+                        <dd>
+                          {selectedClip.start.toFixed(2)}s - {(selectedClip.start + selectedClip.duration).toFixed(2)}s
+                        </dd>
+                      </div>
+                    </dl>
+                    {selectedClip.kind !== "audio" && clipProperties && onSetClipProperties ? (
+                      <ClipPropertiesPanel
+                        clipName={selectedClipAsset?.name ?? selectedClip.assetId}
+                        props={clipProperties}
+                        onChange={(next) => onSetClipProperties(selectedClip.id, next)}
+                      />
+                    ) : null}
+                  </>
                 ) : activeAsset ? (
                   <dl className="production-detail-list">
                     <div>

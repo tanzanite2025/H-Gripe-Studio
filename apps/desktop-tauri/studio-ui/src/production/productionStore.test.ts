@@ -15,10 +15,12 @@ import {
   selectBinAsset,
   selectClip,
   setClipGradeDoc,
+  setClipProperties,
   splitTimelineClip,
   type ProductionStore,
 } from "./productionStore";
 import { defaultAudioEdit } from "./audioEdit";
+import { defaultClipProperties } from "./clipProps";
 import { findClip } from "./timeline";
 
 function storeWithClip(kind: "image" | "audio" = "image"): {
@@ -133,6 +135,33 @@ describe("productionStore", () => {
     expect(Object.keys(state.gradeDocs)).toHaveLength(1);
   });
 
+  it("stores clamped clip properties and prunes documents reset to defaults", () => {
+    const { store, clipId } = storeWithClip();
+    const props = defaultClipProperties();
+    setClipProperties(store, clipId, {
+      transform: { ...props.transform, scalePct: 50, opacityPct: 250 },
+      crop: props.crop,
+    });
+    let doc = store.getState().clipProps[clipId];
+    expect(doc.transform.scalePct).toBe(50);
+    expect(doc.transform.opacityPct).toBe(100);
+
+    setClipProperties(store, clipId, defaultClipProperties());
+    expect(store.getState().clipProps[clipId]).toBeUndefined();
+  });
+
+  it("removing a clip cascades its property document away", () => {
+    const { store, clipId } = storeWithClip();
+    const props = defaultClipProperties();
+    setClipProperties(store, clipId, {
+      transform: { ...props.transform, rotationDeg: 45 },
+      crop: props.crop,
+    });
+    expect(store.getState().clipProps[clipId]).toBeDefined();
+    removeTimelineClip(store, clipId);
+    expect(store.getState().clipProps[clipId]).toBeUndefined();
+  });
+
   it("splits a clip and selects the right-hand segment", () => {
     const { store, clipId } = storeWithClip();
     splitTimelineClip(store, clipId, 2);
@@ -167,5 +196,6 @@ describe("productionStore", () => {
     expect(state.timeline.tracks.every((t) => t.clips.length === 0)).toBe(true);
     expect(state.gradeDocs).toEqual({});
     expect(state.audioEdits).toEqual({});
+    expect(state.clipProps).toEqual({});
   });
 });
