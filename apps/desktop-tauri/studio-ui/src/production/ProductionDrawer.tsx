@@ -140,17 +140,15 @@ function TrackToggleIcon({ kind }: { kind: "visible" | "hidden" | "locked" | "un
   );
 }
 
-type TimelineTool = "select" | "track" | "trim" | "razor" | "pen" | "shape" | "hand" | "type";
+// Timeline edit modes, Premiere/Resolve-style: the rail only offers tools
+// that are actually wired up (Resolve's three core modes — pointer, blade,
+// hand). New tools join this list once their lane behavior exists.
+type TimelineTool = "select" | "razor" | "hand";
 
 const TIMELINE_TOOLS: Array<{ id: TimelineTool; labelKey: MsgKey }> = [
   { id: "select", labelKey: "drawer.timelineToolSelect" },
-  { id: "track", labelKey: "drawer.timelineToolTrackSelect" },
-  { id: "trim", labelKey: "drawer.timelineToolTrim" },
   { id: "razor", labelKey: "drawer.timelineToolRazor" },
-  { id: "pen", labelKey: "drawer.timelineToolPen" },
-  { id: "shape", labelKey: "drawer.timelineToolShape" },
   { id: "hand", labelKey: "drawer.timelineToolHand" },
-  { id: "type", labelKey: "drawer.timelineToolType" },
 ];
 
 function TimelineToolIcon({ tool }: { tool: TimelineTool }) {
@@ -158,48 +156,17 @@ function TimelineToolIcon({ tool }: { tool: TimelineTool }) {
     <svg className="production-timeline-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       {tool === "select" ? (
         <path d="M6 4l11 8-5 1.2 3.2 5.6-2.8 1.6-3.1-5.5L6 18z" />
-      ) : tool === "track" ? (
-        <>
-          <path d="M4 7h10" />
-          <path d="M4 12h16" />
-          <path d="M4 17h10" />
-          <path d="m15 8 4 4-4 4" />
-        </>
-      ) : tool === "trim" ? (
-        <>
-          <path d="M7 5v14" />
-          <path d="M17 5v14" />
-          <path d="m11 8-3 4 3 4" />
-          <path d="m13 8 3 4-3 4" />
-        </>
       ) : tool === "razor" ? (
         <>
           <path d="m5 18 12-12 2 2L7 20z" />
           <path d="m14 9 3 3" />
           <path d="M4 4h5" />
         </>
-      ) : tool === "pen" ? (
-        <>
-          <path d="M5 19l4.5-1 8-8L14 6.5l-8 8z" />
-          <path d="m13 8 3 3" />
-          <path d="M9.5 18 6 14.5" />
-        </>
-      ) : tool === "shape" ? (
-        <>
-          <rect x="5" y="6" width="14" height="12" rx="2" />
-          <path d="M8 10h8" />
-        </>
-      ) : tool === "hand" ? (
+      ) : (
         <>
           <path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11" />
           <path d="M11 11V5.5a1.5 1.5 0 0 1 3 0V11" />
           <path d="M14 11V7a1.5 1.5 0 0 1 3 0v7.5c0 3-2.2 5.5-5.5 5.5H10c-2.3 0-3.6-1.1-4.8-3.1L4 14.8a1.6 1.6 0 0 1 2.7-1.7L8 15" />
-        </>
-      ) : (
-        <>
-          <path d="M5 6h14" />
-          <path d="M12 6v12" />
-          <path d="M9 18h6" />
         </>
       )}
     </svg>
@@ -275,6 +242,8 @@ export function ProductionDrawer({
   const programColumnRef = useRef<HTMLDivElement | null>(null);
   const trackRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const tracksScrollRef = useRef<HTMLDivElement | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const handPan = useRef<{ pointerId: number; startX: number; startLeft: number } | null>(null);
   const navFlashTimer = useRef<number | null>(null);
   const [navFlashTrackId, setNavFlashTrackId] = useState<string | null>(null);
   const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
@@ -643,7 +612,30 @@ export function ProductionDrawer({
 
           <div className="production-timeline-shell">
             <div className="production-timeline production-timeline-track-card">
-              <div className="production-timeline-scroll">
+              <div
+                className={`production-timeline-scroll${timelineTool === "hand" ? " hand-pan" : ""}`}
+                ref={timelineScrollRef}
+                onPointerDown={(e) => {
+                  if (timelineTool !== "hand" || e.button !== 0) return;
+                  const container = timelineScrollRef.current;
+                  if (!container) return;
+                  handPan.current = { pointerId: e.pointerId, startX: e.clientX, startLeft: container.scrollLeft };
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  e.preventDefault();
+                }}
+                onPointerMove={(e) => {
+                  const pan = handPan.current;
+                  const container = timelineScrollRef.current;
+                  if (!pan || pan.pointerId !== e.pointerId || !container) return;
+                  container.scrollLeft = pan.startLeft - (e.clientX - pan.startX);
+                }}
+                onPointerUp={(e) => {
+                  if (handPan.current?.pointerId === e.pointerId) handPan.current = null;
+                }}
+                onPointerCancel={(e) => {
+                  if (handPan.current?.pointerId === e.pointerId) handPan.current = null;
+                }}
+              >
               <div
                 className="production-timeline-scroll-inner"
                 style={{ width: `${timelineZoom * 100}%` }}
