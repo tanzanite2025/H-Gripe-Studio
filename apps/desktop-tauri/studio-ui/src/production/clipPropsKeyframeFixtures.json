@@ -1,0 +1,132 @@
+{
+  "description": "Shared keyframe-evaluation contract between the TS panel (keyframes.ts) and the Rust backend (studio/clip_props.rs). Both evaluators must produce these exact samples: no keys -> static value, one key -> constant, before/after the span -> endpoint hold, inside -> linear interpolation, resolved values clamped like the static document.",
+  "cases": [
+    {
+      "name": "no tracks falls back to the static document",
+      "doc": {
+        "transform": {
+          "position": { "x": 12, "y": -8 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 80,
+          "rotationDeg": 15,
+          "opacityPct": 90
+        },
+        "crop": { "leftPct": 5, "topPct": 0, "rightPct": 0, "bottomPct": 10 }
+      },
+      "samples": [
+        { "path": "transform.position.x", "t": 0, "expected": 12 },
+        { "path": "transform.scalePct", "t": 3.5, "expected": 80 },
+        { "path": "crop.bottomPct", "t": 1, "expected": 10 }
+      ]
+    },
+    {
+      "name": "single keyframe holds its value everywhere",
+      "doc": {
+        "transform": {
+          "position": { "x": 0, "y": 0 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 100,
+          "rotationDeg": 0,
+          "opacityPct": 100
+        },
+        "crop": { "leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0 },
+        "tracks": {
+          "transform.opacityPct": [{ "t": 2, "v": 40 }]
+        }
+      },
+      "samples": [
+        { "path": "transform.opacityPct", "t": 0, "expected": 40 },
+        { "path": "transform.opacityPct", "t": 2, "expected": 40 },
+        { "path": "transform.opacityPct", "t": 9, "expected": 40 },
+        { "path": "transform.scalePct", "t": 2, "expected": 100 }
+      ]
+    },
+    {
+      "name": "two keyframes interpolate linearly and hold at the ends",
+      "doc": {
+        "transform": {
+          "position": { "x": 0, "y": 0 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 100,
+          "rotationDeg": 0,
+          "opacityPct": 100
+        },
+        "crop": { "leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0 },
+        "tracks": {
+          "transform.scalePct": [
+            { "t": 1, "v": 100 },
+            { "t": 3, "v": 50 }
+          ],
+          "transform.position.x": [
+            { "t": 0, "v": -100 },
+            { "t": 4, "v": 100 }
+          ]
+        }
+      },
+      "samples": [
+        { "path": "transform.scalePct", "t": 0, "expected": 100 },
+        { "path": "transform.scalePct", "t": 1, "expected": 100 },
+        { "path": "transform.scalePct", "t": 2, "expected": 75 },
+        { "path": "transform.scalePct", "t": 2.5, "expected": 62.5 },
+        { "path": "transform.scalePct", "t": 3, "expected": 50 },
+        { "path": "transform.scalePct", "t": 10, "expected": 50 },
+        { "path": "transform.position.x", "t": 1, "expected": -50 },
+        { "path": "transform.position.x", "t": 3, "expected": 50 }
+      ]
+    },
+    {
+      "name": "unsorted keys evaluate as if sorted by time",
+      "doc": {
+        "transform": {
+          "position": { "x": 0, "y": 0 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 100,
+          "rotationDeg": 0,
+          "opacityPct": 100
+        },
+        "crop": { "leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0 },
+        "tracks": {
+          "transform.rotationDeg": [
+            { "t": 4, "v": 90 },
+            { "t": 0, "v": 0 },
+            { "t": 2, "v": 30 }
+          ]
+        }
+      },
+      "samples": [
+        { "path": "transform.rotationDeg", "t": 1, "expected": 15 },
+        { "path": "transform.rotationDeg", "t": 3, "expected": 60 }
+      ]
+    },
+    {
+      "name": "resolved values clamp like the static document",
+      "doc": {
+        "transform": {
+          "position": { "x": 0, "y": 0 },
+          "anchor": { "x": 0, "y": 0 },
+          "scalePct": 100,
+          "rotationDeg": 0,
+          "opacityPct": 100
+        },
+        "crop": { "leftPct": 0, "topPct": 0, "rightPct": 0, "bottomPct": 0 },
+        "tracks": {
+          "transform.opacityPct": [
+            { "t": 0, "v": 100 },
+            { "t": 1, "v": 300 }
+          ],
+          "crop.leftPct": [
+            { "t": 0, "v": -60 },
+            { "t": 2, "v": 60 }
+          ]
+        }
+      },
+      "samples": [
+        { "path": "transform.opacityPct", "t": 0.5, "expected": 100 },
+        { "path": "transform.opacityPct", "t": 1, "expected": 100 },
+        { "path": "crop.leftPct", "t": 0, "expected": 0 },
+        { "path": "crop.leftPct", "t": 1, "expected": 0 },
+        { "path": "crop.leftPct", "t": 2, "expected": 60 }
+      ]
+    }
+  ]
+}

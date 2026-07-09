@@ -12,6 +12,9 @@
 //!   (cancellable execute + task history, task ids, numeric param readers).
 //! - [`write_skip`]: PNG write-skip analysis for compute-node outputs.
 //! - [`generate`]: the `generate` node executor (provider image call).
+//! - [`clip_props`]: the per-clip property document (transform / crop +
+//!   keyframe tracks) and its time-resolved evaluation — the backend's
+//!   source of truth mirrored by the TS panel.
 //! - [`grade`]: the `imageGrade` node executor and the grading dialog's
 //!   `grade_preview` command (the `hgripe-grade` kernel's UI entry points).
 //! - [`detail_repaint`]: the `detailRepaint` node executor (issue-region
@@ -60,6 +63,7 @@
 
 mod api_call;
 mod audio_mix;
+mod clip_props;
 mod color;
 mod color_match;
 pub(crate) mod color_match_cpu;

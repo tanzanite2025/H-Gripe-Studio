@@ -1,8 +1,12 @@
 // Per-clip property document (Premiere-style Properties panel): transform
 // (position / anchor / scale / rotation / opacity) and crop, stored
-// non-destructively per timeline clip. Pure functions over an immutable
-// document so the panel is unit testable without React. Keyframing and
-// render-time application build on this document in later steps.
+// non-destructively per timeline clip, plus optional per-property keyframe
+// tracks (see `keyframes.ts`; the Rust mirror in
+// `src-tauri/src/studio/clip_props.rs` is the render-time source of truth).
+// Pure functions over an immutable document so the panel is unit testable
+// without React.
+
+import type { ClipPropertyTracks } from "./keyframes";
 
 export interface ClipTransform {
   /** Frame position of the anchor point, pixels. */
@@ -28,6 +32,8 @@ export interface ClipCrop {
 export interface ClipProperties {
   transform: ClipTransform;
   crop: ClipCrop;
+  /** Per-property keyframe tracks, keyed by property path (absent = static). */
+  tracks?: ClipPropertyTracks;
 }
 
 export const MIN_SCALE_PCT = 0;
@@ -65,6 +71,7 @@ export function clampClipProperties(props: ClipProperties): ClipProperties {
   const leftPct = clampPct(finite(props.crop.leftPct, 0));
   const topPct = clampPct(finite(props.crop.topPct, 0));
   return {
+    ...(props.tracks && Object.keys(props.tracks).length > 0 ? { tracks: props.tracks } : {}),
     transform: {
       position: {
         x: finite(props.transform.position.x, d.transform.position.x),
@@ -90,10 +97,12 @@ export function clampClipProperties(props: ClipProperties): ClipProperties {
   };
 }
 
-/** True when every field still has its default value (nothing to store). */
+/** True when every field is default and no property is animated (nothing to store). */
 export function isDefaultClipProperties(props: ClipProperties): boolean {
   const d = defaultClipProperties();
+  const animated = Object.values(props.tracks ?? {}).some((keys) => keys && keys.length > 0);
   return (
+    !animated &&
     props.transform.position.x === d.transform.position.x &&
     props.transform.position.y === d.transform.position.y &&
     props.transform.anchor.x === d.transform.anchor.x &&

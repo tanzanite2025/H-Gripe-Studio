@@ -605,6 +605,10 @@ export function ProductionDrawer({
                       <ClipPropertiesPanel
                         clipName={selectedClipAsset?.name ?? selectedClip.assetId}
                         props={clipProperties}
+                        clipLocalSec={Math.min(
+                          Math.max(0, playheadSec - selectedClip.start),
+                          selectedClip.duration,
+                        )}
                         onChange={(next) => onSetClipProperties(selectedClip.id, next)}
                       />
                     ) : null}
