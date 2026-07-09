@@ -29,11 +29,20 @@ export interface TimelineTrack {
   clips: TimelineClip[];
 }
 
+/** Sequence marker: a named point on the timeline ruler. */
+export interface TimelineMarker {
+  id: string;
+  /** Marker position, seconds (frame-snapped). */
+  sec: number;
+}
+
 export interface TimelineModel {
   id: string;
   /** Project timeline timebase. Razor, ruler and playhead snap to this fps. */
   fps: number;
   tracks: TimelineTrack[];
+  /** Sequence markers, kept sorted by time. Absent on older models. */
+  markers?: TimelineMarker[];
 }
 
 /** Default clip lengths until real media durations are probed. */
@@ -226,7 +235,29 @@ export function removeClipsForAsset(timeline: TimelineModel, assetId: string): T
   };
 }
 
-/** Sorted unique snap points: timeline start plus every clip edge. */
+export function timelineMarkers(timeline: TimelineModel): TimelineMarker[] {
+  return timeline.markers ?? [];
+}
+
+/** Add a marker at the frame-snapped time; a second toggle at the same frame
+ * removes it (Premiere's M-key add / clear pattern). */
+export function toggleMarker(timeline: TimelineModel, sec: number): TimelineModel {
+  const fps = timeline.fps ?? DEFAULT_TIMELINE_FPS;
+  const frame = secondsToFrame(sec, fps);
+  const markers = timelineMarkers(timeline);
+  const existing = markers.find((m) => secondsToFrame(m.sec, fps) === frame);
+  if (existing) return { ...timeline, markers: markers.filter((m) => m.id !== existing.id) };
+  const marker: TimelineMarker = { id: freshId("marker"), sec: frameToSeconds(frame, fps) };
+  return { ...timeline, markers: [...markers, marker].sort((a, b) => a.sec - b.sec) };
+}
+
+export function removeMarker(timeline: TimelineModel, markerId: string): TimelineModel {
+  const markers = timelineMarkers(timeline);
+  if (!markers.some((m) => m.id === markerId)) return timeline;
+  return { ...timeline, markers: markers.filter((m) => m.id !== markerId) };
+}
+
+/** Sorted unique snap points: timeline start, every clip edge, every marker. */
 export function timelineSnapPoints(timeline: TimelineModel): number[] {
   const points = new Set<number>([0]);
   for (const track of timeline.tracks) {
@@ -235,6 +266,7 @@ export function timelineSnapPoints(timeline: TimelineModel): number[] {
       points.add(clip.start + clip.duration);
     }
   }
+  for (const marker of timelineMarkers(timeline)) points.add(marker.sec);
   return [...points].sort((a, b) => a - b);
 }
 

@@ -18,8 +18,10 @@ import {
   findClip,
   removeClip,
   removeClipsForAsset,
+  removeMarker,
   removeTrack,
   splitClip,
+  toggleMarker,
   trimClip,
   type TimelineModel,
   type TrackKind,
@@ -216,6 +218,15 @@ export function addAssetClip(
       selectedClipId: result.clip.id,
     };
   });
+}
+
+/** Add / clear a sequence marker at the given time (M key at the playhead). */
+export function toggleTimelineMarker(store: ProductionStore, sec: number): void {
+  store.mutate((state) => ({ ...state, timeline: toggleMarker(state.timeline, sec) }));
+}
+
+export function removeTimelineMarker(store: ProductionStore, markerId: string): void {
+  store.mutate((state) => ({ ...state, timeline: removeMarker(state.timeline, markerId) }));
 }
 
 export function addTimelineTrack(store: ProductionStore, kind: TrackKind): void {

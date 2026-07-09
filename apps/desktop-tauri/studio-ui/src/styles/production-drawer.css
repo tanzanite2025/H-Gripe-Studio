@@ -635,6 +635,17 @@
   box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.28);
   pointer-events: none;
 }
+/* Green sequence marker chip on the ruler bottom edge. */
+.production-timeline-marker {
+  position: absolute;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-4px);
+  background: #4caf7d;
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 0 0 1px rgba(76, 175, 125, 0.35);
+}
 /* Blue triangle playhead head, sitting in the ruler like Premiere's. */
 .production-timeline-playhead-head {
   position: absolute;

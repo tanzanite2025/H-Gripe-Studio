@@ -101,11 +101,13 @@ import {
   productionStore,
   removeAssetFromBin,
   removeTimelineClip,
+  removeTimelineMarker,
   removeTimelineTrack,
   selectBinAsset,
   selectClip,
   setClipGradeDoc,
   splitTimelineClip,
+  toggleTimelineMarker,
   useProductionState,
 } from "./production/productionStore";
 import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
@@ -352,6 +354,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   const handleSplitTimelineClip = useCallback((clipId: string, atSec: number) => {
     splitTimelineClip(productionStore, clipId, atSec);
+  }, []);
+
+  const handleToggleMarker = useCallback((sec: number) => {
+    toggleTimelineMarker(productionStore, sec);
+  }, []);
+
+  const handleRemoveMarker = useCallback((markerId: string) => {
+    removeTimelineMarker(productionStore, markerId);
   }, []);
 
   const handleSelectClip = useCallback((clipId: string | null) => {
@@ -1817,6 +1827,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onRemoveTrack={handleRemoveTrack}
           onRemoveClip={handleRemoveClip}
           onSplitClipAt={handleSplitTimelineClip}
+          onToggleMarkerAt={handleToggleMarker}
+          onRemoveMarker={handleRemoveMarker}
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}
           onOpenClipGrade={handleOpenClipGrade}

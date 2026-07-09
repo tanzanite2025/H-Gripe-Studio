@@ -11,9 +11,12 @@ import {
   findClip,
   removeClip,
   removeClipsForAsset,
+  removeMarker,
   removeTrack,
   snapTimeToPoints,
   splitClip,
+  timelineMarkers,
+  toggleMarker,
   timelineDuration,
   timelineSnapPoints,
   trackKindForClip,
@@ -118,6 +121,23 @@ describe("timeline model", () => {
       DEFAULT_STILL_SECONDS,
       DEFAULT_STILL_SECONDS + DEFAULT_MEDIA_SECONDS,
     ]);
+  });
+
+  it("toggles frame-snapped markers and removes them by id", () => {
+    const one = toggleMarker(createTimeline(), 2.501);
+    expect(timelineMarkers(one).map((m) => m.sec)).toEqual([2.5]);
+    // Same frame toggles the marker off.
+    expect(timelineMarkers(toggleMarker(one, 2.5))).toEqual([]);
+    const two = toggleMarker(one, 1);
+    expect(timelineMarkers(two).map((m) => m.sec)).toEqual([1, 2.5]);
+    const removed = removeMarker(two, timelineMarkers(two)[0].id);
+    expect(timelineMarkers(removed).map((m) => m.sec)).toEqual([2.5]);
+    expect(removeMarker(two, "missing")).toBe(two);
+  });
+
+  it("includes markers in the snap points", () => {
+    const tl = toggleMarker(appendClip(createTimeline(), imageAsset)!.timeline, 2);
+    expect(timelineSnapPoints(tl)).toEqual([0, 2, DEFAULT_STILL_SECONDS]);
   });
 
   it("snaps to the nearest point only within tolerance", () => {
