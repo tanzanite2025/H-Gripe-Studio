@@ -165,13 +165,13 @@ pub(super) fn fill_holes(mask: &mut GrayImage) {
 
 /// Separable max filter: grow the matte outward by `radius` px. Also used by
 /// [`subject_matte`](super::super::subject_matte) to build trimaps.
-pub(super) fn dilate(mask: &GrayImage, radius: u32) -> GrayImage {
+pub(in crate::studio) fn dilate(mask: &GrayImage, radius: u32) -> GrayImage {
     morphology(mask, radius, true)
 }
 
 /// Separable min filter: bite the matte inward by `radius` px. Also used by
 /// [`subject_matte`](super::super::subject_matte) to build trimaps.
-pub(super) fn erode(mask: &GrayImage, radius: u32) -> GrayImage {
+pub(in crate::studio) fn erode(mask: &GrayImage, radius: u32) -> GrayImage {
     morphology(mask, radius, false)
 }
 
