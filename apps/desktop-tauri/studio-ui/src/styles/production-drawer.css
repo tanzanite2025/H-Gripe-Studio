@@ -578,7 +578,7 @@
   gap: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 42px 8px 8px;
+  padding: 8px 64px 8px 8px;
   min-height: 0;
   background: rgba(255, 255, 255, 0.018);
 }
@@ -590,7 +590,7 @@
 .production-timeline-ruler {
   position: relative;
   height: 34px;
-  margin-left: 94px;
+  margin-left: 122px;
   border-bottom: 1px solid #343946;
   background:
     linear-gradient(#5f6675, #5f6675) left bottom 8px / 100% 1px no-repeat,
@@ -678,12 +678,13 @@
   gap: 8px;
 }
 /* Playhead line extended from the ruler down across every track lane.
-   left mirrors the 94px header column; top clears the 34px ruler plus gap. */
+   left mirrors the header column (116px + 6px gap); top starts at the ruler's
+   bottom edge so the line meets the ruler's own playhead without a seam. */
 .production-timeline-playhead-overlay {
   position: absolute;
-  top: 42px;
+  top: 34px;
   bottom: 0;
-  left: 94px;
+  left: 122px;
   right: 0;
   pointer-events: none;
   z-index: 2;
@@ -894,6 +895,14 @@
   filter: brightness(1.16);
 }
 .production-track { display: flex; align-items: stretch; gap: 6px; }
+/* V1/A1 quick-nav feedback: pulse the lane of the targeted track. */
+.production-track.nav-flash .production-track-lane {
+  animation: production-track-nav-flash 1s ease-out;
+}
+@keyframes production-track-nav-flash {
+  0%, 60% { border-color: #7aa2f7; box-shadow: inset 0 0 0 1px #7aa2f7; }
+  100% { border-color: var(--border); box-shadow: none; }
+}
 /* Video / audio group boundary, like Premiere's split between V1 and A1. */
 .production-track-group-start {
   border-top: 1px solid var(--border);
@@ -905,7 +914,7 @@
   position: sticky;
   left: 0;
   z-index: 3;
-  width: 88px;
+  width: 116px;
   flex: none;
   display: flex;
   align-items: center;
@@ -957,6 +966,44 @@
   border-radius: 4px;
   overflow: hidden;
 }
+.production-track-toggle {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+.production-track-toggle:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.production-track-toggle.active { color: #e8b45a; }
+.production-track-toggle-icon {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+/* Locked track: diagonal hatching, Premiere-style. */
+.production-track-lane.track-locked {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--panel-2),
+    var(--panel-2) 6px,
+    rgba(255, 255, 255, 0.05) 6px,
+    rgba(255, 255, 255, 0.05) 8px
+  );
+}
+.production-track-lane.track-locked .production-clip { filter: saturate(0.4); }
+/* Hidden / muted track: dim the lane content. */
+.production-track-lane.track-hidden { opacity: 0.45; }
 .production-track-lane.drop-ready {
   border-color: #7aa2f7;
   background: #223047;

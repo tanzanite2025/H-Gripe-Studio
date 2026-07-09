@@ -27,6 +27,10 @@ export interface TimelineTrack {
   id: string;
   kind: TrackKind;
   clips: TimelineClip[];
+  /** Locked tracks reject drops, razor cuts and clip edits. */
+  locked?: boolean;
+  /** Hidden (video) / muted (audio) tracks are dimmed and excluded from output. */
+  hidden?: boolean;
 }
 
 /** Sequence marker: a named point on the timeline ruler. */
@@ -107,6 +111,22 @@ export function removeTrack(timeline: TimelineModel, trackId: string): TimelineM
   return { ...timeline, tracks: timeline.tracks.filter((t) => t.id !== trackId) };
 }
 
+export function toggleTrackLock(timeline: TimelineModel, trackId: string): TimelineModel {
+  if (!timeline.tracks.some((t) => t.id === trackId)) return timeline;
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((t) => (t.id === trackId ? { ...t, locked: !t.locked } : t)),
+  };
+}
+
+export function toggleTrackHidden(timeline: TimelineModel, trackId: string): TimelineModel {
+  if (!timeline.tracks.some((t) => t.id === trackId)) return timeline;
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((t) => (t.id === trackId ? { ...t, hidden: !t.hidden } : t)),
+  };
+}
+
 export function trackEnd(track: TimelineTrack): number {
   return track.clips.reduce((end, c) => Math.max(end, c.start + c.duration), 0);
 }
@@ -135,9 +155,9 @@ export function appendClip(
   const wantTrackKind = trackKindForClip(clipKind);
   const requested = opts.trackId ? timeline.tracks.find((t) => t.id === opts.trackId) : undefined;
   const track =
-    requested && requested.kind === wantTrackKind
+    requested && requested.kind === wantTrackKind && !requested.locked
       ? requested
-      : timeline.tracks.find((t) => t.kind === wantTrackKind);
+      : timeline.tracks.find((t) => t.kind === wantTrackKind && !t.locked);
   if (!track) return null;
   const clip: TimelineClip = {
     id: freshId("clip"),

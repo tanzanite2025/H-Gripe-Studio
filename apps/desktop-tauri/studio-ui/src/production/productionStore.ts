@@ -22,6 +22,8 @@ import {
   removeTrack,
   splitClip,
   toggleMarker,
+  toggleTrackHidden,
+  toggleTrackLock,
   trimClip,
   type TimelineModel,
   type TrackKind,
@@ -227,6 +229,14 @@ export function toggleTimelineMarker(store: ProductionStore, sec: number): void 
 
 export function removeTimelineMarker(store: ProductionStore, markerId: string): void {
   store.mutate((state) => ({ ...state, timeline: removeMarker(state.timeline, markerId) }));
+}
+
+export function toggleTimelineTrackLock(store: ProductionStore, trackId: string): void {
+  store.mutate((state) => ({ ...state, timeline: toggleTrackLock(state.timeline, trackId) }));
+}
+
+export function toggleTimelineTrackHidden(store: ProductionStore, trackId: string): void {
+  store.mutate((state) => ({ ...state, timeline: toggleTrackHidden(state.timeline, trackId) }));
 }
 
 export function addTimelineTrack(store: ProductionStore, kind: TrackKind): void {

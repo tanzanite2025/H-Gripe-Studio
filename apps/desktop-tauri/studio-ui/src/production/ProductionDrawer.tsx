@@ -56,6 +56,10 @@ export interface ProductionDrawerProps {
   onToggleMarkerAt?: (sec: number) => void;
   /** Right-click a ruler marker to remove it. */
   onRemoveMarker?: (markerId: string) => void;
+  /** Track head lock toggle: a locked track rejects drops and razor cuts. */
+  onToggleTrackLock?: (trackId: string) => void;
+  /** Track head eye toggle: hide (video) / mute (audio) the track. */
+  onToggleTrackHidden?: (trackId: string) => void;
   /** Right-click on an image asset / still clip: open the existing image editor. */
   onOpenImageEdit: (assetId: string) => void;
   /** Right-click on an audio clip: open the minimal trim/gain/fade editor. */
@@ -104,6 +108,34 @@ function ExportIcon() {
       <path d="M12 4v10" />
       <path d="m8 10 4 4 4-4" />
       <path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+function TrackToggleIcon({ kind }: { kind: "visible" | "hidden" | "locked" | "unlocked" }) {
+  return (
+    <svg className="production-track-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      {kind === "visible" ? (
+        <>
+          <path d="M2.5 12c2.6-4.4 5.8-6.5 9.5-6.5s6.9 2.1 9.5 6.5c-2.6 4.4-5.8 6.5-9.5 6.5S5.1 16.4 2.5 12z" />
+          <circle cx="12" cy="12" r="2.6" />
+        </>
+      ) : kind === "hidden" ? (
+        <>
+          <path d="M2.5 12c2.6-4.4 5.8-6.5 9.5-6.5s6.9 2.1 9.5 6.5c-2.6 4.4-5.8 6.5-9.5 6.5S5.1 16.4 2.5 12z" />
+          <path d="m4 20 16-16" />
+        </>
+      ) : kind === "locked" ? (
+        <>
+          <rect x="5.5" y="11" width="13" height="8.5" rx="1.6" />
+          <path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3" />
+        </>
+      ) : (
+        <>
+          <rect x="5.5" y="11" width="13" height="8.5" rx="1.6" />
+          <path d="M8.5 11V8a3.5 3.5 0 0 1 7 0" />
+        </>
+      )}
     </svg>
   );
 }
@@ -201,6 +233,8 @@ export function ProductionDrawer({
   onSplitClipAt,
   onToggleMarkerAt,
   onRemoveMarker,
+  onToggleTrackLock,
+  onToggleTrackHidden,
   onOpenImageEdit,
   onOpenAudioEdit,
   onOpenClipGrade,
@@ -240,6 +274,9 @@ export function ProductionDrawer({
   const [timelineZoom, setTimelineZoom] = useState(1);
   const programColumnRef = useRef<HTMLDivElement | null>(null);
   const trackRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const tracksScrollRef = useRef<HTMLDivElement | null>(null);
+  const navFlashTimer = useRef<number | null>(null);
+  const [navFlashTrackId, setNavFlashTrackId] = useState<string | null>(null);
   const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
 
   useEffect(() => {
@@ -353,12 +390,25 @@ export function ProductionDrawer({
     return clipId;
   };
 
+  // Scroll the tracks container itself (scrollIntoView would also drag the
+  // page / drawer around) and flash the lane so short stacks still respond.
   const scrollTrackIntoView = (trackId: string) => {
-    trackRefs.current[trackId]?.scrollIntoView({
-      block: "center",
-      inline: "nearest",
-      behavior: "smooth",
-    });
+    const el = trackRefs.current[trackId];
+    const container = tracksScrollRef.current;
+    if (el && container) {
+      const top =
+        el.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop -
+        (container.clientHeight - el.clientHeight) / 2;
+      container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    }
+    setNavFlashTrackId(trackId);
+    if (navFlashTimer.current != null) window.clearTimeout(navFlashTimer.current);
+    navFlashTimer.current = window.setTimeout(() => {
+      setNavFlashTrackId(null);
+      navFlashTimer.current = null;
+    }, 1000);
   };
 
   const targetLabel = !target
@@ -616,11 +666,13 @@ export function ProductionDrawer({
                   style={{ left: `${playheadRatio * 100}%` }}
                 />
               </div>
-              <div className="production-timeline-tracks">
+              <div className="production-timeline-tracks" ref={tracksScrollRef}>
               {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
                 const total = rulerDuration;
                 const acceptsActive =
-                  !!activeAsset && trackKindForClip(clipKindForAsset(activeAsset.kind)) === track.kind;
+                  !!activeAsset &&
+                  !track.locked &&
+                  trackKindForClip(clipKindForAsset(activeAsset.kind)) === track.kind;
                 return (
                     <div
                       key={track.id}
@@ -628,13 +680,31 @@ export function ProductionDrawer({
                         if (el) trackRefs.current[track.id] = el;
                         else delete trackRefs.current[track.id];
                       }}
-                      className={`production-track${groupBoundary ? " production-track-group-start" : ""}`}
+                      className={`production-track${groupBoundary ? " production-track-group-start" : ""}${navFlashTrackId === track.id ? " nav-flash" : ""}`}
                     >
                     <span className="production-track-head">
                       <span className={`production-track-label track-${track.kind}`}>
                         {(track.kind === "video" ? t("drawer.trackVideo") : t("drawer.trackAudio")) + laneNumber}
                       </span>
                       <span className="production-track-controls">
+                        {onToggleTrackHidden ? (
+                          <button
+                            className={`production-track-toggle${track.hidden ? " active" : ""}`}
+                            onClick={() => onToggleTrackHidden(track.id)}
+                            title={t(track.hidden ? "drawer.showTrackTitle" : "drawer.hideTrackTitle")}
+                          >
+                            <TrackToggleIcon kind={track.hidden ? "hidden" : "visible"} />
+                          </button>
+                        ) : null}
+                        {onToggleTrackLock ? (
+                          <button
+                            className={`production-track-toggle${track.locked ? " active" : ""}`}
+                            onClick={() => onToggleTrackLock(track.id)}
+                            title={t(track.locked ? "drawer.unlockTrackTitle" : "drawer.lockTrackTitle")}
+                          >
+                            <TrackToggleIcon kind={track.locked ? "locked" : "unlocked"} />
+                          </button>
+                        ) : null}
                           <button
                             onClick={() => onAddTrack(track.kind)}
                             title={track.kind === "video" ? t("drawer.addVideoTrackTitle") : t("drawer.addAudioTrackTitle")}
@@ -651,7 +721,7 @@ export function ProductionDrawer({
                       </span>
                     </span>
                     <div
-                      className={`production-track-lane${dragAssetId && acceptsActive ? " drop-ready" : ""}`}
+                      className={`production-track-lane${dragAssetId && acceptsActive ? " drop-ready" : ""}${track.locked ? " track-locked" : ""}${track.hidden ? " track-hidden" : ""}`}
                       onDragOver={(e) => {
                         if (!acceptsActive) return;
                         e.preventDefault();
@@ -676,6 +746,7 @@ export function ProductionDrawer({
                               width: `${(clip.duration / total) * 100}%`,
                             }}
                             onClick={(e) => {
+                              if (track.locked) return;
                               if (timelineTool === "razor") {
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;

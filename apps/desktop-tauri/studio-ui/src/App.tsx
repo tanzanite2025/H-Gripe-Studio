@@ -108,6 +108,8 @@ import {
   setClipGradeDoc,
   splitTimelineClip,
   toggleTimelineMarker,
+  toggleTimelineTrackHidden,
+  toggleTimelineTrackLock,
   useProductionState,
 } from "./production/productionStore";
 import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
@@ -362,6 +364,14 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   const handleRemoveMarker = useCallback((markerId: string) => {
     removeTimelineMarker(productionStore, markerId);
+  }, []);
+
+  const handleToggleTrackLock = useCallback((trackId: string) => {
+    toggleTimelineTrackLock(productionStore, trackId);
+  }, []);
+
+  const handleToggleTrackHidden = useCallback((trackId: string) => {
+    toggleTimelineTrackHidden(productionStore, trackId);
   }, []);
 
   const handleSelectClip = useCallback((clipId: string | null) => {
@@ -1829,6 +1839,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onSplitClipAt={handleSplitTimelineClip}
           onToggleMarkerAt={handleToggleMarker}
           onRemoveMarker={handleRemoveMarker}
+          onToggleTrackLock={handleToggleTrackLock}
+          onToggleTrackHidden={handleToggleTrackHidden}
           onOpenImageEdit={handleOpenImageEdit}
           onOpenAudioEdit={handleOpenAudioEdit}
           onOpenClipGrade={handleOpenClipGrade}

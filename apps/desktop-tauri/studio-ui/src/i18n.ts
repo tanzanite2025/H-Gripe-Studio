@@ -868,6 +868,22 @@ export const messages = {
     en: "append the selected bin asset at the end of this track",
     zh: "将选中的素材追加到该轨道末尾",
   },
+  "drawer.lockTrackTitle": {
+    en: "lock this track (rejects drops and razor cuts)",
+    zh: "锁定该轨道（不接受落料和剃刀切割）",
+  },
+  "drawer.unlockTrackTitle": {
+    en: "unlock this track",
+    zh: "解锁该轨道",
+  },
+  "drawer.hideTrackTitle": {
+    en: "hide this track",
+    zh: "隐藏该轨道",
+  },
+  "drawer.showTrackTitle": {
+    en: "show this track",
+    zh: "显示该轨道",
+  },
   "drawer.removeTrackTitle": {
     en: "remove this track and its clips (the last track stays)",
     zh: "删除该轨道及其上的 clip（最后一条轨道不可删）",
