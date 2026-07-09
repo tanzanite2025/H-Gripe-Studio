@@ -2429,7 +2429,26 @@ fn migrate_edit_paths(value: Value) -> Value {
             .cloned()
             .unwrap_or_default()
     };
-    let version = value.get("version").and_then(Value::as_u64).unwrap_or(1);
+    let version = value
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            if value.get("layers").and_then(Value::as_array).is_some() {
+                3
+            } else if let Some(ops) = value.get("ops").and_then(Value::as_array) {
+                if ops.iter().any(|op| {
+                    op.get("type").and_then(Value::as_str) == Some("wand")
+                        && op.get("x").and_then(Value::as_f64).is_some()
+                        && op.get("y").and_then(Value::as_f64).is_some()
+                }) {
+                    1
+                } else {
+                    2
+                }
+            } else {
+                1
+            }
+        });
     if version >= 3 {
         let layer_groups = normalise_layer_groups(value.get("layerGroups"));
         let group_ids: BTreeSet<String> = layer_groups
@@ -2438,28 +2457,33 @@ fn migrate_edit_paths(value: Value) -> Value {
             .collect();
         let layers: Vec<Value> = arr("layers")
             .into_iter()
-            .map(|layer| normalise_layer(layer, &group_ids))
+            .filter_map(|layer| normalise_layer(layer, &group_ids))
             .collect();
-        let layers = if layers.is_empty() {
-            vec![empty_layer()]
+        let active = if layers.is_empty() {
+            -1
         } else {
-            layers
+            value
+                .get("active")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, layers.len() as i64 - 1)
         };
-        let active = value
-            .get("active")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .min(layers.len() as u64 - 1);
         let mut doc = json!({
             "version": 3,
             "layers": layers,
             "active": active,
             "matte_strokes": arr("matte_strokes"),
-            "points": arr("points"),
+            "points": normalise_points(value.get("points")),
             "layerGroups": layer_groups,
         });
         if let Some(canvas) = normalise_canvas(value.get("canvas")) {
             doc["canvas"] = canvas;
+        }
+        if value.get("activeTarget").and_then(Value::as_str) == Some("mask")
+            && active >= 0
+            && doc["layers"][active as usize].get("mask").is_some()
+        {
+            doc["activeTarget"] = json!("mask");
         }
         return doc;
     }
@@ -2506,7 +2530,7 @@ fn migrate_edit_paths(value: Value) -> Value {
         "layers": [layer],
         "active": 0,
         "matte_strokes": arr("matte_strokes"),
-        "points": arr("points"),
+        "points": normalise_points(value.get("points")),
         "layerGroups": [],
     })
 }
@@ -2545,9 +2569,37 @@ fn normalise_layer_groups(value: Option<&Value>) -> Vec<Value> {
         }) else {
             continue;
         };
-        out.push(json!({ "id": id, "name": name, "color": color }));
+        out.push(json!({ "id": id, "name": name, "color": color.to_ascii_lowercase() }));
     }
     out
+}
+
+fn normalise_points(value: Option<&Value>) -> Vec<Value> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|point| match point {
+            Value::Array(pair) if pair.len() >= 2 => {
+                pair[0].as_f64()?;
+                pair[1].as_f64()?;
+                let (x, y) = (pair[0].clone(), pair[1].clone());
+                Some(json!({ "x": x, "y": y, "label": 1 }))
+            }
+            Value::Object(_) => {
+                point.get("x")?.as_f64()?;
+                point.get("y")?.as_f64()?;
+                let (x, y) = (point.get("x")?.clone(), point.get("y")?.clone());
+                let label = if point.get("label").and_then(Value::as_f64) == Some(0.0) {
+                    0
+                } else {
+                    1
+                };
+                Some(json!({ "x": x, "y": y, "label": label }))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn normalise_layer_mask(value: Option<&Value>) -> Option<Value> {
@@ -2578,7 +2630,10 @@ fn normalise_layer_mask(value: Option<&Value>) -> Option<Value> {
 }
 
 // Fill in a stored layer's missing / malformed fields with their defaults.
-fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Value {
+fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Option<Value> {
+    if !layer.is_object() {
+        return None;
+    }
     let mut out = empty_layer();
     if let Some(id) = layer.get("id").and_then(Value::as_str) {
         out["id"] = json!(id);
@@ -2624,7 +2679,7 @@ fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Value {
     if let Some(mask) = normalise_layer_mask(layer.get("mask")) {
         out["mask"] = mask;
     }
-    out
+    Some(out)
 }
 
 /// The document-level PS Image Size request: the output pixel size plus the
@@ -3005,6 +3060,93 @@ mod tests {
     use super::*;
     use image::Rgba;
     use std::collections::HashSet;
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ImageDocumentFixtures {
+        migration_cases: Vec<MigrationCase>,
+        blend_cases: Vec<BlendCase>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MigrationCase {
+        name: String,
+        input: Value,
+        expected: Value,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct BlendCase {
+        name: String,
+        mode: String,
+        backdrop: f64,
+        source: f64,
+        opacity: f64,
+        expected: u8,
+    }
+
+    fn image_document_fixtures() -> ImageDocumentFixtures {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../studio-ui/src/editor/imageDocumentContractFixtures.json"
+        );
+        let raw = std::fs::read_to_string(path).expect("image-document fixtures readable");
+        serde_json::from_str(&raw).expect("image-document fixtures parse")
+    }
+
+    fn document_contract_summary(doc: &Value) -> Value {
+        let layers = doc
+            .get("layers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let layer_ops: Vec<Value> = layers
+            .iter()
+            .map(|layer| layer.get("ops").cloned().unwrap_or_else(|| json!([])))
+            .collect();
+        let layer_props: Vec<Value> = layers
+            .iter()
+            .map(|layer| {
+                let mask = layer.get("mask").map(|mask| {
+                    json!({
+                        "ops": mask.get("ops").cloned().unwrap_or_else(|| json!([])),
+                        "disabled": mask.get("disabled").and_then(Value::as_bool).unwrap_or(false),
+                        "unlinked": mask.get("unlinked").and_then(Value::as_bool).unwrap_or(false),
+                    })
+                });
+                json!({
+                    "name": layer.get("name").and_then(Value::as_str).unwrap_or("Background"),
+                    "kind": layer.get("kind").and_then(Value::as_str).unwrap_or("mask"),
+                    "blend": layer.get("blend").and_then(Value::as_str).unwrap_or("normal"),
+                    "opacity": layer.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
+                    "visible": layer.get("visible").and_then(Value::as_bool).unwrap_or(true),
+                    "locked": layer.get("locked").and_then(Value::as_bool).unwrap_or(false),
+                    "linked": layer.get("linked").and_then(Value::as_bool).unwrap_or(false),
+                    "groupId": layer.get("groupId").cloned().unwrap_or(Value::Null),
+                    "adjustment": layer.get("adjustment").cloned().unwrap_or(Value::Null),
+                    "mask": mask,
+                })
+            })
+            .collect();
+        json!({
+            "version": doc.get("version").and_then(Value::as_i64).unwrap_or_default(),
+            "layerCount": layers.len(),
+            "active": doc.get("active").and_then(Value::as_i64).unwrap_or(-1),
+            "layerOps": layer_ops,
+            "layerProps": layer_props,
+            "matteStrokes": doc
+                .get("matte_strokes")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+            "points": doc.get("points").cloned().unwrap_or_else(|| json!([])),
+            "canvas": doc.get("canvas").cloned().unwrap_or(Value::Null),
+            "layerGroups": doc.get("layerGroups").cloned().unwrap_or_else(|| json!([])),
+            "activeTarget": doc
+                .get("activeTarget")
+                .and_then(Value::as_str)
+                .unwrap_or("pixel"),
+        })
+    }
 
     /// Run a subject-mask node with no skippable ports (the default for every
     /// test that isn't specifically exercising the write-skip path).
@@ -3914,6 +4056,21 @@ mod tests {
     }
 
     #[test]
+    fn matches_the_shared_image_document_migration_contract() {
+        let fixtures = image_document_fixtures();
+        assert!(!fixtures.migration_cases.is_empty());
+        for case in fixtures.migration_cases {
+            let migrated = migrate_edit_paths(case.input);
+            assert_eq!(
+                document_contract_summary(&migrated),
+                case.expected,
+                "{}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
     fn migrate_edit_paths_folds_version1_arrays_in_legacy_replay_order() {
         let legacy = json!({
             "version": 1,
@@ -3940,7 +4097,10 @@ mod tests {
         assert_eq!(ops[1]["amount"], json!(255));
         // Non-sequential fields survive unchanged.
         assert_eq!(migrated["matte_strokes"].as_array().unwrap().len(), 1);
-        assert_eq!(migrated["points"], json!([[10, 20]]));
+        assert_eq!(
+            migrated["points"],
+            json!([{ "x": 10, "y": 20, "label": 1 }])
+        );
     }
 
     #[test]
@@ -4244,17 +4404,17 @@ mod tests {
     }
 
     #[test]
-    fn blend_value_covers_the_full_mode_set() {
-        assert_eq!(blend_value(100.0, 200.0, "normal"), 200.0);
-        assert_eq!(blend_value(102.0, 51.0, "multiply"), 102.0 * 51.0 / 255.0);
-        assert_eq!(
-            blend_value(102.0, 51.0, "screen"),
-            255.0 - (255.0 - 102.0) * (255.0 - 51.0) / 255.0
-        );
-        assert_eq!(blend_value(100.0, 200.0, "darken"), 100.0);
-        assert_eq!(blend_value(100.0, 200.0, "lighten"), 200.0);
-        assert_eq!(blend_value(100.0, 200.0, "difference"), 100.0);
-        assert_eq!(blend_value(100.0, 200.0, "unknown"), 200.0); // falls back to normal
+    fn blend_value_matches_the_shared_image_document_contract() {
+        let fixtures = image_document_fixtures();
+        assert!(!fixtures.blend_cases.is_empty());
+        for case in fixtures.blend_cases {
+            let blended = blend_value(case.backdrop, case.source, &case.mode);
+            let actual = (case.backdrop + (blended - case.backdrop) * case.opacity)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            assert_eq!(actual, case.expected, "{}", case.name);
+        }
+        assert_eq!(blend_value(100.0, 200.0, "unknown"), 200.0);
     }
 
     #[test]

@@ -113,12 +113,13 @@ export function serializeEditState(state: EditState): PersistedMaskEditState {
  * `MaskDocument`. A version-3 value loads directly; a version-2 value (one
  * ordered `ops` stack) becomes the single background layer; a version-1 value
  * (separate `paths` / `brush_strokes` / `operations` arrays) migrates onto one
- * ordered stack in the legacy replay order — paths, then strokes, then
- * operations — so old workflows rasterise identically.
+ * ordered stack in the legacy replay order — paths, inline wand/invert ops,
+ * strokes, then operations — so old workflows rasterise identically.
  */
 export function normalizeEditPaths(value: unknown): MaskDocument {
   if (!value || typeof value !== "object") return emptyMaskDocument();
   const v = value as {
+    version?: unknown;
     layers?: unknown;
     active?: unknown;
     canvas?: unknown;
@@ -131,19 +132,34 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
     points?: unknown;
     activeTarget?: unknown;
   };
+  const version =
+    typeof v.version === "number"
+      ? Math.trunc(v.version)
+      : Array.isArray(v.layers)
+        ? 3
+        : Array.isArray(v.ops)
+          ? v.ops.some(isLegacyInlineWand)
+            ? 1
+            : 2
+          : 1;
   const matte_strokes = Array.isArray(v.matte_strokes) ? (v.matte_strokes as BrushStroke[]) : [];
   const points = Array.isArray(v.points)
     ? v.points.map(normalizePoint).filter((p): p is PointPrompt => p !== null)
     : [];
   const canvas = normalizeCanvas(v.canvas);
-  if (Array.isArray(v.layers)) {
+  if (version >= 3) {
     const layerGroups = normalizeLayerGroups(v.layerGroups);
     const groupIds = new Set(layerGroups.map((g) => g.id));
-    const layers = v.layers.map((layer) => normalizeLayer(layer, groupIds)).filter((l): l is MaskLayer => l !== null);
+    const storedLayers = Array.isArray(v.layers) ? v.layers : [];
+    const layers = storedLayers
+      .map((layer) => normalizeLayer(layer, groupIds))
+      .filter((l): l is MaskLayer => l !== null);
     // Tolerant loading is the contract, but a truncated document should not
     // load silently: leave a trace for "where did my layer go".
-    if (layers.length < v.layers.length) {
-      console.warn(`normalizeEditPaths: dropped ${v.layers.length - layers.length} malformed layer(s) from stored edit_paths`);
+    if (layers.length < storedLayers.length) {
+      console.warn(
+        `normalizeEditPaths: dropped ${storedLayers.length - layers.length} malformed layer(s) from stored edit_paths`,
+      );
     }
     const active = layers.length === 0
       ? -1
@@ -161,16 +177,10 @@ export function normalizeEditPaths(value: unknown): MaskDocument {
       ...(v.activeTarget === "mask" && layers[active]?.mask ? { activeTarget: "mask" as const } : {}),
     };
   }
-  const ops: EditOp[] = Array.isArray(v.ops)
-    ? v.ops.filter(isEditOp)
-    : [
-        ...(Array.isArray(v.paths) ? v.paths : []).map((p: EditPath) => ({ ...p, type: "path" as const })),
-        ...(Array.isArray(v.brush_strokes) ? v.brush_strokes : []).map((s: BrushStroke) => ({
-          ...s,
-          type: "brush" as const,
-        })),
-        ...((Array.isArray(v.operations) ? v.operations : []) as MaskOperation[]),
-      ];
+  const ops: EditOp[] =
+    version >= 2 && Array.isArray(v.ops)
+      ? v.ops.filter(isEditOp)
+      : legacyEditOps(v.paths, v.ops, v.brush_strokes, v.operations);
   return {
     version: 3,
     layers: [{ ...emptyMaskLayer(), ops }],
@@ -265,6 +275,41 @@ function normalizeAdjustment(value: unknown): LayerAdjustment | null {
 
 function isEditOp(value: unknown): value is EditOp {
   return !!value && typeof value === "object" && typeof (value as { type?: unknown }).type === "string";
+}
+
+function isLegacyInlineWand(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const op = value as { type?: unknown; x?: unknown; y?: unknown };
+  return op.type === "wand" && typeof op.x === "number" && typeof op.y === "number";
+}
+
+function legacyEditOps(paths: unknown, inlineOps: unknown, brushStrokes: unknown, operations: unknown): EditOp[] {
+  const migrated: EditOp[] = [];
+  for (const path of Array.isArray(paths) ? paths : []) {
+    if (path && typeof path === "object") migrated.push({ ...(path as EditPath), type: "path" });
+  }
+  for (const op of Array.isArray(inlineOps) ? inlineOps : []) {
+    if (!op || typeof op !== "object") continue;
+    const legacy = op as { type?: unknown; x?: unknown; y?: unknown; tolerance?: unknown };
+    if (legacy.type === "invert") {
+      migrated.push({ type: "invert" });
+    } else if (legacy.type === "wand" && typeof legacy.x === "number" && typeof legacy.y === "number") {
+      migrated.push({
+        type: "wand",
+        region: [Math.max(0, Math.trunc(legacy.x)), Math.max(0, Math.trunc(legacy.y))],
+        ...(typeof legacy.tolerance === "number"
+          ? { amount: Math.min(Math.max(Math.trunc(legacy.tolerance), 0), 255) }
+          : {}),
+      });
+    }
+  }
+  for (const stroke of Array.isArray(brushStrokes) ? brushStrokes : []) {
+    if (stroke && typeof stroke === "object") migrated.push({ ...(stroke as BrushStroke), type: "brush" });
+  }
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    if (isEditOp(operation)) migrated.push(operation);
+  }
+  return migrated;
 }
 
 export function cloneMaskDocument(doc: MaskDocument): MaskDocument {

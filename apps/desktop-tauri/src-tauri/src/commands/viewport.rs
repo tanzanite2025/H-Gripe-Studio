@@ -3036,6 +3036,66 @@ fn render_image_path(
 mod tests {
     use super::*;
 
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ImageDocumentFixtures {
+        blend_cases: Vec<BlendCase>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct BlendCase {
+        name: String,
+        mode: String,
+        backdrop: f32,
+        source: f32,
+        opacity: f32,
+        expected: u8,
+    }
+
+    fn image_document_blend_cases() -> Vec<BlendCase> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../studio-ui/src/editor/imageDocumentContractFixtures.json"
+        );
+        let raw = std::fs::read_to_string(path).expect("image-document fixtures readable");
+        serde_json::from_str::<ImageDocumentFixtures>(&raw)
+            .expect("image-document fixtures parse")
+            .blend_cases
+    }
+
+    fn grade_blend_mode(mode: &str) -> hgripe_grade::BlendMode {
+        match mode {
+            "multiply" => hgripe_grade::BlendMode::Multiply,
+            "screen" => hgripe_grade::BlendMode::Screen,
+            "darken" => hgripe_grade::BlendMode::Darken,
+            "lighten" => hgripe_grade::BlendMode::Lighten,
+            "difference" => hgripe_grade::BlendMode::Difference,
+            _ => hgripe_grade::BlendMode::Normal,
+        }
+    }
+
+    #[test]
+    fn blend_channel_matches_the_shared_image_document_contract() {
+        let cases = image_document_blend_cases();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let local_blend = blend_channel(case.backdrop, case.source, &case.mode);
+            let local = (case.backdrop + (local_blend - case.backdrop) * case.opacity)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let canonical_blend = hgripe_grade::blend_channel(
+                grade_blend_mode(&case.mode),
+                case.backdrop / 255.0,
+                case.source / 255.0,
+            ) * 255.0;
+            let canonical = (case.backdrop + (canonical_blend - case.backdrop) * case.opacity)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            assert_eq!(local, case.expected, "local viewport: {}", case.name);
+            assert_eq!(canonical, case.expected, "hgripe-grade: {}", case.name);
+        }
+    }
+
     #[test]
     fn create_set_render_destroy_lifecycle() {
         let desc = viewport_create("image_edit".to_string()).expect("create");
