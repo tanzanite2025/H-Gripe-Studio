@@ -33,6 +33,8 @@ export interface ProxyMask {
   data: Uint8Array;
 }
 
+export type AlphaBounds = [number, number, number, number];
+
 /** Morphology / filter op ids this module can preview (the amount-taking ones). */
 export const PREVIEWABLE_OP_IDS = ["grow", "shrink", "feather", "smooth", "blur", "sharpen"] as const;
 export type PreviewableOpId = (typeof PREVIEWABLE_OP_IDS)[number];
@@ -1057,7 +1059,60 @@ export function buildLayerThumb(layer: MaskLayer, dims: { w: number; h: number }
   const w = Math.max(1, Math.min(thumbWidth, dims.w || thumbWidth));
   const scale = w / Math.max(1, dims.w || w);
   const h = Math.max(1, Math.round((dims.h || w) * scale));
-  return replayOps(createProxyMask(w, h), layer.ops, scale);
+  return renderLayerSurface(layer, w, h, scale);
+}
+
+interface LayerAlphaBoundsOptions {
+  proxyWidth?: number;
+  implicitSource?: boolean;
+  ignoreTransforms?: boolean;
+  alphaThreshold?: number;
+}
+
+function layerForAlphaSurface(
+  layer: MaskLayer,
+  options: Pick<LayerAlphaBoundsOptions, "implicitSource" | "ignoreTransforms">,
+): MaskLayer {
+  let ops = options.ignoreTransforms === true ? layer.ops.filter((op) => op.type !== "transform") : layer.ops;
+  if (options.implicitSource === true && !ops.some((op) => op.type === SOURCE_IMAGE_OP_TYPE)) {
+    ops = [{ type: SOURCE_IMAGE_OP_TYPE }, ...ops];
+  }
+  return ops === layer.ops ? layer : { ...layer, ops };
+}
+
+export function layerAlphaBounds(
+  layer: MaskLayer,
+  dims: { w: number; h: number },
+  options: LayerAlphaBoundsOptions = {},
+): AlphaBounds | null {
+  if (layer.kind === "adjustment") return null;
+  const docW = Math.max(1, dims.w || options.proxyWidth || DEFAULT_PROXY_WIDTH);
+  const docH = Math.max(1, dims.h || options.proxyWidth || DEFAULT_PROXY_WIDTH);
+  const proxyWidth = Math.max(16, Math.min(options.proxyWidth ?? DEFAULT_PROXY_WIDTH, docW));
+  const scale = proxyWidth / docW;
+  const w = Math.max(1, Math.round(docW * scale));
+  const h = Math.max(1, Math.round(docH * scale));
+  const surface = renderLayerSurface(layerForAlphaSurface(layer, options), w, h, scale);
+  const threshold = options.alphaThreshold ?? 0;
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (surface.data[y * w + x] <= threshold) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  const x0 = Math.max(0, Math.floor(minX / scale));
+  const y0 = Math.max(0, Math.floor(minY / scale));
+  const x1 = Math.min(docW, Math.ceil((maxX + 1) / scale));
+  const y1 = Math.min(docH, Math.ceil((maxY + 1) / scale));
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
 }
 
 function applyLayerMask(surface: ProxyMask, layer: MaskLayer, scale: number): ProxyMask {

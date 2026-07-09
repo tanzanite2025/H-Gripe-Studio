@@ -24,7 +24,15 @@ import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
 import { fromMaskDocument } from "./imageDocument";
-import { imageCompositeTarget, imageDocumentNeedsComposite, withActiveLayerDraftTransform } from "./imageCompositeSource";
+import {
+  imageDocumentFrameHidden,
+  imageCompositeTarget,
+  imageLayerContentBounds,
+  imageLayerDrawsSource,
+  imageDocumentNeedsComposite,
+  layerCompositeTransform,
+  withActiveLayerDraftTransform,
+} from "./imageCompositeSource";
 import {
   activeOps,
   canRedo,
@@ -488,6 +496,10 @@ export function MaskEditModal({
     }
     return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
   }, [workspace, needsCompositeSource, state, moveDraft]);
+  const activeCompositeTransform = useMemo(() => {
+    if (workspace !== "image" || !needsCompositeSource) return null;
+    return layerCompositeTransform(state.current.layers[state.current.active], moveDraft);
+  }, [workspace, needsCompositeSource, state.current.layers, state.current.active, moveDraft]);
   // All in-flight pointer gesture state (drags, picked sources, pending
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
@@ -510,20 +522,18 @@ export function MaskEditModal({
     const compiled = compileImageAdjustments(fromMaskDocument(state.current));
     return compiled && compiled.layers.some((l) => l.visible && l.ops.length > 0) ? compiled : null;
   }, [workspace, state]);
-  // Image workspace: the underlay frame is the background pixel layer's
-  // content, so hiding the bottom pixel layer hides the frame — the stage
-  // shows the transparency checkerboard instead (PS: hidden Background).
-  const baseHidden = useMemo(() => {
+  // Composite visibility source of truth: hide the frame only when no
+  // visible layer can draw source pixels.
+  const frameHidden = useMemo(() => {
     if (workspace !== "image") return false;
-    const base = state.current.layers.find((l) => l.kind !== "adjustment");
-    return base ? !base.visible : false;
+    return imageDocumentFrameHidden(state.current);
   }, [workspace, state]);
   // Grading needs frame pixels, so it forces the PNG transport (a natively
   // presented surface frame has no readable data URL). Any image-layer
   // transform also uses the full-frame PNG path for now: transforming a
   // cropped view-window texture exposes hard edges inside the visible stage.
   const presentEnabled =
-    !overlayOnly && !baseHidden && !view.rotate && !imageTransform && !cropRegion && !gradePreview && !entering && !closing;
+    !overlayOnly && !frameHidden && !view.rotate && !imageTransform && !cropRegion && !gradePreview && !entering && !closing;
   const underlayViewportView = imageTransform || cropRegion ? IDENTITY_VIEW : viewportView;
   // The anchor moves under CSS transforms (view zoom/pan and the layer
   // transform) without firing the resize observer: re-measure on either.
@@ -553,11 +563,21 @@ export function MaskEditModal({
     return resolveActiveTarget(state.current, docRef);
   }, [state.current, imagePath]);
   const targetBounds = useMemo(() => {
+    if (workspace === "image" && activeStudioTarget.kind === "pixel_layer") {
+      const index = state.current.layers.findIndex((layer) => layer.id === activeStudioTarget.layerId);
+      const layer = index >= 0 ? state.current.layers[index] : null;
+      if (!layer || !imageLayerDrawsSource(layer, index)) return { kind: "none" } as const;
+      const rect = imageLayerContentBounds(layer, index, dims);
+      return rect
+        ? { kind: "content", rect, layerId: layer.id, source: "alpha" } as const
+        : { kind: "none" } as const;
+    }
     return resolveTargetBounds(state.current, activeStudioTarget, { dims });
-  }, [state.current, activeStudioTarget, dims.w, dims.h]);
+  }, [workspace, state.current, activeStudioTarget, dims.w, dims.h]);
+  const targetDisplayTransform = workspace === "image" ? (needsCompositeSource ? activeCompositeTransform : imageTransform) : null;
   const displayTargetBounds = useMemo(() => {
-    return transformLayerTargetBounds(targetBounds, workspace === "image" ? imageTransform : null, dims);
-  }, [targetBounds, workspace, imageTransform, dims.w, dims.h]);
+    return transformLayerTargetBounds(targetBounds, targetDisplayTransform, dims);
+  }, [targetBounds, targetDisplayTransform, dims.w, dims.h]);
   const contextActionItems = useMemo(() => {
     if (workspace !== "image") return [];
     return IMAGE_CONTEXT_COMMANDS
@@ -910,7 +930,7 @@ export function MaskEditModal({
   };
 
   const viewportHost = viewport.host;
-  const magneticUnderlay = baseHidden ? null : (gradedUnderlay ?? underlay);
+  const magneticUnderlay = frameHidden ? null : (gradedUnderlay ?? underlay);
   // Magnetic lasso: prewarm and cache the visible window's edge map. Pointer
   // down can reuse a same-window map immediately; stale async readbacks are
   // ignored so old pixels never drive a new drag.
@@ -1385,9 +1405,9 @@ export function MaskEditModal({
             canvasRef={canvasRef}
             dims={dims}
             view={view}
-            underlay={baseHidden ? null : (gradedUnderlay ?? underlay)}
+            underlay={frameHidden ? null : (gradedUnderlay ?? underlay)}
             presented={presented}
-            baseHidden={baseHidden}
+            frameHidden={frameHidden}
             fallbackDims={viewport.dims == null}
             cropView={cropView}
             underlayRef={underlayAnchorRef}

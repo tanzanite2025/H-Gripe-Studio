@@ -6,11 +6,12 @@ import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
 import type { LayerBlend, LayerGroup, LayerTargetKind, MaskDocument, MaskLayer } from "../../types/production";
 import { LAYER_BLENDS } from "../../types/production";
-import { hasSourceImageContent, LAYER_GROUP_COLORS } from "../maskEdit";
+import { hasSourceImageContent, LAYER_GROUP_COLORS, SOURCE_IMAGE_OP_TYPE } from "../maskEdit";
 import { runMaskEditorCommand } from "../maskEditorCommandRunner";
 import { buildLayerThumb } from "../maskMorphology";
 import { getCommand, getCommandCapability, type CommandId } from "../studioCommands";
 import type { StudioTarget } from "../studioTarget";
+import { imageLayerHasSourceContent } from "../imageCompositeSource";
 import type { MaskEditDispatch } from "./actions";
 
 const LAYER_MIME = "application/x-hgripe-layer";
@@ -81,6 +82,77 @@ function BaseImageThumb({ imagePath }: { imagePath: string }) {
 
   return src ? (
     <img className="mask-layer-thumb-img" src={src} alt="" draggable={false} />
+  ) : (
+    <span className="mask-layer-thumb-fallback">IMG</span>
+  );
+}
+
+function SourceImageLayerThumb({
+  imagePath,
+  layer,
+  dims,
+  implicitSource = false,
+}: {
+  imagePath: string;
+  layer: MaskLayer;
+  dims: { w: number; h: number };
+  implicitSource?: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [src, setSrc] = useState<string | null>(null);
+  const thumbLayer = useMemo<MaskLayer>(() => {
+    if (!implicitSource || hasSourceImageContent(layer)) return layer;
+    return { ...layer, ops: [{ type: SOURCE_IMAGE_OP_TYPE }, ...layer.ops] };
+  }, [implicitSource, layer]);
+  const thumb = useMemo(() => buildLayerThumb(thumbLayer, dims), [thumbLayer, dims]);
+
+  useEffect(() => {
+    let alive = true;
+    setSrc(null);
+    generateThumbnail({ path: imagePath, size: 96 })
+      .then((thumb) => {
+        if (alive) setSrc(thumb.data_url || null);
+      })
+      .catch(() => {
+        if (alive) setSrc(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [imagePath]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    canvas.width = thumb.w;
+    canvas.height = thumb.h;
+    ctx.clearRect(0, 0, thumb.w, thumb.h);
+    if (!src) return;
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      ctx.clearRect(0, 0, thumb.w, thumb.h);
+      ctx.drawImage(img, 0, 0, thumb.w, thumb.h);
+      try {
+        const pixels = ctx.getImageData(0, 0, thumb.w, thumb.h);
+        for (let i = 0; i < thumb.data.length; i++) {
+          pixels.data[i * 4 + 3] = Math.round((pixels.data[i * 4 + 3] * thumb.data[i]) / 255);
+        }
+        ctx.putImageData(pixels, 0, 0);
+      } catch {
+        ctx.clearRect(0, 0, thumb.w, thumb.h);
+      }
+    };
+    img.src = src;
+    return () => {
+      cancelled = true;
+    };
+  }, [src, thumb]);
+
+  return src ? (
+    <canvas ref={canvasRef} className="mask-layer-thumb-canvas" aria-hidden="true" />
   ) : (
     <span className="mask-layer-thumb-fallback">IMG</span>
   );
@@ -400,16 +472,21 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
         {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
           const layer = layers[i];
           const group = layer.groupId ? groupById.get(layer.groupId) : undefined;
-          // The image workspace's pixel layers draw the backing image: the
-          // bottom layer always (it *is* the image), an upper layer while its
-          // own stack is empty (a Ctrl+J copy holds the image's content).
-          const showBaseImage = Boolean(
+          // The image workspace's pixel layers can draw the backing image:
+          // the bottom layer implicitly, and source_image copies explicitly.
+          const showSourceImage = Boolean(
+              imagePath &&
+              workspace === "image" &&
+              imageLayerHasSourceContent(layer, i),
+          );
+          const showPlainBaseImage = Boolean(
             imagePath &&
               layer.kind !== "adjustment" &&
-              (workspace === "image" ? i === 0 || hasSourceImageContent(layer) : i === 0 && layer.ops.length === 0),
+              ((workspace === "image" && i === 0 && !layer.mask && layer.ops.length === 0) ||
+                (workspace !== "image" && i === 0 && layer.ops.length === 0)),
           );
           const displayName =
-            showBaseImage && imagePath && layer.name === "Background" ? basename(imagePath) : layer.name;
+            showSourceImage && imagePath && layer.name === "Background" ? basename(imagePath) : layer.name;
           return (
             <div
               key={layer.id}
@@ -458,8 +535,10 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
                 title={t("mask.pixelThumbTitle")}
                 onClick={(e) => selectTarget(e, i, "pixel")}
               >
-                {showBaseImage && imagePath ? (
+                {showPlainBaseImage && imagePath ? (
                   <BaseImageThumb imagePath={imagePath} />
+                ) : showSourceImage && imagePath ? (
+                  <SourceImageLayerThumb imagePath={imagePath} layer={layer} dims={dims} implicitSource={i === 0} />
                 ) : layer.kind === "adjustment" ? (
                   "ADJ"
                 ) : (
@@ -517,7 +596,7 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
               ) : (
                 <span
                   className="mask-layer-name"
-                  title={showBaseImage && imagePath ? imagePath : layer.name}
+                  title={showSourceImage && imagePath ? imagePath : layer.name}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     if (layer.locked) return;

@@ -18,6 +18,7 @@ import {
   historyStroke,
   invert,
   isPreviewableOp,
+  layerAlphaBounds,
   patchRegion,
   patternStampStroke,
   perspectiveCrop,
@@ -529,6 +530,66 @@ describe("buildProxyMask", () => {
     const { mask } = buildProxyMask(d, { w: 20, h: 20 }, { proxyWidth: 20 });
     expect(mask.data[6 * 20 + 6]).toBe(255);
     expect(mask.data[2 * 20 + 2]).toBe(0);
+  });
+
+  it("layer thumbnails apply source-image layer masks", () => {
+    const layer = {
+      id: "copy",
+      name: "Background copy",
+      kind: "mask" as const,
+      blend: "normal" as const,
+      opacity: 1,
+      visible: true,
+      ops: [{ type: "source_image" as const }],
+      mask: { id: "mask-copy", ops: [{ type: "rect" as const, region: [4, 5, 12, 15] as [number, number, number, number] }] },
+    };
+    const thumb = buildLayerThumb(layer, { w: 20, h: 20 }, 20);
+    expect(thumb.data[6 * 20 + 6]).toBe(255);
+    expect(thumb.data[2 * 20 + 2]).toBe(0);
+  });
+
+  it("resolves source-image layer alpha bounds through layer masks", () => {
+    const layer = {
+      id: "copy",
+      name: "Background copy",
+      kind: "mask" as const,
+      blend: "normal" as const,
+      opacity: 1,
+      visible: true,
+      ops: [{ type: "source_image" as const }],
+      mask: { id: "mask-copy", ops: [{ type: "rect" as const, region: [4, 5, 12, 15] as [number, number, number, number] }] },
+    };
+    expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20 })).toEqual([4, 5, 13, 16]);
+  });
+
+  it("can treat the background layer as an implicit source for bounds", () => {
+    const layer = {
+      id: "background",
+      name: "Background",
+      kind: "mask" as const,
+      blend: "normal" as const,
+      opacity: 1,
+      visible: true,
+      ops: [],
+      mask: { id: "mask-background", ops: [{ type: "rect" as const, region: [4, 5, 12, 15] as [number, number, number, number] }] },
+    };
+    expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20, implicitSource: true })).toEqual([4, 5, 13, 16]);
+    expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20 })).toBeNull();
+  });
+
+  it("can resolve pre-transform content bounds for display transforms", () => {
+    const layer = {
+      id: "copy",
+      name: "Background copy",
+      kind: "mask" as const,
+      blend: "normal" as const,
+      opacity: 1,
+      visible: true,
+      ops: [{ type: "source_image" as const }, { type: "transform" as const, dx: 8, dy: 0, scale: 1, rotate: 0 }],
+      mask: { id: "mask-copy", ops: [{ type: "rect" as const, region: [4, 5, 12, 15] as [number, number, number, number] }] },
+    };
+    expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20 })).toEqual([8, 5, 13, 16]);
+    expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20, ignoreTransforms: true })).toEqual([4, 5, 13, 16]);
   });
 
   it("skips disabled history steps on replay", () => {

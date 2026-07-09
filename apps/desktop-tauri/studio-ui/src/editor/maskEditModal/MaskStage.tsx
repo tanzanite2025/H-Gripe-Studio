@@ -37,7 +37,8 @@ interface MaskStageProps {
   overlayOnly: boolean;
   /** Image workspace: the background pixel layer is hidden — the frame
    * shows the transparency checkerboard instead of the source frame. */
-  baseHidden?: boolean;
+  /** True only when no visible source-backed layer remains. */
+  frameHidden?: boolean;
   /** `dims` is the default fallback space (no decodable backing image):
    * edits record in it and rasterise against the real image on run. */
   fallbackDims?: boolean;
@@ -57,7 +58,7 @@ interface MaskStageProps {
   contextActionBar?: ReactNode;
 }
 
-export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, baseHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, frameHidden, fallbackDims, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
   const t = useT();
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
@@ -94,7 +95,7 @@ export function MaskStage({ canvasRef, dims, view, underlay, presented, underlay
       onDragStart={(e) => e.preventDefault()}
     >
       <div
-        className={`mask-edit-frame${baseHidden ? " base-hidden" : ""}${cropRegion ? " cropped" : ""}`}
+        className={`mask-edit-frame${frameHidden ? " base-hidden" : ""}${cropRegion ? " cropped" : ""}`}
         style={{
           aspectRatio: `${cropW} / ${cropH}`,
           maxWidth: `min(100%, ${cropW}px)`,
