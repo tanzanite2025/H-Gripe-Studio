@@ -1,0 +1,569 @@
+/* full-resolution media viewer (modal) */
+.media-viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.media-viewer-backdrop:has(> .mask-edit),
+.media-viewer-backdrop:has(> .crop-edit) {
+  inset: var(--app-window-control-row-h) 0 0 0;
+  padding: 0;
+}
+.media-viewer {
+  display: flex;
+  flex-direction: column;
+  max-width: 92vw;
+  max-height: 92vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.media-viewer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #20232e;
+  border-bottom: 1px solid var(--border);
+}
+.media-viewer-name { font-size: 13px; font-weight: 600; }
+.media-viewer-actions { display: flex; gap: 6px; }
+.media-viewer-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0c0e14;
+  padding: 12px;
+}
+/* Placement anchor for the native surface (surface swap): sized to the
+   stage, painted by nothing — the surface below shows through. */
+.media-viewer-underlay-anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* Frame on the native surface window below the webview: drop the stage
+   background so the hole stays see-through. */
+.media-viewer-stage.presented { background: transparent; }
+/* Shared viewport backend badge (shared DeviceReport vocabulary): pinned to
+   the presenting stage's bottom-right corner, like the program monitor's. */
+.viewport-backend-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  padding: 0 4px;
+  pointer-events: auto;
+  z-index: 2;
+}
+.media-viewer-stage.fit .media-viewer-img { max-width: 100%; max-height: calc(92vh - 110px); object-fit: contain; }
+.media-viewer-stage.actual .media-viewer-img { max-width: none; max-height: none; }
+.media-viewer-path {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+}
+.media-viewer-details {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+}
+.media-viewer-details .media-viewer-path { padding: 0; border-top: none; flex-basis: 100%; }
+.media-viewer-detail-name { font-size: 12px; font-weight: 600; word-break: break-all; }
+.media-viewer-detail-dims { font-size: 11px; color: var(--muted); }
+
+/* ===================================================================
+   Subject Mask card: node body actions, shared Preview modal,
+   on-demand Mask-Edit modal + tool registry palette.
+   =================================================================== */
+
+/* node body */
+.subject-mask { display: flex; flex-direction: column; gap: 6px; }
+.node-thumb.click-select {
+  cursor: crosshair;
+  font-size: 11px;
+  color: var(--muted);
+}
+.subject-mask-actions { display: flex; gap: 4px; }
+.subject-mask-actions button {
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.subject-mask-actions button:hover { background: #2a2f3d; }
+.subject-mask-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
+
+/* generic image media card (imageSource): thumbnail + info + bound-edit actions */
+.media-card { display: flex; flex-direction: column; gap: 6px; }
+.media-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.media-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-dims { flex: none; font-variant-numeric: tabular-nums; }
+.media-card-actions { display: flex; gap: 4px; }
+.media-card-actions button {
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.media-card-actions button:hover:not(:disabled) { background: #2a2f3d; }
+.media-card-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
+.media-card-actions button:disabled { color: var(--muted); cursor: default; opacity: 0.5; }
+
+/* shared Preview modal (built on the media-viewer shell) */
+.media-viewer-actions button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.media-viewer-actions button:hover:not(:disabled) { background: #2a2f3d; }
+.media-viewer-actions button:disabled { color: var(--muted); cursor: default; opacity: 0.5; }
+.media-viewer-actions button.active { border-color: var(--accent); color: var(--accent); }
+.media-viewer-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
+.preview-modal { width: min(1100px, 92vw); }
+
+/* Unified media editor: tool-group switcher in the bar (mask vs crop) */
+.media-edit-groups { display: inline-flex; gap: 4px; margin-left: 12px; }
+.media-edit-groups button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.media-edit-groups button:hover { background: #2a2f3d; }
+.media-edit-groups button.active { border-color: var(--accent); color: var(--accent); }
+
+/* Unified image editor: save light (far left) + centred collapse arrow */
+.media-edit-light {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  background: #46a758; /* saved: green */
+  cursor: pointer;
+}
+.media-edit-light.unsaved { background: #e5484d; } /* unsaved: red */
+.media-viewer-bar { position: relative; }
+/* With a centred slot the bar packs left (the centre is absolute), so the
+   in-flow items don't fight the space-between distribution. */
+.media-viewer-bar:has(.media-viewer-bar-center) { justify-content: flex-start; }
+.media-viewer-bar:has(.media-viewer-bar-center) .media-viewer-actions { margin-left: auto; }
+.media-viewer-bar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.media-edit-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 24px;
+  cursor: pointer;
+}
+.media-edit-collapse:hover { color: var(--text); background: #2a2f3d; }
+
+/* Unified image editor: PS-style open-document tabs on their own row */
+.media-viewer-tabs-row {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: #191c26;
+  border-bottom: 1px solid var(--border);
+}
+.media-edit-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.media-edit-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #11131a;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  max-width: 180px;
+}
+.media-edit-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Per-tab save light: sized to sit inside the pill. */
+.media-edit-tab .media-edit-light {
+  width: 10px;
+  height: 10px;
+}
+.media-edit-tab:hover { background: #2a2f3d; }
+.media-edit-tab.active {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--accent);
+}
+/* "+" at the end of the strip: opens an image as a new document tab. */
+.media-edit-tab-add {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.media-edit-tab-add:hover { background: #2a2f3d; color: var(--text); }
+
+/* Mask-Edit modal styles live in src/editor/maskEditModal/maskEditModal.css
+   (imported by MaskEditModal.tsx). The crop editor below reuses that shell. */
+
+/* Crop-Edit modal â€” reuses the mask-edit shell with a 2-column body. */
+.media-viewer.crop-edit {
+  width: 100%;
+  max-width: 100%;
+  height: min(95vh, var(--app-editor-workarea-h));
+  max-height: var(--app-editor-workarea-h);
+}
+.media-viewer.crop-edit .mask-edit-body { grid-template-columns: 1fr 240px; }
+.crop-edit-stage-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.crop-edit-stage {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  margin: auto;
+  max-height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+  background: #11131a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  user-select: none;
+}
+.crop-edit-stage.auto { cursor: default; }
+.crop-edit-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  display: block;
+  pointer-events: none;
+}
+.crop-edit-img.placeholder { background: #11131a; }
+/* Placement anchor for the native surface (surface swap): sized to the
+   stage, painted by nothing — the surface below shows through. */
+.crop-edit-underlay-anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* Frame on the native surface window below the webview: drop the stage
+   background so the hole stays see-through. */
+.crop-edit-stage.presented { background: transparent; }
+.crop-box {
+  position: absolute;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  cursor: move;
+  touch-action: none;
+}
+.crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 1px solid #00112e;
+  border-radius: 2px;
+  touch-action: none;
+}
+.crop-handle.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.crop-handle.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.crop-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.crop-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.crop-mode-row { display: flex; gap: 6px; }
+.crop-mode-row button {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.crop-mode-row button.active { border-color: var(--accent); color: var(--accent); }
+
+/* Grade-Edit modal â€” reuses the mask-edit shell; the controls column is the
+   scrollable op stack. */
+.media-viewer.grade-edit { width: min(1180px, 94vw); height: 88vh; }
+.media-viewer.grade-edit .mask-edit-body { grid-template-columns: 1fr 300px; }
+.grade-edit-controls { overflow-y: auto; }
+.grade-op {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.grade-op-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+.grade-op-buttons { display: flex; gap: 4px; }
+.grade-op-buttons button,
+.grade-op-remove {
+  padding: 0 6px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 18px;
+}
+.grade-op-buttons button:hover,
+.grade-op-remove:hover { color: var(--text); border-color: var(--accent); }
+.grade-scopes-toggle {
+  padding: 0 4px;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  cursor: pointer;
+  font-size: inherit;
+}
+.grade-scopes-toggle:hover { color: var(--text); }
+.grade-scopes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.grade-scope {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.grade-scope canvas {
+  width: 100%;
+  height: 96px;
+  background: #0b0d13;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  image-rendering: auto;
+}
+.grade-scope figcaption {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.grade-add-row { display: flex; gap: 6px; align-items: center; }
+.grade-add-row select { flex: 1; min-width: 0; }
+.grade-warp-point .slider-row small { min-width: 64px; }
+.grade-edit-controls .checkbox-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── On-demand audio editor (drawer step 8) ─────────────────────────── */
+.media-viewer.audio-edit { width: min(720px, 92vw); }
+.audio-edit-body {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 16px;
+  padding: 12px 16px 16px;
+}
+.audio-edit-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.audio-edit-envelope {
+  width: 100%;
+  height: 120px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.audio-edit-envelope polygon {
+  fill: rgba(122, 162, 247, 0.35);
+  stroke: var(--accent, #7aa2f7);
+  stroke-width: 1;
+}
+.audio-edit-controls { display: flex; flex-direction: column; }
+.audio-edit-controls .field { margin-top: 8px; }
+.audio-edit-controls small { margin-top: 12px; }
+
+/* ── On-demand timeline export dialog (drawer step 9) ───────────────── */
+.media-viewer.export-dialog { width: min(560px, 92vw); }
+.export-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+.export-summary { margin: 0; color: var(--text); }
+.export-fields { display: flex; gap: 16px; }
+.export-fields .field { flex: 1; }
+.export-fields input[type="number"] { width: 72px; }
+.export-warnings {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.export-warning { margin: 0; color: var(--muted); font-size: 12px; }
+.export-result {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-error { margin: 0; color: #f7768e; font-size: 12px; }
+
+/* ── System model manager (Models / APIs) ────────────────────────────── */
+.media-viewer.model-manager { width: min(880px, 92vw); }
+.model-manager-body { overflow-y: auto; padding: 12px 16px 16px; }
+.model-manager-list-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.model-manager-list-actions button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.model-manager-list-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
+.model-manager-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.model-manager-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--panel-2);
+}
+.model-manager-list li.model-manager-dim { opacity: 0.45; }
+.model-manager-entry { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.model-manager-entry code { font-size: 11px; color: var(--muted); }
+.model-manager-entry .muted { font-size: 12px; }
+.model-manager-health { font-size: 11px; color: var(--muted); }
+.model-manager-health.health-valid,
+.model-manager-health.health-installed { color: #9ece6a; }
+.model-manager-health.health-unreachable,
+.model-manager-health.health-missing_weights,
+.model-manager-health.health-missing_key,
+.model-manager-health.health-unsupported_runtime { color: #f7768e; }
+.model-manager-entry-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.model-manager-entry-actions button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.model-manager-entry-actions button:hover { background: #2a2f3d; }
+.model-manager-form {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 12px 12px;
+  background: var(--panel-2);
+}
+.model-manager-capability { margin: 12px 0; }
+.model-manager-capability-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.model-manager-capability-lines li.warn code { color: var(--warn, #d9a441); }
+.model-manager-caps { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.model-manager-caps .snap-toggle { font-size: 11px; }
+.model-manager-form-actions { display: flex; gap: 8px; margin-top: 12px; }
+.model-manager-form-actions button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.model-manager-form-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
