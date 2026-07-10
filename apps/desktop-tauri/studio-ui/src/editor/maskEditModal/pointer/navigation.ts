@@ -19,7 +19,9 @@ export function navigationDown(env: PointerEnv, g: PointerGestures, e: React.Poi
     const cx = e.clientX - (rect.left + rect.width / 2);
     const cy = e.clientY - (rect.top + rect.height / 2);
     const factor = e.altKey ? 1 / ZOOM_STEP : ZOOM_STEP;
-    env.setView((v) => zoomAt(v, factor, cx, cy, ...env.viewBase()));
+    // The canvas rect reflects the view transform, so its centre sits at
+    // base centre + pan; `zoomAt` anchors from the untransformed centre.
+    env.setView((v) => zoomAt(v, factor, cx + v.panX, cy + v.panY, ...env.viewBase()));
     return true;
   }
   if (tool.id === "rotate_view") {

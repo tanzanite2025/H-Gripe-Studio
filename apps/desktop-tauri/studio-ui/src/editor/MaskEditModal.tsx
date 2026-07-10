@@ -1163,7 +1163,6 @@ export function MaskEditModal({
             view={view}
             underlay={frameHidden ? null : (gradedUnderlay ?? underlay)}
             presented={presented}
-            frameHidden={frameHidden}
             cropView={cropView}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
