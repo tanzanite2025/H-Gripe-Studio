@@ -73,6 +73,7 @@ import {
   type SelectionDraft,
 } from "./maskEditModal/selection";
 import { applyActiveSelectionClip } from "./maskEditModal/selectionActions";
+import { listenFileDrop, probeImageDims } from "../bridge/tauri";
 import { useSelectionController } from "./maskEditModal/useSelectionController";
 import { useUnderlayController } from "./maskEditModal/useUnderlayController";
 
@@ -433,6 +434,36 @@ export function MaskEditModal({
   });
   const { view, setView, viewRef, viewBase, spacePan } = nav;
   frameDimsRef.current = dims;
+  // Image workspace: an OS file dropped onto the editor becomes its own
+  // placed layer — the layer records the image resource and a contain-fit
+  // centred placement rect, so it composites within its own bounds on the
+  // canvas instead of adopting (or clipping to) the opened image's frame.
+  useEffect(() => {
+    if (workspace !== "image") return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listenFileDrop((event) => {
+      for (const path of event.paths) {
+        if (!/\.(png|jpe?g|webp|bmp|gif|tiff?|avif)$/i.test(path)) continue;
+        void probeImageDims(path).then((probed) => {
+          if (!probed || probed.width <= 0 || probed.height <= 0) return;
+          const canvas = frameDimsRef.current;
+          rawDispatch({
+            type: "layer_add_image",
+            source: { path, width: probed.width, height: probed.height },
+            canvas: { w: canvas.w, h: canvas.h },
+          });
+        });
+      }
+    }).then((stop) => {
+      if (disposed) stop?.();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [workspace]);
   useEffect(() => {
     setPreviewDimensions(dims);
   }, [dims.w, dims.h, setPreviewDimensions]);

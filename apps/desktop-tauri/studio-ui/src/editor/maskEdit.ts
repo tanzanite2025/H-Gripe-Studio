@@ -26,6 +26,7 @@ import {
   type EditOp,
   type EditPath,
   type EditPathPoint,
+  type LayerImageSource,
   type MaskOperation,
   type PointPrompt,
 } from "../contracts/maskOps";
@@ -594,6 +595,47 @@ export function updatePathAnchors(state: EditState, index: number, points: EditP
 export function addLayer(state: EditState, name?: string): EditState {
   const layers = [...state.current.layers, emptyMaskLayer(name ?? `Layer ${state.current.layers.length + 1}`)];
   return commit(state, { ...state.current, layers, active: layers.length - 1 });
+}
+
+/** Contain-fit an image's natural size inside the canvas, centred: the rect
+ * a newly placed image layer draws into. */
+export function fitPlacement(
+  natural: { width: number; height: number },
+  canvas: { w: number; h: number },
+): [number, number, number, number] {
+  const nw = Math.max(1, natural.width);
+  const nh = Math.max(1, natural.height);
+  const cw = Math.max(1, canvas.w);
+  const ch = Math.max(1, canvas.h);
+  const scale = Math.min(cw / nw, ch / nh, 1);
+  const w = nw * scale;
+  const h = nh * scale;
+  const x0 = (cw - w) / 2;
+  const y0 = (ch - h) / 2;
+  return [x0, y0, x0 + w, y0 + h];
+}
+
+/** Append a layer that draws its own image resource, contain-fit centred on
+ * the canvas, and make it active (undoable). The layer's `source_image` op
+ * records the resource and its placement rect, so it composites within its
+ * own bounds and never clips other layers. */
+export function addImageLayer(
+  state: EditState,
+  source: LayerImageSource,
+  canvas: { w: number; h: number },
+  name?: string,
+): EditState {
+  const layer: MaskLayer = {
+    ...emptyMaskLayer(name ?? sourceBasename(source.path) ?? `Layer ${state.current.layers.length + 1}`),
+    ops: [{ type: SOURCE_IMAGE_OP_TYPE, source, placement: fitPlacement(source, canvas) }],
+  };
+  const layers = [...state.current.layers, layer];
+  return commit(state, { ...state.current, layers, active: layers.length - 1 });
+}
+
+function sourceBasename(path: string): string | null {
+  const name = path.split(/[\\/]/).pop();
+  return name && name.length > 0 ? name : null;
 }
 
 /** Append an identity adjustment layer above the stack, active (undoable; M6). */

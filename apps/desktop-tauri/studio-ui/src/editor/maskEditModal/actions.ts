@@ -4,6 +4,7 @@
 import {
   addAdjustmentLayer,
   addBrushStroke,
+  addImageLayer,
   addMatteStroke,
   addOperation,
   addPath,
@@ -56,6 +57,7 @@ import {
   type EditOpBase,
   type EditPath,
   type EditPathPoint,
+  type LayerImageSource,
   type MaskOperation,
   type PointPrompt,
 } from "../../contracts/maskOps";
@@ -78,6 +80,7 @@ export type MaskEditAction =
   | { type: "op_transform"; index: number; params: TransformParams }
   | { type: "path_anchors"; index: number; points: EditPathPoint[] }
   | { type: "layer_add"; name?: string }
+  | { type: "layer_add_image"; source: LayerImageSource; canvas: { w: number; h: number }; name?: string }
   | { type: "layer_add_adjustment"; adjType: AdjustmentType; name?: string }
   | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
   | { type: "layer_remove"; index: number }
@@ -143,6 +146,8 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return updatePathAnchors(state, action.index, action.points);
     case "layer_add":
       return addLayer(state, action.name);
+    case "layer_add_image":
+      return addImageLayer(state, action.source, action.canvas, action.name);
     case "layer_add_adjustment":
       return addAdjustmentLayer(state, action.adjType, action.name);
     case "layer_adjustment":
