@@ -32,7 +32,7 @@ import { getHelperLines } from "./editor/helperLines";
 import { setGraphHelperLines } from "./editor/graphStore";
 import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
-import { deserializeGraph, type WorkflowGraph } from "./graph/model";
+import type { WorkflowGraph } from "./graph/model";
 import { canvasDocumentTitle } from "./editor/canvasDocument";
 import { ProjectPanel } from "./editor/ProjectPanel";
 import { RedoIcon, Toolbar, UndoIcon } from "./editor/Toolbar";
@@ -47,20 +47,10 @@ import { makeNode, useNodeEditing } from "./editor/useNodeEditing";
 import { useContextMenu } from "./editor/useContextMenu";
 import { useModals } from "./editor/useModals";
 import { loadPersistedGraph } from "./editor/persist";
-import {
-  loadLocalProjectManifest,
-  parseProjectManifest,
-  saveLocalProjectManifest,
-  serializeProjectManifest,
-  type ProjectManifest,
-} from "./editor/projectManifest";
 import { validateGraph } from "./runtime/dag";
 import {
   isTauri,
   listenFileDrop,
-  readStudioAutosave,
-  readStudioProjectManifest,
-  writeStudioProjectManifest,
   mergeLayerMasks,
   pickFile,
   primeIngest,
@@ -138,6 +128,7 @@ import {
 } from "./assistant/insertTarget";
 import type { ModelCapability } from "./models/backendRegistry";
 import { useT } from "./i18n";
+import { useProjectRestoreController } from "./app/useProjectRestoreController";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -672,108 +663,18 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     if (stored > 1) applyGpuMaxJobs(stored).catch(() => {});
   }, []);
 
-  // Restore the persisted project manifest (open canvas tabs) once on mount.
-  // The manifest is the workspace autosave; workspaces that predate it fall
-  // back to the legacy single-graph autosave once (desktop) or the
-  // localStorage graph already seeded into the initial canvas (browser).
-  const manifestRestored = useRef(false);
-  // Persisting is held until the restore settles, so a fresh session never
-  // overwrites the previous session's manifest with its initial single tab.
-  const [manifestReady, setManifestReady] = useState(false);
-  useEffect(() => {
-    if (manifestRestored.current) return;
-    manifestRestored.current = true;
-    const apply = (manifest: ProjectManifest | null) => {
-      if (!manifest) return false;
-      const restoredDrafts = new Map<string, ImageDocument>();
-      canvas.restoreCanvases(
-        manifest.activeCanvasId,
-        manifest.canvases.map((c) => {
-          const graph = fromWorkflowGraph(c.graph);
-          for (const [nodeId, draft] of Object.entries(c.mediaEditDrafts)) restoredDrafts.set(nodeId, draft);
-          return {
-            id: c.id,
-            path: c.path,
-            dirty: c.dirty,
-            name: c.name,
-            selectedNodeId: c.selectedNodeId,
-            viewport: c.viewport,
-            nodes: graph.nodes,
-            edges: graph.edges,
-          };
-        }),
-      );
-      mediaEditDrafts.current = restoredDrafts;
-      setMediaDraftRevision((v) => v + 1);
-      setMessage(t("canvasTabs.restored"));
-      return true;
-    };
-    if (isDesktop) {
-      void readStudioProjectManifest()
-        .then(async (raw) => {
-          if (apply(parseProjectManifest(raw))) return;
-          const legacy = await readStudioAutosave();
-          if (!legacy) return;
-          const restored = fromWorkflowGraph(deserializeGraph(legacy));
-          suppressNextDirty();
-          setNodes(restored.nodes);
-          setEdges(restored.edges);
-          setSelectedId(null);
-          setMessage("restored desktop workflow");
-        })
-        .catch((err) => setMessage(`project manifest restore failed: ${String(err)}`))
-        .finally(() => setManifestReady(true));
-    } else {
-      apply(loadLocalProjectManifest());
-      setManifestReady(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Persist the project manifest (debounced) so the tab set survives a
-  // restart. View-only state such as viewport pan/zoom and selection is
-  // exported when real content changes, but does not itself trigger a save.
-  const exportCanvases = canvas.exportCanvases;
-  useEffect(() => {
-    if (!manifestReady) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const { activeCanvasId, canvases } = exportCanvases({
-        path: currentFile,
-        dirty: fileDirty,
-      });
-      const manifest: ProjectManifest = {
-        version: 1,
-        activeCanvasId,
-        canvases: canvases.map((c) => ({
-          id: c.id,
-          path: c.path,
-          dirty: c.dirty,
-          name: c.name ?? null,
-          selectedNodeId: c.selectedNodeId,
-          viewport: c.viewport,
-          graph: toWorkflowGraph(c.nodes, c.edges),
-          mediaEditDrafts: Object.fromEntries(
-            c.nodes
-              .map((node) => [node.id, mediaEditDrafts.current.get(node.id)] as const)
-              .filter((entry): entry is readonly [string, ImageDocument] => entry[1] != null),
-          ),
-        })),
-      };
-      if (isDesktop) {
-        void writeStudioProjectManifest(serializeProjectManifest(manifest))
-          .catch((err) => {
-            if (!cancelled) setMessage(`project manifest save failed: ${String(err)}`);
-          });
-      } else {
-        saveLocalProjectManifest(manifest);
-      }
-    }, 500);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [manifestReady, exportCanvases, canvas.documentId, canvas.tabs, nodes, edges, currentFile, fileDirty, mediaDraftRevision, isDesktop, setMessage]);
+  useProjectRestoreController({
+    canvas,
+    currentFile,
+    fileDirty,
+    isDesktop,
+    mediaEditDrafts,
+    mediaDraftRevision,
+    setMediaDraftRevision,
+    suppressNextDirty,
+    setMessage,
+    restoredMessage: t("canvasTabs.restored"),
+  });
 
   // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
   // graph in tab order. Defined below the run controller (see runAllCanvases).
