@@ -37,10 +37,6 @@ interface MaskStageProps {
   backend: ViewportBackend | null;
   /** Transparency preview: hide the underlay (the canvas paints a backdrop). */
   overlayOnly: boolean;
-  /** Image workspace: the background pixel layer is hidden — the frame
-   * shows the transparency checkerboard instead of the source frame. */
-  /** True only when no visible source-backed layer remains. */
-  frameHidden?: boolean;
   /** Confirmed image crop: show only this original-image rect, PS-style. */
   cropView?: { region: [number, number, number, number] } | null;
   spacePan: boolean;
@@ -57,7 +53,7 @@ interface MaskStageProps {
   contextActionBar?: ReactNode;
 }
 
-export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, frameHidden, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
   // centre (the op's scale/rotate pivot) sits at `(0.5 − pan) · zoom`.
@@ -103,7 +99,7 @@ export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, 
       }}
     >
       <div
-        className={`mask-edit-frame${frameHidden ? " base-hidden" : ""}${cropRegion ? " cropped" : ""}`}
+        className={`mask-edit-frame${cropRegion ? " cropped" : ""}`}
         style={{
           aspectRatio: `${cropW} / ${cropH}`,
           maxWidth: "100%",

@@ -50,14 +50,6 @@ export function MediaEditModal({
   onClose,
 }: MediaEditModalProps) {
   const t = useT();
-  const previousDocumentId = useRef(documentId);
-  const editorDocumentKey = useRef(documentId ?? "blank");
-  if (previousDocumentId.current !== documentId) {
-    if (previousDocumentId.current != null || documentId == null) {
-      editorDocumentKey.current = documentId ?? "blank";
-    }
-    previousDocumentId.current = documentId;
-  }
   // The image editor's contract is ImageDocument (image-kernel K1). Until the
   // grade-kernel render path lands (K2), the mask editor remains the canvas,
   // so documents bridge losslessly at this boundary in both directions.
@@ -120,7 +112,7 @@ export function MediaEditModal({
 
   return (
     <MaskEditModal
-      key={editorDocumentKey.current}
+      key={documentId ?? "blank"}
       title={title}
       imagePath={imagePath}
       initial={maskInitial}

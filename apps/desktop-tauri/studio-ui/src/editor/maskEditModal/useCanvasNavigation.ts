@@ -99,7 +99,9 @@ export function useCanvasNavigation(
       // Alt+wheel on some platforms reports the delta on the X axis.
       const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
       const factor = delta < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
-      setView((v) => zoomAt(v, factor, cx, cy, ...viewBase()));
+      // The bounding rect reflects the view transform, so its centre sits at
+      // base centre + pan; `zoomAt` anchors from the untransformed centre.
+      setView((v) => zoomAt(v, factor, cx + v.panX, cy + v.panY, ...viewBase()));
     };
     wheelTarget.addEventListener("wheel", onWheel, { passive: false });
     return () => wheelTarget.removeEventListener("wheel", onWheel);

@@ -321,11 +321,6 @@
   position: absolute;
   inset: 0;
 }
-/* Hidden background pixel layer (image workspace): the frame shows the
-   transparency checkerboard where the source frame would present. */
-.mask-edit-frame.base-hidden {
-  background: repeating-conic-gradient(#3a3f4a 0% 25%, #262a33 0% 50%) 0 0 / 16px 16px;
-}
 .mask-edit-underlay {
   position: absolute;
   opacity: 0.85;
