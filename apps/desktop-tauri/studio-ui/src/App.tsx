@@ -5,13 +5,10 @@ import {
   useReactFlow,
   type Edge,
   type Node,
-  type OnNodesChange,
-  type OnEdgesChange,
-  type NodePositionChange,
 } from "@hgripe/flow";
 
 import { FlowCanvas } from "./editor/FlowCanvas";
-import { RunHud, type RunHudScope } from "./editor/RunHud";
+import { RunHud } from "./editor/RunHud";
 import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
@@ -20,14 +17,6 @@ import { EditorHost } from "./editor/host/EditorHost";
 import type { ImageDocument } from "./editor/imageDocument";
 import { useHistory } from "./editor/useHistory";
 import { useCanvasDocument } from "./editor/useCanvasDocument";
-import {
-  detachChildren,
-  findContainingGroup,
-  isGroupNode,
-  reparentNode,
-} from "./editor/grouping";
-import { getHelperLines } from "./editor/helperLines";
-import { setGraphHelperLines } from "./editor/graphStore";
 import type { HgripeNodeData } from "./editor/HgripeNode";
 import { fromWorkflowGraph, toWorkflowGraph } from "./editor/adapter";
 import type { WorkflowGraph } from "./graph/model";
@@ -46,24 +35,18 @@ import { useContextMenu } from "./editor/useContextMenu";
 import { useModals } from "./editor/useModals";
 import { loadPersistedGraph } from "./editor/persist";
 import { validateGraph } from "./runtime/dag";
-import {
-  isTauri,
-  listenFileDrop,
-  primeIngest,
-} from "./bridge/tauri";
+import { isTauri } from "./bridge/tauri";
 import { ProductionDrawer } from "./production/ProductionDrawer";
 import { toggleDrawer } from "./production/drawerState";
 import {
   IMAGE_MEDIA_EXTS,
   VIDEO_MEDIA_EXTS,
 } from "./production/mediaBin";
-import { findClip } from "./production/timeline";
 import { defaultAudioEdit } from "./production/audioEdit";
 import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
 import { unregisterNodeOutput } from "./bridge/viewport";
 import { AudioEditModal } from "./production/AudioEditModal";
 import { ExportDialog } from "./production/ExportDialog";
-import { startIngestListener } from "./runtime/ingestStore";
 import { ModelManagerModal } from "./models/ModelManagerModal";
 import { ToolRail } from "./assistant/ToolRail";
 import { FloatingDock } from "./assistant/FloatingDock";
@@ -79,6 +62,7 @@ import { useT } from "./i18n";
 import { useProjectRestoreController } from "./app/useProjectRestoreController";
 import { useProductionWorkspaceController } from "./app/useProductionWorkspaceController";
 import { useEditorLaunchController } from "./app/useEditorLaunchController";
+import { useCanvasWorkspaceController } from "./app/useCanvasWorkspaceController";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -86,11 +70,6 @@ import { useEditorLaunchController } from "./app/useEditorLaunchController";
 // metadata (see docs/cards/generic-media-card.md).
 const IMAGE_DROP_EXTS = new Set<string>(IMAGE_MEDIA_EXTS);
 const VIDEO_DROP_EXTS = new Set<string>(VIDEO_MEDIA_EXTS);
-
-function dropExtension(path: string): string {
-  const dot = path.lastIndexOf(".");
-  return dot >= 0 ? path.slice(dot + 1).toLowerCase() : "";
-}
 
 // Minimal pre-wired workflow: Prompt -> Generate.
 const initialNodes: Node[] = [
@@ -162,8 +141,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     if (result === "limit") setMessage(t("canvasTabs.limitMessage"));
   }, [openNewCanvas, t]);
 
-  // True while a node drag is in progress, so we snapshot only once per drag.
-  const dragging = useRef(false);
   // Node id queued for a "run up to this node" once the committing param edit
   // has landed in `nodes` state (setNodes is async, so we defer to an effect).
   const pendingRunNode = useRef<string | null>(null);
@@ -447,124 +424,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     openCropEditorFor: setCropEditNodeId,
   });
 
-  // Ingest OS files dropped onto the canvas: create a generic media card per
-  // recognised file (an `imageSource` for images, a `videoSource` for videos),
-  // path pre-filled at the drop point and cascading multiple drops in drop
-  // order. The Tauri drop position is physical px, so divide by the device pixel
-  // ratio before mapping to flow space.
-  const ingestDroppedFiles = useCallback(
-    (paths: string[], physical: { x: number; y: number }) => {
-      const dpr = window.devicePixelRatio || 1;
-      const dropTarget = document.elementFromPoint(physical.x / dpr, physical.y / dpr);
-      if (dropTarget?.closest(".production-bin-popover")) {
-        importMediaPathsToBin(paths);
-        return;
-      }
-      const origin = screenToFlowPosition({ x: physical.x / dpr, y: physical.y / dpr });
-      const media = paths.flatMap((path) => {
-        const ext = dropExtension(path);
-        if (IMAGE_DROP_EXTS.has(ext)) return [{ path, kind: "imageSource" }];
-        if (VIDEO_DROP_EXTS.has(ext)) return [{ path, kind: "videoSource" }];
-        return [];
-      });
-      if (media.length === 0) {
-        setMessage(t("canvas.dropUnsupported"));
-        return;
-      }
-      takeSnapshot();
-      const created = media.map(({ path, kind }, i) => ({
-        ...makeNode(newNodeId(kind), kind, origin.x + i * 28, origin.y + i * 28, { path }),
-        selected: i === media.length - 1,
-      }));
-      setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...created]);
-      setSelectedId(created[created.length - 1]?.id ?? null);
-      // Warm the backend ingestion pipeline for the dropped images: it probes
-      // header dims and decodes thumbnails off the UI thread, pushing both to
-      // the cards over `ingest://progress`. Fire-and-forget; cards still have
-      // their own probe/lazy-thumbnail fallback.
-      void primeIngest(
-        media.filter((m) => m.kind === "imageSource").map((m) => m.path),
-      );
-      const images = media.filter((m) => m.kind === "imageSource").length;
-      const videos = media.length - images;
-      const note =
-        images > 0 && videos > 0
-          ? t("canvas.dropMedia", { images, videos })
-          : videos > 0
-            ? t("canvas.dropVideos", { n: videos })
-            : t("canvas.dropImages", { n: images });
-      setMessage(note);
-    },
-    [importMediaPathsToBin, screenToFlowPosition, setNodes, takeSnapshot, newNodeId, setMessage, t],
-  );
-
-  // Timeline clip context menu “split to layers” (IMAGE_TO_LAYERED_PSD plan,
-  // Phase 5): wire the clip's media into a Smart Layer Split card on the
-  // canvas — reusing the clip's source card when it still exists, else
-  // creating one from the bin asset's path — and select the split card so the
-  // drawer's review panel targets its layers. A video clip connects to the
-  // split card's video input; the node's frame time picks the still to split.
-  const handleSplitClipToLayers = useCallback(
-    (clipId: string) => {
-      const found = findClip(timeline, clipId);
-      if (!found || found.clip.kind === "audio") return;
-      const asset = binAssets.find((a) => a.id === found.clip.assetId);
-      if (!asset || asset.kind === "audio") return;
-      takeSnapshot();
-      const existing = asset.sourceNodeId
-        ? nodes.find((n) => n.id === asset.sourceNodeId)
-        : undefined;
-      const handle = asset.kind === "video" ? "video" : "image";
-      const created: Node[] = [];
-      let sourceId: string;
-      let sourcePos: { x: number; y: number };
-      if (existing) {
-        sourceId = existing.id;
-        sourcePos = existing.position;
-      } else {
-        const sourceKind = asset.kind === "video" ? "videoSource" : "imageSource";
-        sourceId = newNodeId(sourceKind);
-        sourcePos = screenToFlowPosition({
-          x: window.innerWidth / 2 - 320,
-          y: window.innerHeight / 3,
-        });
-        created.push(makeNode(sourceId, sourceKind, sourcePos.x, sourcePos.y, { path: asset.path }));
-      }
-      const splitId = newNodeId("smartLayerSplit");
-      created.push({
-        ...makeNode(splitId, "smartLayerSplit", sourcePos.x + 320, sourcePos.y),
-        selected: true,
-      });
-      setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...created]);
-      setEdges((es) =>
-        es.concat(
-          withHgripeDataEdge({
-            id: `edge-${splitId}`,
-            source: sourceId,
-            sourceHandle: handle,
-            target: splitId,
-            targetHandle: handle,
-          }),
-        ),
-      );
-      handleCanvasSelect(splitId);
-      setMessage(t("drawer.splitLayersCreated"));
-    },
-    [
-      timeline,
-      binAssets,
-      nodes,
-      takeSnapshot,
-      newNodeId,
-      screenToFlowPosition,
-      setNodes,
-      setEdges,
-      handleCanvasSelect,
-      setMessage,
-      t,
-    ],
-  );
-
   // Software-level Prompt Assistant (PROMPT_ASSISTANT_SYSTEM_PLAN): a right
   // tool rail + docked panel that stays reachable while the bottom drawer is
   // open. The panel drafts prompt text; the graph only receives what the user
@@ -660,89 +519,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [takeSnapshot, newNodeId, screenToFlowPosition, setNodes, handleCanvasSelect, setMessage, t],
   );
 
-  // Subscribe to the Tauri webview file-drop (desktop only; browser preview has
-  // no native drag-drop paths). Re-subscribes if the handler identity changes.
-  useEffect(() => {
-    // Register the shared ingest-progress sink before any drop can fire.
-    startIngestListener();
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    void listenFileDrop((e) => ingestDroppedFiles(e.paths, e.position)).then((fn) => {
-      if (disposed) fn?.();
-      else unlisten = fn;
-    });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [ingestDroppedFiles]);
-
-  // After a drag, (re)assign the node to whatever group frame now contains it,
-  // or detach it when dropped outside every group. Groups themselves are never
-  // reparented. The pre-drag snapshot (taken on drag start) covers the undo.
-  const handleNodeDragStop = useCallback(
-    (dragged: Node) => {
-      if (isGroupNode(dragged)) return;
-      setNodes((ns) => {
-        const merged = ns.map((n) =>
-          n.id === dragged.id
-            ? { ...n, position: dragged.position, parentId: dragged.parentId, measured: dragged.measured ?? n.measured }
-            : n,
-        );
-        const groupId = findContainingGroup(dragged.id, merged);
-        return reparentNode(merged, dragged.id, groupId);
-      });
-    },
-    [setNodes],
-  );
-
-  // Snapshot before structural changes that React Flow applies itself
-  // (deletions, and the start of a drag), so they can be undone.
-  const handleNodesChange = useCallback<OnNodesChange>(
-    (changes) => {
-      if (changes.some((c) => c.type === "remove")) {
-        takeSnapshot();
-        // When a group frame is deleted, free its members (back to absolute
-        // coords) so they survive instead of becoming orphaned children.
-        const removed = new Set(changes.filter((c) => c.type === "remove").map((c) => c.id));
-        const removedGroups = new Set(
-          nodes.filter((n) => removed.has(n.id) && isGroupNode(n)).map((n) => n.id),
-        );
-        if (removedGroups.size > 0) {
-          setNodes((ns) => detachChildren(ns, removedGroups));
-        }
-      } else if (changes.some((c) => c.type === "position" && c.dragging) && !dragging.current) {
-        dragging.current = true;
-        takeSnapshot();
-      }
-      if (changes.some((c) => c.type === "position" && c.dragging === false)) {
-        dragging.current = false;
-      }
-      // Alignment guides: while dragging a single node, snap its edges to other
-      // nodes' edges and surface the guide lines. Grid snapping (if enabled) is
-      // applied by React Flow separately and composes with this.
-      let lines: { horizontal?: number; vertical?: number } = {};
-      if (changes.length === 1 && changes[0].type === "position" && changes[0].dragging && changes[0].position) {
-        const change = changes[0] as NodePositionChange;
-        const helper = getHelperLines(change, nodes);
-        if (helper.snapPosition.x !== undefined) change.position!.x = helper.snapPosition.x;
-        if (helper.snapPosition.y !== undefined) change.position!.y = helper.snapPosition.y;
-        lines = { horizontal: helper.horizontal, vertical: helper.vertical };
-      }
-      setGraphHelperLines(lines);
-      onNodesChange(changes);
-    },
-    [onNodesChange, takeSnapshot, nodes, setNodes],
-  );
-
-  const handleEdgesChange = useCallback<OnEdgesChange>(
-    (changes) => {
-      if (changes.some((c) => c.type === "remove")) takeSnapshot();
-      onEdgesChange(changes);
-    },
-    [onEdgesChange, takeSnapshot],
-  );
-
   // The run lifecycle, run log, and run history live in their own controller.
   // The editor reaches it through these callbacks and consumes the returned
   // view state (panel toggles, counts, run actions).
@@ -792,24 +568,33 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     void runUpToNode(target);
   }, [nodes, runUpToNode]);
 
-  // keep their distinct style — the global edge style applies to data wires.
-  // Toolbar selection-run command: run the selected nodes plus upstream
-  // (RunScope `selection_with_upstream`; plan "Toolbar" affordances).
-  const selectedNodeIds = useMemo(
-    () => nodes.filter((n) => n.selected).map((n) => n.id),
-    [nodes],
-  );
-  // Canvas run HUD: map the HUD's scope choice onto the run controller's
-  // scoped entry points (full canvas / selection + upstream / selection only).
-  const runHudScope = useCallback(
-    (scope: RunHudScope) => {
-      if (scope === "selection_with_upstream") void runSelection(selectedNodeIds);
-      else if (scope === "selection_only") void runSelectionOnly(selectedNodeIds);
-      else void run();
-    },
-    [run, runSelection, runSelectionOnly, selectedNodeIds],
-  );
-
+  const {
+    handleEdgesChange,
+    handleNodeDragStop,
+    handleNodesChange,
+    handleSplitClipToLayers,
+    runHudScope,
+    selectedNodeIds,
+  } = useCanvasWorkspaceController({
+    nodes,
+    setNodes,
+    onNodesChange,
+    setEdges,
+    onEdgesChange,
+    setSelectedId,
+    timeline,
+    binAssets,
+    importMediaPathsToBin,
+    handleCanvasSelect,
+    newNodeId,
+    takeSnapshot,
+    screenToFlowPosition,
+    setMessage,
+    runActions: { run, runSelection, runSelectionOnly },
+    imageExtensions: IMAGE_DROP_EXTS,
+    videoExtensions: VIDEO_DROP_EXTS,
+    t,
+  });
   // Right-click context menu: open state + item list built from the editing
   // actions above.
   const { menu, menuItems, openNodeMenu, openPaneMenu, closeMenu } = useContextMenu({
