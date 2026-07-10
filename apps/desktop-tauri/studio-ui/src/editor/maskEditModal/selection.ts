@@ -93,6 +93,23 @@ export function replaceSelectionBox<T extends SelectionGeometry>(
   } as T;
 }
 
+/** One selection overlay scene both renderers (SVG/2D canvas and the WGPU
+ * host) consume: the solid draft outline and the marching-ants active
+ * selection are mutually exclusive — a draft always suppresses the ants. */
+export interface SelectionOverlayScene {
+  draft: SelectionGeometry | null;
+  ants: SelectionGeometry | null;
+}
+
+export function buildSelectionOverlayScene(
+  draft: SelectionDraft | null | undefined,
+  active: ActiveSelection | null | undefined,
+): SelectionOverlayScene {
+  if (draft) return { draft, ants: null };
+  if (active) return { draft: null, ants: active };
+  return { draft: null, ants: null };
+}
+
 export function selectionSourceFromToolId(toolId: string): SelectionSource {
   switch (toolId) {
     case "rect":

@@ -64,6 +64,38 @@ describe("buildViewportOverlayScene", () => {
     expect(scene).toBeNull();
   });
 
+  it("suppresses host marching ants while a solid draft outline exists", () => {
+    const withDraft = buildViewportOverlayScene({
+      workspace: "mask",
+      frameDims: { w: 100, h: 100 },
+      previewing: false,
+      doc: emptyMaskDocument(),
+      editingPath: null,
+      selectionDraft: { region: [5, 5, 40, 40], ellipse: false, status: "closed" },
+      activeSelection: { region: [10, 10, 80, 80], ellipse: false },
+      antsPhase: 4,
+      toolId: "rect",
+      rulerLine: null,
+      colorSamples: [],
+    });
+    expect(withDraft?.items.some((item) => item.kind === "marquee") ?? false).toBe(false);
+
+    const withoutDraft = buildViewportOverlayScene({
+      workspace: "mask",
+      frameDims: { w: 100, h: 100 },
+      previewing: false,
+      doc: emptyMaskDocument(),
+      editingPath: null,
+      selectionDraft: null,
+      activeSelection: { region: [10, 10, 80, 80], ellipse: false },
+      antsPhase: 4,
+      toolId: "rect",
+      rulerLine: null,
+      colorSamples: [],
+    });
+    expect(withoutDraft?.items.some((item) => item.kind === "marquee")).toBe(true);
+  });
+
   it("keeps committed mask geometry visible in the mask workspace", () => {
     const scene = buildViewportOverlayScene({
       workspace: "mask",

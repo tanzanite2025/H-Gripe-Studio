@@ -391,13 +391,14 @@ export function MaskEditModal({
         previewing,
         doc: state.current,
         editingPath,
+        selectionDraft,
         activeSelection,
         antsPhase,
         toolId,
         rulerLine,
         colorSamples,
       }),
-    [workspace, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
+    [workspace, selectionDraft, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
   const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
   // All in-flight pointer gesture state (drags, picked sources, pending
@@ -876,6 +877,7 @@ export function MaskEditModal({
       cropDraft,
       cropRegion: null,
       targetBounds: workspace === "image" ? displayTargetBounds : null,
+      selectionDraft,
       activeSelection,
       antsPhase,
       gestures,

@@ -1,4 +1,4 @@
-import type { ActiveSelection, SelectionGeometry, SelectionPoint, SelectionDraft } from "./selection";
+import { buildSelectionOverlayScene, type ActiveSelection, type SelectionGeometry, type SelectionPoint, type SelectionDraft } from "./selection";
 
 interface SelectionOverlayProps {
   dims: { w: number; h: number };
@@ -81,12 +81,13 @@ function SelectionShape({
 
 export function SelectionOverlay({ dims, draft = null, active = null, phase = 0 }: SelectionOverlayProps) {
   if (dims.w <= 0 || dims.h <= 0) return null;
-  const visibleSelection = draft ?? active;
+  const scene = buildSelectionOverlayScene(draft, active);
+  const visibleSelection = scene.draft ?? scene.ants;
   if (!visibleSelection) return null;
   const selection = normalizeSelection(visibleSelection);
   if (!selection) return null;
 
-  if (draft) {
+  if (scene.draft) {
     return (
       <svg
         className="mask-selection-overlay"

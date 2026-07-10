@@ -13,7 +13,7 @@ import type { TargetBounds } from "../studioTarget";
 import { hexToRgb } from "./ColorPicker";
 import { flattenEditPath } from "./pathGeometry";
 import type { PointerGestures } from "./pointer/types";
-import type { ActiveSelection } from "./selection";
+import { buildSelectionOverlayScene, type ActiveSelection, type SelectionDraft } from "./selection";
 import {
   paintAnchorDraft,
   paintCloneSource,
@@ -52,6 +52,7 @@ export interface OverlaySceneArgs {
   doc: MaskDocument;
   /** Index of the path op being anchor-re-edited on the active layer. */
   editingPath: number | null;
+  selectionDraft?: SelectionDraft | null;
   activeSelection: ActiveSelection | null;
   /** Marching-ants dash phase in surface pixels; advances over time so the
    * committed marquee's ants flow. */
@@ -66,7 +67,8 @@ export interface OverlaySceneArgs {
  * screen pixel wide at any zoom instead of scaling with a document-size
  * canvas. Live drags stay on the canvas for zero-latency feedback. */
 export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverlayScene | null {
-  const { workspace, frameDims, previewing, doc, editingPath, activeSelection, antsPhase, toolId, rulerLine, colorSamples } = args;
+  const { workspace, frameDims, previewing, doc, editingPath, selectionDraft, activeSelection, antsPhase, toolId, rulerLine, colorSamples } = args;
+  const selectionScene = buildSelectionOverlayScene(selectionDraft, activeSelection);
   if (frameDims.w <= 0 || frameDims.h <= 0) return null;
   const items: ViewportOverlayItem[] = [];
   let animatedSelection = false;
@@ -118,18 +120,18 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
       });
     }
   }
-  if (activeSelection && workspace === "mask") {
-    if (activeSelection.polygon) {
+  if (selectionScene.ants && workspace === "mask") {
+    if (selectionScene.ants.polygon) {
       // Polygon lasso selections are painted on the DOM edit canvas instead
       // of the host overlay. The canvas sits above both PNG and native WGPU
       // underlays, so closing the lasso cannot disappear while the host
       // surface catches up or lacks polygon-dash support.
     } else {
-      const [x0, y0, x1, y1] = activeSelection.region;
+      const [x0, y0, x1, y1] = selectionScene.ants.region;
       items.push({
         kind: "marquee",
         region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
-        ...(activeSelection.ellipse ? { ellipse: true } : null),
+        ...(selectionScene.ants.ellipse ? { ellipse: true } : null),
       });
     }
     animatedSelection = true;
@@ -209,6 +211,7 @@ export interface StagePaintArgs {
   cropDraft: [number, number, number, number] | null;
   cropRegion: [number, number, number, number] | null;
   targetBounds: TargetBounds | null;
+  selectionDraft?: SelectionDraft | null;
   activeSelection: ActiveSelection | null;
   antsPhase: number;
   gestures: PointerGestures;
@@ -247,10 +250,12 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     cropDraft,
     cropRegion,
     targetBounds,
+    selectionDraft,
     activeSelection,
     antsPhase,
     gestures,
   } = args;
+  const selectionScene = buildSelectionOverlayScene(selectionDraft, activeSelection);
   ctx.clearRect(0, 0, dims.w, dims.h);
 
   if (overlayOnly) {
@@ -323,11 +328,11 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     if (!(workspace === "image" && (tool.id === "rect" || tool.id === "ellipse"))) {
       paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse", antsPhase);
     }
-  } else if (activeSelection?.polygon && workspace !== "image") {
-    paintLassoLoop(ctx, activeSelection.polygon, true, antsPhase);
-  } else if (activeSelection && workspace !== "image" && !underlay && !presented) {
-    const [x0, y0, x1, y1] = activeSelection.region;
-    paintMarquee(ctx, [x0, y0], [x1, y1], activeSelection.ellipse, antsPhase);
+  } else if (selectionScene.ants?.polygon && workspace !== "image") {
+    paintLassoLoop(ctx, selectionScene.ants.polygon, true, antsPhase);
+  } else if (selectionScene.ants && workspace !== "image" && !underlay && !presented) {
+    const [x0, y0, x1, y1] = selectionScene.ants.region;
+    paintMarquee(ctx, [x0, y0], [x1, y1], selectionScene.ants.ellipse, antsPhase);
   }
   const pl = gestures.patchLoop;
   if (pl) {
