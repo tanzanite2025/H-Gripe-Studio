@@ -754,6 +754,62 @@ mod tests {
     }
 
     #[test]
+    fn hidden_base_keeps_a_transformed_placed_layer_visible() {
+        // Hiding the opened base layer must not blank a moved placed layer:
+        // the placed layer still draws its own source through its transform.
+        let source = RgbaImage::from_pixel(8, 8, Rgba([255, 0, 0, 255]));
+        let mut load = |_: &str| Ok(RgbaImage::from_pixel(4, 4, Rgba([0, 255, 0, 255])));
+        let doc = |base_visible: bool, dx: f64| {
+            json!({
+                "layers": [
+                    {
+                        "kind": "mask",
+                        "visible": base_visible,
+                        "opacity": 1.0,
+                        "blend": "normal",
+                        "ops": []
+                    },
+                    {
+                        "kind": "mask",
+                        "visible": true,
+                        "opacity": 1.0,
+                        "blend": "normal",
+                        "ops": [
+                            {
+                                "type": "source_image",
+                                "source": { "path": "green.png", "width": 4, "height": 4 },
+                                "placement": [2.0, 2.0, 6.0, 6.0]
+                            },
+                            { "type": "transform", "dx": dx, "dy": 0.0 }
+                        ]
+                    }
+                ]
+            })
+        };
+        for (name, base_visible, dx) in [
+            ("base visible, unmoved", true, 0.0),
+            ("base hidden, unmoved", false, 0.0),
+            ("base visible, moved", true, 1.0),
+            ("base hidden, moved", false, 1.0),
+        ] {
+            let out = composite_image_document_with_sources(
+                &source,
+                &doc(base_visible, dx),
+                8,
+                8,
+                8,
+                &mut load,
+            )
+            .expect("composite");
+            let green = out.pixels().filter(|p| p.0 == [0, 255, 0, 255]).count();
+            assert_eq!(green, 16, "placed layer pixels missing: {name}");
+            let opaque = out.pixels().filter(|p| p.0[3] > 0).count();
+            let expected = if base_visible { 64 } else { 16 };
+            assert_eq!(opaque, expected, "unexpected coverage: {name}");
+        }
+    }
+
+    #[test]
     fn missing_layer_stack_keeps_the_source() {
         let source = RgbaImage::from_pixel(1, 1, Rgba([10, 20, 30, 40]));
         assert_eq!(
