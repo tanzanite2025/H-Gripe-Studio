@@ -5,9 +5,11 @@
 // (target flip) applies the requested view before its first frame.
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openMockViewportCount, registerLayeredAsset } from "../bridge/viewport";
+import { registerLayeredAsset } from "../bridge/viewport";
+import type { MockViewportClient } from "../bridge/viewport/mock";
+import { installMockViewportClient, resetViewportClient } from "../bridge/viewport/testing";
 import { useViewportUnderlay } from "./useViewportUnderlay";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 import { IDENTITY_VIEW, type ViewportViewState } from "./view";
@@ -32,9 +34,16 @@ function stubRect(el: HTMLElement, width = 640, height = 640) {
   } as DOMRect);
 }
 
+let viewportClient: MockViewportClient;
+
+beforeEach(() => {
+  viewportClient = installMockViewportClient();
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  resetViewportClient();
 });
 
 describe("useViewportUnderlay view state", () => {
@@ -45,9 +54,9 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(result.current.settled).toBe(true));
     expect(result.current.underlay).toMatch(/^data:image\//);
     expect(result.current.dims).toEqual({ w: 640, h: 640 });
-    expect(openMockViewportCount()).toBe(1);
+    expect(viewportClient.openViewportCount()).toBe(1);
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("keeps dims stable across zoom/pan re-renders", async () => {
@@ -69,7 +78,7 @@ describe("useViewportUnderlay view state", () => {
     // `frameView` reports the window the presented frame was rendered for.
     await waitFor(() => expect(result.current.frameView).toEqual(zoomed));
     expect(result.current.dims).toEqual({ w: 640, h: 640 });
-    expect(openMockViewportCount()).toBe(1);
+    expect(viewportClient.openViewportCount()).toBe(1);
     unmount();
   });
 
@@ -89,9 +98,9 @@ describe("useViewportUnderlay view state", () => {
     });
     await waitFor(() => expect(result.current.settled).toBe(true));
     expect(result.current.dims).toEqual({ w: 640, h: 640 });
-    expect(openMockViewportCount()).toBe(1);
+    expect(viewportClient.openViewportCount()).toBe(1);
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("renders a target source directly, without the resource registry", async () => {
@@ -112,7 +121,7 @@ describe("useViewportUnderlay view state", () => {
     // Reference targets skip path registration entirely.
     expect(files.registerResource).not.toHaveBeenCalled();
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("settles null on an unregistered image_layer target", async () => {
@@ -126,7 +135,7 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(result.current.settled).toBe(true));
     expect(result.current.underlay).toBeNull();
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("exposes the open host and re-renders on a presentability flip", async () => {
@@ -152,10 +161,10 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() =>
       expect(commands).toContainEqual({ kind: "set_presented", presented: false }),
     );
-    expect(openMockViewportCount()).toBe(1);
+    expect(viewportClient.openViewportCount()).toBe(1);
     expect(result.current.underlay).toMatch(/^data:image\//);
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("places the surface before the first frame so WGPU does not force a second render", async () => {
@@ -196,7 +205,7 @@ describe("useViewportUnderlay view state", () => {
     expect(result.current.backend?.actual).toBe("wgpu");
     expect(renderFrame).toHaveBeenCalledTimes(1);
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("re-presents a live view change as a GPU crop when a frame is on the surface", async () => {
@@ -244,7 +253,7 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(presentView).toHaveBeenCalledWith(zoomed));
     await waitFor(() => expect(result.current.frameView).toEqual(zoomed));
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("skips the live-view fast path while no frame is on the surface", async () => {
@@ -277,7 +286,7 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(result.current.settled).toBe(true));
     expect(result.current.underlay).toBeNull();
     expect(result.current.dims).toBeNull();
-    expect(openMockViewportCount()).toBe(0);
+    expect(viewportClient.openViewportCount()).toBe(0);
     unmount();
   });
 });

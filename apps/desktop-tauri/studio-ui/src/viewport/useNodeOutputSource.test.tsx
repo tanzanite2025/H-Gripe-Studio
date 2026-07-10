@@ -5,9 +5,10 @@
 // stays the source.
 
 import { renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openMockViewportCount } from "../bridge/viewport";
+import type { MockViewportClient } from "../bridge/viewport/mock";
+import { installMockViewportClient, resetViewportClient } from "../bridge/viewport/testing";
 import { useNodeOutputSource } from "./useNodeOutputSource";
 import { useViewportUnderlay } from "./useViewportUnderlay";
 
@@ -17,8 +18,15 @@ vi.mock("../bridge/files", () => ({
   registerResource: vi.fn(async (path: string) => ({ id: `res-${path}`, path })),
 }));
 
+let viewportClient: MockViewportClient;
+
+beforeEach(() => {
+  viewportClient = installMockViewportClient();
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  resetViewportClient();
 });
 
 describe("useNodeOutputSource", () => {
@@ -33,7 +41,7 @@ describe("useNodeOutputSource", () => {
     await waitFor(() => expect(result.current.underlay.settled).toBe(true));
     expect(result.current.underlay.underlay).toMatch(/^data:image\//);
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("stays a path source without a node id, and undefined without a path", () => {

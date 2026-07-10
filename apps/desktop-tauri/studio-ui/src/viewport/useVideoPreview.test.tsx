@@ -5,10 +5,11 @@
 // sets are skipped, null clears the frame, and unmount closes the host.
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as viewportBridge from "../bridge/viewport";
-import { openMockViewportCount } from "../bridge/viewport";
+import type { MockViewportClient } from "../bridge/viewport/mock";
+import { installMockViewportClient, resetViewportClient } from "../bridge/viewport/testing";
 import { useVideoPreview } from "./useVideoPreview";
 
 // The resource registry is Tauri-only; stub it so the hook takes the render
@@ -17,8 +18,15 @@ vi.mock("../bridge/files", () => ({
   registerResource: vi.fn(async (path: string) => ({ id: `res-${path}`, path })),
 }));
 
+let viewportClient: MockViewportClient;
+
+beforeEach(() => {
+  viewportClient = installMockViewportClient();
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  resetViewportClient();
 });
 
 const still = (path: string) =>
@@ -28,7 +36,7 @@ describe("useVideoPreview coalescing", () => {
   it("opens one viewport lazily and renders the requested frame", async () => {
     const { result, unmount } = renderHook(() => useVideoPreview(320));
     // Never at mount: the viewport opens on the first frame request.
-    expect(openMockViewportCount()).toBe(0);
+    expect(viewportClient.openViewportCount()).toBe(0);
 
     act(() => {
       result.current.showFrame({ target: still("a.png"), gradeDoc: null });
@@ -36,10 +44,10 @@ describe("useVideoPreview coalescing", () => {
     await waitFor(() => expect(result.current.state.pending).toBe(false));
     expect(result.current.state.frame).toMatch(/^data:image\//);
     expect(result.current.state.backend?.actual).toBe("cpu");
-    expect(openMockViewportCount()).toBe(1);
+    expect(viewportClient.openViewportCount()).toBe(1);
 
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("passes video_clip reference targets through without the resource registry", async () => {
@@ -66,7 +74,7 @@ describe("useVideoPreview coalescing", () => {
       timeSec: 0.5,
     });
     unmount();
-    await waitFor(() => expect(openMockViewportCount()).toBe(0));
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
   it("collapses a burst of requests to the newest (latest-wins)", async () => {
