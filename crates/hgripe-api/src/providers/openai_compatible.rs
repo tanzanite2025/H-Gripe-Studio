@@ -1,3 +1,5 @@
+use super::common::output_files::normalized_content_type_or_original;
+use super::common::task_params::{value, value_bool, value_str};
 use crate::credentials::{load_credential_ref, CredentialEntry};
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
@@ -622,7 +624,7 @@ impl OpenAiCompatibleProvider {
         let content_type = headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .map(normalized_content_type);
+            .map(normalized_content_type_or_original);
         let body = response
             .bytes()
             .await
@@ -711,18 +713,6 @@ impl OpenAiCompatibleProvider {
             provider_request_id,
         })
     }
-}
-
-fn value<'a>(task: &'a ApiTask, key: &str) -> Option<&'a Value> {
-    task.params.get(key).or_else(|| task.inputs.get(key))
-}
-
-fn value_str<'a>(task: &'a ApiTask, key: &str) -> Option<&'a str> {
-    value(task, key).and_then(Value::as_str)
-}
-
-fn value_bool(task: &ApiTask, key: &str) -> Option<bool> {
-    value(task, key).and_then(Value::as_bool)
 }
 
 fn multipart_image_from_task(task: &ApiTask, prefix: &str) -> BrokerResult<Option<MultipartImage>> {
@@ -1276,16 +1266,6 @@ fn audio_mime_type_from_extension(extension: &str) -> Option<String> {
         "webm" => Some("audio/webm".to_string()),
         _ => None,
     }
-}
-
-fn normalized_content_type(value: &str) -> String {
-    value
-        .split(';')
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(value)
-        .to_string()
 }
 
 fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry>) -> String {

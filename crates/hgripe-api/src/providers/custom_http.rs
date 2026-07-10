@@ -1,3 +1,7 @@
+use super::common::output_files::{
+    extension_for_content_type, normalized_content_type, CUSTOM_HTTP_EXTRA_EXTENSIONS,
+};
+use super::common::task_params::{value, value_bool, value_str, value_u64};
 use crate::credentials::{load_credential_ref, CredentialEntry};
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
@@ -700,26 +704,6 @@ impl CustomHttpProvider {
     }
 }
 
-fn value<'a>(task: &'a ApiTask, key: &str) -> Option<&'a Value> {
-    task.params.get(key).or_else(|| task.inputs.get(key))
-}
-
-fn value_str<'a>(task: &'a ApiTask, key: &str) -> Option<&'a str> {
-    value(task, key).and_then(Value::as_str)
-}
-
-fn value_bool(task: &ApiTask, key: &str) -> Option<bool> {
-    value(task, key).and_then(Value::as_bool)
-}
-
-fn value_u64(task: &ApiTask, key: &str) -> Option<u64> {
-    match value(task, key)? {
-        Value::Number(number) => number.as_u64(),
-        Value::String(value) => value.trim().parse().ok(),
-        _ => None,
-    }
-}
-
 fn credentials_file(task: &ApiTask) -> Option<&str> {
     value_str(task, "credentials_file")
 }
@@ -1378,7 +1362,9 @@ fn save_bytes_output(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| extension_for_content_type(mime_type.as_deref()));
+        .unwrap_or_else(|| {
+            extension_for_content_type(mime_type.as_deref(), CUSTOM_HTTP_EXTRA_EXTENSIONS)
+        });
 
     write_task_output_bytes(
         value_str(task, "output_dir"),
@@ -1388,37 +1374,6 @@ fn save_bytes_output(
         mime_type.as_deref(),
         &extension,
     )
-}
-
-fn normalized_content_type(content_type: &str) -> Option<String> {
-    content_type
-        .split(';')
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn extension_for_content_type(content_type: Option<&str>) -> String {
-    match content_type.unwrap_or("").to_ascii_lowercase().as_str() {
-        "application/json" => "json",
-        "application/pdf" => "pdf",
-        "application/xml" | "text/xml" => "xml",
-        "audio/mpeg" => "mp3",
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/webm" => "webm",
-        "image/gif" => "gif",
-        "image/jpeg" => "jpg",
-        "image/png" => "png",
-        "image/webp" => "webp",
-        "text/csv" => "csv",
-        "text/html" => "html",
-        "text/plain" => "txt",
-        "video/mp4" => "mp4",
-        "video/webm" => "webm",
-        _ => "bin",
-    }
-    .to_string()
 }
 
 fn resolve_job_id(task: &ApiTask, submit_body: &Value) -> BrokerResult<String> {

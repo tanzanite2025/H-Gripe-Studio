@@ -1,3 +1,5 @@
+use super::common::output_files::{extension_for_content_type, normalized_content_type};
+use super::common::task_params::{value, value_bool, value_str, value_u64};
 use crate::credentials::{load_credential_ref, CredentialEntry};
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
@@ -385,7 +387,7 @@ impl ReplicateProvider {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .or_else(|| extension_from_url(url))
-            .unwrap_or_else(|| extension_for_content_type(mime_type.as_deref()));
+            .unwrap_or_else(|| extension_for_content_type(mime_type.as_deref(), &[]));
 
         write_task_output_bytes(
             value_str(task, "output_dir"),
@@ -718,26 +720,6 @@ fn prediction_failed_result(
     }
 }
 
-fn value<'a>(task: &'a ApiTask, key: &str) -> Option<&'a Value> {
-    task.params.get(key).or_else(|| task.inputs.get(key))
-}
-
-fn value_str<'a>(task: &'a ApiTask, key: &str) -> Option<&'a str> {
-    value(task, key).and_then(Value::as_str)
-}
-
-fn value_bool(task: &ApiTask, key: &str) -> Option<bool> {
-    value(task, key).and_then(Value::as_bool)
-}
-
-fn value_u64(task: &ApiTask, key: &str) -> Option<u64> {
-    match value(task, key)? {
-        Value::Number(number) => number.as_u64(),
-        Value::String(value) => value.trim().parse().ok(),
-        _ => None,
-    }
-}
-
 fn merge_extra_body(task: &ApiTask, body: &mut Map<String, Value>) -> BrokerResult<()> {
     let Some(extra_body) = value(task, "extra_body") else {
         return Ok(());
@@ -978,34 +960,6 @@ fn merge_task_param(params: &mut BTreeMap<String, Value>, key: String, value: Va
 
 fn value_is_blank_string(value: &Value) -> bool {
     value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
-fn normalized_content_type(content_type: &str) -> Option<String> {
-    content_type
-        .split(';')
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn extension_for_content_type(content_type: Option<&str>) -> String {
-    match content_type.unwrap_or("").to_ascii_lowercase().as_str() {
-        "application/json" => "json",
-        "application/pdf" => "pdf",
-        "audio/mpeg" => "mp3",
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/webm" => "webm",
-        "image/gif" => "gif",
-        "image/jpeg" => "jpg",
-        "image/png" => "png",
-        "image/webp" => "webp",
-        "text/plain" => "txt",
-        "video/mp4" => "mp4",
-        "video/webm" => "webm",
-        _ => "bin",
-    }
-    .to_string()
 }
 
 fn normalized_status_value(value: &str) -> String {
