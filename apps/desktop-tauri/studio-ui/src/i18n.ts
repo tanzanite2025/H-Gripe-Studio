@@ -1213,6 +1213,11 @@ export const messages = {
   "models.tabLocal": { en: "Local Models", zh: "本地模型" },
   "models.closeTitle": { en: "Close (Esc)", zh: "关闭 (Esc)" },
   "models.addProfile": { en: "Add profile", zh: "新增配置" },
+  "models.presetsTitle": { en: "Quick add from a provider preset:", zh: "从服务商预设快速添加：" },
+  "models.presetsHint": {
+    en: "everything is prefilled — just paste your API key reference and save",
+    zh: "其余全部预填好——只需填 API key 引用并保存",
+  },
   "models.addModel": { en: "Add local model", zh: "新增本地模型" },
   "models.importLegacy": { en: "Import H-Gripe profiles", zh: "导入 H-Gripe 配置" },
   "models.importLegacyTitle": {

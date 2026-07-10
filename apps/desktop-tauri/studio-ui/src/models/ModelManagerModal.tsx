@@ -36,6 +36,7 @@ import {
   type ModelCapability,
 } from "./backendRegistry";
 import { probeLocalModelHealth, testApiProfileHealth } from "./backendHealth";
+import { API_PROFILE_PRESETS, profileFromPreset } from "./apiProfilePresets";
 
 // The system "Models / APIs" manager modal
 // (docs/plans/active/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md): one global surface
@@ -260,6 +261,23 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   {t("models.importLegacy")}
                 </button>
                 <span className="muted">{message}</span>
+              </div>
+              <div className="model-manager-presets">
+                <span className="muted">{t("models.presetsTitle")}</span>
+                <div className="model-manager-preset-cards">
+                  {API_PROFILE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setEditingApi(profileFromPreset(preset, registry))}
+                      title={preset.base_url}
+                    >
+                      <strong>{preset.display_name}</strong>
+                      <span className="muted">{preset.provider_kind}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="muted">{t("models.presetsHint")}</span>
               </div>
               {apiProfiles.length === 0 && (
                 <p className="muted">{t("models.emptyApi")}</p>
