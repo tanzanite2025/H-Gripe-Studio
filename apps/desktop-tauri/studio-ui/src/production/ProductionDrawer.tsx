@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useT, type MsgKey } from "../i18n";
-import { ClipPropertiesPanel } from "./ClipPropertiesPanel";
 import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import type { DrawerMode } from "./drawerState";
 import {
@@ -9,15 +8,14 @@ import {
   removeKeyframesAtTime,
   timelineKeyframeGroups,
 } from "./keyframes";
-import { LayerReviewPanel } from "./LayerReviewPanel";
 import { findLayer, type LayeredImageAsset } from "./layeredImage";
 import type { MediaAsset } from "./mediaBin";
 import {
   MediaWorkspacePopover,
-  mediaAssetKindLabel,
   type AddableAsset,
 } from "./MediaWorkspacePopover";
 import { ProgramMonitor } from "./ProgramMonitor";
+import { ProductionInspector } from "./ProductionInspector";
 import type { ProductionTarget } from "./productionTarget";
 import {
   addAssetClip,
@@ -372,7 +370,6 @@ export function ProductionDrawerView({
     assetId: string;
     kind: ClipKind;
   } | null>(null);
-  const [detailTab, setDetailTab] = useState<"details" | "grade">("details");
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [dragAssetId, setDragAssetId] = useState<string | null>(null);
   const [timelineTool, setTimelineTool] = useState<TimelineTool>("select");
@@ -649,94 +646,23 @@ export function ProductionDrawerView({
             />
           </div>
 
-          <aside
-            className="production-detail-panel"
-            style={monitorCardHeight ? { height: `${monitorCardHeight}px`, maxHeight: `${monitorCardHeight}px` } : undefined}
-          >
-            <div className="production-detail-tabs" role="tablist" aria-label={t("drawer.detailTabs")}>
-              <button
-                type="button"
-                className={detailTab === "details" ? "active" : ""}
-                aria-selected={detailTab === "details"}
-                onClick={() => setDetailTab("details")}
-              >
-                {t("drawer.detailsTab")}
-              </button>
-              <button
-                type="button"
-                className={detailTab === "grade" ? "active" : ""}
-                aria-selected={detailTab === "grade"}
-                onClick={() => setDetailTab("grade")}
-              >
-                {t("drawer.gradeTab")}
-              </button>
-            </div>
-            <div className="production-detail-body">
-              {detailTab === "details" ? (
-                layeredAsset ? (
-                  <LayerReviewPanel
-                    asset={layeredAsset}
-                    selectedLayerId={selectedLayerId}
-                    onSelectLayer={onSelectLayer}
-                    visibility={layerVisibility}
-                    onToggleVisibility={onToggleLayerVisibility}
-                    onMergeLayers={onMergeLayers}
-                    onSplitLayer={onSplitLayer}
-                    onToggleProtected={onToggleProtected}
-                  />
-                ) : selectedClip ? (
-                  <>
-                    <dl className="production-detail-list">
-                      <div>
-                        <dt>{t("drawer.detailClip")}</dt>
-                        <dd>{selectedClipAsset?.name ?? selectedClip.assetId}</dd>
-                      </div>
-                      <div>
-                        <dt>{t("drawer.detailKind")}</dt>
-                        <dd>{selectedClip.kind}</dd>
-                      </div>
-                      <div>
-                        <dt>{t("drawer.detailRange")}</dt>
-                        <dd>
-                          {selectedClip.start.toFixed(2)}s - {(selectedClip.start + selectedClip.duration).toFixed(2)}s
-                        </dd>
-                      </div>
-                    </dl>
-                    {selectedClip.kind !== "audio" && clipProperties && onSetClipProperties ? (
-                      <ClipPropertiesPanel
-                        clipName={selectedClipAsset?.name ?? selectedClip.assetId}
-                        props={clipProperties}
-                        clipLocalSec={Math.min(
-                          Math.max(0, playheadSec - selectedClip.start),
-                          selectedClip.duration,
-                        )}
-                        onChange={(next) => onSetClipProperties(selectedClip.id, next)}
-                      />
-                    ) : null}
-                  </>
-                ) : activeAsset ? (
-                  <dl className="production-detail-list">
-                    <div>
-                      <dt>{t("drawer.detailAsset")}</dt>
-                      <dd>{activeAsset.name}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("drawer.detailKind")}</dt>
-                      <dd>{mediaAssetKindLabel(activeAsset.kind, t)}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("drawer.detailPath")}</dt>
-                      <dd title={activeAsset.path}>{activeAsset.path}</dd>
-                    </div>
-                  </dl>
-                ) : (
-                  <p className="production-detail-empty">{t("drawer.detailEmpty")}</p>
-                )
-              ) : (
-                <p className="production-detail-empty">{t("drawer.gradePlaceholder")}</p>
-              )}
-            </div>
-          </aside>
+          <ProductionInspector
+            activeAsset={activeAsset}
+            selectedClip={selectedClip}
+            selectedClipAsset={selectedClipAsset}
+            playheadSec={playheadSec}
+            clipProperties={clipProperties}
+            onSetClipProperties={onSetClipProperties}
+            layeredAsset={layeredAsset}
+            selectedLayerId={selectedLayerId}
+            onSelectLayer={onSelectLayer}
+            layerVisibility={layerVisibility}
+            onToggleLayerVisibility={onToggleLayerVisibility}
+            onMergeLayers={onMergeLayers}
+            onSplitLayer={onSplitLayer}
+            onToggleProtected={onToggleProtected}
+            height={monitorCardHeight}
+          />
           </div>
 
           <div className="production-timeline-shell">
