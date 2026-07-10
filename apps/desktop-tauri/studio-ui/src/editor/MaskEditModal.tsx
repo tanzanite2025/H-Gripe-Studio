@@ -413,10 +413,8 @@ export function MaskEditModal({
     documentDimensions: documentDims,
     dimensions: dims,
     sourceDimensions,
-    needsCompositeSource,
     activeCompositeTransform,
     cropRegion,
-    imageTransform,
     gradePreview,
     frameHidden,
   } = useUnderlayController({
@@ -510,7 +508,7 @@ export function MaskEditModal({
     return resolveTargetBounds(state.current, activeStudioTarget, { dims, layerMaskBounds });
   }, [workspace, state.current, activeStudioTarget, layerMaskBounds, dims.w, dims.h]);
   const targetMaskUnlinked = activeTargetMask?.unlinked === true;
-  const targetDisplayTransform = workspace === "image" && !targetMaskUnlinked ? (needsCompositeSource ? activeCompositeTransform : imageTransform) : null;
+  const targetDisplayTransform = workspace === "image" && !targetMaskUnlinked ? activeCompositeTransform : null;
   const displayTargetBounds = useMemo(() => {
     return transformLayerTargetBounds(targetBounds, targetDisplayTransform, dims);
   }, [targetBounds, targetDisplayTransform, dims.w, dims.h]);
@@ -1229,7 +1227,6 @@ export function MaskEditModal({
             cropView={cropView}
             underlayRef={underlayAnchorRef}
             frameView={frameView}
-            imageTransform={imageTransform}
             backend={viewport.backend}
             overlayOnly={overlayOnly}
             spacePan={spacePan}

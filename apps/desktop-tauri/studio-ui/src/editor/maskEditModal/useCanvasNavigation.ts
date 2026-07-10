@@ -3,9 +3,8 @@
 // are untouched by it — plus the derived viewport view window the underlay
 // renders for, Alt+wheel zoom and the Space hold-to-pan flag.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IDENTITY_VIEW, type ViewportViewState } from "../../viewport/view";
+import { type ViewportViewState } from "../../viewport/view";
 import { FIT_VIEW, WHEEL_ZOOM_STEP, viewWindow, zoomAt, type CanvasView } from "../canvasView";
-import type { TransformParams } from "../maskEdit";
 import type { PointerGestures } from "./pointer/types";
 
 /** Idle time after the last view change before the underlay re-renders at
@@ -31,11 +30,6 @@ export interface CanvasNavigation {
 
 export function useCanvasNavigation(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
-  /** Composed image-workspace layer transform, if any: while a layer is
-   * moved/scaled the displayed underlay must be the full identity frame
-   * (moving a cropped window exposes a hard edge inside the stage), and the
-   * settle debounce is skipped. */
-  imageTransform: TransformParams | null,
   gestures: PointerGestures,
 ): CanvasNavigation {
   const [view, setView] = useState<CanvasView>(FIT_VIEW);
@@ -52,7 +46,6 @@ export function useCanvasNavigation(
   }, [canvasRef]);
 
   const targetViewportView = useMemo(() => {
-    if (imageTransform) return IDENTITY_VIEW;
     const canvas = canvasRef.current;
     // The stage rect bounds what is visible of the transformed frame; the
     // window must cover it even when the frame's base rect is smaller.
@@ -64,7 +57,7 @@ export function useCanvasNavigation(
       stage?.clientWidth ?? 0,
       stage?.clientHeight ?? 0,
     );
-  }, [view, imageTransform]);
+  }, [view]);
   const [viewportView, setViewportView] = useState(targetViewportView);
   useEffect(() => {
     if (
@@ -73,13 +66,9 @@ export function useCanvasNavigation(
       targetViewportView.panY === viewportView.panY
     )
       return;
-    if (imageTransform) {
-      setViewportView(targetViewportView);
-      return;
-    }
     const timer = setTimeout(() => setViewportView(targetViewportView), VIEW_SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [targetViewportView, viewportView, imageTransform]);
+  }, [targetViewportView, viewportView]);
 
   // Alt+wheel / Ctrl+wheel zooms about the cursor with any tool in hand (PS
   // Alt+scroll). A native non-passive listener: React's synthetic `onWheel`

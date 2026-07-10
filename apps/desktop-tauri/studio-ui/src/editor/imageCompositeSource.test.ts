@@ -4,7 +4,6 @@ import {
   imageCompositeTarget,
   imageDocumentFrameHidden,
   imageDocumentHasVisibleSource,
-  imageDocumentNeedsComposite,
   imageLayerContentBounds,
   imageLayerDrawsSource,
   imageLayerHasSourceContent,
@@ -15,27 +14,6 @@ import {
 import { addImageLayer, fitPlacement, initEditState } from "./maskEdit";
 
 describe("image composite viewport source", () => {
-  it("keeps a plain background image on the light underlay path", () => {
-    expect(imageDocumentNeedsComposite(emptyMaskDocument())).toBe(false);
-  });
-
-  it("uses the composite target when the background is hidden", () => {
-    const doc = emptyMaskDocument();
-    doc.layers[0].visible = false;
-    expect(imageDocumentNeedsComposite(doc)).toBe(true);
-  });
-
-  it("uses the composite target for source-backed copied layers", () => {
-    const doc = emptyMaskDocument();
-    doc.layers.push({
-      ...emptyMaskDocument().layers[0],
-      id: "copy",
-      name: "Background copy",
-      ops: [{ type: "source_image" }],
-    });
-    expect(imageDocumentNeedsComposite(doc)).toBe(true);
-  });
-
   it("keeps the image frame visible when the base is hidden but a source copy is visible", () => {
     const doc = emptyMaskDocument();
     doc.layers[0].visible = false;
@@ -169,9 +147,7 @@ describe("image composite viewport source", () => {
     const op = layerSourceImageOp(doc.layers[1]);
     expect(op?.source).toEqual({ path: "C:/imgs/photo.png", width: 800, height: 600 });
     expect(op?.placement).toEqual([400, 300, 1200, 900]);
-    // A placed layer always goes through the compositor, and legacy source
-    // copies never read as placed.
-    expect(imageDocumentNeedsComposite(doc)).toBe(true);
+    // Legacy source copies never read as placed.
     expect(layerSourceImageOp({ ...doc.layers[1], ops: [{ type: "source_image" }] })).toBeNull();
   });
 

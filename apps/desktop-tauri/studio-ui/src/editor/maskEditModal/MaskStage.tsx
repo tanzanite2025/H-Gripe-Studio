@@ -10,7 +10,6 @@ import type { ViewportBackend } from "../../bridge/viewport";
 import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../../viewport/view";
 import { isFitView, viewTransform, type CanvasView } from "../canvasView";
-import type { TransformParams } from "../maskEdit";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 import { SelectionOverlay } from "./SelectionOverlay";
 
@@ -31,10 +30,6 @@ interface MaskStageProps {
   underlayRef: MutableRefObject<HTMLDivElement | null>;
   /** The window `underlay` was rendered for, placing it in the frame. */
   frameView: ViewportViewState;
-  /** Image-workspace layer transform (move tool / free transform), applied
-   * to the underlay as CSS: the render target keeps the source untouched,
-   * so the stage carries the recorded move on the presented window. */
-  imageTransform?: TransformParams | null;
   /** Backend report of the presented underlay frame (fallback contract). */
   backend: ViewportBackend | null;
   /** Transparency preview: hide the underlay (the canvas paints a backdrop). */
@@ -59,22 +54,12 @@ interface MaskStageProps {
   contextActionBar?: ReactNode;
 }
 
-export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, contextActionBar }: MaskStageProps) {
-  // Percentages are of the window element's own size (1/zoom of the frame):
-  // an image-pixel delta is `px / dims · zoom` element-widths, and the image
-  // centre (the op's scale/rotate pivot) sits at `(0.5 − pan) · zoom`.
-  const layerStyle = imageTransform
-    ? {
-        transform: `translate(${(imageTransform.dx / dims.w) * frameView.zoom * 100}%, ${(imageTransform.dy / dims.h) * frameView.zoom * 100}%) rotate(${imageTransform.rotate}deg) scale(${imageTransform.scale})`,
-        transformOrigin: `${(0.5 - frameView.panX) * frameView.zoom * 100}% ${(0.5 - frameView.panY) * frameView.zoom * 100}%`,
-      }
-    : null;
+export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, backend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, contextActionBar }: MaskStageProps) {
   const windowRect = {
     left: `${frameView.panX * 100}%`,
     top: `${frameView.panY * 100}%`,
     width: `${100 / frameView.zoom}%`,
     height: `${100 / frameView.zoom}%`,
-    ...layerStyle,
   };
   const cropRegion = cropView?.region ?? null;
   const cropW = cropRegion ? Math.max(1, cropRegion[2] - cropRegion[0]) : dims.w;
