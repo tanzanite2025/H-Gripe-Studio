@@ -305,6 +305,13 @@ type LayerSplitReport = {
 - Mark as text / product / person / background。
 - Confirm asset。
 
+If `Split layer by lasso` is implemented through the image editor, the lasso
+must follow
+[`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md):
+draw solid draft, explicitly Make Selection, then split from the committed
+active selection. The split action should create a new layer or new asset
+version; it must not treat an uncommitted lasso draft as a stable layer target.
+
 不要把 Review Editor 做成新的顶层产品入口。它应该复用现有图片/PSD 编辑弹窗或未来按需 overlay。
 
 ## 和节点系统的关系

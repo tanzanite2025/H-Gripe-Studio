@@ -3,6 +3,10 @@
 > Status: active planning document.
 > Purpose: define the required mask/layer target model before building
 > Studio Action or any AI-agent-driven quick operation path.
+> Read with:
+> [`IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md),
+> which defines when a drawn solid selection draft becomes an addressable
+> active selection target.
 
 ## Hard Gate
 
@@ -161,11 +165,17 @@ They may convert into each other, but they are not the same thing.
 
 Examples:
 
-- a pen path can create a selection;
+- a pen path can create a selection only after an explicit Make Selection /
+  commit step;
 - a selection can become a layer mask;
 - SAM 2 can produce a mask artifact from points/box/path hints;
 - a mask artifact can be attached to a layer mask target;
 - a node output can open in the image editor, then be edited into a document.
+
+Important distinction: a solid pen/lasso/marquee draft is not a `selection`
+target yet. It is a `SelectionDraft` under
+[`IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+Only the committed marching-ants state may receive a `selectionId`.
 
 ## PS-Aligned Mask Model
 
@@ -188,7 +198,7 @@ The row needs a clear active-target state:
 | --- | --- |
 | Pixel thumbnail active | Brush/adjustments/edit ops affect pixel content or pixel edit stack. |
 | Mask thumbnail active | Brush/pen/SAM/matte ops affect the layer mask. |
-| Selection active | Tools modify the floating selection, not yet a layer mask. |
+| Selection active | Commands modify the committed floating selection, not yet a layer mask. Tool pointer handlers create drafts first; they do not mutate this state until Make Selection commits. |
 | Path active | Anchor/path editing modifies vector path data. |
 
 Do not infer target only from the last clicked tool. The document must store
@@ -321,8 +331,8 @@ Required overlay classes:
 | --- | --- | --- |
 | Target bounds | active target resolver | Quiet outline for selected layer/mask/object. |
 | Transform frame | transform/move tool state | Handles only when direct transform is active. |
-| Selection ants | selection state | Already separate from layer/mask. |
-| Work path | path/lasso/pen state | Solid outline before "make selection"; ants only after selection exists. |
+| Selection ants | active selection state | Already separate from layer/mask; render only after a draft has been committed. |
+| Work path / selection draft | path/lasso/pen/marquee draft state | Solid outline before "make selection"; ants only after selection exists. |
 | Crop frame | crop tool state | Blue crop frame and size panel remain crop-owned. |
 | Mask tint | mask preview/quick-mask state | Must not obscure target bounds. |
 
@@ -706,7 +716,10 @@ ordinary layer by default.
 
 ### 3. Selection Target Protocol
 
-Selections need persistent ids and source metadata:
+Selections need persistent ids and source metadata. This applies only to
+committed active selections, not to solid tool drafts. The draft-to-active
+rules live in
+[`IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
 
 ```ts
 interface SelectionTarget {
@@ -720,6 +733,15 @@ interface SelectionTarget {
 
 The selection may be temporary, but while it exists it should be addressable by
 actions and previews.
+
+Non-negotiable rules:
+
+- `SelectionDraft` has no `selectionId`.
+- Studio Action cannot target an uncommitted draft.
+- `Ctrl+J`, selection-to-mask, feather, invert, and delete consume the
+  committed active selection state, not the tool that drew it.
+- If the user wants to use a path/draft as an action input, the command chain
+  is `path/draft -> Make Selection -> ActiveSelection(selectionId) -> action`.
 
 ### 4. Compute Block Registry
 

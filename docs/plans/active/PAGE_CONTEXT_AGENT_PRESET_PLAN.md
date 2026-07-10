@@ -45,6 +45,9 @@ This plan depends on these contracts:
 
 - [`MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md`](MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md)
   for target-safe mask/layer actions.
+- [`IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md)
+  for the boundary between solid selection drafts and committed selection
+  targets.
 - [`../completed/PROMPT_ASSISTANT_SYSTEM_PLAN.md`](../completed/PROMPT_ASSISTANT_SYSTEM_PLAN.md)
   for the assistant shell and session boundary.
 - [`../completed/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](../completed/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md)
@@ -192,6 +195,10 @@ path targets
 history stack
 current viewport/read-only pixels
 ```
+
+Selection reads mean committed active selection targets only. The assistant must
+not read or act on an uncommitted pen/lasso/marquee draft as if it were a
+selection target.
 
 Allowed actions:
 
@@ -445,7 +452,9 @@ not become part of deterministic graph execution.
 4. Add read-only context summaries per preset.
 5. Add action whitelist enforcement before any write action.
 6. Wire the Image Editor preset only after the layer/mask target model from
-   `MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md` is stable.
+   `MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md` and the selection draft/active
+   selection model from `IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md` are
+   stable.
 7. Wire Canvas preset to existing run scope actions.
 8. Wire Model/API preset to manager health checks and capability reports.
 9. Only then evaluate Goose as an adapter for action calling.

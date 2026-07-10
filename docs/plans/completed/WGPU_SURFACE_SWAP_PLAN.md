@@ -216,6 +216,11 @@ badges truthful on both paths.
   brush/path/marquee canvas — DOM, above the webview hole — keeps compositing
   over the surface unchanged. The selection tint stays host-side
   (`set_mask_overlay`), so it is composited into the presented frame.
+- Selection semantics are not owned by the surface path. DOM canvas fallback
+  and WGPU overlays both consume the same state model from
+  [`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md):
+  solid drafts remain drafts; only committed active selections render as
+  marching ants and become command targets.
 - States the surface cannot represent fall back to the PNG transport without
   re-opening the host: a rotated view (the CSS transform rotates the DOM, not
   the surface window) and the transparency preview hide the surface

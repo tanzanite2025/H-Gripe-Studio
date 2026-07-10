@@ -12,6 +12,12 @@ a clean matte to `Refine Mask Edge` → `PSD Export`. It is **not** an edge-qual
 card: selection lives here, edge cleanup / feather / fringe removal stays in
 `Refine Mask Edge`. The two are never merged.
 
+Terminology boundary: this card's "selection" means a subject mask/matte output
+and its `edit_paths` replay contract. It is not the image editor's active
+marching-ants selection state. For pen/lasso/marquee drafts, Make Selection, and
+`Ctrl+J` / Layer Via Copy inside the image editor, use
+[`../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+
 This document is the card's frozen contract. Phase 1 (manual + magic-wand, no
 model) is specified in full; later phases are listed as planned extensions
 behind the same ports.

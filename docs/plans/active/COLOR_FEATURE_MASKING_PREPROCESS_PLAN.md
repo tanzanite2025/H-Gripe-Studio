@@ -217,6 +217,11 @@ entry surface
   -> accept, edit, rerun, or route downstream
 ```
 
+When `selection.from_colour` is used inside the image editor, it must hand back a
+candidate artifact/draft first. It becomes an active marching-ants selection
+only through the protocol in
+[`IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+
 The preview modal is allowed to expose quick controls, but it stays a review
 surface. If the user needs brush/path/layer-mask correction, it opens the full
 image editor on the same target instead of growing its own editor stack.

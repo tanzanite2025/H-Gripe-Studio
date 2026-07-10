@@ -240,6 +240,14 @@ Examples:
 - API/local model nodes remain graph concepts; only direct canvas interactions
   should become toolbar tools.
 
+Selection-related toolbar tools still follow the shared selection-state
+protocol in
+[`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+Pen, marquee, lasso, wand, object selection, and SAM-assisted variants may draw
+different solid drafts, but they must commit into the same active
+marching-ants selection state before `Ctrl+J`, Delete, Feather, or
+Selection-To-Mask commands can consume them.
+
 ## Implementation Order
 
 1. Freeze this document as the review standard for toolbar PRs.

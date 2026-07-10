@@ -112,12 +112,16 @@ tool, `Z` zoom tool (click in / Alt+click out, cursor-anchored), Space-hold
 pan with any tool, `Ctrl+=` / `Ctrl+-` / `Ctrl+0` (fit) / `Ctrl+1` (100%).
 Follows M7 so 100% zoom on 8K images lands on an interaction that stays cheap.
 
-**M9 — Selection commands.** `Ctrl+A` select all and `Delete` as recorded ops
-(`select_all` / `delete` — history steps, replayed identically by the proxy
-and the Rust run, unlike `Ctrl+D` clear which wipes the stack itself);
-`Ctrl+Shift+D` reselect (restores the last snapshot a clear dropped, itself
-undoable); `Ctrl+J` duplicate the active layer via copy (fresh id, "… copy"
-name, active above the source).
+**M9 — Selection commands.** Implementation authority:
+[`../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+`Ctrl+A` select all and `Delete` as recorded ops (`select_all` / `delete` —
+history steps, replayed identically by the proxy and the Rust run, unlike
+`Ctrl+D` clear which wipes the stack itself); `Ctrl+Shift+D` reselect
+(restores the last snapshot a clear dropped, itself undoable); `Ctrl+J`
+duplicates via copy from the active editable pixel layer, clipped by the active
+marching-ants selection when one exists. `Ctrl+J` must never consume a solid
+selection draft or branch on whether the selection came from pen, marquee,
+lasso, wand, or model assist.
 
 **M10 — Gradient tool.** `G` gradient as a recorded `gradient` op: dragging a
 start → end vector composites a linear selection ramp (full at the start,

@@ -24,6 +24,9 @@ src/editor/
     MaskToolbar.tsx          ← left icon rail (+ flyouts)
     MaskStage.tsx            ← the canvas element + view transform
     stagePainter.ts          ← ALL overlay canvas painting (pure functions)
+    selection.ts             -> selection state contracts: draft vs active
+                               selection shapes shared by shortcuts, context
+                               menus, overlay scene, and commands
     ToolOptionsPanel.tsx     ← per-tool options (top dock)
     PropertiesPanel.tsx      ← active adjustment layer's parameters (PS 属性)
     InfoPanel.tsx            ← mask info (top dock)
@@ -60,7 +63,12 @@ src/editor/
    literals sprinkled across rules are not.
 4. **State model changes go through the reducer** (`maskEditModal/actions.ts`
    \+ `maskEdit.ts`), never by mutating `MaskDocument` in a component.
-5. **Panels receive props, not the whole state.** If a panel needs six new
+5. **Selection tools create drafts; commands consume active selections.** The
+   selection state contract is defined in
+   `../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`. Pointer
+   handlers may create/update/cancel a solid selection draft, but must not own
+   `Ctrl+J`, Delete, Feather, Selection To Mask, or Studio Action behavior.
+6. **Panels receive props, not the whole state.** If a panel needs six new
    props, consider whether the logic belongs in the reducer or a hook instead.
 
 ## Workspaces & the node-result → image-editor pipeline
@@ -87,6 +95,34 @@ node result → PreviewModal (review gate) → "Image editor" entry
 New result-producing cards get this for free by populating the node's result
 fields (`cutoutImagePath` / `imagePath`); never add a bespoke editor entry
 per card.
+
+## Selection state boundary
+
+Selection tools are not selection commands. The top selection row and the left
+toolbar variants (pen, marquee, ellipse, polygon/magnetic lasso, object/quick
+selection, wand/SAM variants) may draw different geometry, but they all feed
+the same state model defined by
+[`../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+
+```text
+tool pointer handler -> SelectionDraft
+SelectionDraft -> Make Selection -> ActiveSelection
+ActiveSelection + active target -> command
+```
+
+Implementation consequences:
+
+- `pointer/*` modules may create/update/cancel a draft, but must not implement
+  `Ctrl+J`, Delete, Feather, Selection To Mask, or other selection commands.
+- `stagePainter.ts` / WGPU overlay code only renders state: solid outline for a
+  draft, marching ants for an active selection.
+- `ContextActionBar` and context menus render command models; capability checks
+  live in the command layer, not in toolbar or painter code.
+- `Ctrl+J` must read the active selection plus the active editable pixel layer.
+  It must not branch on whether the selection came from pen, marquee, lasso,
+  wand, or a model-assisted tool.
+- A solid closed draft is not a `StudioTarget` and cannot be called by Studio
+  Action until it is explicitly committed into an active selection.
 
 ## PS design tokens
 

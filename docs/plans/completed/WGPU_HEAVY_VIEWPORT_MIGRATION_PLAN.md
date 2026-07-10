@@ -283,7 +283,7 @@ WGPU owns:
 - zoom / pan presentation
 - checkerboard / transparency background
 - layer compositing preview
-- lasso / pen / crop overlays where performance matters
+- lasso / pen / crop overlays where performance matters, as rendering only
 
 The edit document remains a lightweight operation document. Do not place pixels
 or base64 previews in React node state.
@@ -407,6 +407,14 @@ The WGPU viewport must consume the same target model as the production drawer:
 
 This prevents the image editor, grade tab, video preview, and timeline from
 inventing separate identity systems.
+
+For image-editor selections, the semantic authority is
+[`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+WGPU may render solid drafts, marching ants, mask/selection tint, and cached
+selection masks at viewport detail, but it must consume the existing overlay
+scene and selection ids. It must not decide whether a pen/lasso/marquee draft
+has become an active selection, and it must not enable `Ctrl+J` or selection
+commands by inspecting renderer state.
 
 ### CPU Fallback
 

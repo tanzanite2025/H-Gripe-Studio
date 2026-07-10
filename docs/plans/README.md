@@ -17,6 +17,7 @@ Use it as the quick project-memory map:
 | [`active/COLOR_FEATURE_MASKING_PREPROCESS_PLAN.md`](active/COLOR_FEATURE_MASKING_PREPROCESS_PLAN.md) | Defines the future colour-space / feature-map preprocess layer for mask and matte work. | Do not implement before the Image Processing card, row ports, shared preview/editor entry points, backend selectors, and preview gate are structurally settled. |
 | [`active/EDGE_ROUTING_VISUAL_SYSTEM_PLAN.md`](active/EDGE_ROUTING_VISUAL_SYSTEM_PLAN.md) | Defines the single-cut 45° chamfer wire style and edge visual states for the node canvas. Steps 1–9 and explicit bend points have landed; selected-area tidy routing remains. | Use before changing edge rendering, edge states, or connection-drag visuals in `@hgripe/flow`. |
 | [`active/GPU_DEVICE_STRATEGY_PLAN.md`](active/GPU_DEVICE_STRATEGY_PLAN.md) | Defines device reporting and deeper device management. The thin reporting track and D3D11VA-to-WGPU zero-copy implementation have landed: shared `DeviceReport`, node/viewport normalizers, UI badges/logs, capability summaries, adapter/hardware probes, registry diagnostics, texture import, and native viewport presentation. | Use for native-machine validation, fallback/runtime hardening, or future cross-kernel scheduling. FFmpeg stays the repo-maintained vendored build under `third_party/ffmpeg`. |
+| [`active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md) | Defines the image editor selection state machine: solid tool drafts, committed marching-ants active selection, and target-safe `Ctrl+J` / selection commands. | Use before changing pen/lasso/marquee/object-selection behavior, selection context menus, layer-via-copy, selection-to-mask, Studio Action selection targets, or WGPU selection overlays. |
 | [`active/MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md`](active/MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md) | Defines the PS-style layer/mask target model required before Studio Action or agent-driven quick operations. | Use before changing mask creation, layer-mask UI, selection targets, SAM 2 action calls, shared preview/editor action flow, or Goose/assistant action integration. |
 | [`active/PAGE_CONTEXT_AGENT_PRESET_PLAN.md`](active/PAGE_CONTEXT_AGENT_PRESET_PLAN.md) | Defines one assistant runtime with page-specific presets, read scopes, and Studio Action whitelists. | Use before adding per-page assistant modes, preview/editor agent actions, Goose adapters, or agent-callable editor/canvas/model actions. |
 | [`active/UI_TYPOGRAPHY_SYSTEM_PLAN.md`](active/UI_TYPOGRAPHY_SYSTEM_PLAN.md) | Defines bilingual typography, font fallback, and dark UI type tokens. | Use before restyling the app shell, node cards, drawer, and editor panels. |
@@ -35,6 +36,9 @@ Use it as the quick project-memory map:
   zero-copy implementation tracks are already landed.
 - `NODE_CARD_PRODUCT_BOUNDARY_PLAN.md` is a living product guardrail rather
   than a finite implementation checklist.
+- Image-editor selection state is now its own guardrail: do not treat a
+  pen/lasso/marquee solid draft as a committed selection target, and do not let
+  `Ctrl+J` branch on the source tool.
 - Colour-feature masking, mask/Studio Action targeting, page-context agent
   presets, and typography remain gated future work. Do not treat them as the
   next implementation task until each document's prerequisites are satisfied.
