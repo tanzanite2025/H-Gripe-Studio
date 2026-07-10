@@ -24,7 +24,6 @@ import {
   assetKindForPath,
   MEDIA_IMPORT_EXTS,
 } from "../production/mediaBin";
-import { defaultClipProperties, type ClipProperties } from "../production/clipProps";
 import {
   assetTarget,
   imageLayerTarget,
@@ -33,25 +32,12 @@ import {
   type ProductionTarget,
 } from "../production/productionTarget";
 import {
-  addAssetClip,
   addAssetToBin,
-  addTimelineTrack,
   clearProductionSelection,
   productionStore,
-  removeAssetFromBin,
-  removeTimelineClip,
-  removeTimelineMarker,
-  removeTimelineTrack,
-  selectBinAsset,
-  selectClip,
-  setClipProperties,
-  splitTimelineClip,
-  toggleTimelineMarker,
-  toggleTimelineTrackHidden,
-  toggleTimelineTrackLock,
   useProductionState,
 } from "../production/productionStore";
-import { findClip, type TrackKind } from "../production/timeline";
+import { findClip } from "../production/timeline";
 
 type Translate = (key: MsgKey, vars?: Record<string, string | number>) => string;
 
@@ -187,75 +173,6 @@ export function useProductionWorkspaceController({
   const handleAddSelectedToBin = useCallback(() => {
     if (addableAsset) addAssetToBin(productionStore, addableAsset);
   }, [addableAsset]);
-
-  const handleRemoveBinAsset = useCallback((id: string) => {
-    removeAssetFromBin(productionStore, id);
-  }, []);
-
-  const handleAddActiveToTimeline = useCallback(() => {
-    const active = productionStore.getState().activeAssetId;
-    if (active) addAssetClip(productionStore, active);
-  }, []);
-
-  const handleAddActiveToTrack = useCallback((trackId: string) => {
-    const active = productionStore.getState().activeAssetId;
-    if (active) addAssetClip(productionStore, active, { trackId });
-  }, []);
-
-  const handleAddTrack = useCallback((kind: TrackKind) => {
-    addTimelineTrack(productionStore, kind);
-  }, []);
-
-  const handleRemoveTrack = useCallback((trackId: string) => {
-    removeTimelineTrack(productionStore, trackId);
-  }, []);
-
-  const handleRemoveClip = useCallback((clipId: string) => {
-    removeTimelineClip(productionStore, clipId);
-  }, []);
-
-  const handleSplitTimelineClip = useCallback((clipId: string, atSec: number) => {
-    splitTimelineClip(productionStore, clipId, atSec);
-  }, []);
-
-  const handleToggleMarker = useCallback((sec: number) => {
-    toggleTimelineMarker(productionStore, sec);
-  }, []);
-
-  const handleRemoveMarker = useCallback((markerId: string) => {
-    removeTimelineMarker(productionStore, markerId);
-  }, []);
-
-  const handleToggleTrackLock = useCallback((trackId: string) => {
-    toggleTimelineTrackLock(productionStore, trackId);
-  }, []);
-
-  const handleToggleTrackHidden = useCallback((trackId: string) => {
-    toggleTimelineTrackHidden(productionStore, trackId);
-  }, []);
-
-  const handleSelectClip = useCallback((clipId: string | null) => {
-    selectClip(productionStore, clipId);
-  }, []);
-
-  const handleSetClipProperties = useCallback(
-    (clipId: string, props: ClipProperties) => {
-      setClipProperties(productionStore, clipId, props);
-    },
-    [],
-  );
-
-  const selectedClipProperties = useMemo(
-    () =>
-      selectedClipId
-        ? (clipProps[selectedClipId] ?? defaultClipProperties())
-        : undefined,
-    [selectedClipId, clipProps],
-  );
-
-  const handleSelectBinAsset = useCallback((assetId: string | null) => {
-    selectBinAsset(productionStore, assetId);
-  }, []);
 
   const productionTarget = useMemo<ProductionTarget | null>(() => {
     if (selectedClipId) {
@@ -460,34 +377,19 @@ export function useProductionWorkspaceController({
     clipProps,
     drawerMode,
     gradeDocs,
-    handleAddActiveToTimeline,
-    handleAddActiveToTrack,
     handleAddExportedFrame,
     handleAddSelectedToBin,
-    handleAddTrack,
     handleCanvasSelect,
     handleImportMediaToBin,
     handleMergeLayers,
-    handleRemoveBinAsset,
-    handleRemoveClip,
-    handleRemoveMarker,
-    handleRemoveTrack,
-    handleSelectBinAsset,
-    handleSelectClip,
-    handleSetClipProperties,
     handleSplitLayer,
-    handleSplitTimelineClip,
     handleToggleLayerVisibility,
-    handleToggleMarker,
     handleToggleProtected,
-    handleToggleTrackHidden,
-    handleToggleTrackLock,
     importMediaPathsToBin,
     layeredAsset,
     layerVisibility,
     productionTarget,
     selectedClipId,
-    selectedClipProperties,
     selectedLayerId,
     setSelectedLayerId,
     timeline,
