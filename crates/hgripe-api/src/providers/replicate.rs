@@ -1,6 +1,7 @@
+use super::common::credentials::resolve_credentials;
 use super::common::output_files::{extension_for_content_type, normalized_content_type};
 use super::common::task_params::{value, value_bool, value_str, value_u64};
-use crate::credentials::{load_credential_ref, CredentialEntry};
+use crate::credentials::CredentialEntry;
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
 use crate::profiles::{load_provider_profile, ProviderProfile};
@@ -68,7 +69,7 @@ impl ReplicateProvider {
         task: &ApiTask,
         context: &ProviderExecutionContext,
     ) -> BrokerResult<ApiResult> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "replicate")?;
         let (submit_path, submit_body) = build_submit_request(task)?;
         let submit_url = endpoint_url(task, &submit_path, credentials.as_ref());
 
@@ -760,41 +761,12 @@ fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry
     format!("{}{}", base_url.trim_end_matches('/'), path)
 }
 
-fn credentials_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "credentials_file")
-}
-
 fn profiles_file(task: &ApiTask) -> Option<&str> {
     value_str(task, "profiles_file")
 }
 
 fn profile_ref(task: &ApiTask) -> Option<&str> {
     value_str(task, "profile_ref").or_else(|| value_str(task, "provider_profile_ref"))
-}
-
-fn resolve_credentials(task: &ApiTask) -> BrokerResult<Option<CredentialEntry>> {
-    let Some(credential_ref) = task.credentials_ref.as_deref() else {
-        return Ok(None);
-    };
-    let credential_ref = credential_ref.trim();
-    if credential_ref.is_empty() {
-        return Ok(None);
-    }
-
-    let credential =
-        load_credential_ref(credential_ref, credentials_file(task))?.ok_or_else(|| {
-            BrokerError::Provider(format!("credentials_ref '{credential_ref}' was not found"))
-        })?;
-    if let Some(provider) = credential.provider.as_deref() {
-        let provider = provider.trim();
-        if !provider.is_empty() && provider != "replicate" {
-            return Err(BrokerError::Provider(format!(
-                "credentials_ref '{credential_ref}' is for provider '{provider}', not replicate"
-            )));
-        }
-    }
-
-    Ok(Some(credential))
 }
 
 fn resolve_api_key(

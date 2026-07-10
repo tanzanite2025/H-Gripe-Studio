@@ -1,6 +1,7 @@
+use super::common::credentials::resolve_credentials;
 use super::common::output_files::normalized_content_type_or_original;
 use super::common::task_params::{value, value_bool, value_str};
-use crate::credentials::{load_credential_ref, CredentialEntry};
+use crate::credentials::CredentialEntry;
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
 use crate::profiles::{load_provider_profile, ProviderProfile};
@@ -506,7 +507,7 @@ impl OpenAiCompatibleProvider {
         path: &str,
         request_body: Value,
     ) -> BrokerResult<JsonResponse> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "openai_compatible")?;
         let url = endpoint_url(task, path, credentials.as_ref());
         let mut request = self.client.post(url).json(&request_body);
 
@@ -581,7 +582,7 @@ impl OpenAiCompatibleProvider {
         path: &str,
         request_body: Value,
     ) -> BrokerResult<BinaryResponse> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "openai_compatible")?;
         let url = endpoint_url(task, path, credentials.as_ref());
         let mut request = self.client.post(url).json(&request_body);
 
@@ -645,7 +646,7 @@ impl OpenAiCompatibleProvider {
         path: &str,
         form: Form,
     ) -> BrokerResult<JsonResponse> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "openai_compatible")?;
         let url = endpoint_url(task, path, credentials.as_ref());
         let mut request = self.client.post(url).multipart(form);
 
@@ -936,10 +937,6 @@ fn mime_type_from_path(path: &Path) -> Option<String> {
         Some("gif") => Some("image/gif".to_string()),
         _ => None,
     }
-}
-
-fn credentials_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "credentials_file")
 }
 
 fn profiles_file(task: &ApiTask) -> Option<&str> {
@@ -1286,23 +1283,6 @@ fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry
         format!("/{path}")
     };
     format!("{}{}", base_url.trim_end_matches('/'), path)
-}
-
-fn resolve_credentials(task: &ApiTask) -> BrokerResult<Option<CredentialEntry>> {
-    let Some(credential_ref) = task.credentials_ref.as_deref() else {
-        return Ok(None);
-    };
-    let credential_ref = credential_ref.trim();
-    if credential_ref.is_empty() {
-        return Ok(None);
-    }
-
-    let credentials = load_credential_ref(credential_ref, credentials_file(task))?;
-    credentials
-        .ok_or_else(|| {
-            BrokerError::Provider(format!("credentials_ref '{credential_ref}' was not found"))
-        })
-        .map(Some)
 }
 
 fn resolve_api_key(

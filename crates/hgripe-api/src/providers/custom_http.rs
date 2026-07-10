@@ -1,8 +1,9 @@
+use super::common::credentials::resolve_credentials;
 use super::common::output_files::{
     extension_for_content_type, normalized_content_type, CUSTOM_HTTP_EXTRA_EXTENSIONS,
 };
 use super::common::task_params::{value, value_bool, value_str, value_u64};
-use crate::credentials::{load_credential_ref, CredentialEntry};
+use crate::credentials::CredentialEntry;
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
 use crate::profiles::{load_provider_profile, ProviderProfile};
@@ -81,7 +82,7 @@ impl CustomHttpProvider {
     async fn execute_request(&self, task: &ApiTask) -> BrokerResult<ApiResult> {
         let url = value_str(task, "url")
             .ok_or_else(|| BrokerError::Provider("custom_http requires params.url".to_string()))?;
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "custom_http")?;
         let response = self
             .send_task_request(
                 task,
@@ -136,7 +137,7 @@ impl CustomHttpProvider {
         let submit_url = value_str(task, "url").ok_or_else(|| {
             BrokerError::Provider("custom_http async_job requires params.url".to_string())
         })?;
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "custom_http")?;
         let submit_response = tokio::select! {
             response = self.send_task_request(
                 task,
@@ -704,10 +705,6 @@ impl CustomHttpProvider {
     }
 }
 
-fn credentials_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "credentials_file")
-}
-
 fn profiles_file(task: &ApiTask) -> Option<&str> {
     value_str(task, "profiles_file")
 }
@@ -824,31 +821,6 @@ fn merge_task_param(params: &mut BTreeMap<String, Value>, key: String, value: Va
 
 fn value_is_blank_string(value: &Value) -> bool {
     value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
-fn resolve_credentials(task: &ApiTask) -> BrokerResult<Option<CredentialEntry>> {
-    let Some(credential_ref) = task.credentials_ref.as_deref() else {
-        return Ok(None);
-    };
-    let credential_ref = credential_ref.trim();
-    if credential_ref.is_empty() {
-        return Ok(None);
-    }
-
-    let credential =
-        load_credential_ref(credential_ref, credentials_file(task))?.ok_or_else(|| {
-            BrokerError::Provider(format!("credentials_ref '{credential_ref}' was not found"))
-        })?;
-    if let Some(provider) = credential.provider.as_deref() {
-        let provider = provider.trim();
-        if !provider.is_empty() && provider != "custom_http" {
-            return Err(BrokerError::Provider(format!(
-                "credentials_ref '{credential_ref}' is for provider '{provider}', not custom_http"
-            )));
-        }
-    }
-
-    Ok(Some(credential))
 }
 
 fn resolve_api_key(
