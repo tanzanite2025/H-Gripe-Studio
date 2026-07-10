@@ -23,6 +23,7 @@ import {
   activeOps,
   currentHistoryIndex,
   editCount,
+  hasSourceImageContent,
   historySnapshots,
   initEditState,
   type EditState,
@@ -411,6 +412,7 @@ export function MaskEditModal({
     frameView,
     documentDimensions: documentDims,
     dimensions: dims,
+    sourceDimensions,
     needsCompositeSource,
     activeCompositeTransform,
     cropRegion,
@@ -434,6 +436,20 @@ export function MaskEditModal({
   });
   const { view, setView, viewRef, viewBase, spacePan } = nav;
   frameDimsRef.current = dims;
+  // Image workspace: the opened image is the base layer's own source, stated
+  // explicitly on the document — the base layer is a placed layer covering the
+  // full canvas, not an implicit special case. Old documents (and fresh empty
+  // ones) are migrated here, once the source's pixel size is known.
+  const baseLayer = state.current.layers[0];
+  const baseNeedsExplicitSource =
+    workspace === "image" && Boolean(imagePath) && Boolean(baseLayer) && baseLayer.kind !== "adjustment" && !hasSourceImageContent(baseLayer);
+  useEffect(() => {
+    if (!baseNeedsExplicitSource || !imagePath || !sourceDimensions) return;
+    rawDispatch({
+      type: "base_source",
+      source: { path: imagePath, width: sourceDimensions.w, height: sourceDimensions.h },
+    });
+  }, [baseNeedsExplicitSource, imagePath, sourceDimensions]);
   // Image workspace: an OS file dropped onto the editor becomes its own
   // placed layer — the layer records the image resource and a contain-fit
   // centred placement rect, so it composites within its own bounds on the

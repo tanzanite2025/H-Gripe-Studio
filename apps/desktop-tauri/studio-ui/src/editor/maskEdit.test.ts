@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeOps,
+  addAdjustmentLayer,
   addBrushStroke,
   addLayer,
   addMatteStroke,
@@ -25,6 +26,7 @@ import {
   removeLayer,
   removeOp,
   setActiveLayer,
+  setCanvasSize,
   setLayerBlend,
   setLayerGroup,
   setLayerGroups,
@@ -36,6 +38,7 @@ import {
   undo,
   updateOpAmount,
   updatePathAnchors,
+  withExplicitBaseSource,
 } from "./maskEdit";
 import { type BrushStroke } from "../contracts/maskOps";
 import { type MaskDocument } from "../contracts/maskDocument";
@@ -434,6 +437,33 @@ describe("maskEdit reducer-style helpers", () => {
       },
     ]);
     expect(s.current.layers[1].mask).toBeUndefined();
+  });
+
+  it("gives the base layer an explicit full-canvas source_image op across the whole history", () => {
+    let s = initEditState();
+    s = addBrushStroke(s, stroke("m"));
+    const source = { path: "C:/img/base.png", width: 800, height: 600 };
+    const migrated = withExplicitBaseSource(s, source);
+    for (const doc of [migrated.current, ...migrated.past]) {
+      expect(doc.layers[0].ops[0]).toEqual({ type: "source_image", source, placement: [0, 0, 800, 600] });
+    }
+    // Existing ops stay after the source op.
+    expect(migrated.current.layers[0].ops).toHaveLength(2);
+    // Idempotent: a second migration is a no-op (same reference).
+    expect(withExplicitBaseSource(migrated, source)).toBe(migrated);
+  });
+
+  it("explicit base source uses the document canvas for the placement when set", () => {
+    let s = initEditState();
+    s = setCanvasSize(s, { w: 400, h: 300, resample: "bilinear" });
+    const migrated = withExplicitBaseSource(s, { path: "a.png", width: 800, height: 600 });
+    expect(migrated.current.layers[0].ops[0]).toMatchObject({ placement: [0, 0, 400, 300] });
+  });
+
+  it("explicit base source skips adjustment base layers and layers that already state a source", () => {
+    const adj = addAdjustmentLayer(initEditState(), "levels");
+    const adjBase = { past: [], future: [], current: { ...adj.current, layers: adj.current.layers.slice(1) } };
+    expect(withExplicitBaseSource(adjBase, { path: "a.png", width: 8, height: 8 })).toBe(adjBase);
   });
 
   it("renames a layer (undoable) and ignores blank or unchanged names", () => {

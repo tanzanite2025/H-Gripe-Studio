@@ -40,6 +40,7 @@ import {
   updateOpAmount,
   updateOpTransform,
   updatePathAnchors,
+  withExplicitBaseSource,
   type EditState,
   type LayerCopySelection,
   type TransformParams,
@@ -81,6 +82,7 @@ export type MaskEditAction =
   | { type: "path_anchors"; index: number; points: EditPathPoint[] }
   | { type: "layer_add"; name?: string }
   | { type: "layer_add_image"; source: LayerImageSource; canvas: { w: number; h: number }; name?: string }
+  | { type: "base_source"; source: LayerImageSource }
   | { type: "layer_add_adjustment"; adjType: AdjustmentType; name?: string }
   | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
   | { type: "layer_remove"; index: number }
@@ -148,6 +150,8 @@ export function maskEditReducer(state: EditState, action: MaskEditAction): EditS
       return addLayer(state, action.name);
     case "layer_add_image":
       return addImageLayer(state, action.source, action.canvas, action.name);
+    case "base_source":
+      return withExplicitBaseSource(state, action.source);
     case "layer_add_adjustment":
       return addAdjustmentLayer(state, action.adjType, action.name);
     case "layer_adjustment":
