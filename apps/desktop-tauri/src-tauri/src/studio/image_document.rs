@@ -897,6 +897,64 @@ mod tests {
     }
 
     #[test]
+    fn explicit_full_canvas_base_source_matches_the_implicit_base() {
+        // The de-specialised base layer states its own source and a
+        // full-canvas placement; the composite must be identical to the
+        // legacy implicit "index 0 draws the shared image" layer.
+        let mut source = RgbaImage::from_pixel(8, 6, Rgba([255, 0, 0, 255]));
+        source.put_pixel(2, 3, Rgba([0, 0, 255, 255]));
+        let upper = json!({
+            "kind": "mask",
+            "visible": true,
+            "opacity": 1.0,
+            "blend": "normal",
+            "ops": [
+                {
+                    "type": "source_image",
+                    "source": { "path": "green.png", "width": 2, "height": 2 },
+                    "placement": [1.0, 1.0, 3.0, 3.0]
+                },
+                { "type": "transform", "dx": 1.0, "dy": 0.0 }
+            ]
+        });
+        let implicit = json!({
+            "layers": [
+                { "kind": "mask", "visible": true, "opacity": 1.0, "blend": "normal", "ops": [] },
+                upper.clone()
+            ]
+        });
+        let explicit = json!({
+            "layers": [
+                {
+                    "kind": "mask",
+                    "visible": true,
+                    "opacity": 1.0,
+                    "blend": "normal",
+                    "ops": [
+                        {
+                            "type": "source_image",
+                            "source": { "path": "base.png", "width": 8, "height": 6 },
+                            "placement": [0.0, 0.0, 8.0, 6.0]
+                        }
+                    ]
+                },
+                upper
+            ]
+        });
+        let base = source.clone();
+        let mut load = move |path: &str| match path {
+            "base.png" => Ok(base.clone()),
+            "green.png" => Ok(RgbaImage::from_pixel(2, 2, Rgba([0, 255, 0, 255]))),
+            other => Err(format!("unexpected source {other}")),
+        };
+        let a = composite_image_document_with_sources(&source, &implicit, 8, 6, 8, &mut load)
+            .expect("implicit base composite");
+        let b = composite_image_document_with_sources(&source, &explicit, 8, 6, 8, &mut load)
+            .expect("explicit base composite");
+        assert_eq!(a, b);
+    }
+
+    #[test]
     fn missing_layer_stack_keeps_the_source() {
         let source = RgbaImage::from_pixel(1, 1, Rgba([10, 20, 30, 40]));
         assert_eq!(

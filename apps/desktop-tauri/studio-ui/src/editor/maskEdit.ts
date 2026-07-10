@@ -749,6 +749,30 @@ export function hasSourceImageContent(layer: MaskLayer): boolean {
   return layer.kind !== "adjustment" && layer.ops.some((op) => op.type === SOURCE_IMAGE_OP_TYPE);
 }
 
+/** Give the base layer an explicit `source_image` op covering the full canvas,
+ * so every pixel layer states its own source and placement and no renderer
+ * needs an "index 0 draws the shared image" special case. Applies across the
+ * whole history (not undoable), and is a no-op when the base layer already
+ * has a `source_image` op or is an adjustment layer. */
+export function withExplicitBaseSource(state: EditState, source: LayerImageSource): EditState {
+  const migrate = (doc: MaskDocument): MaskDocument => {
+    const base = doc.layers[0];
+    if (!base || base.kind === "adjustment" || hasSourceImageContent(base)) return doc;
+    const w = doc.canvas?.w ?? source.width;
+    const h = doc.canvas?.h ?? source.height;
+    const op: EditOp = { type: SOURCE_IMAGE_OP_TYPE, source, placement: [0, 0, w, h] };
+    const layers = doc.layers.map((l, i) => (i === 0 ? { ...l, ops: [op, ...l.ops] } : l));
+    return { ...doc, layers };
+  };
+  const current = migrate(state.current);
+  const past = state.past.map(migrate);
+  const future = state.future.map(migrate);
+  if (current === state.current && past.every((d, i) => d === state.past[i]) && future.every((d, i) => d === state.future[i])) {
+    return state;
+  }
+  return { current, past, future };
+}
+
 function withLayer(state: EditState, index: number, patch: Partial<MaskLayer>): EditState {
   const layer = state.current.layers[index];
   if (!layer) return state;

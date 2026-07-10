@@ -198,6 +198,7 @@ export function useUnderlayController({
     frameView: viewport.frameView,
     documentDimensions,
     dimensions,
+    sourceDimensions,
     needsCompositeSource,
     activeCompositeTransform,
     cropRegion,
