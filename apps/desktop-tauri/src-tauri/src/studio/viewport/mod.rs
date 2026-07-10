@@ -32,6 +32,8 @@ use crate::studio::{
 
 mod registries;
 pub(crate) use registries::*;
+mod proxy_cache;
+use proxy_cache::*;
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -209,87 +211,6 @@ pub(crate) struct ViewportFrame {
     pub width: u32,
     pub height: u32,
     pub backend: ViewportBackend,
-}
-
-/// Identity of a decoded source proxy: which pixels it holds and at what
-/// size. Timestamps are compared through their bit pattern so the key can be
-/// `Eq` without float fuzz.
-#[derive(Clone, PartialEq, Eq)]
-struct ProxyKey {
-    path: String,
-    time_bits: Option<u64>,
-    size: u32,
-}
-
-/// The viewport's cached display-space source: decode + downscale happen once
-/// per (target, size); parameter-only re-renders such as slider drags re-run
-/// only the grade kernel over this proxy.
-struct SourceProxy {
-    key: ProxyKey,
-    srgb: Arc<RgbaImage>,
-    /// The source's full-resolution dimensions, recorded when the decode
-    /// path reports them — the clip-property pass maps source-pixel
-    /// coordinates onto the proxy through this ratio.
-    source_dims: Option<(u32, u32)>,
-}
-
-/// Per-viewport proxy cache depth (Phase 4 bounded frame cache): scrubbing
-/// back and forth across nearby timestamps — or flipping between a layer's
-/// cutout and its mask — reuses recently decoded proxies instead of
-/// re-decoding. Bounded by construction: at most this many proxies per
-/// viewport, viewports capped at [`MAX_VIEWPORTS`].
-const PROXY_CACHE_DEPTH: usize = 8;
-
-/// Presentation view state (WGPU migration Phase 2): `zoom >= 1` selects a
-/// window `1/zoom` the size of the source; `pan_x`/`pan_y` place the window's
-/// top-left corner in normalized source coordinates and are clamped so the
-/// window stays inside the frame. The identity view shows the whole source.
-#[derive(Clone, Copy)]
-struct ViewportView {
-    zoom: f32,
-    pan_x: f32,
-    pan_y: f32,
-}
-
-impl ViewportView {
-    const IDENTITY: ViewportView = ViewportView {
-        zoom: 1.0,
-        pan_x: 0.0,
-        pan_y: 0.0,
-    };
-
-    fn is_identity(self) -> bool {
-        self.zoom <= 1.0 && self.pan_x == 0.0 && self.pan_y == 0.0
-    }
-}
-
-/// Crop `srgb` to the view's window. Cheap relative to decode: the input is
-/// the cached display-space proxy, so a pan/zoom tick re-crops the proxy
-/// without touching the source file.
-fn crop_view(srgb: &RgbaImage, view: ViewportView) -> RgbaImage {
-    let (w, h) = srgb.dimensions();
-    let zoom = view.zoom.max(1.0);
-    let vw = ((w as f32 / zoom).round() as u32).clamp(1, w);
-    let vh = ((h as f32 / zoom).round() as u32).clamp(1, h);
-    let x = ((view.pan_x * w as f32).round() as i64).clamp(0, (w - vw) as i64) as u32;
-    let y = ((view.pan_y * h as f32).round() as i64).clamp(0, (h - vh) as i64) as u32;
-    image::imageops::crop_imm(srgb, x, y, vw, vh).to_image()
-}
-
-/// Proxy decode size for a view: zoomed views decode at a higher detail so
-/// the `1/zoom` window still fills the viewport instead of upscaling a
-/// viewport-sized proxy. Zoom is quantized to powers of two so consecutive
-/// wheel ticks reuse the cached proxy, and the result is capped so a deep
-/// zoom cannot request an unbounded decode. Decoders only ever downscale, so
-/// small sources are unaffected.
-fn proxy_detail_size(size: u32, view: ViewportView) -> u32 {
-    const MAX_PROXY_DIM: u32 = 4096;
-    let zoom = view.zoom.clamp(1.0, 8.0);
-    let mut detail = size;
-    while (detail as f32) < (size as f32) * zoom && detail < MAX_PROXY_DIM {
-        detail = (detail * 2).min(MAX_PROXY_DIM);
-    }
-    detail
 }
 
 struct ViewportState {
@@ -941,91 +862,6 @@ pub(crate) fn ensure_viewport(viewport_id: &str) -> Result<(), String> {
     } else {
         Err(format!("unknown viewport id: {viewport_id}"))
     }
-}
-
-/// Fetch the viewport's cached source proxy for `key`, decoding through
-/// `decode` on a miss and storing the result back onto the viewport (if it is
-/// still open) so the next parameter-only render skips the decode. The cache
-/// is a small per-viewport LRU ([`PROXY_CACHE_DEPTH`]); the registry lock is
-/// never held across a decode.
-fn cached_proxy(
-    id: u64,
-    key: ProxyKey,
-    decode: impl FnOnce() -> Result<RgbaImage, String>,
-) -> Result<Arc<RgbaImage>, String> {
-    {
-        let mut map = viewports()
-            .lock()
-            .map_err(|_| "viewport registry poisoned")?;
-        if let Some(state) = map.get_mut(&id) {
-            if let Some(pos) = state.proxies.iter().position(|proxy| proxy.key == key) {
-                let hit = state.proxies.remove(pos);
-                let srgb = hit.srgb.clone();
-                state.proxies.insert(0, hit);
-                return Ok(srgb);
-            }
-        }
-    }
-    let srgb = Arc::new(decode()?);
-    let mut map = viewports()
-        .lock()
-        .map_err(|_| "viewport registry poisoned")?;
-    if let Some(state) = map.get_mut(&id) {
-        state.proxies.retain(|proxy| proxy.key != key);
-        state.proxies.insert(
-            0,
-            SourceProxy {
-                key,
-                srgb: srgb.clone(),
-                source_dims: None,
-            },
-        );
-        state.proxies.truncate(PROXY_CACHE_DEPTH);
-    }
-    Ok(srgb)
-}
-
-/// [`cached_proxy`] for callers that also need the source's full-resolution
-/// dimensions (the clip-property pass). A hit stored without dimensions (by
-/// the plain path) re-decodes once and upgrades the entry.
-fn cached_proxy_with_dims(
-    id: u64,
-    key: ProxyKey,
-    decode: impl FnOnce() -> Result<(RgbaImage, (u32, u32)), String>,
-) -> Result<(Arc<RgbaImage>, (u32, u32)), String> {
-    {
-        let mut map = viewports()
-            .lock()
-            .map_err(|_| "viewport registry poisoned")?;
-        if let Some(state) = map.get_mut(&id) {
-            if let Some(pos) = state.proxies.iter().position(|proxy| proxy.key == key) {
-                if let Some(dims) = state.proxies[pos].source_dims {
-                    let hit = state.proxies.remove(pos);
-                    let srgb = hit.srgb.clone();
-                    state.proxies.insert(0, hit);
-                    return Ok((srgb, dims));
-                }
-            }
-        }
-    }
-    let (srgb, dims) = decode()?;
-    let srgb = Arc::new(srgb);
-    let mut map = viewports()
-        .lock()
-        .map_err(|_| "viewport registry poisoned")?;
-    if let Some(state) = map.get_mut(&id) {
-        state.proxies.retain(|proxy| proxy.key != key);
-        state.proxies.insert(
-            0,
-            SourceProxy {
-                key,
-                srgb: srgb.clone(),
-                source_dims: Some(dims),
-            },
-        );
-        state.proxies.truncate(PROXY_CACHE_DEPTH);
-    }
-    Ok((srgb, dims))
 }
 
 const VIEWPORT_KINDS: [&str; 3] = ["image_edit", "grade_preview", "video_preview"];
