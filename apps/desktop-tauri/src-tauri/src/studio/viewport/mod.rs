@@ -27,7 +27,7 @@ use serde_json::Value;
 use crate::resource;
 use crate::studio::{
     apply_clip_props_srgb_proxy_preferred, load_image_srgb_proxy, load_image_srgb_proxy_with_dims,
-    parse_grade_doc, ClipPropsBackend, ClipPropsEvaluator, ResolvedClipProps, TemporalAccumulator,
+    parse_grade_doc, ClipPropsBackend, ClipPropsEvaluator, ResolvedClipProps,
 };
 
 mod registries;
@@ -36,6 +36,8 @@ mod overlays;
 pub(crate) use overlays::*;
 mod proxy_cache;
 use proxy_cache::*;
+mod temporal;
+use temporal::*;
 
 /// Hard cap on simultaneously open viewports. Editors open at most a handful;
 /// hitting the cap means a caller is leaking viewports instead of destroying
@@ -246,65 +248,6 @@ struct ViewportState {
     clip_props: Option<(String, ClipPropsEvaluator)>,
     /// Clip-local evaluation time (seconds) for `clip_props`.
     clip_props_time: f64,
-}
-
-struct TemporalChain {
-    acc: TemporalAccumulator,
-    path: String,
-    time_sec: f64,
-}
-
-/// Largest forward playhead step still treated as continuous playback;
-/// anything larger (or backwards, or a paused re-render at the same
-/// timestamp) reads as a seek and restarts the temporal chain.
-const MAX_TEMPORAL_STEP_SEC: f64 = 0.5;
-
-/// Temporal-denoise a graded video frame against the viewport's previous
-/// graded frame when the playhead advanced continuously, then store the
-/// frame as the new feedback state. Discontinuities restart the chain (the
-/// frame passes through untouched). The registry lock is never held across
-/// the blend.
-#[cfg_attr(not(feature = "native-ffmpeg"), allow(dead_code))]
-fn apply_temporal(
-    id: u64,
-    path: &str,
-    time_sec: f64,
-    surface: &mut hgripe_grade::GradeSurface,
-    amount: f32,
-) -> Result<(), String> {
-    if amount <= 0.0 {
-        return Ok(());
-    }
-    let taken = {
-        let mut map = viewports()
-            .lock()
-            .map_err(|_| "viewport registry poisoned")?;
-        match map.get_mut(&id) {
-            Some(state) => state.temporal.take(),
-            None => return Ok(()),
-        }
-    };
-    let continuous = taken.as_ref().is_some_and(|c| {
-        c.path == path && time_sec > c.time_sec && time_sec - c.time_sec <= MAX_TEMPORAL_STEP_SEC
-    });
-    let mut chain = match taken {
-        Some(chain) if continuous => chain,
-        _ => TemporalChain {
-            acc: TemporalAccumulator::new(),
-            path: path.to_string(),
-            time_sec,
-        },
-    };
-    chain.acc.push(surface, amount);
-    chain.path = path.to_string();
-    chain.time_sec = time_sec;
-    let mut map = viewports()
-        .lock()
-        .map_err(|_| "viewport registry poisoned")?;
-    if let Some(state) = map.get_mut(&id) {
-        state.temporal = Some(chain);
-    }
-    Ok(())
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();
