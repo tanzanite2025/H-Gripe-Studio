@@ -666,13 +666,13 @@ export function MaskEditModal({
 
   const disabledMenuAction = () => {};
   const selectionMenuItems: MenuItem[] = [
-    { label: "取消选择", onClick: clearActiveSelection },
-    { label: "选择反向", onClick: disabledMenuAction, disabled: true },
-    { label: "羽化...", onClick: disabledMenuAction, disabled: true },
+    { label: "取消选择", onClick: () => runContextCommand("selection.deselect") },
+    { label: "选择反向", onClick: () => runContextCommand("selection.invert") },
+    { label: "羽化...", onClick: () => runContextCommand("selection.feather") },
     { label: "选择并遮住...", onClick: disabledMenuAction, disabled: true },
     { label: "存储选区...", onClick: disabledMenuAction, disabled: true },
     { label: "建立工作路径...", onClick: disabledMenuAction, disabled: true },
-    { label: "通过拷贝的图层", onClick: disabledMenuAction, disabled: true },
+    { label: "通过拷贝的图层", onClick: () => runContextCommand("layer.duplicate") },
     { label: "通过剪切的图层", onClick: disabledMenuAction, disabled: true },
     { label: "新建图层...", onClick: disabledMenuAction, disabled: true },
     { label: "自由变换", onClick: openFreeTransform },

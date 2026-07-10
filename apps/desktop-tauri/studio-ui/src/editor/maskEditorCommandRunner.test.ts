@@ -93,4 +93,43 @@ describe("runMaskEditorCommand", () => {
     }]);
     expect(cleared).toBe(true);
   });
+
+  it("routes selection commands through the shared resolver", () => {
+    const doc = docWithTwoLayers();
+    const target: StudioTarget = { kind: "selection", canvasId: "canvas", documentId: "doc", selectionId: "sel-1" };
+    const selection: ActiveSelection = {
+      region: [10, 20, 80, 90],
+      ellipse: false,
+      source: "pen",
+      combineMode: "replace",
+    };
+    const { actions, dispatch } = capture();
+    let cleared = false;
+    let toolId = "";
+
+    expect(runMaskEditorCommand("selection.invert", { doc, target, dispatch, activeSelection: selection })).toBe(true);
+    expect(runMaskEditorCommand("selection.deselect", {
+      doc,
+      target,
+      dispatch,
+      activeSelection: selection,
+      clearActiveSelection: () => {
+        cleared = true;
+      },
+    })).toBe(true);
+    expect(runMaskEditorCommand("selection.feather", { doc, target, dispatch, setToolId: (id) => { toolId = id; } })).toBe(true);
+
+    expect(actions).toEqual([{ type: "op", op: { type: "invert" } }]);
+    expect(cleared).toBe(true);
+    expect(toolId).toBe("feather");
+  });
+
+  it("does not deselect when no active selection exists", () => {
+    const doc = docWithTwoLayers();
+    const target: StudioTarget = { kind: "selection", canvasId: "canvas", documentId: "doc", selectionId: "sel-1" };
+    const { actions, dispatch } = capture();
+
+    expect(runMaskEditorCommand("selection.deselect", { doc, target, dispatch })).toBe(false);
+    expect(actions).toEqual([]);
+  });
 });

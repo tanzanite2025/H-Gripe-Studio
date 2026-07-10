@@ -39,4 +39,19 @@ describe("SelectionOverlay", () => {
     expect(light?.getAttribute("style")).toContain("stroke-dashoffset: -4");
     expect(dark?.getAttribute("style")).toContain("stroke-dashoffset: 1");
   });
+
+  it("never renders a solid draft and marching ants at the same time", () => {
+    const { container } = render(
+      <SelectionOverlay
+        dims={{ w: 200, h: 100 }}
+        draft={createBoxSelection([10, 20, 80, 90])}
+        active={{ region: [30, 30, 60, 60], ellipse: false }}
+        phase={4}
+      />,
+    );
+
+    expect(container.querySelector(".mask-selection-draft-path")).not.toBeNull();
+    expect(container.querySelector(".mask-selection-ants-light")).toBeNull();
+    expect(container.querySelector(".mask-selection-ants-dark")).toBeNull();
+  });
 });
