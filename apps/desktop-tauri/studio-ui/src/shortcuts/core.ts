@@ -142,6 +142,7 @@ export function dispatchShortcut(e: KeyboardEvent): boolean {
       if (!handler) continue;
       if (handler(e) === false) continue;
       e.preventDefault();
+      e.stopImmediatePropagation();
       return true;
     }
   }
@@ -152,13 +153,13 @@ function pushScope(entry: ScopeEntry): () => void {
   scopeStack.push(entry);
   if (!listener) {
     listener = (e: KeyboardEvent) => void dispatchShortcut(e);
-    window.addEventListener("keydown", listener);
+    window.addEventListener("keydown", listener, true);
   }
   return () => {
     const i = scopeStack.indexOf(entry);
     if (i >= 0) scopeStack.splice(i, 1);
     if (scopeStack.length === 0 && listener) {
-      window.removeEventListener("keydown", listener);
+      window.removeEventListener("keydown", listener, true);
       listener = null;
     }
   };

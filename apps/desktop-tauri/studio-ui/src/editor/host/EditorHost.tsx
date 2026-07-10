@@ -139,10 +139,9 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
       )}
       {request.editor === "media" && (
         <MediaEditModal
-          key={request.target.nodeId ?? "blank"}
           title={request.target.title}
           imagePath={request.target.imagePath}
-          nodeId={request.target.nodeId}
+          documentId={request.target.nodeId}
           onPickFile={request.onPickFile}
           tabs={request.tabs}
           onSelectTab={request.onSelectTab}

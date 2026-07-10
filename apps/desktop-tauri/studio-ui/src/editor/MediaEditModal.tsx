@@ -19,7 +19,7 @@ interface MediaEditModalProps {
   imagePath?: string | null;
   /** Opening context only. The image editor displays `imagePath`; node
    * context is used by the caller to save/commit back into the graph. */
-  nodeId?: string | null;
+  documentId?: string | null;
   /** "Open image" entry: lands the picked file on a new image card / tab. */
   onPickFile?: () => void;
   /** Open-document tabs (PS-style top strip); clicking switches targets. */
@@ -40,6 +40,7 @@ interface MediaEditModalProps {
 export function MediaEditModal({
   title,
   imagePath,
+  documentId,
   onPickFile,
   tabs,
   onSelectTab,
@@ -49,6 +50,14 @@ export function MediaEditModal({
   onClose,
 }: MediaEditModalProps) {
   const t = useT();
+  const previousDocumentId = useRef(documentId);
+  const editorDocumentKey = useRef(documentId ?? "blank");
+  if (previousDocumentId.current !== documentId) {
+    if (previousDocumentId.current != null || documentId == null) {
+      editorDocumentKey.current = documentId ?? "blank";
+    }
+    previousDocumentId.current = documentId;
+  }
   // The image editor's contract is ImageDocument (image-kernel K1). Until the
   // grade-kernel render path lands (K2), the mask editor remains the canvas,
   // so documents bridge losslessly at this boundary in both directions.
@@ -111,6 +120,7 @@ export function MediaEditModal({
 
   return (
     <MaskEditModal
+      key={editorDocumentKey.current}
       title={title}
       imagePath={imagePath}
       initial={maskInitial}
