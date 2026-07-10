@@ -103,4 +103,60 @@ describe("resolveSelectionCommand", () => {
       action: { type: "op", op: { type: "invert" } },
     });
   });
+
+  it("deselect clears only an active selection and never a draft", () => {
+    expect(resolveSelectionCommand("deselect", {
+      workspace: "image",
+      activeSelection,
+      selectionDraft: null,
+    })).toEqual({ handled: true, clearActiveSelection: true });
+
+    expect(resolveSelectionCommand("deselect", {
+      workspace: "image",
+      activeSelection: null,
+      selectionDraft,
+    })).toEqual({ handled: false });
+  });
+
+  it("feather routes to the feather tool flow without mutating selection state", () => {
+    expect(resolveSelectionCommand("feather", {
+      workspace: "mask",
+      activeSelection,
+      selectionDraft: null,
+    })).toEqual({ handled: true, selectToolId: "feather" });
+  });
+
+  it("resolves Layer Via Copy identically for every selection source", () => {
+    const sources = ["rect_marquee", "ellipse_marquee", "pen", "polygon_lasso", "magnetic_lasso", "mask"] as const;
+    const resolutions = sources.map((source) =>
+      resolveSelectionCommand("duplicate", {
+        workspace: "image",
+        activeSelection: { ...activeSelection, source },
+        selectionDraft: null,
+      }),
+    );
+    for (const [index, resolution] of resolutions.entries()) {
+      expect(resolution).toEqual({
+        handled: true,
+        action: {
+          type: "layer_duplicate",
+          selection: { ...activeSelection, source: sources[index] },
+          includeSourceImage: true,
+        },
+        clearActiveSelection: true,
+      });
+    }
+  });
+
+  it("never lets Layer Via Copy consume an uncommitted draft", () => {
+    expect(resolveSelectionCommand("duplicate", {
+      workspace: "image",
+      activeSelection: null,
+      selectionDraft,
+    })).toEqual({
+      handled: true,
+      action: { type: "layer_duplicate", includeSourceImage: true },
+      clearActiveSelection: false,
+    });
+  });
 });

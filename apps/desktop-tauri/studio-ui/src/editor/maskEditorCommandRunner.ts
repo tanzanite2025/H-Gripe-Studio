@@ -25,6 +25,10 @@ function runSelectionCommand(id: SelectionCommandId, env: MaskEditorCommandEnv):
     selectionDraft: env.selectionDraft ?? null,
   });
   if (!resolution.handled) return false;
+  if (resolution.selectToolId) {
+    if (!env.setToolId) return false;
+    env.setToolId(resolution.selectToolId);
+  }
   if (resolution.action) env.dispatch(resolution.action);
   if (resolution.clearActiveSelection) env.clearActiveSelection?.();
   if (resolution.clearSelectionDraft) env.clearSelectionDraft?.();
@@ -64,8 +68,13 @@ export function runMaskEditorCommand(id: CommandId, env: MaskEditorCommandEnv): 
     case "target.transform":
       setToolId?.("move");
       return Boolean(setToolId);
-    case "selection.toMask":
     case "selection.invert":
+      return runSelectionCommand("invert", env);
+    case "selection.deselect":
+      return runSelectionCommand("deselect", env);
+    case "selection.feather":
+      return runSelectionCommand("feather", env);
+    case "selection.toMask":
     case "path.makeSelection":
     case "ai.selectSubject":
     case "ai.removeBackground":

@@ -334,9 +334,12 @@ The first implementation slice now exists in the image editor code:
   for ordinary paint/path/op actions. Polygon selections must stay polygon
   clips; they must not fall back to only their bounding box.
 - `selectionCommands.ts` owns keyboard/system selection command resolution for
-  Clear, Escape/Cancel, Delete, Invert, and Duplicate. `Ctrl+J` / Layer
-  Duplicate with an active selection is Layer Via Copy and clears the active
-  marching-ants selection after dispatch.
+  Clear, Escape/Cancel, Delete, Invert, Duplicate, Deselect, and Feather.
+  `Ctrl+J` / Layer Duplicate with an active selection is Layer Via Copy and
+  clears the active marching-ants selection after dispatch. The selection
+  context menu's Deselect, Invert, Feather, and Layer Via Copy items route
+  through `runMaskEditorCommand()` and the same resolver, so the menu, the
+  shortcuts, and the Layers panel share one selection command path.
 - `runMaskEditorCommand()` and the Layers panel duplicate button route layer
   duplicate through the same selection command resolver, so shortcuts, context
   actions, and layer-panel actions do not fork selection semantics.

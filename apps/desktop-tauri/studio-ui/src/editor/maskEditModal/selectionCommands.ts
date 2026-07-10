@@ -1,7 +1,14 @@
 import type { MaskEditAction } from "./actions";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 
-export type SelectionCommandId = "clear" | "cancel" | "delete" | "duplicate" | "invert";
+export type SelectionCommandId =
+  | "clear"
+  | "cancel"
+  | "delete"
+  | "duplicate"
+  | "invert"
+  | "deselect"
+  | "feather";
 
 export interface SelectionCommandState {
   workspace: "image" | "mask";
@@ -14,6 +21,7 @@ export interface SelectionCommandResolution {
   action?: MaskEditAction;
   clearActiveSelection?: boolean;
   clearSelectionDraft?: boolean;
+  selectToolId?: string;
 }
 
 export function resolveSelectionCommand(
@@ -46,5 +54,12 @@ export function resolveSelectionCommand(
       };
     case "invert":
       return { handled: true, action: { type: "op", op: { type: "invert" } } };
+    case "deselect":
+      if (activeSelection) return { handled: true, clearActiveSelection: true };
+      return { handled: false };
+    case "feather":
+      // Feather routes to the feather tool's radius/preview flow; the tool
+      // applies the op as a revisable step, clipped by the active selection.
+      return { handled: true, selectToolId: "feather" };
   }
 }

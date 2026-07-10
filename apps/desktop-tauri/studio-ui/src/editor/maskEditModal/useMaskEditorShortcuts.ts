@@ -72,6 +72,7 @@ export function useMaskEditorShortcuts({
       selectionDraft,
     });
     if (!resolution.handled) return false;
+    if (resolution.selectToolId) toolSlots.selectTool(resolution.selectToolId);
     if (resolution.action) dispatch(resolution.action);
     if (resolution.clearActiveSelection) setActiveSelection(null);
     if (resolution.clearSelectionDraft) setSelectionDraft(null);
@@ -134,7 +135,9 @@ export function useMaskEditorShortcuts({
     adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
     fill_dialog: dialogs.openFillDialog,
     image_size: dialogs.openImageSize,
-    feather_dialog: () => toolSlots.selectTool("feather"),
+    feather_dialog: () => {
+      runSelectionCommand("feather");
+    },
     swap_mode: colors.swapColors,
     close_path: () => {
       if (pathEditing.editingPathRef.current != null) {

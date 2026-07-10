@@ -102,6 +102,28 @@ describe("selection protocol helpers", () => {
     });
   });
 
+  it("commits every selection source into the same ActiveSelection contract", () => {
+    const drafts = [
+      createBoxSelection([10, 20, 60, 80], false, "rect_marquee"),
+      createBoxSelection([10, 20, 60, 80], true, "ellipse_marquee"),
+      createPolygonSelection([[10, 10], [70, 10], [40, 50]], "pen"),
+      createPolygonSelection([[10, 10], [70, 10], [40, 50]], "polygon_lasso"),
+      createPolygonSelection([[10, 10], [70, 10], [40, 50]], "magnetic_lasso"),
+      createPolygonSelection([[10, 10], [70, 10], [40, 50]], "mask"),
+    ];
+
+    for (const draft of drafts) {
+      const active = commitSelectionDraft(draft);
+      expect(active.region).toEqual(draft.region);
+      expect(active.ellipse).toBe(draft.ellipse);
+      expect(active.source).toBe(draft.source);
+      expect(active.combineMode).toBe("replace");
+      expect(active.antiAlias).toBe(true);
+      expect(active).not.toHaveProperty("status");
+      if (draft.polygon) expect(active.polygon).toEqual(draft.polygon);
+    }
+  });
+
   it("maps tool ids to selection sources without letting commands depend on the tool", () => {
     expect(selectionSourceFromToolId("rect")).toBe("rect_marquee");
     expect(selectionSourceFromToolId("ellipse")).toBe("ellipse_marquee");
