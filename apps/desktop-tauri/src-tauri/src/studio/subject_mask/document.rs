@@ -15,6 +15,54 @@ pub(super) fn parse_edit_paths(value: Option<&Value>) -> Option<Value> {
     }
 }
 
+/// Trimap unknown-band strokes painted by the Mask-Edit "Matting" tool, read
+/// from `edit_paths.matte_strokes` (same shape as `brush_strokes`: a polyline +
+/// radius). Each becomes a disc-stamped band the matter resolves into soft
+/// alpha. Empty ⇒ matting only runs when the `alpha_matting` flag is set.
+pub(super) fn parse_matte_strokes(edit_paths: Option<&Value>) -> Vec<(Vec<(f32, f32)>, u32)> {
+    let Some(value) = parse_edit_paths(edit_paths) else {
+        return Vec::new();
+    };
+    value
+        .get("matte_strokes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|stroke| {
+            let points = parse_points(stroke.get("points"));
+            if points.is_empty() {
+                return None;
+            }
+            let radius = stroke
+                .get("radius")
+                .and_then(Value::as_f64)
+                .unwrap_or(8.0)
+                .max(0.0) as u32;
+            Some((points, radius))
+        })
+        .collect()
+}
+
+pub(super) fn parse_points(value: Option<&Value>) -> Vec<(f32, f32)> {
+    let Some(Value::Array(items)) = value else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Value::Array(pair) if pair.len() >= 2 => {
+                Some((json_f32(Some(&pair[0]))?, json_f32(Some(&pair[1]))?))
+            }
+            Value::Object(_) => Some((json_f32(item.get("x"))?, json_f32(item.get("y"))?)),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(super) fn json_f32(value: Option<&Value>) -> Option<f32> {
+    value.and_then(Value::as_f64).map(|n| n as f32)
+}
+
 pub(super) fn normalise_edit_paths(value: Option<&Value>) -> Value {
     migrate_edit_paths(parse_edit_paths(value).unwrap_or_else(|| json!({})))
 }
