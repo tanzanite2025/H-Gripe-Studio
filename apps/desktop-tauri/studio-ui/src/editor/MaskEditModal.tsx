@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useViewportUnderlay, type ViewportUnderlaySource } from "../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW } from "../viewport/view";
-import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
+import type { ViewportOverlayScene } from "../bridge/viewport";
 import { probeImageDims, registerResource } from "../bridge/files";
 import {
   ANCHOR_PATH_TOOLS,
@@ -16,8 +16,7 @@ import { parseCombo, useShortcutScope, type ShortcutHandlers } from "../shortcut
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
 import { useT } from "../i18n";
-import { PreviewLane } from "../runtime/previewLane";
-import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
+import { isPreviewableOp } from "./maskMorphology";
 import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
@@ -82,6 +81,7 @@ import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import { opsAlphaBounds } from "./maskMorphology";
 import { useBrushParams } from "./maskEditModal/useBrushParams";
 import { useToolSlots } from "./maskEditModal/useToolSlots";
+import { useMaskPreviewController } from "./maskEditModal/useMaskPreviewController";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
@@ -309,12 +309,20 @@ export function MaskEditModal({
   } = useBrushParams(wandTolerance);
   const [amount, setAmount] = useState(4);
   const [overlayOnly, setOverlayOnly] = useState(false);
-  // Quick-mask (Q): PS-style ruby overlay of the unselected area.
-  const [quickMask, setQuickMask] = useState(false);
-  const [quickProxy, setQuickProxy] = useState<ProxyMask | null>(null);
-  // Morphology preview proxy (grow/shrink/feather/smooth), recomputed by the
-  // preview lane effect below.
-  const [preview, setPreview] = useState<ProxyMask | null>(null);
+  const {
+    quickMask,
+    setQuickMask,
+    quickProxy,
+    preview,
+    previewing,
+    viewportMaskOverlay,
+    setDimensions: setPreviewDimensions,
+  } = useMaskPreviewController({
+    toolId,
+    amount,
+    document: state.current,
+    initialDimensions: state.current.canvas ?? EMPTY_DOCUMENT_DIMS,
+  });
   // Boolean mode the next committed path-selection shape combines with.
   const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
   // PS-style right rail: tabbed dock groups driven by a persisted layout
@@ -341,14 +349,6 @@ export function MaskEditModal({
   // host-side over the rendered frame, so it follows the view window's
   // detail; when no host frame presents (browser preview) the canvas
   // painters below draw the same tint locally.
-  const previewing = isPreviewableOp(toolId) && preview != null;
-  const viewportMaskOverlay = useMemo<ViewportMaskOverlay | null>(() => {
-    const proxy = previewing && preview ? preview : quickMask && quickProxy ? quickProxy : null;
-    if (!proxy) return null;
-    return previewing && preview
-      ? { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [86, 168, 255], alpha: 0.55 }
-      : { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [224, 32, 32], alpha: 0.5, invert: true };
-  }, [previewing, preview, quickMask, quickProxy]);
   // The active rect/ellipse marquee selection (PS-style): marching ants stay
   // visible across tools, subsequent edit steps are confined to it (`clip`),
   // and Ctrl+D / a plain marquee click deselects.
@@ -596,6 +596,9 @@ export function MaskEditModal({
   const documentDims = state.current.canvas ?? sourceDims ?? viewport.dims;
   const dims = documentDims ?? EMPTY_DOCUMENT_DIMS;
   frameDimsRef.current = dims;
+  useEffect(() => {
+    setPreviewDimensions(dims);
+  }, [dims.w, dims.h, setPreviewDimensions]);
   const activeStudioTarget = useMemo(() => {
     const docRef = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
     return resolveActiveTarget(state.current, docRef);
@@ -703,15 +706,6 @@ export function MaskEditModal({
   const { quadDraft, setQuadDraft, cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
   const [, forceRedraw] = useState(0);
 
-  // Preview lane for morphology ops: a live, best-effort proxy render of
-  // grow/shrink/feather/smooth so a slider drag shows roughly what Apply will
-  // do — off the global run lock, latest-wins so rapid drags don't pile up
-  // (docs/cards/editor-resource-model.md § "Four lanes" → Preview).
-  const previewLane = useRef(new PreviewLane());
-  // Persistent proxy render cache (M7): per-layer surfaces are reused across
-  // rebuilds and the composite recomputes dirty tiles only, so a slider drag
-  // or brush commit on a large document stays cheap.
-  const proxyCache = useRef(new ProxyLayerCache());
   // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
   const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
@@ -1067,41 +1061,6 @@ export function MaskEditModal({
   useEffect(() => {
     redraw();
   }, [redraw]);
-
-  // Recompute the morphology preview whenever the active op, its amount, or the
-  // underlying edits change. The compute is cheap (a downscaled proxy) but is
-  // routed through PreviewLane so an in-flight job is superseded by the next
-  // slider tick rather than blocking it.
-  useEffect(() => {
-    if (!isPreviewableOp(toolId)) {
-      setPreview(null);
-      previewLane.current.cancel();
-      return;
-    }
-    let disposed = false;
-    void previewLane.current
-      .run<ProxyMask | null>(async (signal) => {
-        const { mask, scale } = buildProxyMask(state.current, dims, { cache: proxyCache.current });
-        if (signal.cancelled) return null;
-        return applyOp(mask, toolId, Math.max(0, Math.round(amount * scale)));
-      })
-      .then((outcome) => {
-        if (!disposed && outcome.status === "applied" && outcome.value) setPreview(outcome.value);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [toolId, amount, state.current, dims]);
-
-  // Rebuild the quick-mask proxy whenever the overlay is on and the document
-  // changes (cheap: a downscaled rasterisation, and only on committed edits).
-  useEffect(() => {
-    if (!quickMask) {
-      setQuickProxy(null);
-      return;
-    }
-    setQuickProxy(buildProxyMask(state.current, dims, { cache: proxyCache.current }).mask);
-  }, [quickMask, state.current, dims]);
 
   // Commit a closed path (straight anchors; no handles from the UI). The
   // tool name is recorded for provenance — the rasteriser only reads
