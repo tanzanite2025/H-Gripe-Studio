@@ -9,14 +9,6 @@ export interface ImageCompositeDims {
   h: number;
 }
 
-export function imageDocumentNeedsComposite(doc: MaskDocument): boolean {
-  const base = doc.layers[0];
-  if (!base) return false;
-  if (base.kind !== "adjustment" && (base.visible === false || base.opacity < 1 || base.mask)) return true;
-  if (doc.layers.some((layer) => layerSourceImageOp(layer))) return true;
-  return doc.layers.some((layer, index) => index > 0 && imageLayerDrawsSource(layer, index));
-}
-
 /** The layer's `source_image` op when it carries its own image resource or a
  * placement rect — the placed-layer model the compositor must resolve. */
 export function layerSourceImageOp(layer: MaskLayer): (MaskOperation & EditOpBase) | null {
