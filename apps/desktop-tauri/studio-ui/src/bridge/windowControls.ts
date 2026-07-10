@@ -17,7 +17,3 @@ export function toggleMaximizeWindow(): Promise<void> {
 export function closeWindow(): Promise<void> {
   return invokeWindow("window_close");
 }
-
-export function startWindowDrag(): Promise<void> {
-  return invokeWindow("window_start_drag");
-}

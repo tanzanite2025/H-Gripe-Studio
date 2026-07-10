@@ -12,7 +12,12 @@ interface TauriWindow {
   __TAURI__?: {
     core?: { invoke?: Invoke };
     event?: { listen?: Listen };
+    window?: { getCurrentWindow?: () => TauriDesktopWindow };
   };
+}
+
+export interface TauriDesktopWindow {
+  startDragging: () => Promise<void>;
 }
 
 function tauriFrames(): (Window | null)[] | null {
@@ -43,6 +48,14 @@ export function tauriListen(): Listen | null {
   for (const frame of tauriFrames() ?? []) {
     const listen = (frame as unknown as TauriWindow | null)?.__TAURI__?.event?.listen;
     if (listen) return listen;
+  }
+  return null;
+}
+
+export function tauriWindow(): TauriDesktopWindow | null {
+  for (const frame of tauriFrames() ?? []) {
+    const getCurrentWindow = (frame as unknown as TauriWindow | null)?.__TAURI__?.window?.getCurrentWindow;
+    if (getCurrentWindow) return getCurrentWindow();
   }
   return null;
 }
