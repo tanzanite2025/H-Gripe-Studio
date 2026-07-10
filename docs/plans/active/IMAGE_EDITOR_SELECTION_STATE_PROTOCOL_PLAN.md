@@ -343,6 +343,12 @@ The first implementation slice now exists in the image editor code:
 - `runMaskEditorCommand()` and the Layers panel duplicate button route layer
   duplicate through the same selection command resolver, so shortcuts, context
   actions, and layer-panel actions do not fork selection semantics.
+- `buildSelectionOverlayScene()` in `selection.ts` is the one place that
+  decides which selection representation renders: a solid draft outline always
+  suppresses the marching ants. The SVG overlay (`SelectionOverlay`), the 2D
+  canvas fallback (`paintStage`), and the WGPU host scene
+  (`buildViewportOverlayScene`) all consume this shared scene instead of
+  making their own draft/active decisions.
 
 This is still a first command layer, not the final full command registry. The
 remaining long-term work is to move future Feather, Refine Edge, Selection To

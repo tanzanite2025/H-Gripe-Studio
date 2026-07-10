@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSelectionOverlayScene,
   commitSelectionDraft,
   createBoxSelection,
   createPolygonSelection,
@@ -122,6 +123,15 @@ describe("selection protocol helpers", () => {
       expect(active).not.toHaveProperty("status");
       if (draft.polygon) expect(active.polygon).toEqual(draft.polygon);
     }
+  });
+
+  it("builds one overlay scene where a draft outline always suppresses the ants", () => {
+    const draft = createBoxSelection([5, 5, 40, 40]);
+    const active = commitSelectionDraft(createBoxSelection([10, 10, 80, 80]));
+
+    expect(buildSelectionOverlayScene(draft, active)).toEqual({ draft, ants: null });
+    expect(buildSelectionOverlayScene(null, active)).toEqual({ draft: null, ants: active });
+    expect(buildSelectionOverlayScene(null, null)).toEqual({ draft: null, ants: null });
   });
 
   it("maps tool ids to selection sources without letting commands depend on the tool", () => {
