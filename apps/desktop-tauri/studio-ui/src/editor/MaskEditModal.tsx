@@ -33,7 +33,6 @@ import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
 import { catmullRomClosed } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap } from "./maskEditModal/magneticSnap";
-import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
 import "./maskEditModal/maskEditModal.css";
@@ -235,7 +234,6 @@ export function MaskEditModal({
         gestures.patchLoop = null;
         gestures.patchDrag = null;
       }
-      if (id !== "perspective_crop") setQuadDraft(null);
     },
   });
   const {
@@ -371,8 +369,6 @@ export function MaskEditModal({
     requestColorPick,
     sampleUnderlay,
   } = colors;
-  // Ruler measurement: the last committed drag (session-local view read).
-  const [rulerLine, setRulerLine] = useState<RulerLine | null>(null);
   // The committed marquee's marching ants stroke host-side over rendered
   // frames (WGPU migration: interactive overlays on the live surface), so
   // the outline stays one screen pixel wide at any zoom instead of scaling
@@ -394,11 +390,9 @@ export function MaskEditModal({
         selectionDraft,
         activeSelection,
         antsPhase,
-        toolId,
-        rulerLine,
         colorSamples,
       }),
-    [workspace, selectionDraft, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
+    [workspace, selectionDraft, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, colorSamples],
   );
   const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
   // All in-flight pointer gesture state (drags, picked sources, pending
@@ -543,10 +537,10 @@ export function MaskEditModal({
   }, [visibleSelection]);
   const [shapeKind, setShapeKind] = useState<ShapeKind>("polygon");
   const [shapeSides, setShapeSides] = useState(5);
-  // Crop tool: the adjustable rect / perspective-quad drafts and the floating
+  // Crop tool: the adjustable rect draft and the floating
   // panel's controls (see useCropTool).
   const crop = useCropTool(dims, dispatch);
-  const { quadDraft, setQuadDraft, cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
+  const { cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
   const [, forceRedraw] = useState(0);
 
   // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
@@ -665,24 +659,13 @@ export function MaskEditModal({
     setPathMenu(null);
   };
 
-  const disabledMenuAction = () => {};
   const selectionMenuItems: MenuItem[] = [
     { label: "取消选择", onClick: () => runContextCommand("selection.deselect") },
     { label: "选择反向", onClick: () => runContextCommand("selection.invert") },
     { label: "羽化...", onClick: () => runContextCommand("selection.feather") },
-    { label: "选择并遮住...", onClick: disabledMenuAction, disabled: true },
-    { label: "存储选区...", onClick: disabledMenuAction, disabled: true },
-    { label: "建立工作路径...", onClick: disabledMenuAction, disabled: true },
     { label: "通过拷贝的图层", onClick: () => runContextCommand("layer.duplicate") },
-    { label: "通过剪切的图层", onClick: disabledMenuAction, disabled: true },
-    { label: "新建图层...", onClick: disabledMenuAction, disabled: true },
     { label: "自由变换", onClick: openFreeTransform },
-    { label: "变换选区", onClick: disabledMenuAction, disabled: true },
     { label: "填充...", onClick: openFillDialog },
-    { label: "描边...", onClick: disabledMenuAction, disabled: true },
-    { label: "内容识别填充...", onClick: disabledMenuAction, disabled: true },
-    { label: "生成式填充...", onClick: disabledMenuAction, disabled: true },
-    { label: "删除和填充选区", onClick: disabledMenuAction, disabled: true },
   ];
 
   const pathMenuItems: MenuItem[] = [
@@ -872,8 +855,6 @@ export function MaskEditModal({
       shapeKind,
       shapeSides,
       colorSamples,
-      rulerLine,
-      quadDraft,
       cropDraft,
       cropRegion: null,
       targetBounds: workspace === "image" ? displayTargetBounds : null,
@@ -882,7 +863,7 @@ export function MaskEditModal({
       antsPhase,
       gestures,
     });
-  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, displayTargetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, activeSelection, selectionDraft, antsPhase]);
+  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, displayTargetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, cropDraft, activeSelection, selectionDraft, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -952,7 +933,6 @@ export function MaskEditModal({
     anchorDraft,
     penAnchors,
     cropDraft,
-    quadDraft,
     paintTarget,
     tolerance,
     brushSize,
@@ -968,7 +948,6 @@ export function MaskEditModal({
     viewBase,
     pointerAngle,
     viewRotate: () => viewRef.current.rotate ?? 0,
-    canvasRect: () => canvasRef.current?.getBoundingClientRect() ?? null,
     setView,
     dispatch,
     commitPath,
@@ -979,11 +958,9 @@ export function MaskEditModal({
     setCropDraft,
     setCropAspect,
     confirmCropDraft,
-    setQuadDraft,
     setActiveSelection,
     setSelectionDraft,
     setMoveDraft,
-    setRulerLine,
     setColorSamples,
     sampleUnderlay,
     captureEdgeMap,
@@ -1038,7 +1015,6 @@ export function MaskEditModal({
       gestures.patchLoop = null;
       gestures.patchDrag = null;
     }
-    if (t.id !== "perspective_crop") setQuadDraft(null);
     if (t.id !== "crop") setCropDraft(null);
     // Picking a marquee tool surfaces its 选项 tab (size readout + manual
     // width/height inputs) so the selection's numbers are in view.
@@ -1295,8 +1271,6 @@ export function MaskEditModal({
               sampledColor={sampledColor}
               colorSamples={colorSamples}
               clearColorSamples={() => setColorSamples([])}
-              rulerLine={rulerLine}
-              clearRuler={() => setRulerLine(null)}
               shapeKind={shapeKind}
               setShapeKind={setShapeKind}
               shapeSides={shapeSides}

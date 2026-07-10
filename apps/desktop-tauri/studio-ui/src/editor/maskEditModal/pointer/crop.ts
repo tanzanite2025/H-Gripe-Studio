@@ -1,7 +1,6 @@
-// Crop tools: the image crop's adjustable rect (corner drags, ratio lock,
-// click-inside to confirm) and the perspective crop's adjustable quad.
+// Crop tool: the image crop's adjustable rect (corner drags, ratio lock,
+// click-inside to confirm).
 import type React from "react";
-import { pointInPolygon } from "../pathGeometry";
 import { cropCorners, type Box, type PointerEnv, type PointerGestures, type Pt } from "./types";
 
 export function cropDown(env: PointerEnv, g: PointerGestures, pt: Pt): void {
@@ -35,34 +34,7 @@ export function cropDown(env: PointerEnv, g: PointerGestures, pt: Pt): void {
   env.forceRedraw();
 }
 
-export function perspectiveCropDown(env: PointerEnv, g: PointerGestures, pt: Pt): void {
-  // Perspective crop: drag corners of the pending quad, click inside it
-  // to commit, or drag a fresh box.
-  const quad = env.quadDraft;
-  if (quad) {
-    const grabRadius = Math.max(10, env.dims.w * 0.012);
-    const idx = quad.findIndex(([qx, qy]) => Math.hypot(qx - pt[0], qy - pt[1]) <= grabRadius);
-    if (idx >= 0) {
-      g.quadCorner = idx;
-      return;
-    }
-    env.setQuadDraft(null);
-    if (pointInPolygon(pt, quad)) {
-      env.dispatch({ type: "op", op: { type: "perspective_crop", region: quad.flat() } });
-      return;
-    }
-  }
-  g.marquee = { start: pt, end: pt };
-  env.forceRedraw();
-}
-
 export function cropMove(env: PointerEnv, g: PointerGestures, e: React.PointerEvent): boolean {
-  if (g.quadCorner != null) {
-    const p = env.toImage(e);
-    const idx = g.quadCorner;
-    env.setQuadDraft((prev) => (prev ? prev.map((q, i) => (i === idx ? p : q)) : prev));
-    return true;
-  }
   if (g.cropCorner != null) {
     const p = env.toImage(e);
     const idx = g.cropCorner;
@@ -93,10 +65,6 @@ export function cropMove(env: PointerEnv, g: PointerGestures, e: React.PointerEv
 }
 
 export function cropUp(env: PointerEnv, g: PointerGestures): boolean {
-  if (g.quadCorner != null) {
-    g.quadCorner = null;
-    return true;
-  }
   if (g.cropCorner != null) {
     g.cropCorner = null;
     g.cropDragRatio = null;
@@ -120,15 +88,4 @@ export function cropUp(env: PointerEnv, g: PointerGestures): boolean {
 export function cropMarqueeEnd(env: PointerEnv, region: Box): void {
   env.setCropAspect("");
   env.setCropDraft(region);
-}
-
-/** A released perspective-crop marquee becomes the adjustable quad; the
- * commit happens on the click inside it. */
-export function perspectiveMarqueeEnd(env: PointerEnv, region: Box): void {
-  env.setQuadDraft([
-    [region[0], region[1]],
-    [region[2], region[1]],
-    [region[2], region[3]],
-    [region[0], region[3]],
-  ]);
 }

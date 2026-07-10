@@ -1,10 +1,9 @@
-// Path / direct selection: hit-test a canvas click against the committed
-// path steps of the active layer, and translate a whole anchor draft.
+// Path selection: hit-test a canvas click against the committed path steps of
+// the active layer, and translate a whole anchor draft.
 //
-// Both tools re-open a committed `EditPath` through the existing anchor-edit
-// flow (M2): path selection then drags every anchor together, direct
-// selection drags one anchor at a time. Neither adds a new kernel op — the
-// commit is the ordinary `path_anchors` history step.
+// It re-opens a committed `EditPath` through the existing anchor-edit flow
+// (M2). It adds no new kernel op — the commit is the ordinary
+// `path_anchors` history step.
 
 import { isPathOp, type EditOp, type EditPathPoint } from "../../contracts/maskOps";
 

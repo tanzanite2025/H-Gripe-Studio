@@ -3,7 +3,7 @@
 
 import { useContext, type Dispatch, type SetStateAction } from "react";
 import { ANCHOR_PATH_TOOLS, toolTargets, type MaskTool, type PaintTarget, type ShapeKind } from "../maskTools";
-import type { ColorSample, RulerLine } from "./stagePainter";
+import type { ColorSample } from "./stagePainter";
 import { localizeTool } from "../maskToolsI18n";
 import { LangContext, useT } from "../../i18n";
 import { isPreviewableOp } from "../maskMorphology";
@@ -37,9 +37,6 @@ interface ToolOptionsPanelProps {
   /** Colour-sampler pins (up to four persistent readouts). */
   colorSamples: readonly ColorSample[];
   clearColorSamples: () => void;
-  /** Last committed ruler measurement; null until a drag lands. */
-  rulerLine: RulerLine | null;
-  clearRuler: () => void;
   shapeKind: ShapeKind;
   setShapeKind: (k: ShapeKind) => void;
   shapeSides: number;
@@ -90,8 +87,6 @@ export function ToolOptionsPanel({
   sampledColor,
   colorSamples,
   clearColorSamples,
-  rulerLine,
-  clearRuler,
   shapeKind,
   setShapeKind,
   shapeSides,
@@ -322,28 +317,6 @@ export function ToolOptionsPanel({
                 <button onClick={clearColorSamples}>{t("mask.samplerClear")}</button>
               </span>
             </>
-          )}
-        </div>
-      ) : null}
-      {tool.id === "ruler" ? (
-        <div className="field">
-          <span>{t("mask.rulerTitle")}</span>
-          {rulerLine ? (
-            <>
-              <output>
-                {(() => {
-                  const dx = rulerLine.end[0] - rulerLine.start[0];
-                  const dy = rulerLine.end[1] - rulerLine.start[1];
-                  const angle = (Math.atan2(-dy, dx) * 180) / Math.PI;
-                  return `L ${Math.round(Math.hypot(dx, dy))}px · W ${Math.round(Math.abs(dx))} · H ${Math.round(Math.abs(dy))} · ∠ ${angle.toFixed(1)}°`;
-                })()}
-              </output>
-              <span className="slider-row">
-                <button onClick={clearRuler}>{t("mask.rulerClear")}</button>
-              </span>
-            </>
-          ) : (
-            <small className="muted">{t("mask.rulerEmpty")}</small>
           )}
         </div>
       ) : null}

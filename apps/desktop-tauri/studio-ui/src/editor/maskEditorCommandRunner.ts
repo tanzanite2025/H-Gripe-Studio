@@ -74,10 +74,5 @@ export function runMaskEditorCommand(id: CommandId, env: MaskEditorCommandEnv): 
       return runSelectionCommand("deselect", env);
     case "selection.feather":
       return runSelectionCommand("feather", env);
-    case "selection.toMask":
-    case "path.makeSelection":
-    case "ai.selectSubject":
-    case "ai.removeBackground":
-      return false;
   }
 }

@@ -1,5 +1,5 @@
-// Crop tool state: the adjustable rect / perspective-quad drafts between the
-// box drag and the commit click, and the floating crop panel's controls
+// Crop tool state: the adjustable rect between the box drag and the commit
+// click, and the floating crop panel's controls
 // (pixel W×H draft, aspect presets, ratio lock, saved size templates).
 import { useEffect, useRef, useState } from "react";
 import type { MaskEditAction } from "./actions";
@@ -35,10 +35,6 @@ function loadCropTemplates(): { w: number; h: number }[] {
 }
 
 export interface CropTool {
-  /** Perspective crop: the adjustable quad draft (TL, TR, BR, BL image-space)
-   * between the box drag and the commit click. */
-  quadDraft: [number, number][] | null;
-  setQuadDraft: React.Dispatch<React.SetStateAction<[number, number][] | null>>;
   /** Image-workspace crop: the adjustable rect draft ([x0, y0, x1, y1]
    * image-space) between the box drag and the commit click. */
   cropDraft: [number, number, number, number] | null;
@@ -61,7 +57,6 @@ export function useCropTool(
   dims: { w: number; h: number },
   dispatch: (action: MaskEditAction) => void,
 ): CropTool {
-  const [quadDraft, setQuadDraft] = useState<[number, number][] | null>(null);
   const [cropDraft, setCropDraft] = useState<[number, number, number, number] | null>(null);
   // Crop panel state: local W×H draft (re-seeded from the box), the selected
   // aspect preset ("" = free; manual sizing clears it), the ratio lock, and
@@ -170,8 +165,6 @@ export function useCropTool(
     });
   };
   return {
-    quadDraft,
-    setQuadDraft,
     cropDraft,
     setCropDraft,
     cropSizeDraft,

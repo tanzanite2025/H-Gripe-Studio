@@ -235,26 +235,6 @@ export function paintCropDraft(
   }
 }
 
-/** Perspective-crop quad draft: dashed outline plus draggable corner squares. */
-export function paintQuadDraft(ctx: CanvasRenderingContext2D, quad: readonly [number, number][]) {
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.lineWidth = 1;
-  ctx.setLineDash([5, 3]);
-  ctx.beginPath();
-  quad.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-  ctx.closePath();
-  ctx.stroke();
-  ctx.setLineDash([]);
-  for (const [x, y] of quad) {
-    ctx.fillStyle = "#fff";
-    ctx.strokeStyle = "rgba(0,0,0,0.6)";
-    ctx.beginPath();
-    ctx.rect(x - 4, y - 4, 8, 8);
-    ctx.fill();
-    ctx.stroke();
-  }
-}
-
 /** The live retouch band colour: green heal / violet clone / amber history
  *  brush / white dodge / near-black burn. */
 export function retouchBandColor(kind: "heal" | "clone" | "history" | "dodge", dodgeBurn: "dodge" | "burn"): string {
@@ -374,12 +354,6 @@ export interface ColorSample {
   hex: string;
 }
 
-/** A ruler measurement drag (image px; session-local view read). */
-export interface RulerLine {
-  start: [number, number];
-  end: [number, number];
-}
-
 /** Colour-sampler pins: numbered circle markers filled with the sampled colour. */
 export function paintColorSamples(
   ctx: CanvasRenderingContext2D,
@@ -400,30 +374,6 @@ export function paintColorSamples(
     ctx.font = "600 12px system-ui, sans-serif";
     ctx.fillText(String(i + 1), x + 9, y - 7);
   });
-}
-
-/** Ruler line: endpoint ticks plus a distance / angle readout at the midpoint. */
-export function paintRuler(ctx: CanvasRenderingContext2D, { start, end }: RulerLine, labelsOnly = false) {
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  if (!labelsOnly) {
-    ctx.strokeStyle = "rgba(255,214,90,0.95)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(start[0], start[1]);
-    ctx.lineTo(end[0], end[1]);
-    ctx.stroke();
-    for (const [x, y] of [start, end]) {
-      ctx.beginPath();
-      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-  }
-  const dist = Math.hypot(dx, dy);
-  const angle = (Math.atan2(-dy, dx) * 180) / Math.PI;
-  ctx.fillStyle = "rgba(255,214,90,0.95)";
-  ctx.font = "600 13px system-ui, sans-serif";
-  ctx.fillText(`${Math.round(dist)}px ∠${angle.toFixed(1)}°`, (start[0] + end[0]) / 2 + 8, (start[1] + end[1]) / 2 - 8);
 }
 
 /** Paint a proxy mask (scaled up to document size) as a tinted overlay.

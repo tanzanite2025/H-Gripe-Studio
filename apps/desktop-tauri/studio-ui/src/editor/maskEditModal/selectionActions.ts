@@ -3,7 +3,7 @@ import { selectionClipFromActive, type ActiveSelection } from "./selection";
 
 // Ops an active selection does NOT confine: whole-mask reshapes keep their
 // global meaning even while a selection is up.
-export const UNCLIPPED_SELECTION_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
+export const UNCLIPPED_SELECTION_OPS = new Set(["transform", "crop", "select_all"]);
 
 export function applyActiveSelectionClip(
   action: MaskEditAction,

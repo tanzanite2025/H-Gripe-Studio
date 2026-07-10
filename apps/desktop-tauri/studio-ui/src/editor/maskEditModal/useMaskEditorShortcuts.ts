@@ -124,7 +124,6 @@ export function useMaskEditorShortcuts({
     tool_shape: () => toolSlots.selectSlot("shape"),
     tool_hand: () => toolSlots.selectSlot("hand"),
     tool_rotate_view: () => toolSlots.selectSlot("rotate_view"),
-    tool_zoom: () => toolSlots.selectSlot("zoom"),
     screen_mode: () => setScreenMode((mode) => ((mode + 1) % 3) as 0 | 1 | 2),
     pan_space: () => navigation.setSpacePan(true),
     zoom_in: () => navigation.setView((view) => zoomIn(view, ...navigation.viewBase())),

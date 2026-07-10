@@ -2,7 +2,7 @@
 // region-op tools and the crop tools' initial box (they share `g.marquee`;
 // the crop-specific endings live in crop.ts).
 import type React from "react";
-import { cropMarqueeEnd, perspectiveMarqueeEnd } from "./crop";
+import { cropMarqueeEnd } from "./crop";
 import type { Box, PointerEnv, PointerGestures, Pt } from "./types";
 import { commitSelectionDraft, createBoxSelection } from "../selection";
 
@@ -31,8 +31,6 @@ export function marqueeUp(env: PointerEnv, g: PointerGestures): boolean {
   if (region[2] - region[0] > 1 && region[3] - region[1] > 1) {
     if (tool.id === "crop" && env.workspace === "image") {
       cropMarqueeEnd(env, region as Box);
-    } else if (tool.id === "perspective_crop") {
-      perspectiveMarqueeEnd(env, region as Box);
     } else if (tool.id === "rect" || tool.id === "ellipse") {
       const selection = createBoxSelection(region as Box, tool.id === "ellipse");
       if (env.workspace === "image") {

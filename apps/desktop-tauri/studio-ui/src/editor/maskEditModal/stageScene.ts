@@ -26,17 +26,14 @@ import {
   paintPath,
   paintPenAnchors,
   paintPreviewOverlay,
-  paintQuadDraft,
   paintQuickMask,
   paintRetouchBand,
-  paintRuler,
   paintSamPoints,
   paintShapeDraft,
   paintStroke,
   paintTargetBounds,
   retouchBandColor,
   type ColorSample,
-  type RulerLine,
 } from "./stagePainter";
 
 export interface OverlaySceneArgs {
@@ -57,8 +54,6 @@ export interface OverlaySceneArgs {
   /** Marching-ants dash phase in surface pixels; advances over time so the
    * committed marquee's ants flow. */
   antsPhase: number;
-  toolId: string;
-  rulerLine: RulerLine | null;
   colorSamples: ColorSample[];
 }
 
@@ -67,7 +62,7 @@ export interface OverlaySceneArgs {
  * screen pixel wide at any zoom instead of scaling with a document-size
  * canvas. Live drags stay on the canvas for zero-latency feedback. */
 export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverlayScene | null {
-  const { workspace, frameDims, previewing, doc, editingPath, selectionDraft, activeSelection, antsPhase, toolId, rulerLine, colorSamples } = args;
+  const { workspace, frameDims, previewing, doc, editingPath, selectionDraft, activeSelection, antsPhase, colorSamples } = args;
   const selectionScene = buildSelectionOverlayScene(selectionDraft, activeSelection);
   if (frameDims.w <= 0 || frameDims.h <= 0) return null;
   const items: ViewportOverlayItem[] = [];
@@ -137,20 +132,6 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
     animatedSelection = true;
   }
   const norm = (x: number, y: number): [number, number] => [x / frameDims.w, y / frameDims.h];
-  // The committed ruler line (shown while the ruler tool is in hand):
-  // endpoint ticks plus the measurement line; the readout text stays on the
-  // canvas (the host strokes geometry only).
-  if (toolId === "ruler" && rulerLine) {
-    const amber: [number, number, number, number] = [1, 214 / 255, 90 / 255, 0.95];
-    items.push({
-      kind: "polyline",
-      points: [norm(...rulerLine.start), norm(...rulerLine.end)],
-      stroke: amber,
-    });
-    for (const [x, y] of [rulerLine.start, rulerLine.end]) {
-      items.push({ kind: "marker", center: norm(x, y), shape: "disc", size: 3.5, stroke: amber });
-    }
-  }
   // Colour-sampler pins: a disc filled with the sampled colour; the
   // numbered label stays on the canvas.
   for (const { x, y, hex } of colorSamples) {
@@ -206,8 +187,6 @@ export interface StagePaintArgs {
   shapeKind: ShapeKind;
   shapeSides: number;
   colorSamples: ColorSample[];
-  rulerLine: RulerLine | null;
-  quadDraft: [number, number][] | null;
   cropDraft: [number, number, number, number] | null;
   cropRegion: [number, number, number, number] | null;
   targetBounds: TargetBounds | null;
@@ -245,8 +224,6 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     shapeKind,
     shapeSides,
     colorSamples,
-    rulerLine,
-    quadDraft,
     cropDraft,
     cropRegion,
     targetBounds,
@@ -303,13 +280,10 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if ((tool.kind === "clone" || tool.id === "healing_brush") && gestures.cloneSource) paintCloneSource(ctx, gestures.cloneSource);
   if (editingPath != null && anchorDraft) paintAnchorDraft(ctx, anchorDraft, gestures.draggingAnchor);
   if (penAnchors.length > 0) paintPenAnchors(ctx, penAnchors, antsPhase);
-  // With a host frame, sampler pins / ruler / SAM markers stroke host-side
+  // With a host frame, sampler pins / SAM markers stroke host-side
   // (the viewport overlay scene) — the canvas keeps only the text labels.
-  // The live ruler drag stays fully on the canvas for zero-latency feedback.
   const hostFrame = Boolean(underlay || presented);
   if (colorSamples.length > 0) paintColorSamples(ctx, colorSamples, hostFrame);
-  const rl = gestures.rulerDrag ?? (tool.id === "ruler" ? rulerLine : null);
-  if (rl) paintRuler(ctx, rl, hostFrame && gestures.rulerDrag == null);
   if (workspace === "mask") paintSamPoints(ctx, doc.points, hostFrame);
   // With a host frame — a PNG underlay or a natively presented surface —
   // the selection tint is composited host-side (the viewport mask
@@ -341,7 +315,6 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     paintLassoLoop(ctx, pd ? pl.map(([x, y]) => [x + ox, y + oy] as [number, number]) : pl, true, antsPhase);
     if (pd) paintDragArrow(ctx, pd.start, pd.end);
   }
-  if (quadDraft) paintQuadDraft(ctx, quadDraft);
   if (cropDraft) paintCropDraft(ctx, cropDraft, dims.w, dims.h);
   else if (cropRegion) paintCropDim(ctx, cropRegion, dims.w, dims.h);
 }

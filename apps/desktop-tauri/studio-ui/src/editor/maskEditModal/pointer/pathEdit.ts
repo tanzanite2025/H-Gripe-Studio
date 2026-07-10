@@ -1,5 +1,5 @@
 // Anchor re-edit mode (M2): dragging anchors of the path being re-edited,
-// path-selection whole-path drags, and the path / direct selection tool's
+// path-selection whole-path drags, and the path selection tool's
 // click-to-reopen hit test.
 import type React from "react";
 import { activeOps } from "../../maskEdit";
@@ -31,7 +31,7 @@ export function anchorEditDown(env: PointerEnv, g: PointerGestures, e: React.Poi
   return true;
 }
 
-/** Path / direct selection: click near a committed path outline to re-open
+/** Path selection: click near a committed path outline to re-open
  * it through the ordinary anchor-edit flow. */
 export function pathEditHitDown(env: PointerEnv, pt: [number, number]): void {
   const hit = hitTestPathOp(activeOps(env.doc), pt, Math.max(10, env.dims.w * 0.012));

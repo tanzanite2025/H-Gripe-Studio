@@ -166,7 +166,7 @@ describe("mask tool registry", () => {
       move: "V", marquee: "M", lasso: "L", selection: "W", crop: "C", sample: "I",
       repair: "J", brush: "B", stamp: "S", history: "Y", eraser: "E", fill: "G", dodge: "O",
       pen: "P", type: "T", path_select: "A", shape: "U",
-      hand: "H", rotate_view: "R", zoom: "Z",
+      hand: "H", rotate_view: "R",
     };
     for (const [slot, letter] of Object.entries(expected)) {
       expect(byId.get(slot), slot).toBe(letter);

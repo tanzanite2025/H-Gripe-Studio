@@ -444,7 +444,6 @@ export function labelEditOp(op: EditOp | null | undefined): string | null {
   if (op.type === "quick_select") return `quick select tol${op.amount ?? 0} (${op.points?.length ?? 0})`;
   if (op.type === "background_eraser") return `bg eraser r${op.amount ?? 8} tol${op.tolerance ?? 0}`;
   if (op.type === "patch") return `patch d${Math.round(op.dx ?? 0)},${Math.round(op.dy ?? 0)} (${op.points?.length ?? 0})`;
-  if (op.type === "perspective_crop") return "perspective crop";
   if (op.type === "red_eye") return `red eye @${Math.round(op.region?.[0] ?? 0)},${Math.round(op.region?.[1] ?? 0)}`;
   if (op.type === "object_select") return "object select";
   if (op.type === "remove") return `remove r${op.amount ?? 8} (${op.points?.length ?? 0})`;

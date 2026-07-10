@@ -39,7 +39,7 @@ export type ToolKind =
   // variants. Recorded as an `EditPath`; the backend rasterises the closed
   // polygon and boolean-combines it with the mask (add/subtract/intersect).
   | "path"
-  // Canvas navigation (M8): hand pans the zoomed view, zoom clicks in/out.
+  // Canvas navigation (M8): hand pans the zoomed view, rotate-view rotates it.
   // Records nothing — the view is a CSS transform, never part of the document.
   | "view"
   // Drag a start → end vector that records a `gradient` op: a linear ramp
@@ -65,9 +65,8 @@ export type ToolKind =
   // Drag a bounding box that commits a geometric shape (triangle / polygon /
   // star / line) as an ordinary vector path step (PS shape tools on a mask).
   | "shape"
-  // Click a committed path step on the canvas to re-open it for editing:
-  // path selection drags the whole path, direct selection drags single
-  // anchors. Commits through the ordinary anchor-edit flow (M2).
+  // Click a committed path step on the canvas to re-open it for editing.
+  // Commits through the ordinary anchor-edit flow (M2).
   | "path_edit";
 
 export interface MaskTool {
@@ -134,22 +133,18 @@ export const MASK_TOOLS: readonly MaskTool[] = [
   { id: "sponge", label: "Sponge", status: "ready", kind: "dodge", lane: "preview", hint: "Sponge: paint to push the mask toward hard on/off (Alt-drag softens toward mid-grey) — a revisable step." },
   { id: "eyedropper", label: "Eyedropper", status: "ready", kind: "sample", lane: "interactive", hint: "Eyedropper: click to sample the image colour under the cursor — the swatch shows in tool options." },
   { id: "color_sampler", label: "Color sampler", status: "ready", kind: "sample", lane: "interactive", hint: "Color sampler: click to pin up to four persistent colour readouts — listed in tool options, markers on the canvas." },
-  { id: "ruler", label: "Ruler", status: "ready", kind: "sample", lane: "interactive", hint: "Ruler: drag to measure distance and angle — a pure view read, nothing is recorded." },
   { id: "pen", label: "Pen", status: "ready", kind: "path", lane: "interactive", hint: "Click to place anchor points; click the first point (or Close path) to close — rasterised + boolean-combined on run." },
   { id: "freeform_pen", label: "Freeform pen", status: "ready", kind: "path", lane: "interactive", hint: "Freeform pen: drag a freehand path; released, it closes into a path selection." },
   { id: "curvature_pen", label: "Curvature pen", status: "ready", kind: "path", lane: "interactive", hint: "Curvature pen: click points and a smooth closed curve is fitted through them on close." },
   { id: "path_select", label: "Path selection", status: "ready", kind: "path_edit", lane: "interactive", hint: "Path selection: click a committed path to select it, then drag to move the whole path (Done commits)." },
-  { id: "direct_select", label: "Direct selection", status: "ready", kind: "path_edit", lane: "interactive", hint: "Direct selection: click a committed path to select it, then drag individual anchors (Done commits)." },
   { id: "shape", label: "Shape", status: "ready", kind: "shape", lane: "interactive", hint: "Drag a box — the chosen shape (triangle / polygon / star / line) commits as an ordinary path step (add / subtract / intersect)." },
   { id: "magnetic_lasso", label: "Magnetic lasso", status: "ready", kind: "path", lane: "interactive", hint: "Magnetic lasso: drag a loop and the points snap to nearby image edges on release." },
   { id: "polygon_lasso", label: "Polygonal lasso", status: "ready", kind: "path", lane: "interactive", hint: "Polygonal lasso: click straight segments around the subject; click the first point (or Close path) to close." },
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
   { id: "crop", label: "Crop", status: "ready", kind: "marquee", lane: "preview", hint: "Drag a crop box — the mask is cleared outside it (a revisable step)." },
-  { id: "perspective_crop", label: "Perspective crop", status: "ready", kind: "marquee", lane: "preview", hint: "Perspective crop: drag a box, pull its corners into a quad, then click inside — the quad is straightened into its bounding rectangle (a revisable step)." },
   { id: "hand", label: "Hand", status: "ready", kind: "view", lane: "interactive", hint: "Drag to pan the zoomed view (or hold Space with any tool)." },
   { id: "rotate_view", label: "Rotate view", status: "ready", kind: "view", lane: "interactive", hint: "Drag to rotate the view around its centre — screen-space only, the mask is untouched (Esc resets, Ctrl+0 fits and resets)." },
-  { id: "zoom", label: "Zoom", status: "ready", kind: "view", lane: "interactive", hint: "Click to zoom in at that point, Alt+click to zoom out (Ctrl+0 fit, Ctrl+1 100%)." },
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
   { id: "color_replacement", label: "Color replacement", status: "planned", kind: "paint", lane: "render", hint: "Color replacement: paint a new hue while keeping texture (planned — colour has no meaning on a grayscale mask)." },
@@ -193,8 +188,8 @@ export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
     { id: "marquee", shortcut: "M", label: "Marquee", variants: ["rect", "ellipse"] },
     { id: "lasso", shortcut: "L", label: "Lasso", variants: ["magnetic_lasso", "polygon_lasso"] },
     { id: "selection", shortcut: "W", label: "Selection", variants: ["object_select", "quick_select", "wand", "point"] },
-    { id: "crop", shortcut: "C", label: "Crop", variants: ["crop", "perspective_crop"] },
-    { id: "sample", shortcut: "I", label: "Sample", variants: ["eyedropper", "color_sampler", "ruler"] },
+    { id: "crop", shortcut: "C", label: "Crop", variants: ["crop"] },
+    { id: "sample", shortcut: "I", label: "Sample", variants: ["eyedropper", "color_sampler"] },
   ],
   [
     { id: "repair", shortcut: "J", label: "Repair", variants: ["heal", "remove", "healing_brush", "patch", "content_aware_move", "red_eye"] },
@@ -208,13 +203,12 @@ export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
   [
     { id: "pen", shortcut: "P", label: "Pen", variants: ["pen", "freeform_pen", "curvature_pen"] },
     { id: "type", shortcut: "T", label: "Type", variants: ["type_horizontal", "type_vertical"] },
-    { id: "path_select", shortcut: "A", label: "Path Select", variants: ["path_select", "direct_select"] },
+    { id: "path_select", shortcut: "A", label: "Path Select", variants: ["path_select"] },
     { id: "shape", shortcut: "U", label: "Shape", variants: ["shape"] },
   ],
   [
     { id: "hand", shortcut: "H", label: "Hand", variants: ["hand"] },
     { id: "rotate_view", shortcut: "R", label: "Rotate View", variants: ["rotate_view"] },
-    { id: "zoom", shortcut: "Z", label: "Zoom", variants: ["zoom"] },
   ],
 ] as const;
 

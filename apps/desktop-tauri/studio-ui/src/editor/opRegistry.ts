@@ -67,7 +67,6 @@ export const MASK_OP_TYPES = [
   "quick_select",
   "background_eraser",
   "patch",
-  "perspective_crop",
   "red_eye",
   "object_select",
   "remove",

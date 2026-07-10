@@ -131,7 +131,7 @@ export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, 
             ref={canvasRef}
             className="mask-edit-canvas"
             style={{
-              cursor: spacePan || toolId === "hand" ? "grab" : toolId === "zoom" ? "zoom-in" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
+              cursor: spacePan || toolId === "hand" ? "grab" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
             }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}

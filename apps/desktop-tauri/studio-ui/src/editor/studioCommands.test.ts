@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  emptyAdjustmentLayer,
   emptyLayerMask,
   emptyMaskDocument,
   emptyMaskLayer,
@@ -69,34 +68,19 @@ describe("studio command capabilities", () => {
     expect(getCommandCapability("target.delete", { doc, target: documentTarget }).enabled).toBe(false);
   });
 
-  it("keeps selection and path commands target-specific", () => {
+  it("keeps selection commands target-specific", () => {
     const doc = docWithTwoLayers();
     const selectionTarget: StudioTarget = { kind: "selection", canvasId: "canvas", documentId: "doc", selectionId: "sel-1" };
-    const pathTarget: StudioTarget = { kind: "path", canvasId: "canvas", documentId: "doc", pathId: "path-1" };
 
-    expect(getCommandCapability("selection.toMask", { doc, target: selectionTarget }).enabled).toBe(true);
-    expect(getCommandCapability("path.makeSelection", { doc, target: pathTarget }).enabled).toBe(true);
-    expect(getCommandCapability("path.makeSelection", { doc, target: selectionTarget }).enabled).toBe(false);
-  });
-
-  it("requires an editable pixel target and backend for AI commands", () => {
-    const doc = docWithTwoLayers();
-
-    expect(getCommandCapability("ai.removeBackground", { doc, target: pixelTarget }).enabled).toBe(false);
-    expect(getCommandCapability("ai.removeBackground", { doc, target: pixelTarget, backendAvailable: true })).toMatchObject({
-      enabled: true,
-      requiresPreview: true,
-    });
-
-    doc.layers[1] = { ...emptyAdjustmentLayer("brightness_contrast", "Brightness"), id: "layer-1" };
-
-    expect(getCommandCapability("ai.selectSubject", { doc, target: pixelTarget, backendAvailable: true }).enabled).toBe(false);
+    expect(getCommandCapability("selection.invert", { doc, target: selectionTarget }).enabled).toBe(true);
+    expect(getCommandCapability("selection.deselect", { doc, target: selectionTarget }).enabled).toBe(true);
+    expect(getCommandCapability("selection.feather", { doc, target: pixelTarget }).enabled).toBe(false);
   });
 
   it("filters available commands from one resolver", () => {
     const doc = docWithTwoLayers();
 
-    expect(availableCommands(["layer.invert", "layer.addMask", "path.makeSelection"], { doc, target: pixelTarget })).toEqual([
+    expect(availableCommands(["layer.invert", "layer.addMask", "selection.invert"], { doc, target: pixelTarget })).toEqual([
       "layer.invert",
       "layer.addMask",
     ]);

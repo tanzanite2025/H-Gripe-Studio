@@ -1,27 +1,15 @@
-// Canvas navigation (M8): hand tool / Space-hold pan, the zoom tool and the
-// rotate-view drag. Pure view changes — nothing records on the document.
+// Canvas navigation (M8): hand tool / Space-hold pan and the rotate-view drag.
+// Pure view changes — nothing records on the document.
 import type React from "react";
-import { ZOOM_STEP, panBy, rotateTo, zoomAt } from "../../canvasView";
+import { panBy, rotateTo } from "../../canvasView";
 import type { PointerEnv, PointerGestures } from "./types";
 
 export function navigationDown(env: PointerEnv, g: PointerGestures, e: React.PointerEvent): boolean {
   const { tool } = env;
-  // Hand tool / Space-hold pans; zoom tool clicks in (Alt+click out)
-  // anchored at the cursor.
+  // Hand tool / Space-hold pans anchored at the cursor.
   if (env.spacePan || tool.id === "hand") {
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     g.panDrag = { x: e.clientX, y: e.clientY };
-    return true;
-  }
-  if (tool.id === "zoom") {
-    const rect = env.canvasRect();
-    if (!rect) return true;
-    const cx = e.clientX - (rect.left + rect.width / 2);
-    const cy = e.clientY - (rect.top + rect.height / 2);
-    const factor = e.altKey ? 1 / ZOOM_STEP : ZOOM_STEP;
-    // The canvas rect reflects the view transform, so its centre sits at
-    // base centre + pan; `zoomAt` anchors from the untransformed centre.
-    env.setView((v) => zoomAt(v, factor, cx + v.panX, cy + v.panY, ...env.viewBase()));
     return true;
   }
   if (tool.id === "rotate_view") {

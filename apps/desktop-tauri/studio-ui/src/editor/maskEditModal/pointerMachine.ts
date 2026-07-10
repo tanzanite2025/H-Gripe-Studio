@@ -7,8 +7,8 @@
 // before any tool sees the event.
 import type React from "react";
 import { brushDown, commitStroke } from "./pointer/brush";
-import { clickDown, pointDown, rulerMove, rulerUp, sampleDown } from "./pointer/clickTools";
-import { cropDown, cropMove, cropUp, perspectiveCropDown } from "./pointer/crop";
+import { clickDown, pointDown, sampleDown } from "./pointer/clickTools";
+import { cropDown, cropMove, cropUp } from "./pointer/crop";
 import { gradientDown, gradientMove, gradientUp } from "./pointer/gradient";
 import { marqueeDown, marqueeDragMove, marqueeUp } from "./pointer/marquee";
 import { navigationDown, navigationMove, navigationUp } from "./pointer/navigation";
@@ -63,7 +63,6 @@ export function pointerDown(env: PointerEnv, g: PointerGestures, e: React.Pointe
   if (tool.kind === "path") return pathToolDown(env, g, pt);
   if (tool.id === "patch" || tool.id === "content_aware_move") return patchDown(env, g, pt);
   if (tool.id === "crop" && env.workspace === "image") return cropDown(env, g, pt);
-  if (tool.id === "perspective_crop") return perspectiveCropDown(env, g, pt);
   if (
     tool.id === "pattern_stamp" ||
     tool.id === "healing_brush" ||
@@ -80,14 +79,13 @@ export function pointerDown(env: PointerEnv, g: PointerGestures, e: React.Pointe
   if (tool.kind === "marquee") return marqueeDown(env, g, pt);
   if (tool.kind === "shape") return shapeDown(env, g, pt);
   if (tool.kind === "click") return clickDown(env, pt);
-  if (tool.kind === "sample") return sampleDown(env, g, pt);
+  if (tool.kind === "sample") return sampleDown(env, pt);
   if (tool.kind === "point") return pointDown(env, e, pt);
 }
 
 export function pointerMove(env: PointerEnv, g: PointerGestures, e: React.PointerEvent): void {
   if (navigationMove(env, g, e)) return;
   if (anchorEditMove(env, g, e)) return;
-  if (rulerMove(env, g, e)) return;
   if (cropMove(env, g, e)) return;
   if (patchMove(env, g, e)) return;
   if (g.drawing) {
@@ -125,7 +123,6 @@ export function pointerUp(env: PointerEnv, g: PointerGestures): void {
   const { tool } = env;
   if (navigationUp(g)) return;
   if (anchorEditUp(env, g)) return;
-  if (rulerUp(env, g)) return;
   if (cropUp(env, g)) return;
   if (patchUp(env, g)) return;
   if (g.drawing) {

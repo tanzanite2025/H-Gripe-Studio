@@ -30,8 +30,6 @@ describe("buildViewportOverlayScene", () => {
       editingPath: null,
       activeSelection: null,
       antsPhase: 0,
-      toolId: "move",
-      rulerLine: null,
       colorSamples: [],
     });
 
@@ -56,8 +54,6 @@ describe("buildViewportOverlayScene", () => {
         ],
       },
       antsPhase: 6,
-      toolId: "polygon_lasso",
-      rulerLine: null,
       colorSamples: [],
     });
 
@@ -105,8 +101,6 @@ describe("buildViewportOverlayScene", () => {
       editingPath: null,
       activeSelection: null,
       antsPhase: 0,
-      toolId: "move",
-      rulerLine: null,
       colorSamples: [],
     });
 

@@ -63,7 +63,7 @@ describe("applyActiveSelectionClip", () => {
   });
 
   it("leaves whole-mask reshape operations unclipped", () => {
-    for (const type of ["transform", "crop", "perspective_crop", "select_all"]) {
+    for (const type of ["transform", "crop", "select_all"]) {
       const action: MaskEditAction = { type: "op", op: { type } };
       expect(applyActiveSelectionClip(action, polygonSelection)).toBe(action);
     }

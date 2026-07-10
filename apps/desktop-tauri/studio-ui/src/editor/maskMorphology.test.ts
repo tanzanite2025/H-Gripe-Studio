@@ -22,8 +22,6 @@ import {
   opsAlphaBounds,
   patchRegion,
   patternStampStroke,
-  perspectiveCrop,
-  quadHomography,
   PREVIEWABLE_OP_IDS,
   PROXY_TILE_SIZE,
   ProxyLayerCache,
@@ -221,40 +219,6 @@ describe("maskMorphology preview primitives", () => {
     const before = new Uint8Array(mask.data);
     artHistoryStroke(mask, base, { type: "art_history_brush", amount: 4, points: [] }, 1);
     expect(mask.data).toEqual(before);
-  });
-
-  it("quadHomography maps the unit square onto the quad", () => {
-    const quad: [number, number][] = [[10, 10], [30, 5], [35, 35], [5, 30]];
-    const [a, b, c, d, e, f, g, h] = quadHomography(quad);
-    const map = (u: number, v: number): [number, number] => {
-      const den = g * u + h * v + 1;
-      return [(a * u + b * v + c) / den, (d * u + e * v + f) / den];
-    };
-    expect(map(0, 0)[0]).toBeCloseTo(10);
-    expect(map(0, 0)[1]).toBeCloseTo(10);
-    expect(map(1, 0)[0]).toBeCloseTo(30);
-    expect(map(1, 0)[1]).toBeCloseTo(5);
-    expect(map(1, 1)[0]).toBeCloseTo(35);
-    expect(map(1, 1)[1]).toBeCloseTo(35);
-    expect(map(0, 1)[0]).toBeCloseTo(5);
-    expect(map(0, 1)[1]).toBeCloseTo(30);
-  });
-
-  it("perspectiveCrop straightens the quad into its bounding rectangle", () => {
-    // An axis-aligned quad is an identity warp inside its bounds and clears
-    // everything outside.
-    const mask = filledSquare(40, 0);
-    const out = perspectiveCrop(mask, { type: "perspective_crop", region: [10, 10, 30, 10, 30, 30, 10, 30] }, 1);
-    expect(out.data[20 * 40 + 20]).toBe(255); // inside the rect preserved
-    expect(out.data[5 * 40 + 5]).toBe(0); // outside the rect cleared
-    // A skewed quad samples the quad's corner regions into the rect's.
-    const m2 = createProxyMask(40, 40);
-    for (let y = 3; y < 8; y++) for (let x = 27; x < 33; x++) m2.data[y * 40 + x] = 255; // blob at the quad's TR
-    const o2 = perspectiveCrop(m2, { type: "perspective_crop", region: [10, 10, 30, 5, 35, 35, 5, 30] }, 1);
-    expect(o2.data[5 * 40 + 34]).toBe(255); // rect TR samples the quad TR blob
-    expect(o2.data[34 * 40 + 6]).toBe(0); // rect BL far from any on-pixels
-    // A missing quad returns the mask unchanged.
-    expect(perspectiveCrop(mask, { type: "perspective_crop" }, 1)).toBe(mask);
   });
 
   it("stampDisc fills a clamped circular region", () => {

@@ -11,7 +11,7 @@ import type { EdgeMap, MagneticSnapSettings } from "../magneticSnap";
 import type { MaskTool, PaintTarget, ShapeKind } from "../../maskTools";
 import type { MaskEditAction } from "../actions";
 import type { ActiveSelection, SelectionDraft } from "../selection";
-import type { ColorSample, RulerLine } from "../stagePainter";
+import type { ColorSample } from "../stagePainter";
 
 export type Pt = [number, number];
 export type Box = [number, number, number, number];
@@ -65,13 +65,10 @@ export interface PointerGestures {
    * in-progress drop drag (the loop's translation vector). */
   patchLoop: Pt[] | null;
   patchDrag: { start: Pt; end: Pt } | null;
-  /** Perspective-crop quad corner being dragged (TL / TR / BR / BL index). */
-  quadCorner: number | null;
   /** Image-crop rect corner being dragged, and the ratio the lock holds
    * through the drag. */
   cropCorner: number | null;
   cropDragRatio: number | null;
-  rulerDrag: RulerLine | null;
   /** Path-selection whole-path drag: the last pointer position (image px). */
   wholePathDrag: Pt | null;
   /** Index of the anchor square being dragged in anchor re-edit mode. */
@@ -98,10 +95,8 @@ export function createPointerGestures(): PointerGestures {
     magneticLock: null,
     patchLoop: null,
     patchDrag: null,
-    quadCorner: null,
     cropCorner: null,
     cropDragRatio: null,
-    rulerDrag: null,
     wholePathDrag: null,
     draggingAnchor: null,
     panDrag: null,
@@ -127,7 +122,6 @@ export interface PointerEnv {
   anchorDraft: EditPathPoint[] | null;
   penAnchors: Pt[];
   cropDraft: Box | null;
-  quadDraft: Pt[] | null;
   paintTarget: PaintTarget;
   tolerance: number;
   brushSize: number;
@@ -147,7 +141,6 @@ export interface PointerEnv {
   pointerAngle(e: React.PointerEvent): number;
   /** The view's current rotation (degrees). */
   viewRotate(): number;
-  canvasRect(): DOMRect | null;
   setView(update: (v: CanvasView) => CanvasView): void;
   dispatch(action: MaskEditAction): void;
   commitPath(toolName: string, pts: Pt[]): void;
@@ -158,11 +151,9 @@ export interface PointerEnv {
   setCropDraft: React.Dispatch<React.SetStateAction<Box | null>>;
   setCropAspect(v: string): void;
   confirmCropDraft(draft: Box): void;
-  setQuadDraft: React.Dispatch<React.SetStateAction<Pt[] | null>>;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelection | null>>;
   setSelectionDraft: React.Dispatch<React.SetStateAction<SelectionDraft | null>>;
   setMoveDraft(v: Pt | null): void;
-  setRulerLine(v: RulerLine | null): void;
   setColorSamples: React.Dispatch<React.SetStateAction<ColorSample[]>>;
   sampleUnderlay(pt: Pt, onSample?: (hex: string) => void): void;
   captureEdgeMap(): void;

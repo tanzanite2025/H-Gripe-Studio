@@ -192,23 +192,11 @@ const ICONS: Record<string, ReactElement> = {
       <path d="M11.2 2.6l1.2 1.2 1-2.2z" />
     </g>
   ),
-  perspective_crop: (
-    <g {...P}>
-      <path d="M3.5 3l9 1v9l-9-1z" />
-      <path d="M1.5 5.5l4-.4M10.5 12.7l4 .4" opacity="0.6" />
-    </g>
-  ),
   color_sampler: (
     <g {...P}>
       <path d="M9.5 6.5L3.5 12.5l-1 2 2-1 6-6" />
       <path d="M9 4l3 3 1.5-1.5a2.1 2.1 0 0 0-3-3L9 4z" />
       <path d="M12 11.5h2.5M13.25 10.25v2.5" />
-    </g>
-  ),
-  ruler: (
-    <g {...P}>
-      <rect x="1.8" y="9" width="12.5" height="4" rx="0.5" transform="rotate(-30 8 11)" />
-      <path d="M5 10.4l.8 1.4M7.5 9l.8 1.4M10 7.6l.8 1.4" transform="rotate(0)" />
     </g>
   ),
   remove: (
@@ -335,11 +323,6 @@ const ICONS: Record<string, ReactElement> = {
       <path d="M6 2.5l6 6-3.6.4 2.1 3.6-1.8 1-2-3.7L4.5 12z" fill="currentColor" stroke="none" opacity="0.85" />
     </g>
   ),
-  direct_select: (
-    <g {...P}>
-      <path d="M6 2.5l6 6-3.6.4 2.1 3.6-1.8 1-2-3.7L4.5 12z" />
-    </g>
-  ),
   hand: (
     <g {...P}>
       <path d="M5 8V4.5a1 1 0 0 1 2 0V7m0-3.5a1 1 0 0 1 2 0V7m0-2.5a1 1 0 0 1 2 0V8m0-.5a1 1 0 0 1 2 0v3c0 2-1.5 3.5-4 3.5S5.5 13 4.5 11L3.2 8.6a1 1 0 0 1 1.8-.9z" />
@@ -349,13 +332,6 @@ const ICONS: Record<string, ReactElement> = {
     <g {...P}>
       <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
       <path d="M13.5 2.5v2.2h-2.2" />
-    </g>
-  ),
-  zoom: (
-    <g {...P}>
-      <circle cx="7" cy="7" r="4.5" />
-      <path d="M10.3 10.3l3.5 3.5" />
-      <path d="M5 7h4M7 5v4" />
     </g>
   ),
 };

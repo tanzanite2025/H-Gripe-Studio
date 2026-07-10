@@ -39,7 +39,6 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   crop: { label: "裁剪", hint: "拖出裁剪框——框外的蒙版被清除（可随时改参的一步）。" },
   hand: { label: "抓手", hint: "拖拽以平移放大后的视图（任意工具下按住 Space 也可平移）。" },
   rotate_view: { label: "旋转视图", hint: "拖拽绕中心旋转视图——仅屏幕空间，不改动蒙版（Esc 复位，Ctrl+0 适应屏幕并复位）。" },
-  zoom: { label: "缩放", hint: "点击处放大，Alt+点击缩小（Ctrl+0 适应屏幕，Ctrl+1 100%）。" },
   eyedropper: { label: "吸管", hint: "吸管：点击取样光标下的图像颜色——色样显示在工具选项里。" },
   shape: { label: "形状", hint: "形状：拖出一个框——所选形状（三角/多边形/星形/直线）作为普通路径步骤提交（添加/减去/交集）。" },
   heal: { label: "污点修复", hint: "污点修复画笔：涂抹瑕疵区域，由周围蒙版平滑重建（可随时改参的一步）。" },
@@ -50,9 +49,7 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   magnetic_lasso: { label: "磁性套索", hint: "磁性套索：拖出套索圈，松开时各点自动吸附到附近的图像边缘。" },
   object_select: { label: "对象选择", hint: "对象选择：拖一个框——分割内核（有权重时用 SAM 2，否则内置回退）在运行时为框内对象生成蒙版。" },
   quick_select: { label: "快速选择", hint: "快速选择：在主体上涂抹——每个点都作为种子按容差漫水填充，并入蒙版。" },
-  perspective_crop: { label: "透视裁剪", hint: "透视裁剪：拖出矩框后拉动四角成四边形，点击内部将其拉直为包围矩形（可随时改参的一步）。" },
   color_sampler: { label: "颜色取样器", hint: "颜色取样器：点击固定最多四个持续显示的颜色读数，列在工具选项里。" },
-  ruler: { label: "标尺", hint: "标尺：拖拽测量距离和角度——纯视图读取，不记录任何编辑。" },
   remove: { label: "移除工具", hint: "移除工具：刷过物体——笔触作为分割种子点，运行时分割出的对象从蒙版中减去。" },
   healing_brush: { label: "修复画笔", hint: "修复画笔：Alt+点击设定源点，涂抹时按源点偏移复制蒙版并以羽化边缘融入周围（可随时改参的一步）。" },
   patch: { label: "修补", hint: "修补：套索一块区域后拖到干净纹理上——区域从落点处重新填充，边缘羽化（可随时改参的一步）。" },
@@ -72,7 +69,6 @@ export const MASK_TOOL_ZH: Record<string, { label: string; hint: string }> = {
   type_horizontal: { label: "横排文字", hint: "横排文字：点击放置可编辑文本（规划中）。" },
   type_vertical: { label: "直排文字", hint: "直排文字：点击放置竖排可编辑文本（规划中）。" },
   path_select: { label: "路径选择", hint: "路径选择：点击已提交路径选中它，拖动移动整条路径（点「完成」提交）。" },
-  direct_select: { label: "直接选择", hint: "直接选择：点击已提交路径选中它，拖动单个锚点（点「完成」提交）。" },
 };
 
 /** Return the tool's `label` / `hint` translated into `lang` (English fallback). */

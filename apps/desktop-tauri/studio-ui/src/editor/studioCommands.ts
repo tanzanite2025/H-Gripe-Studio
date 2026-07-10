@@ -12,20 +12,16 @@ export type CommandId =
   | "mask.invert"
   | "mask.delete"
   | "mask.disable"
-  | "selection.toMask"
   | "selection.invert"
   | "selection.deselect"
   | "selection.feather"
-  | "path.makeSelection"
-  | "target.transform"
-  | "ai.selectSubject"
-  | "ai.removeBackground";
+  | "target.transform";
 
 export interface StudioCommand {
   id: CommandId;
   titleKey: MsgKey;
   icon: string;
-  group: "layer" | "mask" | "selection" | "path" | "transform" | "ai";
+  group: "layer" | "mask" | "selection" | "transform";
   danger?: boolean;
   requiresPreview?: boolean;
 }
@@ -53,14 +49,10 @@ export const STUDIO_COMMANDS: Record<CommandId, StudioCommand> = {
   "mask.invert": { id: "mask.invert", titleKey: "mask.layerInvertTitle", icon: "invert", group: "mask" },
   "mask.delete": { id: "mask.delete", titleKey: "mask.maskDelete", icon: "delete", group: "mask", danger: true },
   "mask.disable": { id: "mask.disable", titleKey: "mask.maskDisable", icon: "visibility-off", group: "mask" },
-  "selection.toMask": { id: "selection.toMask", titleKey: "mask.maskAdd", icon: "mask", group: "selection" },
   "selection.invert": { id: "selection.invert", titleKey: "mask.selectInvert", icon: "invert", group: "selection" },
   "selection.deselect": { id: "selection.deselect", titleKey: "mask.selectDeselect", icon: "selection", group: "selection" },
   "selection.feather": { id: "selection.feather", titleKey: "mask.selectFeather", icon: "selection", group: "selection" },
-  "path.makeSelection": { id: "path.makeSelection", titleKey: "mask.pathMakeSelection", icon: "selection", group: "path" },
   "target.transform": { id: "target.transform", titleKey: "mask.freeTransform", icon: "transform", group: "transform" },
-  "ai.selectSubject": { id: "ai.selectSubject", titleKey: "mask.selectSubject", icon: "subject", group: "ai", requiresPreview: true },
-  "ai.removeBackground": { id: "ai.removeBackground", titleKey: "mask.removeBackground", icon: "background-remove", group: "ai", requiresPreview: true },
 };
 
 function disabled(reason: string, command: StudioCommand): CommandCapability {
@@ -136,24 +128,13 @@ export function getCommandCapability(commandId: CommandId, ctx: CommandContext):
     case "mask.delete": {
       return editableMaskTarget(doc, target) ? enabled(command) : disabled("target is not an editable layer mask", command);
     }
-    case "selection.toMask":
     case "selection.invert":
     case "selection.deselect":
     case "selection.feather": {
       return target.kind === "selection" ? enabled(command) : disabled("target is not a selection", command);
     }
-    case "path.makeSelection": {
-      return target.kind === "path" ? enabled(command) : disabled("target is not a path", command);
-    }
     case "target.transform": {
       return editablePixelLayer(doc, target) ? enabled(command) : disabled("target cannot be transformed", command);
-    }
-    case "ai.selectSubject":
-    case "ai.removeBackground": {
-      const found = editablePixelLayer(doc, target);
-      if (!found) return disabled("target is not an editable pixel layer", command);
-      if (!ctx.backendAvailable) return disabled("required compute backend is unavailable", command);
-      return enabled(command);
     }
   }
 }
