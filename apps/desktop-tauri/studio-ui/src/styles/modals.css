@@ -569,6 +569,7 @@
   font-size: 12px;
 }
 .model-manager-list-actions button.primary { background: var(--accent); color: #00112e; border-color: var(--accent); }
+.model-manager-api-views button.active { border-color: var(--accent); color: var(--accent); }
 .model-manager-presets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .model-manager-presets > .muted { font-size: 12px; }
 .model-manager-preset-cards { display: flex; flex-wrap: wrap; gap: 8px; }
