@@ -116,14 +116,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const { openNewCanvas, activateCanvas, closeCanvas, renameCanvas } = canvas;
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
-  // Clip whose grade modal is open (clip context menu → “grade”).
   // On-demand export dialog (plan step 9): opened by the drawer's export command.
   const [exportOpen, setExportOpen] = useState(false);
   // System "Models / APIs" manager (system model manager surface plan): one
   // application-level surface, opened from the global toolbar entry or a
   // card's "Manage…" entry (which preselects that card's capability).
   const [modelsRequest, setModelsRequest] = useState<{ capability: ModelCapability | null } | null>(null);
-  // Standalone image editor opened blank (no image card selected yet).
   // Standalone image preview popup: any thumbnail double-click opens the
   // file here, off the canvas layer (no in-canvas preview cards).
   const [imagePreviewPath, setImagePreviewPath] = useState<string | null>(null);

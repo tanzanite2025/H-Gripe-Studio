@@ -89,6 +89,7 @@ export function useCanvasWorkspaceController({
   t,
 }: UseCanvasWorkspaceControllerArgs) {
   const dragging = useRef(false);
+  const { run, runSelection, runSelectionOnly } = runActions;
 
   const ingestDroppedFiles = useCallback(
     (paths: string[], physical: { x: number; y: number }) => {
@@ -364,14 +365,14 @@ export function useCanvasWorkspaceController({
   const runHudScope = useCallback(
     (scope: RunHudScope) => {
       if (scope === "selection_with_upstream") {
-        void runActions.runSelection(selectedNodeIds);
+        void runSelection(selectedNodeIds);
       } else if (scope === "selection_only") {
-        void runActions.runSelectionOnly(selectedNodeIds);
+        void runSelectionOnly(selectedNodeIds);
       } else {
-        void runActions.run();
+        void run();
       }
     },
-    [runActions, selectedNodeIds],
+    [run, runSelection, runSelectionOnly, selectedNodeIds],
   );
 
   return {
