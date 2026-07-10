@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   GRADE_OPS,
   MASK_ADJUSTMENTS,
@@ -7,7 +7,7 @@ import {
   gradeOpMeta,
   maskOpMeta,
 } from "./opRegistry";
-import type { EditOp } from "../types/production";
+import { type EditOp } from "../contracts/maskOps";
 
 describe("opRegistry", () => {
   it("mask-document op types are unique and all registered with their kernel", () => {

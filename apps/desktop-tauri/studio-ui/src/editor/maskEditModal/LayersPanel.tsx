@@ -1,11 +1,17 @@
-// Right rail "Layers" panel block: the layer stack (top first).
+﻿// Right rail "Layers" panel block: the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { LayerBlend, LayerGroup, LayerTargetKind, MaskDocument, MaskLayer } from "../../types/production";
-import { LAYER_BLENDS } from "../../types/production";
+import {
+  type LayerBlend,
+  type LayerGroup,
+  type LayerTargetKind,
+  type MaskDocument,
+  type MaskLayer,
+} from "../../contracts/maskDocument";
+import { LAYER_BLENDS } from "../../contracts/maskDocument";
 import { hasSourceImageContent, LAYER_GROUP_COLORS, SOURCE_IMAGE_OP_TYPE } from "../maskEdit";
 import { runMaskEditorCommand } from "../maskEditorCommandRunner";
 import { buildLayerThumb } from "../maskMorphology";

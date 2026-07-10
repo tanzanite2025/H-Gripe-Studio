@@ -1,4 +1,4 @@
-// Curvature-pen geometry: fit a smooth closed curve through clicked anchors.
+﻿// Curvature-pen geometry: fit a smooth closed curve through clicked anchors.
 //
 // The curvature pen records the same `EditPath` polygon as the pen / lasso —
 // the smoothing happens up front, at commit time, by sampling a closed
@@ -6,7 +6,7 @@
 // rasteriser (frontend proxy and Rust backend) then replays it like any
 // other straight-segment path, so no new kernel op is needed.
 
-import type { EditPathPoint } from "../../types/production";
+import { type EditPathPoint } from "../../contracts/maskOps";
 
 /**
  * Flatten a committed vector path to a closed polyline: bezier segments

@@ -1,5 +1,5 @@
 ﻿import { tauriInvoke } from "./core";
-import type { Bounds } from "../types/production";
+import { type Bounds } from "../contracts/context";
 
 // --- Image Enhance ----------------------------------------------------------
 // Wraps the Rust `enhance_image` command, which shells out to the torch-free

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
@@ -27,11 +27,8 @@ import {
   initEditState,
   type EditState,
 } from "./maskEdit";
-import type {
-  LayerAdjustment,
-  MaskDocument,
-} from "../types/production";
-import { activeTargetKind } from "../types/production";
+import { type LayerAdjustment, type MaskDocument } from "../contracts/maskDocument";
+import { activeTargetKind } from "../contracts/maskDocument";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
 import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";

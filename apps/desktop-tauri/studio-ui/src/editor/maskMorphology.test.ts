@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   adjustmentLut,
   applyOp,
@@ -39,11 +39,11 @@ import {
 import { normalizeEditPaths } from "./maskEdit";
 import {
   emptyMaskDocument,
-  type EditOp,
   type LayerBlend,
   type MaskDocument,
   type MaskLayer,
-} from "../types/production";
+} from "../contracts/maskDocument";
+import { type EditOp } from "../contracts/maskOps";
 import fixtures from "./imageDocumentContractFixtures.json";
 
 /** A single-layer v3 document whose background layer holds `ops`. */

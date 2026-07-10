@@ -1,4 +1,4 @@
-// Right rail — "Channels" panel (PS 通道). The mask document is grayscale, so
+﻿// Right rail — "Channels" panel (PS 通道). The mask document is grayscale, so
 // the mask workspace exposes the mask alpha plus PS's quick-mask overlay
 // channel; the image workspace shows the image's composite and per-colour
 // channels (RGB / red / green / blue), like PS.
@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { MaskLayer } from "../../types/production";
+import { type MaskLayer } from "../../contracts/maskDocument";
 import { buildLayerThumb } from "../maskMorphology";
 
 interface ChannelsPanelProps {

@@ -8,7 +8,7 @@
 // edgeRefine, enhance, watchdog, repaint, and engineProbe.
 
 import { tauriInvoke } from "./core";
-import type { VisualContext } from "../types/production";
+import { type VisualContext } from "../contracts/context";
 
 // Fields are snake_case to match the Rust `ProviderProfileSummary`.
 export interface ProviderProfile {

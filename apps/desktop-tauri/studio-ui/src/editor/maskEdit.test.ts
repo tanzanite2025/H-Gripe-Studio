@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   activeOps,
   addBrushStroke,
@@ -37,8 +37,9 @@ import {
   updateOpAmount,
   updatePathAnchors,
 } from "./maskEdit";
-import type { BrushStroke, MaskDocument } from "../types/production";
-import { isBrushOp, isMaskOperation, isPathOp } from "../types/production";
+import { type BrushStroke } from "../contracts/maskOps";
+import { type MaskDocument } from "../contracts/maskDocument";
+import { isBrushOp, isMaskOperation, isPathOp } from "../contracts/maskOps";
 import fixtures from "./imageDocumentContractFixtures.json";
 
 const stackPaths = (doc: MaskDocument) => activeOps(doc).filter(isPathOp);

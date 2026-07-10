@@ -1,11 +1,12 @@
-// Shared contracts of the Mask-Edit pointer state machine: the mutable
+﻿// Shared contracts of the Mask-Edit pointer state machine: the mutable
 // in-flight gesture record (`PointerGestures`) and the environment the tool
 // modules read from / write back into the editor shell (`PointerEnv`). The
 // per-tool-type handlers live in the sibling modules; pointerMachine.ts only
 // dispatches.
 import type React from "react";
 import type { CanvasView } from "../../canvasView";
-import type { EditPathPoint, MaskDocument } from "../../../types/production";
+import { type EditPathPoint } from "../../../contracts/maskOps";
+import { type MaskDocument } from "../../../contracts/maskDocument";
 import type { EdgeMap, MagneticSnapSettings } from "../magneticSnap";
 import type { MaskTool, PaintTarget, ShapeKind } from "../../maskTools";
 import type { MaskEditAction } from "../actions";

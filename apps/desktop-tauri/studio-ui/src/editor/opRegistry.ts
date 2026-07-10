@@ -1,4 +1,4 @@
-// Op registry (image-kernel K0, docs/design/image-kernel.md §3).
+﻿// Op registry (image-kernel K0, docs/design/image-kernel.md §3).
 //
 // Every editing action in the studio is recorded as an Op — plain revisable
 // data replayed in order. This table is the single place ops are *declared*:
@@ -11,7 +11,8 @@
 // row fails `tsc`. Mask op kinds are an open `string` on `MaskOperation`, so
 // they are pinned by the const list below plus the registry unit test.
 
-import type { AdjustmentType, EditOp } from "../types/production";
+import { type AdjustmentType } from "../contracts/maskDocument";
+import { type EditOp } from "../contracts/maskOps";
 import type { GradeOp } from "./gradeKernel";
 
 /** Which execution core replays an op (image-kernel.md §1). */

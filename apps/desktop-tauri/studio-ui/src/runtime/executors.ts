@@ -1,4 +1,4 @@
-// Default executor registry: maps node kinds to runtime behaviour.
+﻿// Default executor registry: maps node kinds to runtime behaviour.
 //
 // The `generate` node composes an ApiTask and runs it through the existing
 // H-Gripe broker (`run_task_json`). Source nodes (`promptOptimize`, `imageSource`,
@@ -7,7 +7,8 @@
 
 import { analyzePsdContext, composePsd, compositeRepaint, detectQualityIssues, enhanceImage, getOutputDir, localRepaintRegions, matchLightColor, prepareRepaintRegions, refineMaskEdge, runTaskJson } from "../bridge/tauri";
 import type { RepaintedCrop } from "../bridge/tauri";
-import type { Bounds, QualityReport, RepaintReport, VisualContext } from "../types/production";
+import { type Bounds, type VisualContext } from "../contracts/context";
+import { type QualityReport, type RepaintReport } from "../contracts/quality";
 import {
   findLayer,
   layeredAssetManifest,

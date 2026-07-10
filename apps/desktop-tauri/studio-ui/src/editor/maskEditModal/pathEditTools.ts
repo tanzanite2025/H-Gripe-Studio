@@ -1,4 +1,4 @@
-// Path / direct selection: hit-test a canvas click against the committed
+﻿// Path / direct selection: hit-test a canvas click against the committed
 // path steps of the active layer, and translate a whole anchor draft.
 //
 // Both tools re-open a committed `EditPath` through the existing anchor-edit
@@ -6,7 +6,7 @@
 // selection drags one anchor at a time. Neither adds a new kernel op — the
 // commit is the ordinary `path_anchors` history step.
 
-import { isPathOp, type EditOp, type EditPathPoint } from "../../types/production";
+import { isPathOp, type EditOp, type EditPathPoint } from "../../contracts/maskOps";
 
 /** Distance from `pt` to the segment `a`–`b` (image px). */
 function segmentDistance(pt: [number, number], a: EditPathPoint, b: EditPathPoint): number {

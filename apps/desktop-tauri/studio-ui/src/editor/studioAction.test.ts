@@ -1,4 +1,4 @@
-// Studio Action runtime (plan steps 5–7): compute block registry, action
+﻿// Studio Action runtime (plan steps 5–7): compute block registry, action
 // registry stages (dry_run -> preview -> commit -> undo), and the first
 // non-agent actions. Every commit must land as an ordinary undo step and
 // must refuse to touch anything but its resolved target.
@@ -18,7 +18,7 @@ import {
 } from "./studioAction";
 import { addLayerMask, initEditState, undo, type EditState } from "./maskEdit";
 import { resolveActiveTarget, type StudioDocumentRef, type StudioTarget } from "./studioTarget";
-import { activeTargetKind } from "../types/production";
+import { activeTargetKind } from "../contracts/maskDocument";
 
 const ref: StudioDocumentRef = { canvasId: "canvas-1", documentId: "node-1/edit_paths" };
 

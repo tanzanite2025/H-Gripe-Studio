@@ -1,8 +1,8 @@
-// Front-end, best-effort mask morphology on a downscaled proxy buffer.
+﻿// Front-end, best-effort mask morphology on a downscaled proxy buffer.
 //
 // The Mask-Edit modal records morphology as *intent* (`MaskOperation` entries)
 // and the Rust backend rasterises the authoritative result on run — see the
-// note on `MaskOperation` in `types/production.ts` about not re-implementing the
+// note on `MaskOperation` in `contracts.ts` about not re-implementing the
 // exact Rust morphology so stored state can't drift. This module is deliberately
 // the OTHER thing: a cheap, approximate **preview** of grow / shrink / feather /
 // smooth on a small proxy alpha buffer, so a slider drag can show roughly what
@@ -14,16 +14,14 @@
 // modal wraps a proxy build + `applyOp` in `PreviewLane` for latest-wins drags
 // and does the canvas rasterisation of the result overlay separately.
 
-import type {
-  BrushStroke,
-  EditOp,
-  EditPath,
-  LayerAdjustment,
-  MaskDocument,
-  MaskLayer,
-  MaskOperation,
-} from "../types/production";
-import { isBrushOp, isPathOp } from "../types/production";
+import {
+  type BrushStroke,
+  type EditOp,
+  type EditPath,
+  type MaskOperation,
+} from "../contracts/maskOps";
+import { type LayerAdjustment, type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
+import { isBrushOp, isPathOp } from "../contracts/maskOps";
 import { SOURCE_IMAGE_OP_TYPE } from "./maskEdit";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */

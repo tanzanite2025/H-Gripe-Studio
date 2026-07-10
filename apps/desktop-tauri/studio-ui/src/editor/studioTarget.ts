@@ -1,4 +1,4 @@
-// Studio target vocabulary (docs/plans/active/
+﻿// Studio target vocabulary (docs/plans/active/
 // MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md). Every manual tool, compute
 // block, and future Studio Action addresses the same first-class target ids:
 //
@@ -9,8 +9,9 @@
 // `StudioTarget` before they run, so "make a mask" can never silently mean
 // "create a new layer."
 
-import type { EditPath, MaskDocument, MaskLayer } from "../types/production";
-import { activeLayer, activeTargetKind } from "../types/production";
+import { type EditPath } from "../contracts/maskOps";
+import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
+import { activeLayer, activeTargetKind } from "../contracts/maskDocument";
 
 export type StudioTarget =
   | { kind: "document"; canvasId: string; documentId: string }

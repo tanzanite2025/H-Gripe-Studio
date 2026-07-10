@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { emptyMaskDocument } from "../types/production";
+﻿import { describe, expect, it } from "vitest";
+import { emptyMaskDocument } from "../contracts/maskDocument";
 import {
   imageCompositeTarget,
   imageDocumentFrameHidden,

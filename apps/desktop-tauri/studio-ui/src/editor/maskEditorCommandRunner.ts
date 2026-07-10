@@ -1,4 +1,4 @@
-import type { MaskDocument } from "../types/production";
+﻿import { type MaskDocument } from "../contracts/maskDocument";
 import type { MaskEditDispatch } from "./maskEditModal/actions";
 import type { CommandId } from "./studioCommands";
 import type { StudioTarget } from "./studioTarget";

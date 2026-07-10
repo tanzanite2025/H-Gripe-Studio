@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { emptyLayerMask, emptyMaskDocument, emptyMaskLayer, type MaskDocument } from "../types/production";
+﻿import { describe, expect, it } from "vitest";
+import {
+  emptyLayerMask,
+  emptyMaskDocument,
+  emptyMaskLayer,
+  type MaskDocument,
+} from "../contracts/maskDocument";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import type { MaskEditAction } from "./maskEditModal/actions";
 import type { StudioTarget } from "./studioTarget";

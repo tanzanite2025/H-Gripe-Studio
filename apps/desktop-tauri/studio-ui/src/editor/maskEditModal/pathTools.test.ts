@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { catmullRomClosed } from "./pathGeometry";
 import { hitTestPathOp, translateAnchors } from "./pathEditTools";
-import type { EditOp } from "../../types/production";
+import { type EditOp } from "../../contracts/maskOps";
 
 describe("catmullRomClosed", () => {
   it("passes through every anchor and closes the loop", () => {

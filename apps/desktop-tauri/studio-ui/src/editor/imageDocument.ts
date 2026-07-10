@@ -1,4 +1,4 @@
-// ImageDocument (image-kernel K1, docs/design/image-kernel.md §2, §5).
+﻿// ImageDocument (image-kernel K1, docs/design/image-kernel.md §2, §5).
 //
 // The standalone image editor's document model: real pixel layers, grade
 // adjustments, groups. Rendering (K2+) compiles this tree down to the grade
@@ -11,7 +11,6 @@
 
 import {
   LAYER_BLENDS,
-  type EditOp,
   type ImageCanvasSize,
   type LayerAdjustment,
   type LayerBlend,
@@ -20,7 +19,8 @@ import {
   type LayerTargetKind,
   type MaskDocument,
   type MaskLayer,
-} from "../types/production";
+} from "../contracts/maskDocument";
+import { type EditOp } from "../contracts/maskOps";
 import type { GradeBlendMode, GradeOp } from "./gradeKernel";
 import type { PersistedMaskEditState } from "./maskEdit";
 

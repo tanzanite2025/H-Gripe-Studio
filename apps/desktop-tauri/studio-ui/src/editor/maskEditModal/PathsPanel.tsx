@@ -1,9 +1,9 @@
-// Right rail — "Paths" panel (PS 路径): the active layer's vector path steps
+﻿// Right rail — "Paths" panel (PS 路径): the active layer's vector path steps
 // (pen / lasso / marquee / shape ops), with PS-style anchor re-editing.
 
 import { useT } from "../../i18n";
-import type { EditOp } from "../../types/production";
-import { isPathOp } from "../../types/production";
+import { type EditOp } from "../../contracts/maskOps";
+import { isPathOp } from "../../contracts/maskOps";
 
 interface PathsPanelProps {
   ops: readonly EditOp[];

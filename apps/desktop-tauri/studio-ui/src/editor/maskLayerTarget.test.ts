@@ -1,4 +1,4 @@
-// Layer-mask target contract (MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN):
+﻿// Layer-mask target contract (MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN):
 // masks are attachments on a layer, the document stores the active target
 // explicitly, and edits route to the targeted stack.
 
@@ -20,8 +20,8 @@ import {
 } from "./maskEdit";
 import { fromMaskDocument, toMaskDocument } from "./imageDocument";
 import { resolveActiveTarget } from "./studioTarget";
-import type { BrushStroke } from "../types/production";
-import { activeTargetKind, emptyAdjustmentLayer } from "../types/production";
+import { type BrushStroke } from "../contracts/maskOps";
+import { activeTargetKind, emptyAdjustmentLayer } from "../contracts/maskDocument";
 
 const stroke = (id: string): BrushStroke => ({
   id,

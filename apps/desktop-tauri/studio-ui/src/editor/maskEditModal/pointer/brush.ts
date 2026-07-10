@@ -1,9 +1,9 @@
-// Brush-family tools: paint / matte strokes, the retouch brushes (heal,
+﻿// Brush-family tools: paint / matte strokes, the retouch brushes (heal,
 // dodge/burn, history, sponge, clone, healing brush, pattern stamp, remove,
 // art history brush, quick select, background eraser). All of them draw a
 // freehand stroke and commit it on release.
 import type React from "react";
-import type { BrushStroke } from "../../../types/production";
+import { type BrushStroke } from "../../../contracts/maskOps";
 import type { PointerEnv, PointerGestures, Pt } from "./types";
 
 export function brushDown(env: PointerEnv, g: PointerGestures, e: React.PointerEvent, pt: Pt): void {

@@ -1,5 +1,5 @@
-import { Suspense, lazy } from "react";
-import type { MaskDocument } from "../../types/production";
+﻿import { Suspense, lazy } from "react";
+import { type MaskDocument } from "../../contracts/maskDocument";
 import type { EditState } from "../maskEdit";
 import type { ImageDocument } from "../imageDocument";
 import type { CropCommit } from "../CropEditModal";

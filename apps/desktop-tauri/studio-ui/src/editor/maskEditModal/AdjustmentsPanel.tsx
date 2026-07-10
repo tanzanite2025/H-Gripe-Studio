@@ -1,10 +1,10 @@
-// Right rail "Adjustments" panel: the list selects a tool to inspect. It does
+﻿// Right rail "Adjustments" panel: the list selects a tool to inspect. It does
 // not create layers until the user presses the explicit add button.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT, type MsgKey } from "../../i18n";
-import type { AdjustmentType, LayerAdjustment } from "../../types/production";
+import { type AdjustmentType, type LayerAdjustment } from "../../contracts/maskDocument";
 import type { MaskEditDispatch } from "./actions";
 import { AdjustmentControls } from "./AdjustmentControls";
 

@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { compileImageAdjustments } from "./imageCompile";
 import { applyDoc } from "./gradeKernel";
 import type { GradeSurface } from "./gradeKernel";
 import { adjustmentLut } from "./maskMorphology";
 import { emptyImageDocument, emptyImageLayer, type ImageDocument, type ImageLayer } from "./imageDocument";
-import type { LayerAdjustment } from "../types/production";
+import { type LayerAdjustment } from "../contracts/maskDocument";
 
 function adjustmentLayer(adjustment: LayerAdjustment, opts?: Partial<ImageLayer>): ImageLayer {
   return { ...emptyImageLayer(adjustment.type), layer: { kind: "adjustment", adjustment }, ...opts };

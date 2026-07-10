@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { emptyMaskDocument, type MaskDocument } from "../../types/production";
+﻿import { describe, expect, it } from "vitest";
+import { emptyMaskDocument, type MaskDocument } from "../../contracts/maskDocument";
 import { buildViewportOverlayScene } from "./stageScene";
 
 function docWithPath(): MaskDocument {

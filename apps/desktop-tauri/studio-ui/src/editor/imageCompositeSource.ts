@@ -1,4 +1,4 @@
-import type { MaskDocument, MaskLayer } from "../types/production";
+﻿import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
 import type { ViewportTarget } from "../bridge/viewport";
 import { composeTransforms, hasSourceImageContent, type TransformParams } from "./maskEdit";
 import { layerAlphaBounds, type AlphaBounds, type LayerAlphaBoundsOptions } from "./maskMorphology";

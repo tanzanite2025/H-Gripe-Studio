@@ -1,8 +1,8 @@
-// Pure canvas painters for the mask-edit stage overlay. Every function takes
+﻿// Pure canvas painters for the mask-edit stage overlay. Every function takes
 // a 2D context plus plain data and draws one scene element — no React state,
 // no refs. MaskEditModal assembles the scene; painting lives here.
 
-import type { EditPath, EditPathPoint } from "../../types/production";
+import { type EditPath, type EditPathPoint } from "../../contracts/maskOps";
 import type { ProxyMask } from "../maskMorphology";
 import { shapeVertices, type ShapeKind } from "../maskTools";
 import type { TargetBounds } from "../studioTarget";

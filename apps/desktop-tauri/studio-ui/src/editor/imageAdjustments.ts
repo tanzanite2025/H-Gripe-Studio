@@ -1,4 +1,4 @@
-// Mask-adjustment → grade-op lowering (image-kernel K2,
+﻿// Mask-adjustment → grade-op lowering (image-kernel K2,
 // docs/design/image-kernel.md §4).
 //
 // A bridged adjustment layer carries the mask editor's u8 tone map
@@ -25,7 +25,7 @@
 // `adjustmentLut` within u8 rounding at all 256 levels.
 
 import type { GradeOp } from "./gradeKernel";
-import type { LayerAdjustment } from "../types/production";
+import { type LayerAdjustment } from "../contracts/maskDocument";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
