@@ -1,11 +1,13 @@
-import { tauriWindow, type TauriDesktopWindow } from "../bridge/core";
+import {
+  closeWindow,
+  minimizeWindow,
+  toggleMaximizeWindow,
+} from "../bridge/windowControls";
 import { useT } from "../i18n";
 
-async function runWindowAction(action: (win: TauriDesktopWindow) => Promise<void>) {
-  const win = tauriWindow();
-  if (!win) return;
+async function runWindowAction(action: () => Promise<void>) {
   try {
-    await action(win);
+    await action();
   } catch {}
 }
 
@@ -16,7 +18,7 @@ export function WindowControls() {
     <div className="window-controls" aria-label={t("win.controls")}>
       <button
         className="win-btn win-close"
-        onClick={() => void runWindowAction((win) => win.close())}
+        onClick={() => void runWindowAction(closeWindow)}
         aria-label={t("win.close")}
         title={t("win.close")}
       >
@@ -26,7 +28,7 @@ export function WindowControls() {
       </button>
       <button
         className="win-btn win-minimize"
-        onClick={() => void runWindowAction((win) => win.minimize())}
+        onClick={() => void runWindowAction(minimizeWindow)}
         aria-label={t("win.minimize")}
         title={t("win.minimize")}
       >
@@ -36,7 +38,7 @@ export function WindowControls() {
       </button>
       <button
         className="win-btn win-maximize"
-        onClick={() => void runWindowAction((win) => win.toggleMaximize())}
+        onClick={() => void runWindowAction(toggleMaximizeWindow)}
         aria-label={t("win.maximize")}
         title={t("win.maximize")}
       >

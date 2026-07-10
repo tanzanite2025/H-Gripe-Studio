@@ -6,7 +6,7 @@ import type {
 } from "react";
 
 import { WindowControls } from "./WindowControls";
-import { tauriWindow } from "../bridge/core";
+import { startWindowDrag } from "../bridge/windowControls";
 import type { ValidationIssue } from "../runtime/dag";
 import { useT } from "../i18n";
 
@@ -93,12 +93,10 @@ export function SettingsIcon() {
   );
 }
 
-function startWindowDrag(e: MouseEvent<HTMLElement>) {
+function beginWindowDrag(e: MouseEvent<HTMLElement>) {
   if (e.button !== 0) return;
-  const win = tauriWindow();
-  if (!win) return;
   e.preventDefault();
-  void win.startDragging().catch(() => {});
+  void startWindowDrag().catch(() => {});
 }
 
 export interface ToolbarProps {
@@ -165,7 +163,7 @@ export function Toolbar({
         <div
           className="toolbar-drag-spacer"
           data-tauri-drag-region
-          onMouseDown={startWindowDrag}
+          onMouseDown={beginWindowDrag}
           aria-hidden="true"
         />
 

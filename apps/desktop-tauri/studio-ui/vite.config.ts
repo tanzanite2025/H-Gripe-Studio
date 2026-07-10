@@ -50,6 +50,7 @@ export default defineConfig({
   base: "./",
   // Tauri's `devUrl` points here; a fixed port keeps the two in sync.
   server: {
+    host: "127.0.0.1",
     port: 5173,
     strictPort: true,
   },
