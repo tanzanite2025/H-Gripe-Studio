@@ -16,10 +16,8 @@ import { Palette } from "./editor/Palette";
 import { ContextMenu } from "./editor/ContextMenu";
 import { NodeEditingContext } from "./editor/editingContext";
 import { PreviewModal } from "./editor/PreviewModal";
-import { EditorHost, type EditorRequest } from "./editor/host/EditorHost";
-import { maskBridgeGap, toMaskDocument, type ImageDocument } from "./editor/imageDocument";
-import type { CropCommit } from "./editor/CropEditModal";
-import { normalizeEditPaths, serializeEditState } from "./editor/maskEdit";
+import { EditorHost } from "./editor/host/EditorHost";
+import type { ImageDocument } from "./editor/imageDocument";
 import { useHistory } from "./editor/useHistory";
 import { useCanvasDocument } from "./editor/useCanvasDocument";
 import {
@@ -51,7 +49,6 @@ import { validateGraph } from "./runtime/dag";
 import {
   isTauri,
   listenFileDrop,
-  pickFile,
   primeIngest,
 } from "./bridge/tauri";
 import { ProductionDrawer } from "./production/ProductionDrawer";
@@ -61,14 +58,7 @@ import {
   VIDEO_MEDIA_EXTS,
 } from "./production/mediaBin";
 import { findClip } from "./production/timeline";
-import { defaultAudioEdit, type AudioClipEdit } from "./production/audioEdit";
-import {
-  clipGradeKey,
-  commitAudioEdit,
-  productionStore,
-  selectClip,
-  setClipGradeDoc,
-} from "./production/productionStore";
+import { defaultAudioEdit } from "./production/audioEdit";
 import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
 import { unregisterNodeOutput } from "./bridge/viewport";
 import { AudioEditModal } from "./production/AudioEditModal";
@@ -88,6 +78,7 @@ import type { ModelCapability } from "./models/backendRegistry";
 import { useT } from "./i18n";
 import { useProjectRestoreController } from "./app/useProjectRestoreController";
 import { useProductionWorkspaceController } from "./app/useProductionWorkspaceController";
+import { useEditorLaunchController } from "./app/useEditorLaunchController";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -147,8 +138,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
   // Clip whose grade modal is open (clip context menu → “grade”).
-  const [gradeClipId, setGradeClipId] = useState<string | null>(null);
-  const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
   // On-demand export dialog (plan step 9): opened by the drawer's export command.
   const [exportOpen, setExportOpen] = useState(false);
   // System "Models / APIs" manager (system model manager surface plan): one
@@ -156,7 +145,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // card's "Manage…" entry (which preselects that card's capability).
   const [modelsRequest, setModelsRequest] = useState<{ capability: ModelCapability | null } | null>(null);
   // Standalone image editor opened blank (no image card selected yet).
-  const [mediaEditBlank, setMediaEditBlank] = useState(false);
   // Standalone image preview popup: any thumbnail double-click opens the
   // file here, off the canvas layer (no in-canvas preview cards).
   const [imagePreviewPath, setImagePreviewPath] = useState<string | null>(null);
@@ -413,99 +401,19 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
   // Modal-open state (Preview / Mask-Edit / Crop-Edit / media manual editor)
   // and the connected-image lookup the modals underlay with.
+  const modals = useModals({ nodes, edges });
   const {
     previewNode,
-    maskEditNode,
-    cropEditNode,
-    gradeEditNode,
-    mediaEditSource,
     setPreviewNodeId,
     setMaskEditNodeId,
     setCropEditNodeId,
-    setGradeEditNodeId,
-    setMediaEditSourceId,
     openPreview,
     openMaskEdit,
     openCropEdit,
     openGradeEdit,
     openMediaEdit,
     connectedImagePath,
-  } = useModals({ nodes, edges });
-
-  // Right-click on an image bin asset / still clip: reopen the existing
-  // unified image editor (mask + crop) on the asset's source node, so the
-  // drawer never grows a second image-editing surface.
-  const handleOpenImageEdit = useCallback(
-    (assetId: string) => {
-      const asset = binAssets.find((a) => a.id === assetId);
-      if (!asset || asset.kind !== "image") return;
-      if (asset.sourceNodeId && nodes.some((n) => n.id === asset.sourceNodeId)) {
-        openMediaEdit(asset.sourceNodeId);
-      } else {
-        setMessage(t("drawer.imageEditNoSource"));
-      }
-    },
-    [binAssets, nodes, openMediaEdit, setMessage, t],
-  );
-
-  // Right-click on an audio clip: open the minimal trim/gain/fade editor.
-  const handleOpenAudioEdit = useCallback(
-    (clipId: string) => {
-      const found = findClip(timeline, clipId);
-      if (found && found.clip.kind === "audio") setAudioEditClipId(clipId);
-    },
-    [timeline],
-  );
-
-  // Clip context menu “grade”: open the grade modal for a still / video clip.
-  const handleOpenClipGrade = useCallback(
-    (clipId: string) => {
-      const found = findClip(timeline, clipId);
-      if (!found || found.clip.kind === "audio") return;
-      selectClip(productionStore, clipId);
-      setGradeClipId(clipId);
-    },
-    [timeline],
-  );
-
-  const handleAudioEditCommit = useCallback(
-    (edit: AudioClipEdit) => {
-      // The store clamps the edit and reflects the trimmed span on the clip.
-      if (audioEditClipId) commitAudioEdit(productionStore, audioEditClipId, edit);
-      setAudioEditClipId(null);
-    },
-    [audioEditClipId],
-  );
-
-  const audioEditClip = audioEditClipId ? findClip(timeline, audioEditClipId) : null;
-
-  // The program monitor applies each clip's stored grade doc to its frames —
-  // the same per-target documents the Grade tab edits.
-  const clipGradeDoc = useCallback(
-    (clipId: string): string | null => {
-      const key = clipGradeKey(timeline, clipId);
-      return key ? (gradeDocs[key] ?? null) : null;
-    },
-    [timeline, gradeDocs],
-  );
-
-  // The export composites each clip's property document (transform / crop /
-  // keyframes), resolved per frame Rust-side.
-  const clipPropsDoc = useCallback(
-    (clipId: string): string | null => {
-      const props = clipProps[clipId];
-      return props ? JSON.stringify(props) : null;
-    },
-    [clipProps],
-  );
-
-  // The export mixdown applies each audio clip's stored edit (trim / gain /
-  // fades) — the same documents the audio edit modal commits.
-  const clipAudioEdit = useCallback(
-    (clipId: string): AudioClipEdit | null => audioEdits[clipId]?.edit ?? null,
-    [audioEdits],
-  );
-
+  } = modals;
 
   // Node/graph editing actions: add/delete/duplicate, param edits, clipboard,
   // focus/selection, tidy layout, and bound-edit spawning.
@@ -966,325 +874,43 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, handleCanvasSelect, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
   );
 
-  // Canvas -> EditorHost adapter. The editors are application-level surfaces
-  // that only see a target (image path + title) and initial edit data; this is
-  // the one place that derives a request from node state and folds a commit
-  // back into the graph (param update / bound-edit node) and the run pipeline.
-  // The clip whose grade modal is open, resolved against the live timeline.
-  const gradeClip = gradeClipId ? findClip(timeline, gradeClipId) : null;
-  const gradeClipAsset = gradeClip
-    ? (binAssets.find((a) => a.id === gradeClip.clip.assetId) ?? null)
-    : null;
-
-  const editorRequest: EditorRequest | null = gradeClip
-    ? {
-        editor: "grade",
-        target: {
-          title: gradeClipAsset?.name ?? gradeClip.clip.assetId,
-          imagePath: gradeClip.clip.kind === "still" ? (gradeClipAsset?.path ?? null) : null,
-          videoPath: gradeClip.clip.kind === "video" ? (gradeClipAsset?.path ?? null) : null,
-        },
-        initialDoc: clipGradeDoc(gradeClip.clip.id),
-        onCommit: (commit) => {
-          // Store the doc under the clip's target key — the same key the
-          // program monitor reads through `clipGradeDoc`.
-          setClipGradeDoc(productionStore, gradeClip.clip.id, commit.gradeDoc);
-        },
-      }
-    : maskEditNode
-    ? {
-        editor: "mask",
-        target: {
-          title: t((maskEditNode.data as HgripeNodeData).kind === "subjectMask" ? "mask.titleSubject" : "mask.titleDefault"),
-          imagePath: connectedImagePath(maskEditNode.id) ?? null,
-          nodeId: maskEditNode.id,
-        },
-        initial: (maskEditNode.data as HgripeNodeData).params.edit_history
-          ?? normalizeEditPaths((maskEditNode.data as HgripeNodeData).params.edit_paths),
-        wandTolerance: Number((maskEditNode.data as HgripeNodeData).params.wand_tolerance ?? 24),
-        onCommit: (edits, editState) => {
-          // Commit the edit, then run up to this node so the result shows
-          // immediately (the effect fires once `nodes` reflects the commit).
-          const data = maskEditNode.data as HgripeNodeData;
-          pendingRunNode.current = maskEditNode.id;
-          takeSnapshot();
-          patchNode(maskEditNode.id, {
-            params: {
-              ...data.params,
-              edit_paths: edits,
-              edit_history: serializeEditState(editState),
-            },
-          });
-        },
-      }
-    : cropEditNode
-      ? {
-          editor: "crop",
-          target: {
-            title: t("crop.title"),
-            imagePath: connectedImagePath(cropEditNode.id) ?? null,
-            nodeId: cropEditNode.id,
-          },
-          initialMode:
-            (cropEditNode.data as HgripeNodeData).params.mode === "auto_subject"
-              ? "auto_subject"
-              : "manual",
-          initialBox:
-            Array.isArray((cropEditNode.data as HgripeNodeData).params.crop_box) &&
-            ((cropEditNode.data as HgripeNodeData).params.crop_box as unknown[]).length === 4
-              ? ((cropEditNode.data as HgripeNodeData).params.crop_box as [
-                  number,
-                  number,
-                  number,
-                  number,
-                ])
-              : null,
-          initialAspect: String((cropEditNode.data as HgripeNodeData).params.aspect ?? "free"),
-          initialMargin: Number((cropEditNode.data as HgripeNodeData).params.margin_pct ?? 6),
-          onCommit: (commit) => {
-            // Fold the editor's auto/manual choice into the node's params, then
-            // run up to this node so the cropped result shows immediately. Both
-            // lanes resolve through the same Compute-lane render pipeline.
-            const id = cropEditNode.id;
-            takeSnapshot();
-            setNodes((ns) =>
-              ns.map((n) =>
-                n.id === id
-                  ? {
-                      ...n,
-                      data: {
-                        ...(n.data as HgripeNodeData),
-                        params: {
-                          ...(n.data as HgripeNodeData).params,
-                          mode: commit.mode,
-                          aspect: commit.aspect,
-                          margin_pct: commit.marginPct,
-                          crop_box: commit.cropBox,
-                        },
-                      },
-                    }
-                  : n,
-              ),
-            );
-            pendingRunNode.current = id;
-          },
-        }
-      : gradeEditNode
-        ? {
-            editor: "grade",
-            target: {
-              title: t("grade.title"),
-              imagePath: connectedImagePath(gradeEditNode.id) ?? null,
-              nodeId: gradeEditNode.id,
-            },
-            initialDoc:
-              typeof (gradeEditNode.data as HgripeNodeData).params.grade_doc === "string"
-                ? ((gradeEditNode.data as HgripeNodeData).params.grade_doc as string)
-                : null,
-            onCommit: (commit) => {
-              // Fold the dialog's op stack into the node's grade_doc, then run
-              // up to this node so the graded result shows immediately.
-              pendingRunNode.current = gradeEditNode.id;
-              onParamChange(gradeEditNode.id, "grade_doc", commit.gradeDoc);
-            },
-          }
-        : mediaEditSource || mediaEditBlank
-          ? (() => {
-              const data = mediaEditSource ? (mediaEditSource.data as HgripeNodeData) : null;
-              // Node-result → image-editor pipeline: any node result opens here
-              // through the same target shape. The underlay is the node's best
-              // result image — cutout, then last output, then the source path —
-              // so model / API nodes (subject mask today, future LLM or
-              // algorithm cards) all enter the editor the same way.
-              const imagePath = data
-                ? (data.cutoutImagePath ??
-                  data.imagePath ??
-                  (typeof data.params?.path === "string" ? (data.params.path as string) : null))
-                : null;
-              // Title: the image's filename, so the bar reads
-              // "photo.png · image editor".
-              const base = imagePath?.split(/[\\/]/).pop();
-              // PS-style document tabs: one per image card on the canvas;
-              // clicking a tab retargets the editor to that card.
-              const tabs = nodes
-                .filter((n) => (n.data as HgripeNodeData).kind === "imageSource")
-                .map((n) => {
-                  const d = n.data as HgripeNodeData;
-                  const p =
-                    d.imagePath ?? (typeof d.params?.path === "string" ? (d.params.path as string) : null);
-                  return {
-                    id: n.id,
-                    label: p?.split(/[\\/]/).pop() || null,
-                    active: n.id === mediaEditSource?.id,
-                  };
-                })
-                // Pathless image cards have no document to show; only cards
-                // with an image become tabs.
-                .filter((tab): tab is { id: string; label: string; active: boolean } => tab.label != null);
-              return {
-                editor: "media" as const,
-                target: {
-                  title: base || t("mediaEdit.title"),
-                  imagePath,
-                  nodeId: mediaEditSource?.id ?? null,
-                },
-                // "Open image": lands the picked file on a new image card and
-                // retargets the editor to it (a new document tab).
-                onPickFile: () => void pickIntoImageEditor(),
-                tabs,
-                onSelectTab: (id: string) => {
-                  setMediaEditBlank(false);
-                  setMediaEditSourceId(id);
-                },
-                initial: mediaEditSource ? (mediaEditDrafts.current.get(mediaEditSource.id) ?? null) : null,
-                onDocChange: (doc: ImageDocument) => {
-                  if (mediaEditSource) {
-                    mediaEditDrafts.current.set(mediaEditSource.id, doc);
-                    setMediaDraftRevision((v) => v + 1);
-                  }
-                },
-                // Apply spawns exactly one bound edit node of the chosen kind from
-                // the source (never mutating it) and runs it — same pipeline as the
-                // right-click auto entries, but seeded with the manual edits.
-                onCommitMask: (edits: ImageDocument) => {
-                  // Pre-K2 the mask kernel executes commits, so the image
-                  // document lowers to the edit_paths v3 envelope (always
-                  // bridgeable until grade-kernel-only features land).
-                  const lowered = toMaskDocument(edits);
-                  if (mediaEditSource && lowered) {
-                    if (mediaEditDrafts.current.delete(mediaEditSource.id)) setMediaDraftRevision((v) => v + 1);
-                    addBoundEdit(mediaEditSource.id, "subjectMask", {
-                      params: { edit_paths: lowered, ...(edits.editHistory ? { edit_history: edits.editHistory } : null) },
-                      openEditor: false,
-                      run: true,
-                    });
-                  } else if (mediaEditSource && !lowered) {
-                    // The draft stays in `mediaEditDrafts`, so reopening the
-                    // editor restores the document; only the apply is dropped.
-                    console.warn(`image edit apply skipped — document cannot lower to edit_paths (${maskBridgeGap(edits)})`);
-                  }
-                  setMediaEditSourceId(null);
-                  setMediaEditBlank(false);
-                },
-                onCommitCrop: (commit: CropCommit) => {
-                  if (mediaEditSource) {
-                    addBoundEdit(mediaEditSource.id, "crop", {
-                      params: {
-                        mode: commit.mode,
-                        aspect: commit.aspect,
-                        margin_pct: commit.marginPct,
-                        crop_box: commit.cropBox,
-                      },
-                      openEditor: false,
-                      run: true,
-                    });
-                  }
-                  setMediaEditSourceId(null);
-                  setMediaEditBlank(false);
-                },
-              };
-            })()
-          : null;
-
-  // The image card most recently viewed in the editor, so reopening lands on
-  // it (PS-style: the last-looked-at document tab is the active one).
-  const lastMediaEditId = useRef<string | null>(null);
-  useEffect(() => {
-    if (mediaEditSource) lastMediaEditId.current = mediaEditSource.id;
-  }, [mediaEditSource]);
-
-  // Toolbar entry for the unified image editor — a standalone surface: a
-  // selected image card wins, then the last-viewed card, then the most recent
-  // image card on the canvas; with no image cards at all the editor opens
-  // blank and offers an in-editor "open image" entry.
-  const openImageEditor = () => {
-    const isImage = (n: Node) => (n.data as HgripeNodeData).kind === "imageSource";
-    const selected = nodes.find((n) => selectedNodeIds.includes(n.id) && isImage(n));
-    if (selected) {
-      openMediaEdit(selected.id);
-      return;
-    }
-    const last = lastMediaEditId.current;
-    if (last && nodes.some((n) => n.id === last && isImage(n))) {
-      openMediaEdit(last);
-      return;
-    }
-    const cards = nodes.filter(isImage);
-    if (cards.length > 0) {
-      openMediaEdit(cards[cards.length - 1].id);
-      return;
-    }
-    setMediaEditBlank(true);
-  };
-
-  // The preview popup's "image editor" entry: open the unified editor on the
-  // image card that owns `path`, landing a new card first when the path came
-  // from a derived result (mask / cutout) with no source card of its own.
-  const openImageEditorOnPath = (path: string) => {
-    const owner = nodes.find(
-      (n) =>
-        (n.data as HgripeNodeData).kind === "imageSource" &&
-        (n.data as HgripeNodeData).params?.path === path,
-    );
-    if (owner) {
-      openMediaEdit(owner.id);
-      return;
-    }
-    takeSnapshot();
-    const origin = screenToFlowPosition({
-      x: window.innerWidth / 2,
-      y: window.innerHeight / 2,
-    });
-    const node = {
-      ...makeNode(newNodeId("imageSource"), "imageSource", origin.x, origin.y, { path }),
-      selected: true,
-    };
-    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
-    setSelectedId(node.id);
-    void primeIngest([path]);
-    openMediaEdit(node.id);
-  };
-
-  // The blank editor's "open image" entry: pick a file, land it on a new image
-  // card, and re-open the editor on that card.
-  const pickIntoImageEditor = async () => {
-    const path = await pickFile({
-      title: t("imageEdit.pickTitle"),
-      filterName: "Images",
-      extensions: [...IMAGE_DROP_EXTS],
-    });
-    if (!path) {
-      // Browser preview has no native picker; guide toward selecting a card.
-      if (!isDesktop) window.alert(t("imageEdit.selectFirst"));
-      return;
-    }
-    takeSnapshot();
-    const origin = screenToFlowPosition({
-      x: window.innerWidth / 2,
-      y: window.innerHeight / 2,
-    });
-    const node = {
-      ...makeNode(newNodeId("imageSource"), "imageSource", origin.x, origin.y, { path }),
-      selected: true,
-    };
-    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
-    setSelectedId(node.id);
-    void primeIngest([path]);
-    setMediaEditBlank(false);
-    openMediaEdit(node.id);
-  };
-
-  const closeEditor = () => {
-    setGradeClipId(null);
-    setMaskEditNodeId(null);
-    setCropEditNodeId(null);
-    setGradeEditNodeId(null);
-    setMediaEditSourceId(null);
-    setMediaEditBlank(false);
-    // Drafts survive close and project-manifest autosave; the editor unmount
-    // only frees the heavy canvas/underlay memory.
-  };
-
+  const {
+    audioEditClip,
+    audioEditClipId,
+    clipAudioEdit,
+    clipGradeDoc,
+    clipPropsDoc,
+    closeEditor,
+    editorRequest,
+    handleAudioEditCommit,
+    handleOpenAudioEdit,
+    handleOpenClipGrade,
+    handleOpenImageEdit,
+    openImageEditor,
+    openImageEditorOnPath,
+    setAudioEditClipId,
+  } = useEditorLaunchController({
+    nodes,
+    setNodes,
+    setSelectedId,
+    binAssets,
+    timeline,
+    gradeDocs,
+    audioEdits,
+    clipProps,
+    modals,
+    nodeEditing: { addBoundEdit, newNodeId, onParamChange, patchNode },
+    selectedNodeIds,
+    pendingRunNode,
+    mediaEditDrafts,
+    setMediaDraftRevision,
+    takeSnapshot,
+    screenToFlowPosition,
+    setMessage,
+    isDesktop,
+    imageExtensions: IMAGE_DROP_EXTS,
+    t,
+  });
   return (
     <div className="app">
       <Toolbar
