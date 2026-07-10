@@ -416,7 +416,6 @@ export function MaskEditModal({
     activeCompositeTransform,
     cropRegion,
     gradePreview,
-    frameHidden,
   } = useUnderlayController({
     workspace,
     imagePath,
@@ -787,7 +786,7 @@ export function MaskEditModal({
   };
 
   const viewportHost = viewport.host;
-  const magneticUnderlay = frameHidden ? null : (gradedUnderlay ?? underlay);
+  const magneticUnderlay = gradedUnderlay ?? underlay;
   // Magnetic lasso: prewarm and cache the visible window's edge map. Pointer
   // down can reuse a same-window map immediately; stale async readbacks are
   // ignored so old pixels never drive a new drag.
@@ -1222,7 +1221,7 @@ export function MaskEditModal({
             dims={dims}
             documentAvailable={documentDims != null}
             view={view}
-            underlay={frameHidden ? null : (gradedUnderlay ?? underlay)}
+            underlay={gradedUnderlay ?? underlay}
             presented={presented}
             cropView={cropView}
             underlayRef={underlayAnchorRef}

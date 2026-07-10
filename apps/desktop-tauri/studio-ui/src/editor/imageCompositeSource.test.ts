@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { emptyMaskDocument } from "../contracts/maskDocument";
 import {
   imageCompositeTarget,
-  imageDocumentFrameHidden,
-  imageDocumentHasVisibleSource,
   imageLayerContentBounds,
   imageLayerDrawsSource,
   imageLayerHasSourceContent,
@@ -25,8 +23,6 @@ describe("image composite viewport source", () => {
     });
     expect(imageLayerDrawsSource(doc.layers[0], 0)).toBe(false);
     expect(imageLayerDrawsSource(doc.layers[1], 1)).toBe(true);
-    expect(imageDocumentHasVisibleSource(doc)).toBe(true);
-    expect(imageDocumentFrameHidden(doc)).toBe(false);
   });
 
   it("keeps hidden source layers identifiable for thumbnails without drawing them", () => {
@@ -54,23 +50,6 @@ describe("image composite viewport source", () => {
     });
     expect(imageLayerHasSourceContent(doc.layers[1], 1)).toBe(true);
     expect(imageLayerDrawsSource(doc.layers[1], 1)).toBe(false);
-    expect(imageDocumentFrameHidden(doc)).toBe(true);
-  });
-
-  it("hides the frame only after every source-backed layer is hidden or gone", () => {
-    const doc = emptyMaskDocument();
-    doc.layers[0].visible = false;
-    doc.layers.push({
-      ...emptyMaskDocument().layers[0],
-      id: "copy",
-      name: "Background copy",
-      ops: [{ type: "source_image" }],
-    });
-    expect(imageDocumentFrameHidden(doc)).toBe(false);
-    doc.layers[1].visible = false;
-    expect(imageDocumentFrameHidden(doc)).toBe(true);
-    doc.layers.splice(1, 1);
-    expect(imageDocumentFrameHidden(doc)).toBe(true);
   });
 
   it("resolves image-layer content bounds for implicit background and source copies", () => {
