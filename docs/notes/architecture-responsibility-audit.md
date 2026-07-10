@@ -348,6 +348,8 @@ layers/
 
 ### A06 / P1：`types/production.ts` 是多个合同域的聚合桶
 
+状态（2026-07-10）：已完成。合同已按 context、quality、mask operations、mask document 与 subject mask 拆分到 `contracts/`；内部调用方已迁移到对应的聚焦模块，`types/production.ts` 仅保留兼容 re-export。
+
 #### 证据
 
 `apps/desktop-tauri/studio-ui/src/types/production.ts` 约 621 行、50 个 export，并声明自身需与 Rust `contracts.rs` 手工保持一致。文件同时包含：
@@ -384,6 +386,8 @@ contracts/
 ---
 
 ### A07 / P1：纯领域模型放在 feature UI 目录，产生反向依赖
+
+状态（2026-07-10）：已完成。layered image 模型与测试已迁移到 `domain/`，runtime、editor、production 与 app 调用方均直接依赖共享领域模块；原路径仅保留兼容 re-export。
 
 #### 证据
 
