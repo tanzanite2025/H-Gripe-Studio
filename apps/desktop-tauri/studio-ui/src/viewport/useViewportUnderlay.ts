@@ -25,8 +25,8 @@ import { WgpuViewportHost } from "./WgpuViewportHost";
  */
 export type ViewportUnderlaySource = string | ViewportTarget;
 
-/** Stable identity of a source, for effect dependencies. */
-function sourceKey(source: ViewportUnderlaySource | undefined): string {
+/** Full target identity: changes whenever the host must render new pixels. */
+function sourceTargetKey(source: ViewportUnderlaySource | undefined): string {
   if (source === undefined) return "none";
   if (typeof source === "string") return `path:${source}`;
   switch (source.kind) {
@@ -40,6 +40,27 @@ function sourceKey(source: ViewportUnderlaySource | undefined): string {
       return `video_clip:${source.timelineId}:${source.clipId}:${source.timeSec}`;
     case "video_frame":
       return `video_frame:${source.resourceId}:${source.timeSec}`;
+    case "node_output":
+      return `node_output:${source.nodeId}${source.outputPort ? `:${source.outputPort}` : ""}`;
+  }
+}
+
+/** Host lifetime identity: keeps expensive viewport hosts alive across cheap
+ * retargets such as an image-composite documentKey changing during a drag. */
+function sourceHostKey(source: ViewportUnderlaySource | undefined): string {
+  if (source === undefined) return "none";
+  if (typeof source === "string") return `path:${source}`;
+  switch (source.kind) {
+    case "image":
+      return `image:${source.resourceId}`;
+    case "image_layer":
+      return `image_layer:${source.assetId}:${source.layerId}`;
+    case "image_composite":
+      return `image_composite:${source.resourceId}`;
+    case "video_clip":
+      return `video_clip:${source.timelineId}:${source.clipId}`;
+    case "video_frame":
+      return `video_frame:${source.resourceId}`;
     case "node_output":
       return `node_output:${source.nodeId}${source.outputPort ? `:${source.outputPort}` : ""}`;
   }
@@ -130,6 +151,7 @@ export function useViewportUnderlay(
   const [openHost, setOpenHost] = useState<WgpuViewportHost | null>(null);
   // The view last sent to the open host, to skip no-op `set_view` commands.
   const sentViewRef = useRef<ViewportViewState>(IDENTITY_VIEW);
+  const sentTargetKeyRef = useRef<string | null>(null);
   // Latest requested view, so a host opened after a view change (e.g. the
   // caller flipped targets while zoomed) renders that view, not identity.
   const viewRef = useRef(view);
@@ -174,7 +196,8 @@ export function useViewportUnderlay(
 
   // The source object identity may change every render; key the open effect
   // on its stable identity and read the latest value through a ref.
-  const key = sourceKey(source);
+  const hostKey = sourceHostKey(source);
+  const targetKey = sourceTargetKey(source);
   const sourceRef = useRef(source);
   sourceRef.current = source;
 
@@ -253,6 +276,7 @@ export function useViewportUnderlay(
       }
       await host.command({ kind: "resize", width: size, height: size });
       await host.command({ kind: "set_target", target });
+      sentTargetKeyRef.current = sourceTargetKey(src);
       const initialView = viewRef.current;
       if (!isIdentityView(initialView)) {
         await host.command({ kind: "set_view", ...initialView });
@@ -303,7 +327,48 @@ export function useViewportUnderlay(
       setOpenHost(null);
       void host?.close();
     };
-  }, [kind, key, size]);
+  }, [kind, hostKey, size]);
+
+  // Retarget an open host without clearing the current frame. This is
+  // critical for image editing: a live layer move changes an image-composite
+  // documentKey at pointer-move rate, but that should not destroy/recreate
+  // the viewport or blank the stage between frames.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !host.isOpen) return;
+    if (targetKey === sentTargetKeyRef.current) return;
+    const src = sourceRef.current;
+    if (src === undefined) return;
+    let cancelled = false;
+    sentTargetKeyRef.current = targetKey;
+    runCoalesced(host, async () => {
+      let target: ViewportTarget;
+      if (typeof src === "string") {
+        const res = await registerResource(src);
+        if (!res || cancelled || hostRef.current !== host) return;
+        target = { kind: "image", resourceId: res.id };
+      } else {
+        target = src;
+      }
+      await host.command({ kind: "set_target", target });
+      const frame = await host.renderFrame();
+      if (cancelled || hostRef.current !== host) return;
+      const zoom = Math.max(sentViewRef.current.zoom, 1);
+      framePresentedRef.current = frame.presented;
+      setState((s) => ({
+        ...s,
+        underlay: frame.presented ? null : frame.data_url,
+        presented: frame.presented,
+        dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
+        frameView: sentViewRef.current,
+        backend: frame.backend,
+        settled: true,
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [targetKey]);
 
   // A presentability flip re-renders through the open host: disabling hides
   // the surface first (so the frame falls back to the PNG transport rather

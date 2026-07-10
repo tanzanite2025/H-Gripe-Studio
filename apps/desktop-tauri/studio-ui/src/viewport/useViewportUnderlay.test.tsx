@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerLayeredAsset } from "../bridge/viewport";
 import type { MockViewportClient } from "../bridge/viewport/mock";
+import type { ViewportTarget } from "../bridge/viewport/contracts";
 import { installMockViewportClient, resetViewportClient } from "../bridge/viewport/testing";
 import { useViewportUnderlay } from "./useViewportUnderlay";
 import { WgpuViewportHost } from "./WgpuViewportHost";
@@ -32,6 +33,17 @@ function stubRect(el: HTMLElement, width = 640, height = 640) {
     height,
     toJSON: () => ({}),
   } as DOMRect);
+}
+
+function compositeTarget(documentKey: string, width = 640, height = 640): ViewportTarget {
+  return {
+    kind: "image_composite",
+    resourceId: "res-composite-image",
+    document: { documentKey },
+    documentKey,
+    documentWidth: width,
+    documentHeight: height,
+  };
 }
 
 let viewportClient: MockViewportClient;
@@ -120,6 +132,42 @@ describe("useViewportUnderlay view state", () => {
     expect(result.current.dims).toEqual({ w: 640, h: 640 });
     // Reference targets skip path registration entirely.
     expect(files.registerResource).not.toHaveBeenCalled();
+    unmount();
+    await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
+  });
+
+  it("retargets image composites without reopening or blanking the current frame", async () => {
+    const commands: unknown[] = [];
+    const originalCommand = WgpuViewportHost.prototype.command;
+    vi.spyOn(WgpuViewportHost.prototype, "command").mockImplementation(async function (
+      this: WgpuViewportHost,
+      cmd,
+    ) {
+      commands.push(cmd);
+      return originalCommand.call(this, cmd);
+    });
+
+    const { result, rerender, unmount } = renderHook(
+      ({ documentKey }: { documentKey: string }) =>
+        useViewportUnderlay("image_edit", compositeTarget(documentKey), 640),
+      { initialProps: { documentKey: "doc-a" } },
+    );
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    const previousUnderlay = result.current.underlay;
+    expect(previousUnderlay).toMatch(/^data:image\//);
+    expect(viewportClient.openViewportCount()).toBe(1);
+
+    await act(async () => {
+      rerender({ documentKey: "doc-b" });
+    });
+    expect(result.current.underlay).toBe(previousUnderlay);
+    await waitFor(() =>
+      expect(commands).toContainEqual({
+        kind: "set_target",
+        target: expect.objectContaining({ kind: "image_composite", documentKey: "doc-b" }),
+      }),
+    );
+    expect(viewportClient.openViewportCount()).toBe(1);
     unmount();
     await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
