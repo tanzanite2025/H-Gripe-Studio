@@ -21,7 +21,7 @@ import { snapToEdgeCandidate, traceMagneticSegment } from "./magneticSnap";
 import type { PointerEnv, PointerGestures } from "./pointer/types";
 
 export { createPointerGestures, cropCorners } from "./pointer/types";
-export type { MarqueeSelection, PointerEnv, PointerGestures } from "./pointer/types";
+export type { PointerEnv, PointerGestures } from "./pointer/types";
 
 function snapMagneticLivePoint(env: PointerEnv, g: PointerGestures, pt: [number, number]): [number, number] {
   if (!g.magneticEdge) return pt;

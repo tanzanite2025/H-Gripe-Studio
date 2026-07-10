@@ -13,6 +13,7 @@ import type { TargetBounds } from "../studioTarget";
 import { hexToRgb } from "./ColorPicker";
 import { flattenEditPath } from "./pathGeometry";
 import type { PointerGestures } from "./pointer/types";
+import type { ActiveSelection, SelectionDraft } from "./selection";
 import {
   paintAnchorDraft,
   paintCloneSource,
@@ -33,17 +34,11 @@ import {
   paintShapeDraft,
   paintStroke,
   paintTargetBounds,
-  paintWorkSelection,
+  paintSelectionDraft,
   retouchBandColor,
   type ColorSample,
   type RulerLine,
 } from "./stagePainter";
-
-export interface MarqueeSelection {
-  region: [number, number, number, number];
-  ellipse: boolean;
-  polygon?: [number, number][];
-}
 
 export interface OverlaySceneArgs {
   /** Product surface using the shared stage. Mask history overlays belong
@@ -58,7 +53,7 @@ export interface OverlaySceneArgs {
   doc: MaskDocument;
   /** Index of the path op being anchor-re-edited on the active layer. */
   editingPath: number | null;
-  lastMarquee: MarqueeSelection | null;
+  activeSelection: ActiveSelection | null;
   /** Marching-ants dash phase in surface pixels; advances over time so the
    * committed marquee's ants flow. */
   antsPhase: number;
@@ -72,7 +67,7 @@ export interface OverlaySceneArgs {
  * screen pixel wide at any zoom instead of scaling with a document-size
  * canvas. Live drags stay on the canvas for zero-latency feedback. */
 export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverlayScene | null {
-  const { workspace, frameDims, previewing, doc, editingPath, lastMarquee, antsPhase, toolId, rulerLine, colorSamples } = args;
+  const { workspace, frameDims, previewing, doc, editingPath, activeSelection, antsPhase, toolId, rulerLine, colorSamples } = args;
   if (frameDims.w <= 0 || frameDims.h <= 0) return null;
   const items: ViewportOverlayItem[] = [];
   let animatedSelection = false;
@@ -124,18 +119,18 @@ export function buildViewportOverlayScene(args: OverlaySceneArgs): ViewportOverl
       });
     }
   }
-  if (lastMarquee && workspace === "mask") {
-    if (lastMarquee.polygon) {
+  if (activeSelection && workspace === "mask") {
+    if (activeSelection.polygon) {
       // Polygon lasso selections are painted on the DOM edit canvas instead
       // of the host overlay. The canvas sits above both PNG and native WGPU
       // underlays, so closing the lasso cannot disappear while the host
       // surface catches up or lacks polygon-dash support.
     } else {
-      const [x0, y0, x1, y1] = lastMarquee.region;
+      const [x0, y0, x1, y1] = activeSelection.region;
       items.push({
         kind: "marquee",
         region: [x0 / frameDims.w, y0 / frameDims.h, x1 / frameDims.w, y1 / frameDims.h],
-        ...(lastMarquee.ellipse ? { ellipse: true } : null),
+        ...(activeSelection.ellipse ? { ellipse: true } : null),
       });
     }
     animatedSelection = true;
@@ -215,8 +210,8 @@ export interface StagePaintArgs {
   cropDraft: [number, number, number, number] | null;
   cropRegion: [number, number, number, number] | null;
   targetBounds: TargetBounds | null;
-  lastMarquee: MarqueeSelection | null;
-  workSelection: MarqueeSelection | null;
+  activeSelection: ActiveSelection | null;
+  selectionDraft: SelectionDraft | null;
   antsPhase: number;
   gestures: PointerGestures;
 }
@@ -254,8 +249,8 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     cropDraft,
     cropRegion,
     targetBounds,
-    lastMarquee,
-    workSelection,
+    activeSelection,
+    selectionDraft,
     antsPhase,
     gestures,
   } = args;
@@ -286,8 +281,8 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (workspace === "mask" && !underlay && !presented) {
     doc.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
   }
-  if (workspace === "image" && !lastMarquee && workSelection) {
-    paintWorkSelection(ctx, workSelection);
+  if (workspace === "image" && !activeSelection && selectionDraft) {
+    paintSelectionDraft(ctx, selectionDraft);
   }
   if (targetBounds) paintTargetBounds(ctx, targetBounds, antsPhase);
   const live = gestures.drawing;
@@ -331,13 +326,13 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
   const mq = gestures.marquee;
   if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse", antsPhase);
-  else if (lastMarquee?.polygon) {
-    paintLassoLoop(ctx, lastMarquee.polygon, true, antsPhase);
-  } else if (lastMarquee && (workspace === "image" || (!underlay && !presented))) {
+  else if (activeSelection?.polygon) {
+    paintLassoLoop(ctx, activeSelection.polygon, true, antsPhase);
+  } else if (activeSelection && (workspace === "image" || (!underlay && !presented))) {
     // Image-editor selections must stay on the DOM canvas so every closed
     // selection shape remains visible above PNG / native WGPU underlays.
-    const [x0, y0, x1, y1] = lastMarquee.region;
-    paintMarquee(ctx, [x0, y0], [x1, y1], lastMarquee.ellipse, antsPhase);
+    const [x0, y0, x1, y1] = activeSelection.region;
+    paintMarquee(ctx, [x0, y0], [x1, y1], activeSelection.ellipse, antsPhase);
   }
   const pl = gestures.patchLoop;
   if (pl) {

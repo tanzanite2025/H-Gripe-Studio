@@ -6,6 +6,7 @@ import { type EditPath, type EditPathPoint } from "../../contracts/maskOps";
 import type { ProxyMask } from "../maskMorphology";
 import { shapeVertices, type ShapeKind } from "../maskTools";
 import type { TargetBounds } from "../studioTarget";
+import type { SelectionOutline } from "./selection";
 
 export interface StrokeLike {
   mode: string;
@@ -13,12 +14,6 @@ export interface StrokeLike {
   points: [number, number][];
   hardness?: number;
   flow?: number;
-}
-
-export interface SelectionOutline {
-  region: [number, number, number, number];
-  ellipse: boolean;
-  polygon?: [number, number][];
 }
 
 /** A committed or in-progress brush stroke band (blue add / red subtract / amber matte). */
@@ -149,7 +144,7 @@ export function paintWorkPath(ctx: CanvasRenderingContext2D, points: [number, nu
 
 /** A closed work selection in the image editor: solid outline until the user
  * explicitly turns it into an active marching-ants selection. */
-export function paintWorkSelection(ctx: CanvasRenderingContext2D, selection: SelectionOutline) {
+export function paintSelectionDraft(ctx: CanvasRenderingContext2D, selection: SelectionOutline) {
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";

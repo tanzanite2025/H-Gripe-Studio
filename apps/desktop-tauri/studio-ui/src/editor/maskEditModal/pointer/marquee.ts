@@ -4,6 +4,7 @@
 import type React from "react";
 import { cropMarqueeEnd, perspectiveMarqueeEnd } from "./crop";
 import type { Box, PointerEnv, PointerGestures, Pt } from "./types";
+import { commitSelectionDraft, createBoxSelection } from "../selection";
 
 export function marqueeDown(env: PointerEnv, g: PointerGestures, pt: Pt): void {
   g.marquee = { start: pt, end: pt };
@@ -29,17 +30,14 @@ export function marqueeUp(env: PointerEnv, g: PointerGestures): boolean {
     } else if (tool.id === "perspective_crop") {
       perspectiveMarqueeEnd(env, region as Box);
     } else if (tool.id === "rect" || tool.id === "ellipse") {
-      const selection = {
-        region: region as [number, number, number, number],
-        ellipse: tool.id === "ellipse",
-      };
+      const selection = createBoxSelection(region as Box, tool.id === "ellipse");
       if (env.workspace === "image") {
-        env.setWorkSelection(selection);
-        env.setLastMarquee(null);
+        env.setSelectionDraft(selection);
+        env.setActiveSelection(null);
       } else {
         // Mask workspace keeps the existing PS marquee behaviour: the drag
         // directly defines an active selection used as an edit clip.
-        env.setLastMarquee(selection);
+        env.setActiveSelection(commitSelectionDraft(selection));
       }
       // Surface the selection's size readout / manual inputs: they live
       // on the 选项 tab, which may be behind another tab in its group.
@@ -49,8 +47,8 @@ export function marqueeUp(env: PointerEnv, g: PointerGestures): boolean {
     }
   } else if (tool.id === "rect" || tool.id === "ellipse") {
     // A plain click with a marquee tool drops the selection (PS deselect).
-    env.setLastMarquee(null);
-    env.setWorkSelection(null);
+    env.setActiveSelection(null);
+    env.setSelectionDraft(null);
   }
   env.forceRedraw();
   return true;

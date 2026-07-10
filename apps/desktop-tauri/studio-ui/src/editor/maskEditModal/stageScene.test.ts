@@ -28,7 +28,7 @@ describe("buildViewportOverlayScene", () => {
       previewing: false,
       doc: docWithPath(),
       editingPath: null,
-      lastMarquee: null,
+      activeSelection: null,
       antsPhase: 0,
       toolId: "move",
       rulerLine: null,
@@ -45,7 +45,7 @@ describe("buildViewportOverlayScene", () => {
       previewing: false,
       doc: emptyMaskDocument(),
       editingPath: null,
-      lastMarquee: {
+      activeSelection: {
         region: [10, 10, 80, 80],
         ellipse: false,
         polygon: [
@@ -71,7 +71,7 @@ describe("buildViewportOverlayScene", () => {
       previewing: false,
       doc: docWithPath(),
       editingPath: null,
-      lastMarquee: null,
+      activeSelection: null,
       antsPhase: 0,
       toolId: "move",
       rulerLine: null,

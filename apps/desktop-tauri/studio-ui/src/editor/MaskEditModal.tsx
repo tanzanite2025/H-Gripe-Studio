@@ -31,7 +31,7 @@ import { type LayerAdjustment, type MaskDocument } from "../contracts/maskDocume
 import { activeTargetKind } from "../contracts/maskDocument";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
-import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
+import { catmullRomClosed } from "./maskEditModal/pathGeometry";
 import { buildEdgeMap } from "./maskEditModal/magneticSnap";
 import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
@@ -66,7 +66,14 @@ import { useBrushParams } from "./maskEditModal/useBrushParams";
 import { useToolSlots } from "./maskEditModal/useToolSlots";
 import { useMaskPreviewController } from "./maskEditModal/useMaskPreviewController";
 import { useMaskEditorShortcuts } from "./maskEditModal/useMaskEditorShortcuts";
-import type { ActiveSelection } from "./maskEditModal/selection";
+import {
+  createPolygonSelection,
+  pointInSelection,
+  selectionClipFromActive,
+  selectionSourceFromToolId,
+  type SelectionDraft,
+} from "./maskEditModal/selection";
+import { useSelectionController } from "./maskEditModal/useSelectionController";
 import { useUnderlayController } from "./maskEditModal/useUnderlayController";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
@@ -134,34 +141,6 @@ const SHELL_HANDOFF_MS = 300;
 // their global meaning even while a selection is up (PS transforms / crops
 // the selection contents, which the mask model has no notion of).
 const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
-function polygonSelection(points: [number, number][]): ActiveSelection {
-  const xs = points.map(([x]) => x);
-  const ys = points.map(([, y]) => y);
-  const region: [number, number, number, number] = [
-    Math.min(...xs),
-    Math.min(...ys),
-    Math.max(...xs),
-    Math.max(...ys),
-  ];
-  return { region, ellipse: false, polygon: points };
-}
-
-function pointInActiveSelection(point: [number, number], selection: ActiveSelection): boolean {
-  if (selection.polygon) return pointInPolygon(point, selection.polygon);
-  const [x0, y0, x1, y1] = selection.region;
-  const left = Math.min(x0, x1);
-  const right = Math.max(x0, x1);
-  const top = Math.min(y0, y1);
-  const bottom = Math.max(y0, y1);
-  const [x, y] = point;
-  if (x < left || x > right || y < top || y > bottom) return false;
-  if (!selection.ellipse) return true;
-  const rx = Math.max((right - left) / 2, 1);
-  const ry = Math.max((bottom - top) / 2, 1);
-  const cx = left + rx;
-  const cy = top + ry;
-  return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
-}
 
 // Default right-rail dock layout, mirroring PS: a 调整/属性 top group (plus
 // the mask-specific tool options / mask ops / info tabs) over a growing
@@ -329,31 +308,39 @@ export function MaskEditModal({
   // host-side over the rendered frame, so it follows the view window's
   // detail; when no host frame presents (browser preview) the canvas
   // painters below draw the same tint locally.
-  // The active rect/ellipse marquee selection (PS-style): marching ants stay
-  // visible across tools, subsequent edit steps are confined to it (`clip`),
-  // and Ctrl+D / a plain marquee click deselects.
-  const [lastMarquee, setLastMarquee] = useState<ActiveSelection | null>(null);
-  const lastMarqueeRef = useRef(lastMarquee);
-  lastMarqueeRef.current = lastMarquee;
-  const [workSelection, setWorkSelection] = useState<ActiveSelection | null>(null);
+  // Selection state is intentionally split: a solid draft is only a candidate;
+  // Ctrl+J and edit clips read only the committed marching-ants selection.
+  const selectionController = useSelectionController();
+  const {
+    activeSelection,
+    activeSelectionRef,
+    setActiveSelection,
+    selectionDraft,
+    setSelectionDraft,
+    visibleSelection,
+    commitDraft,
+    cancelDraft,
+    clearActiveSelection,
+    resizeVisibleSelection,
+  } = selectionController;
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
-  const [pathMenu, setPathMenu] = useState<{ x: number; y: number; selection: ActiveSelection } | null>(null);
+  const [pathMenu, setPathMenu] = useState<{ x: number; y: number; selection: SelectionDraft } | null>(null);
   // Marching ants flow (PS): while a selection is active, the dash phase
   // advances a few times a second and the ants march along the outline —
   // host-side over presented frames and on the canvas fallback alike.
   const [antsPhase, setAntsPhase] = useState(0);
   useEffect(() => {
-    if (!lastMarquee) return;
+    if (!activeSelection) return;
     const timer = window.setInterval(() => setAntsPhase((p) => (p + 2) % 10), 120);
     return () => window.clearInterval(timer);
-  }, [lastMarquee]);
+  }, [activeSelection]);
   // Edits go through this wrapper, which stamps the active selection as the
   // action's `clip` so rasterisation confines the op to the selection.
   // Whole-mask reshapes (transform / crop / select-all) stay global.
   const dispatch = useCallback((action: MaskEditAction) => {
-    const lm = lastMarqueeRef.current;
+    const lm = activeSelectionRef.current;
     if (lm) {
-      const clip = { region: lm.region, ...(lm.ellipse ? { ellipse: true } : null) };
+      const clip = selectionClipFromActive(lm);
       if (action.type === "stroke") {
         action = { ...action, stroke: { ...action.stroke, clip } };
       } else if (action.type === "path") {
@@ -420,13 +407,13 @@ export function MaskEditModal({
         previewing,
         doc: state.current,
         editingPath,
-        lastMarquee,
+        activeSelection,
         antsPhase,
         toolId,
         rulerLine,
         colorSamples,
       }),
-    [workspace, lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
+    [workspace, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
   const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
   // All in-flight pointer gesture state (drags, picked sources, pending
@@ -561,14 +548,13 @@ export function MaskEditModal({
   // Floating size panel beside the closed marquee shape: pending work
   // selections show as solid outlines; established selections show marching
   // ants. The panel reads whichever one is currently present.
-  const marqueeSelection = workSelection ?? lastMarquee;
   const [marqueeDraft, setMarqueeDraft] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   useEffect(() => {
-    if (marqueeSelection) {
-      const [x0, y0, x1, y1] = marqueeSelection.region;
+    if (visibleSelection) {
+      const [x0, y0, x1, y1] = visibleSelection.region;
       setMarqueeDraft({ w: Math.round(x1 - x0), h: Math.round(y1 - y0) });
     }
-  }, [marqueeSelection]);
+  }, [visibleSelection]);
   const [shapeKind, setShapeKind] = useState<ShapeKind>("polygon");
   const [shapeSides, setShapeSides] = useState(5);
   // Crop tool: the adjustable rect / perspective-quad drafts and the floating
@@ -618,10 +604,10 @@ export function MaskEditModal({
     pathEditing,
     navigation: nav,
     colors,
-    lastMarqueeRef,
-    setLastMarquee,
-    workSelection,
-    setWorkSelection,
+    activeSelectionRef,
+    setActiveSelection,
+    selectionDraft,
+    setSelectionDraft,
     setQuickMask,
     setOverlayOnly,
     setScreenMode,
@@ -629,9 +615,19 @@ export function MaskEditModal({
     requestClose,
   });
 
+  const makeSelectionFromDraft = (draft: SelectionDraft) => {
+    commitDraft(draft);
+    setPathMenu(null);
+  };
+
+  const cancelSelectionDraft = () => {
+    cancelDraft();
+    setPathMenu(null);
+  };
+
   const disabledMenuAction = () => {};
   const selectionMenuItems: MenuItem[] = [
-    { label: "取消选择", onClick: () => setLastMarquee(null) },
+    { label: "取消选择", onClick: clearActiveSelection },
     { label: "选择反向", onClick: disabledMenuAction, disabled: true },
     { label: "羽化...", onClick: disabledMenuAction, disabled: true },
     { label: "选择并遮住...", onClick: disabledMenuAction, disabled: true },
@@ -653,13 +649,10 @@ export function MaskEditModal({
     {
       label: "建立选区",
       onClick: () => {
-        if (pathMenu) {
-          setLastMarquee(pathMenu.selection);
-          setWorkSelection(null);
-        }
+        if (pathMenu) makeSelectionFromDraft(pathMenu.selection);
       },
     },
-    { label: "取消路径", onClick: () => setWorkSelection(null) },
+    { label: "取消草稿", onClick: cancelSelectionDraft },
   ];
 
   // The colour tools read the shell through this env at call time (see
@@ -701,21 +694,21 @@ export function MaskEditModal({
     [dims.w, dims.h],
   );
 
-  const workSelectionAtPoint = (pt: [number, number]): ActiveSelection | null => {
-    return workSelection && pointInActiveSelection(pt, workSelection) ? workSelection : null;
+  const selectionDraftAtPoint = (pt: [number, number]): SelectionDraft | null => {
+    return selectionDraft && pointInSelection(pt, selectionDraft) ? selectionDraft : null;
   };
 
   const openSelectionContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const pt = toImage(e);
-    const selection = lastMarqueeRef.current;
-    if (selection && pointInActiveSelection(pt, selection)) {
+    const selection = activeSelectionRef.current;
+    if (selection && pointInSelection(pt, selection)) {
       setPathMenu(null);
       setSelectionMenu({ x: e.clientX, y: e.clientY });
       return;
     }
-    const pendingSelection = workSelectionAtPoint(pt);
+    const pendingSelection = selectionDraftAtPoint(pt);
     if (pendingSelection) {
       setSelectionMenu(null);
       setPathMenu({ x: e.clientX, y: e.clientY, selection: pendingSelection });
@@ -844,12 +837,12 @@ export function MaskEditModal({
       cropDraft,
       cropRegion: null,
       targetBounds: workspace === "image" ? displayTargetBounds : null,
-      lastMarquee,
-      workSelection: penAnchors.length > 0 ? null : workSelection,
+      activeSelection,
+      selectionDraft: penAnchors.length > 0 ? null : selectionDraft,
       antsPhase,
       gestures,
     });
-  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, displayTargetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, lastMarquee, workSelection, antsPhase]);
+  }, [workspace, dims.w, dims.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, displayTargetBounds, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, rulerLine, quadDraft, cropDraft, activeSelection, selectionDraft, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -861,8 +854,8 @@ export function MaskEditModal({
   const commitPath = (toolName: string, pts: [number, number][]) => {
     if (pts.length < 3) return;
     if (workspace === "image") {
-      setWorkSelection(polygonSelection(pts));
-      setLastMarquee(null);
+      setSelectionDraft(createPolygonSelection(pts, selectionSourceFromToolId(toolName)));
+      setActiveSelection(null);
       setPathMenu(null);
       return;
     }
@@ -910,7 +903,7 @@ export function MaskEditModal({
     dims,
     doc: state.current,
     activeLayerKind,
-    lastMarquee,
+    activeSelection,
     editingPath,
     anchorDraft,
     penAnchors,
@@ -943,8 +936,8 @@ export function MaskEditModal({
     setCropAspect,
     confirmCropDraft,
     setQuadDraft,
-    setLastMarquee,
-    setWorkSelection,
+    setActiveSelection,
+    setSelectionDraft,
     setMoveDraft,
     setRulerLine,
     setColorSamples,
@@ -1054,18 +1047,16 @@ export function MaskEditModal({
     ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind) &&
     !["quick_select", "patch", "content_aware_move"].includes(tool.id);
 
-  // Manual marquee size (right rail): build / resize the selection numerically.
-  // Anchored at the last marquee's top-left (or the image origin), clamped to
-  // the canvas, and recorded as the same rect / ellipse op a drag would make.
+  // Manual marquee size (right rail): build / resize the visible marquee
+  // numerically without changing draft-vs-active selection state.
   const applyMarqueeSize = (w: number, h: number) => {
-    const ellipse = marqueeSelection ? marqueeSelection.ellipse : toolId === "ellipse";
+    const ellipse = visibleSelection ? visibleSelection.ellipse : toolId === "ellipse";
     const cw = Math.max(2, Math.min(Math.round(w), dims.w));
     const ch = Math.max(2, Math.min(Math.round(h), dims.h));
-    const x0 = Math.min(marqueeSelection?.region[0] ?? 0, dims.w - cw);
-    const y0 = Math.min(marqueeSelection?.region[1] ?? 0, dims.h - ch);
+    const x0 = Math.min(visibleSelection?.region[0] ?? 0, dims.w - cw);
+    const y0 = Math.min(visibleSelection?.region[1] ?? 0, dims.h - ch);
     const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
-    setLastMarquee({ region, ellipse });
-    setWorkSelection(null);
+    resizeVisibleSelection(region, ellipse);
     forceRedraw((n) => n + 1);
   };
 
@@ -1206,9 +1197,9 @@ export function MaskEditModal({
           ) : null}
 
           {/* Floating selection-size panel (see MarqueeSizePanel). */}
-          {marqueeSelection && !gestures.marquee && tool.kind === "marquee" && canvasRef.current ? (
+          {visibleSelection && !gestures.marquee && tool.kind === "marquee" && canvasRef.current ? (
             <MarqueeSizePanel
-              region={marqueeSelection.region}
+              region={visibleSelection.region}
               draft={marqueeDraft}
               setDraft={setMarqueeDraft}
               applySize={applyMarqueeSize}

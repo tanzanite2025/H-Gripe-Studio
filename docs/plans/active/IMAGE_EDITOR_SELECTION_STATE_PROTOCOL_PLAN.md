@@ -237,9 +237,10 @@ Rules:
 - If the active target is a layer mask, path, adjustment layer, or node output,
   the capability resolver must either disable `Ctrl+J` or route to an explicit
   target-safe command. It must not guess.
-- Selection persistence after `Ctrl+J` is a command policy. The preferred
-  long-term behavior is to keep the active selection until the user deselects,
-  because the selection is a state, not a one-shot tool side effect.
+- After `Ctrl+J` succeeds with an active selection, clear the active selection
+  and remove the marching ants. Layer Via Copy is treated as a completed
+  selection-consuming command in this product surface, so later edits do not
+  accidentally stay constrained by the previous selection.
 
 This command should be tested with every selection source:
 
@@ -262,7 +263,7 @@ Selection history should distinguish draft interaction from committed edits.
 | Move pointer while drafting | No document history entry. |
 | Close draft | Optional UI/session history only. |
 | Make Selection | Records active selection state if selections are persisted. |
-| `Ctrl+J` | Records a full document transaction with the new layer. |
+| `Ctrl+J` | Records a full document transaction with the new layer, then clears the active selection UI state. |
 | Delete selected pixels | Records a full document transaction. |
 | Deselect | Records selection state only if the product wants reselect/session restore. |
 
@@ -347,6 +348,7 @@ Before accepting image-editor selection work:
 - Is there only one active selection state?
 - Does the active selection survive independently of the tool that created it?
 - Does `Ctrl+J` read active selection + active target, not tool id?
+- Does `Ctrl+J` clear the marching-ants selection after a successful Layer Via Copy?
 - Does a closed draft stay visible while its context menu is open?
 - Are solid drafts and marching ants visually distinct?
 - Can the command capability resolver explain why `Ctrl+J` is disabled?

@@ -9,7 +9,7 @@ import type { CanvasNavigation } from "./useCanvasNavigation";
 import type { ColorTools } from "./useColorTools";
 import type { ToolSlotsController } from "./useToolSlots";
 import type { BrushParamsController } from "./useBrushParams";
-import type { ActiveSelection } from "./selection";
+import type { ActiveSelection, SelectionDraft } from "./selection";
 
 interface UseMaskEditorShortcutsArgs {
   workspace: "image" | "mask";
@@ -24,10 +24,10 @@ interface UseMaskEditorShortcutsArgs {
   >;
   navigation: Pick<CanvasNavigation, "setView" | "viewRef" | "viewBase" | "setSpacePan">;
   colors: Pick<ColorTools, "resetColors" | "swapColors">;
-  lastMarqueeRef: MutableRefObject<ActiveSelection | null>;
-  setLastMarquee: Dispatch<SetStateAction<ActiveSelection | null>>;
-  workSelection: ActiveSelection | null;
-  setWorkSelection: Dispatch<SetStateAction<ActiveSelection | null>>;
+  activeSelectionRef: MutableRefObject<ActiveSelection | null>;
+  setActiveSelection: Dispatch<SetStateAction<ActiveSelection | null>>;
+  selectionDraft: SelectionDraft | null;
+  setSelectionDraft: Dispatch<SetStateAction<SelectionDraft | null>>;
   setQuickMask: Dispatch<SetStateAction<boolean>>;
   setOverlayOnly: Dispatch<SetStateAction<boolean>>;
   setScreenMode: Dispatch<SetStateAction<0 | 1 | 2>>;
@@ -49,10 +49,10 @@ export function useMaskEditorShortcuts({
   pathEditing,
   navigation,
   colors,
-  lastMarqueeRef,
-  setLastMarquee,
-  workSelection,
-  setWorkSelection,
+  activeSelectionRef,
+  setActiveSelection,
+  selectionDraft,
+  setSelectionDraft,
   setQuickMask,
   setOverlayOnly,
   setScreenMode,
@@ -82,21 +82,21 @@ export function useMaskEditorShortcuts({
     redo_alt: () => dispatch({ type: "redo" }),
     step_backward: () => dispatch({ type: "undo" }),
     clear: () => {
-      if (lastMarqueeRef.current) setLastMarquee(null);
-      else if (workSelection) setWorkSelection(null);
+      if (activeSelectionRef.current) setActiveSelection(null);
+      else if (selectionDraft) setSelectionDraft(null);
       else dispatch({ type: "clear" });
     },
     select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
     delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
     reselect: () => dispatch({ type: "reselect" }),
     duplicate: () => {
-      const selection = lastMarqueeRef.current;
+      const selection = activeSelectionRef.current;
       dispatch({
         type: "layer_duplicate",
         ...(selection ? { selection } : null),
         ...(workspace === "image" ? { includeSourceImage: true } : null),
       });
-      if (selection) setLastMarquee(null);
+      if (selection) setActiveSelection(null);
     },
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
     brush_smaller: brushParams.shrinkBrush,
@@ -138,8 +138,8 @@ export function useMaskEditorShortcuts({
       if (pathEditing.editingPathRef.current != null) pathEditing.cancelPathEdit();
       else if (dialogs.cancelDialog()) return;
       else if (pathEditing.penPendingRef.current) pathEditing.setPenAnchors([]);
-      else if (workSelection) setWorkSelection(null);
-      else if (lastMarqueeRef.current) setLastMarquee(null);
+      else if (selectionDraft) setSelectionDraft(null);
+      else if (activeSelectionRef.current) setActiveSelection(null);
       else if (toolSlots.toolId === "rotate_view" && navigation.viewRef.current.rotate) {
         navigation.setView((view) => rotateTo(view, 0));
       } else if (workspace !== "image") {

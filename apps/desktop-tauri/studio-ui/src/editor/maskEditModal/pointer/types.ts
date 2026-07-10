@@ -10,17 +10,11 @@ import { type MaskDocument } from "../../../contracts/maskDocument";
 import type { EdgeMap, MagneticSnapSettings } from "../magneticSnap";
 import type { MaskTool, PaintTarget, ShapeKind } from "../../maskTools";
 import type { MaskEditAction } from "../actions";
+import type { ActiveSelection, SelectionDraft } from "../selection";
 import type { ColorSample, RulerLine } from "../stagePainter";
 
 export type Pt = [number, number];
 export type Box = [number, number, number, number];
-
-/** The active rect/ellipse marquee selection (PS marching ants). */
-export interface MarqueeSelection {
-  region: Box;
-  ellipse: boolean;
-  polygon?: Pt[];
-}
 
 /** A crop-draft region's corners in TL, TR, BR, BL order. */
 export const cropCorners = (r: readonly [number, number, number, number]): Pt[] => [
@@ -128,7 +122,7 @@ export interface PointerEnv {
   dims: { w: number; h: number };
   doc: MaskDocument;
   activeLayerKind: string;
-  lastMarquee: MarqueeSelection | null;
+  activeSelection: ActiveSelection | null;
   editingPath: number | null;
   anchorDraft: EditPathPoint[] | null;
   penAnchors: Pt[];
@@ -165,8 +159,8 @@ export interface PointerEnv {
   setCropAspect(v: string): void;
   confirmCropDraft(draft: Box): void;
   setQuadDraft: React.Dispatch<React.SetStateAction<Pt[] | null>>;
-  setLastMarquee: React.Dispatch<React.SetStateAction<MarqueeSelection | null>>;
-  setWorkSelection: React.Dispatch<React.SetStateAction<MarqueeSelection | null>>;
+  setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelection | null>>;
+  setSelectionDraft: React.Dispatch<React.SetStateAction<SelectionDraft | null>>;
   setMoveDraft(v: Pt | null): void;
   setRulerLine(v: RulerLine | null): void;
   setColorSamples: React.Dispatch<React.SetStateAction<ColorSample[]>>;

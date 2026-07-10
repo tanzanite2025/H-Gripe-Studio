@@ -4,7 +4,7 @@ import type React from "react";
 import type { PointerEnv, PointerGestures, Pt } from "./types";
 
 export function transformDown(env: PointerEnv, g: PointerGestures, pt: Pt): void {
-  const r = env.lastMarquee?.region;
+  const r = env.activeSelection?.region;
   if (r && pt[0] >= r[0] && pt[0] <= r[2] && pt[1] >= r[1] && pt[1] <= r[3]) {
     g.marqueeMove = { last: pt, from: r };
   } else {
@@ -21,7 +21,7 @@ export function transformMove(env: PointerEnv, g: PointerGestures, e: React.Poin
     const dx = pt[0] - last[0];
     const dy = pt[1] - last[1];
     g.marqueeMove.last = pt;
-    env.setLastMarquee((prev) => {
+    env.setActiveSelection((prev) => {
       if (!prev) return prev;
       const [x0, y0, x1, y1] = prev.region;
       const w = x1 - x0;
@@ -46,7 +46,7 @@ export function transformMove(env: PointerEnv, g: PointerGestures, e: React.Poin
 
 export function transformUp(env: PointerEnv, g: PointerGestures): boolean {
   if (g.marqueeMove) {
-    // The moved selection is already live in `lastMarquee`; nothing lands
+    // The moved selection is already live in `activeSelection`; nothing lands
     // on the edit stack (the selection is not a mask edit).
     g.marqueeMove = null;
     return true;
