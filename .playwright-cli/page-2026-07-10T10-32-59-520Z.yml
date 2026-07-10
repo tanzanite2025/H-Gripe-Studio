@@ -1,0 +1,139 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e7]:
+      - button "图片编辑" [ref=e8] [cursor=pointer]
+      - button "剪辑调色" [ref=e13] [cursor=pointer]
+      - button "设置" [ref=e17] [cursor=pointer]
+      - button "快照" [ref=e22] [cursor=pointer]
+      - button "日志" [ref=e27] [cursor=pointer]
+      - button "模型 / API" [ref=e31] [cursor=pointer]
+      - button "当前语言：中文；点击切换为英文" [ref=e37] [cursor=pointer]: 中
+  - tablist [ref=e38]:
+    - generic [ref=e39]:
+      - tab "未命名 已保存 另存为… 重命名 更多操作 关闭画布" [selected] [ref=e40] [cursor=pointer]:
+        - generic [ref=e41]: 未命名
+        - button "已保存" [ref=e42]
+        - button "另存为…" [ref=e44]
+        - button "重命名" [ref=e48]
+        - button "更多操作" [ref=e52]: ⋯
+        - button "关闭画布" [ref=e53]: ×
+      - button "新建画布" [ref=e54] [cursor=pointer]: +
+  - generic [ref=e55]:
+    - complementary "节点":
+      - separator "Resize node palette" [ref=e56]
+      - generic:
+        - generic [ref=e57]:
+          - button "素材源 4" [expanded] [ref=e58] [cursor=pointer]:
+            - generic [ref=e59]: 素材源
+            - generic [ref=e60]: "4"
+            - generic [ref=e61]: −
+          - generic [ref=e62]:
+            - button "提示词 Local/API" [ref=e63]:
+              - generic [ref=e64]: 提示词
+              - generic [ref=e65]: Local/API
+            - button "图像源" [ref=e66]
+            - button "视频源" [ref=e68]
+            - button "PSD 模板" [ref=e70]
+        - button "生成 1" [ref=e73] [cursor=pointer]:
+          - generic [ref=e74]: 生成
+          - generic [ref=e75]: "1"
+          - generic [ref=e76]: +
+        - button "图像处理 4" [ref=e78] [cursor=pointer]:
+          - generic [ref=e79]: 图像处理
+          - generic [ref=e80]: "4"
+          - generic [ref=e81]: +
+        - button "审阅 1" [ref=e83] [cursor=pointer]:
+          - generic [ref=e84]: 审阅
+          - generic [ref=e85]: "1"
+          - generic [ref=e86]: +
+        - button "工作流 1" [ref=e88] [cursor=pointer]:
+          - generic [ref=e89]: 工作流
+          - generic [ref=e90]: "1"
+          - generic [ref=e91]: +
+        - button "导出 2" [ref=e93] [cursor=pointer]:
+          - generic [ref=e94]: 导出
+          - generic [ref=e95]: "2"
+          - generic [ref=e96]: +
+        - button "容器 1" [ref=e98] [cursor=pointer]:
+          - generic [ref=e99]: 容器
+          - generic [ref=e100]: "1"
+          - generic [ref=e101]: +
+        - button "画布控制" [ref=e103] [cursor=pointer]:
+          - generic [ref=e105]: +
+    - generic [ref=e107]:
+      - generic [ref=e108]:
+        - generic [ref=e110]:
+          - generic:
+            - generic:
+              - img:
+                - button "Edge from prompt-1 to generate-1" [ref=e111] [cursor=pointer]
+            - generic:
+              - 'button "提示词 status idle ⚙ 文本: text 文本 提示词 a watercolor fox 文本: text 文本 助手" [ref=e114]':
+                - generic [ref=e115]:
+                  - generic [ref=e116]:
+                    - generic [ref=e117]: 提示词
+                    - generic [ref=e118]:
+                      - generic "status idle" [ref=e119]
+                      - button "⚙" [ref=e120] [cursor=pointer]
+                  - generic [ref=e121]:
+                    - generic [ref=e122]:
+                      - 'generic "文本: text" [ref=e123]'
+                      - generic [ref=e124]: 文本
+                      - generic [ref=e125]:
+                        - generic [ref=e126]: 提示词
+                        - textbox "提示词" [ref=e127]: a watercolor fox
+                    - generic [ref=e128]:
+                      - 'generic "文本: text" [ref=e129]'
+                      - generic [ref=e130]: 文本
+                  - button "助手" [ref=e133] [cursor=pointer]
+              - 'button "生成 status idle ⚙ 提示词: text 提示词 参考图: image 参考图 种子: number 种子 图像: image 图像 操作 image.generate 步数 20" [ref=e134]':
+                - generic [ref=e135]:
+                  - generic [ref=e136]:
+                    - generic [ref=e137]: 生成
+                    - generic [ref=e138]:
+                      - generic "status idle" [ref=e139]
+                      - button "⚙" [ref=e140] [cursor=pointer]
+                  - generic [ref=e141]:
+                    - generic [ref=e142]:
+                      - 'generic "提示词: text" [ref=e143]'
+                      - generic [ref=e144]: 提示词
+                    - generic [ref=e145]:
+                      - 'generic "参考图: image" [ref=e146]'
+                      - generic [ref=e147]: 参考图
+                    - generic [ref=e148]:
+                      - 'generic "种子: number" [ref=e149]'
+                      - generic [ref=e150]: 种子
+                    - generic [ref=e151]:
+                      - 'generic "图像: image" [ref=e152]'
+                      - generic [ref=e153]: 图像
+                  - generic [ref=e155]:
+                    - generic [ref=e156]:
+                      - generic [ref=e157]: 操作
+                      - combobox "操作" [ref=e158]:
+                        - option "image.generate" [selected]
+                        - option "image.edit"
+                        - option "echo"
+                    - generic [ref=e159]:
+                      - generic [ref=e160]: 步数
+                      - generic [ref=e161]:
+                        - slider "步数" [ref=e162]: "20"
+                        - status [ref=e163]: "20"
+        - img "React Flow mini map" [ref=e165]
+      - generic [ref=e169]:
+        - button "运行" [ref=e170] [cursor=pointer]
+        - button "运行历史" [ref=e173] [cursor=pointer]
+        - generic [ref=e174]:
+          - generic [ref=e175]: 范围
+          - combobox "范围" [ref=e176]:
+            - option "全画布" [selected]
+            - option "所选及上游" [disabled]
+            - option "仅所选" [disabled]
+        - generic [ref=e177]: 将运行 2 个节点
+      - generic:
+        - generic "browser preview (backend mocked)"
+        - button "撤销 — 后退一步 (Ctrl+Z)" [disabled] [ref=e178]
+        - button "前进 — 恢复刚撤销的一步 (Ctrl+Shift+Z)" [disabled] [ref=e182]
+  - generic [ref=e186]:
+    - button "› 制作" [ref=e187] [cursor=pointer]
+    - generic [ref=e188]: 0 个素材
+  - button "提示词助手" [ref=e189]

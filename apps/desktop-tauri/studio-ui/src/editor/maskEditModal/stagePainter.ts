@@ -84,6 +84,17 @@ function strokeMarchingAnts(ctx: CanvasRenderingContext2D, trace: () => void, ph
   ctx.restore();
 }
 
+function strokePathGuide(ctx: CanvasRenderingContext2D, trace: () => void, width = 2) {
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.lineWidth = width;
+  ctx.strokeStyle = "rgba(47,124,246,0.96)";
+  trace();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function traceSelectionOutline(ctx: CanvasRenderingContext2D, selection: SelectionOutline) {
   ctx.beginPath();
   if (selection.polygon?.length) {
@@ -118,45 +129,6 @@ export function paintPath(ctx: CanvasRenderingContext2D, p: EditPath) {
   ctx.lineWidth = 1.5;
   ctx.fill("evenodd");
   ctx.stroke();
-}
-
-/** A closed work path in the image editor: solid outline, not a selection. */
-export function paintWorkPath(ctx: CanvasRenderingContext2D, points: [number, number][]) {
-  if (points.length < 2) return;
-  const trace = () => {
-    ctx.beginPath();
-    points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-    ctx.closePath();
-  };
-  ctx.save();
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.lineWidth = 3.5;
-  ctx.strokeStyle = "rgba(255,255,255,0.92)";
-  trace();
-  ctx.stroke();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(47,124,246,0.96)";
-  trace();
-  ctx.stroke();
-  ctx.restore();
-}
-
-/** A closed work selection in the image editor: solid outline until the user
- * explicitly turns it into an active marching-ants selection. */
-export function paintSelectionDraft(ctx: CanvasRenderingContext2D, selection: SelectionOutline) {
-  ctx.save();
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.lineWidth = 3.5;
-  ctx.strokeStyle = "rgba(255,255,255,0.92)";
-  traceSelectionOutline(ctx, selection);
-  ctx.stroke();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(47,124,246,0.96)";
-  traceSelectionOutline(ctx, selection);
-  ctx.stroke();
-  ctx.restore();
 }
 
 export function paintTargetBounds(ctx: CanvasRenderingContext2D, bounds: TargetBounds, phase = 0) {
@@ -202,6 +174,7 @@ export function paintLassoLoop(ctx: CanvasRenderingContext2D, points: [number, n
     2.25,
   );
 }
+
 
 /** Solid blue crop edge — readable over white backgrounds. */
 const CROP_EDGE = "#2f7cf6";
@@ -342,19 +315,14 @@ export function paintAnchorDraft(ctx: CanvasRenderingContext2D, anchors: EditPat
   });
 }
 
-/** Pending pen path: anchor squares + dashed polyline; the first anchor is
+/** Pending pen path: anchor squares + solid guide polyline; the first anchor is
  *  highlighted (clicking it closes the path). */
-export function paintPenAnchors(ctx: CanvasRenderingContext2D, anchors: [number, number][], phase = 0) {
+export function paintPenAnchors(ctx: CanvasRenderingContext2D, anchors: [number, number][], _phase = 0) {
   if (anchors.length > 1) {
-    strokeMarchingAnts(
-      ctx,
-      () => {
-        ctx.beginPath();
-        anchors.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      },
-      phase,
-      2.25,
-    );
+    strokePathGuide(ctx, () => {
+      ctx.beginPath();
+      anchors.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    }, 2.25);
   }
   anchors.forEach(([x, y], i) => {
     const size = i === 0 ? 10 : 8;

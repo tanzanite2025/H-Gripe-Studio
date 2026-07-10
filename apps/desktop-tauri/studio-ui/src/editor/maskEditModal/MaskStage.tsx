@@ -11,6 +11,8 @@ import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../../viewport/view";
 import { isFitView, viewTransform, type CanvasView } from "../canvasView";
 import type { TransformParams } from "../maskEdit";
+import type { ActiveSelection, SelectionDraft } from "./selection";
+import { SelectionOverlay } from "./SelectionOverlay";
 
 interface MaskStageProps {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
@@ -50,10 +52,14 @@ interface MaskStageProps {
    * `brushCursorRef` (left/top %) to avoid re-rendering per pointer move. */
   brushCursor: { diameter: number } | null;
   brushCursorRef: MutableRefObject<HTMLDivElement | null>;
+  liveSelectionOverlayRef: MutableRefObject<SVGSVGElement | null>;
+  selectionDraft?: SelectionDraft | null;
+  activeSelection?: ActiveSelection | null;
+  antsPhase?: number;
   contextActionBar?: ReactNode;
 }
 
-export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, contextActionBar }: MaskStageProps) {
+export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, presented, underlayRef, frameView, imageTransform, backend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, contextActionBar }: MaskStageProps) {
   // Percentages are of the window element's own size (1/zoom of the frame):
   // an image-pixel delta is `px / dims · zoom` element-widths, and the image
   // centre (the op's scale/rotate pivot) sits at `(0.5 − pan) · zoom`.
@@ -133,6 +139,38 @@ export function MaskStage({ canvasRef, dims, documentAvailable, view, underlay, 
             onPointerLeave={onPointerUp}
             onContextMenu={onContextMenu}
           />
+          <SelectionOverlay
+            dims={dims}
+            draft={selectionDraft ?? null}
+            active={activeSelection ?? null}
+            phase={antsPhase}
+          />
+          <svg
+            ref={liveSelectionOverlayRef}
+            className="mask-selection-overlay mask-selection-live-overlay"
+            viewBox={`0 0 ${dims.w} ${dims.h}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <rect
+              data-live-selection-shape="rect"
+              className="mask-selection-draft-path"
+              vectorEffect="non-scaling-stroke"
+              style={{ display: "none" }}
+            />
+            <ellipse
+              data-live-selection-shape="ellipse"
+              className="mask-selection-draft-path"
+              vectorEffect="non-scaling-stroke"
+              style={{ display: "none" }}
+            />
+            <polyline
+              data-live-selection-shape="polyline"
+              className="mask-selection-draft-path"
+              vectorEffect="non-scaling-stroke"
+              style={{ display: "none" }}
+            />
+          </svg>
           {brushCursor ? (
             <div
               ref={brushCursorRef}

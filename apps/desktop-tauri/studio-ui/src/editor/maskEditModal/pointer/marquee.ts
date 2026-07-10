@@ -7,6 +7,10 @@ import type { Box, PointerEnv, PointerGestures, Pt } from "./types";
 import { commitSelectionDraft, createBoxSelection } from "../selection";
 
 export function marqueeDown(env: PointerEnv, g: PointerGestures, pt: Pt): void {
+  if (env.workspace === "image" && (env.tool.id === "rect" || env.tool.id === "ellipse")) {
+    env.setSelectionDraft(null);
+    env.setActiveSelection(null);
+  }
   g.marquee = { start: pt, end: pt };
   env.forceRedraw();
 }

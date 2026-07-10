@@ -13,7 +13,7 @@ import type { TargetBounds } from "../studioTarget";
 import { hexToRgb } from "./ColorPicker";
 import { flattenEditPath } from "./pathGeometry";
 import type { PointerGestures } from "./pointer/types";
-import type { ActiveSelection, SelectionDraft } from "./selection";
+import type { ActiveSelection } from "./selection";
 import {
   paintAnchorDraft,
   paintCloneSource,
@@ -34,7 +34,6 @@ import {
   paintShapeDraft,
   paintStroke,
   paintTargetBounds,
-  paintSelectionDraft,
   retouchBandColor,
   type ColorSample,
   type RulerLine,
@@ -211,7 +210,6 @@ export interface StagePaintArgs {
   cropRegion: [number, number, number, number] | null;
   targetBounds: TargetBounds | null;
   activeSelection: ActiveSelection | null;
-  selectionDraft: SelectionDraft | null;
   antsPhase: number;
   gestures: PointerGestures;
 }
@@ -250,7 +248,6 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
     cropRegion,
     targetBounds,
     activeSelection,
-    selectionDraft,
     antsPhase,
     gestures,
   } = args;
@@ -281,14 +278,11 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   if (workspace === "mask" && !underlay && !presented) {
     doc.matte_strokes.forEach((s) => paintStroke(ctx, s, "matte"));
   }
-  if (workspace === "image" && !activeSelection && selectionDraft) {
-    paintSelectionDraft(ctx, selectionDraft);
-  }
   if (targetBounds) paintTargetBounds(ctx, targetBounds, antsPhase);
   const live = gestures.drawing;
   if (live) {
     if (tool.kind === "path" || tool.id === "patch" || tool.id === "content_aware_move") {
-      paintLassoLoop(ctx, live.points, false, antsPhase);
+      if (!(workspace === "image" && tool.kind === "path")) paintLassoLoop(ctx, live.points, false, antsPhase);
     } else if (tool.kind === "heal" || tool.kind === "clone" || tool.kind === "history" || tool.kind === "dodge") {
       paintRetouchBand(ctx, live.points, brushSize, retouchBandColor(tool.kind, gestures.dodgeBurnMode));
     } else {
@@ -325,12 +319,13 @@ export function paintStage(ctx: CanvasRenderingContext2D, args: StagePaintArgs):
   const sd = gestures.shapeDrag;
   if (sd) paintShapeDraft(ctx, shapeKind, sd.start, sd.end, shapeSides, brushSize);
   const mq = gestures.marquee;
-  if (mq) paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse", antsPhase);
-  else if (activeSelection?.polygon) {
+  if (mq) {
+    if (!(workspace === "image" && (tool.id === "rect" || tool.id === "ellipse"))) {
+      paintMarquee(ctx, mq.start, mq.end, tool.id === "ellipse", antsPhase);
+    }
+  } else if (activeSelection?.polygon && workspace !== "image") {
     paintLassoLoop(ctx, activeSelection.polygon, true, antsPhase);
-  } else if (activeSelection && (workspace === "image" || (!underlay && !presented))) {
-    // Image-editor selections must stay on the DOM canvas so every closed
-    // selection shape remains visible above PNG / native WGPU underlays.
+  } else if (activeSelection && workspace !== "image" && !underlay && !presented) {
     const [x0, y0, x1, y1] = activeSelection.region;
     paintMarquee(ctx, [x0, y0], [x1, y1], activeSelection.ellipse, antsPhase);
   }

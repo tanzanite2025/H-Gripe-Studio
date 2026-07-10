@@ -6,14 +6,14 @@ export function MarqueeSizePanel({
   region,
   draft,
   setDraft,
-  applySize,
+  makeSelection,
   dims,
   canvasEl,
 }: {
   region: [number, number, number, number];
   draft: { w: number; h: number };
   setDraft: React.Dispatch<React.SetStateAction<{ w: number; h: number }>>;
-  applySize: (w: number, h: number) => void;
+  makeSelection: (w: number, h: number) => void;
   dims: { w: number; h: number };
   canvasEl: HTMLCanvasElement;
 }) {
@@ -52,7 +52,7 @@ export function MarqueeSizePanel({
         <button
           className="primary"
           disabled={draft.w < 2 || draft.h < 2}
-          onClick={() => applySize(draft.w, draft.h)}
+          onClick={() => makeSelection(draft.w, draft.h)}
         >
           {t("mask.marqueeApply")}
         </button>

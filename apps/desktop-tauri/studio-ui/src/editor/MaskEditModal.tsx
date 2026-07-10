@@ -69,6 +69,7 @@ import { useMaskEditorShortcuts } from "./maskEditModal/useMaskEditorShortcuts";
 import {
   createPolygonSelection,
   pointInSelection,
+  replaceSelectionBox,
   selectionSourceFromToolId,
   type SelectionDraft,
 } from "./maskEditModal/selection";
@@ -316,7 +317,6 @@ export function MaskEditModal({
     commitDraft,
     cancelDraft,
     clearActiveSelection,
-    resizeVisibleSelection,
   } = selectionController;
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
   const [pathMenu, setPathMenu] = useState<{ x: number; y: number; selection: SelectionDraft } | null>(null);
@@ -526,6 +526,7 @@ export function MaskEditModal({
 
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
+  const liveSelectionOverlayRef = useRef<SVGSVGElement | null>(null);
   // PS selection semantics: an active marquee is only a selection — it never
   // lands on the edit stack itself. Instead, edit steps recorded while it is
   // active carry it as their `clip`, so replay confines their effect to the
@@ -551,6 +552,60 @@ export function MaskEditModal({
   const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
   const tool = maskTool(toolId) ?? MASK_TOOLS[0];
+
+  const hideLiveSelectionOverlay = useCallback(() => {
+    const svg = liveSelectionOverlayRef.current;
+    if (!svg) return;
+    svg.querySelectorAll<SVGElement>("[data-live-selection-shape]").forEach((shape) => {
+      shape.style.display = "none";
+    });
+  }, []);
+
+  const syncLiveSelectionOverlay = useCallback(() => {
+    const svg = liveSelectionOverlayRef.current;
+    if (!svg) return;
+    const rect = svg.querySelector<SVGRectElement>('[data-live-selection-shape="rect"]');
+    const ellipse = svg.querySelector<SVGEllipseElement>('[data-live-selection-shape="ellipse"]');
+    const polyline = svg.querySelector<SVGPolylineElement>('[data-live-selection-shape="polyline"]');
+    hideLiveSelectionOverlay();
+
+    const marquee = gestures.marquee;
+    if (workspace === "image" && marquee && (tool.id === "rect" || tool.id === "ellipse")) {
+      const [x0, y0] = marquee.start;
+      const [x1, y1] = marquee.end;
+      const left = Math.min(x0, x1);
+      const top = Math.min(y0, y1);
+      const width = Math.abs(x1 - x0);
+      const height = Math.abs(y1 - y0);
+      if (width <= 0 || height <= 0) return;
+      if (tool.id === "ellipse" && ellipse) {
+        ellipse.setAttribute("cx", String(left + width / 2));
+        ellipse.setAttribute("cy", String(top + height / 2));
+        ellipse.setAttribute("rx", String(Math.max(width / 2, 0.5)));
+        ellipse.setAttribute("ry", String(Math.max(height / 2, 0.5)));
+        ellipse.style.display = "";
+        return;
+      }
+      if (rect) {
+        rect.setAttribute("x", String(left));
+        rect.setAttribute("y", String(top));
+        rect.setAttribute("width", String(width));
+        rect.setAttribute("height", String(height));
+        rect.style.display = "";
+      }
+      return;
+    }
+
+    const livePath = gestures.drawing;
+    if (workspace === "image" && tool.kind === "path" && livePath && livePath.points.length >= 2 && polyline) {
+      polyline.setAttribute("points", livePath.points.map(([x, y]) => `${x},${y}`).join(" "));
+      polyline.style.display = "";
+    }
+  }, [gestures, hideLiveSelectionOverlay, tool.id, tool.kind, workspace]);
+
+  useEffect(() => {
+    hideLiveSelectionOverlay();
+  }, [hideLiveSelectionOverlay, toolId, workspace]);
 
   // The pointer's angle (degrees) about the canvas centre on screen.
   const pointerAngle = (e: React.PointerEvent): number => {
@@ -822,7 +877,6 @@ export function MaskEditModal({
       cropRegion: null,
       targetBounds: workspace === "image" ? displayTargetBounds : null,
       activeSelection,
-      selectionDraft: penAnchors.length > 0 ? null : selectionDraft,
       antsPhase,
       gestures,
     });
@@ -947,6 +1001,7 @@ export function MaskEditModal({
     // sample the underlay into the requesting swatch, nothing else fires.
     if (colors.consumeColorPick(toImage(e))) return;
     pointerDown(pointerEnv(), gestures, e);
+    syncLiveSelectionOverlay();
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -960,6 +1015,7 @@ export function MaskEditModal({
       cursorEl.style.display = spacePan ? "none" : "";
     }
     pointerMove(pointerEnv(), gestures, e);
+    syncLiveSelectionOverlay();
   };
 
   const onPointerUp = () => {
@@ -967,6 +1023,7 @@ export function MaskEditModal({
     // the pointer is back over the canvas.
     if (brushCursorEl.current) brushCursorEl.current.style.display = "none";
     pointerUp(pointerEnv(), gestures);
+    hideLiveSelectionOverlay();
   };
 
   // Clicking a tool: `global` tools are immediate actions (no canvas mode);
@@ -1035,16 +1092,18 @@ export function MaskEditModal({
     ["paint", "matte", "heal", "clone", "history", "dodge"].includes(tool.kind) &&
     !["quick_select", "patch", "content_aware_move"].includes(tool.id);
 
-  // Manual marquee size (right rail): build / resize the visible marquee
-  // numerically without changing draft-vs-active selection state.
-  const applyMarqueeSize = (w: number, h: number) => {
-    const ellipse = visibleSelection ? visibleSelection.ellipse : toolId === "ellipse";
+  // Manual marquee size: the floating panel exists only for a closed draft.
+  // Its primary action must commit that draft into the active marching-ants
+  // selection; it must not merely resize a hidden candidate.
+  const makeMarqueeSelection = (w: number, h: number) => {
+    if (!selectionDraft) return;
+    const ellipse = selectionDraft.ellipse;
     const cw = Math.max(2, Math.min(Math.round(w), dims.w));
     const ch = Math.max(2, Math.min(Math.round(h), dims.h));
-    const x0 = Math.min(visibleSelection?.region[0] ?? 0, dims.w - cw);
-    const y0 = Math.min(visibleSelection?.region[1] ?? 0, dims.h - ch);
+    const x0 = Math.max(0, Math.min(Math.min(selectionDraft.region[0], selectionDraft.region[2]), Math.max(0, dims.w - cw)));
+    const y0 = Math.max(0, Math.min(Math.min(selectionDraft.region[1], selectionDraft.region[3]), Math.max(0, dims.h - ch)));
     const region: [number, number, number, number] = [x0, y0, x0 + cw, y0 + ch];
-    resizeVisibleSelection(region, ellipse);
+    commitDraft(replaceSelectionBox(selectionDraft, region, ellipse));
     forceRedraw((n) => n + 1);
   };
 
@@ -1156,6 +1215,10 @@ export function MaskEditModal({
             onContextMenu={openSelectionContextMenu}
             brushCursor={usesBrushCursor && !spacePan ? { diameter: brushSize * 2 } : null}
             brushCursorRef={brushCursorEl}
+            liveSelectionOverlayRef={liveSelectionOverlayRef}
+            selectionDraft={workspace === "image" && penAnchors.length === 0 ? selectionDraft : null}
+            activeSelection={workspace === "image" ? activeSelection : null}
+            antsPhase={antsPhase}
             contextActionBar={
               workspace === "image" ? (
                 <ContextActionBar
@@ -1185,12 +1248,12 @@ export function MaskEditModal({
           ) : null}
 
           {/* Floating selection-size panel (see MarqueeSizePanel). */}
-          {visibleSelection && !gestures.marquee && tool.kind === "marquee" && canvasRef.current ? (
+          {selectionDraft && !gestures.marquee && tool.kind === "marquee" && canvasRef.current ? (
             <MarqueeSizePanel
-              region={visibleSelection.region}
+              region={selectionDraft.region}
               draft={marqueeDraft}
               setDraft={setMarqueeDraft}
-              applySize={applyMarqueeSize}
+              makeSelection={makeMarqueeSelection}
               dims={dims}
               canvasEl={canvasRef.current}
             />

@@ -357,6 +357,37 @@
   cursor: crosshair;
   display: block;
 }
+.mask-selection-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2;
+}
+.mask-selection-draft-path,
+.mask-selection-ants-light,
+.mask-selection-ants-dark {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+.mask-selection-draft-path {
+  stroke: #2f7cf6;
+  stroke-width: 1.8;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+.mask-selection-ants-light,
+.mask-selection-ants-dark {
+  stroke-width: 1.45;
+  stroke-dasharray: 5 5;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+.mask-selection-ants-light { stroke: rgba(255, 255, 255, 0.96); }
+.mask-selection-ants-dark { stroke: rgba(0, 0, 0, 0.94); }
 /* PS dock resize: the draggable gutter between the stage and the right rail. */
 .mask-rail-resize {
   width: 6px;

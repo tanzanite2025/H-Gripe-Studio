@@ -1,0 +1,278 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e7]:
+      - button "图片编辑" [active] [ref=e8] [cursor=pointer]
+      - button "剪辑调色" [ref=e13] [cursor=pointer]
+      - button "设置" [ref=e17] [cursor=pointer]
+      - button "快照" [ref=e22] [cursor=pointer]
+      - button "日志" [ref=e27] [cursor=pointer]
+      - button "模型 / API" [ref=e31] [cursor=pointer]
+      - button "当前语言：中文；点击切换为英文" [ref=e37] [cursor=pointer]: 中
+  - tablist [ref=e38]:
+    - generic [ref=e39]:
+      - tab "未命名 已保存 另存为… 重命名 更多操作 关闭画布" [selected] [ref=e40] [cursor=pointer]:
+        - generic [ref=e41]: 未命名
+        - button "已保存" [ref=e42]
+        - button "另存为…" [ref=e44]
+        - button "重命名" [ref=e48]
+        - button "更多操作" [ref=e52]: ⋯
+        - button "关闭画布" [ref=e53]: ×
+      - button "新建画布" [ref=e54] [cursor=pointer]: +
+  - generic [ref=e55]:
+    - complementary "节点":
+      - separator "Resize node palette" [ref=e56]
+      - generic:
+        - generic [ref=e57]:
+          - button "素材源 4" [expanded] [ref=e58] [cursor=pointer]:
+            - generic [ref=e59]: 素材源
+            - generic [ref=e60]: "4"
+            - generic [ref=e61]: −
+          - generic [ref=e62]:
+            - button "提示词 Local/API" [ref=e63]:
+              - generic [ref=e64]: 提示词
+              - generic [ref=e65]: Local/API
+            - button "图像源" [ref=e66]
+            - button "视频源" [ref=e68]
+            - button "PSD 模板" [ref=e70]
+        - button "生成 1" [ref=e73] [cursor=pointer]:
+          - generic [ref=e74]: 生成
+          - generic [ref=e75]: "1"
+          - generic [ref=e76]: +
+        - button "图像处理 4" [ref=e78] [cursor=pointer]:
+          - generic [ref=e79]: 图像处理
+          - generic [ref=e80]: "4"
+          - generic [ref=e81]: +
+        - button "审阅 1" [ref=e83] [cursor=pointer]:
+          - generic [ref=e84]: 审阅
+          - generic [ref=e85]: "1"
+          - generic [ref=e86]: +
+        - button "工作流 1" [ref=e88] [cursor=pointer]:
+          - generic [ref=e89]: 工作流
+          - generic [ref=e90]: "1"
+          - generic [ref=e91]: +
+        - button "导出 2" [ref=e93] [cursor=pointer]:
+          - generic [ref=e94]: 导出
+          - generic [ref=e95]: "2"
+          - generic [ref=e96]: +
+        - button "容器 1" [ref=e98] [cursor=pointer]:
+          - generic [ref=e99]: 容器
+          - generic [ref=e100]: "1"
+          - generic [ref=e101]: +
+        - button "画布控制" [ref=e103] [cursor=pointer]:
+          - generic [ref=e105]: +
+    - generic [ref=e107]:
+      - generic [ref=e108]:
+        - generic [ref=e110]:
+          - generic:
+            - generic:
+              - img:
+                - button "Edge from prompt-1 to generate-1" [ref=e111] [cursor=pointer]
+            - generic:
+              - 'button "提示词 status idle ⚙ 文本: text 文本 提示词 a watercolor fox 文本: text 文本 助手" [ref=e114]':
+                - generic [ref=e115]:
+                  - generic [ref=e116]:
+                    - generic [ref=e117]: 提示词
+                    - generic [ref=e118]:
+                      - generic "status idle" [ref=e119]
+                      - button "⚙" [ref=e120] [cursor=pointer]
+                  - generic [ref=e121]:
+                    - generic [ref=e122]:
+                      - 'generic "文本: text" [ref=e123]'
+                      - generic [ref=e124]: 文本
+                      - generic [ref=e125]:
+                        - generic [ref=e126]: 提示词
+                        - textbox "提示词" [ref=e127]: a watercolor fox
+                    - generic [ref=e128]:
+                      - 'generic "文本: text" [ref=e129]'
+                      - generic [ref=e130]: 文本
+                  - button "助手" [ref=e133] [cursor=pointer]
+              - 'button "生成 status idle ⚙ 提示词: text 提示词 参考图: image 参考图 种子: number 种子 图像: image 图像 操作 image.generate 步数 20" [ref=e134]':
+                - generic [ref=e135]:
+                  - generic [ref=e136]:
+                    - generic [ref=e137]: 生成
+                    - generic [ref=e138]:
+                      - generic "status idle" [ref=e139]
+                      - button "⚙" [ref=e140] [cursor=pointer]
+                  - generic [ref=e141]:
+                    - generic [ref=e142]:
+                      - 'generic "提示词: text" [ref=e143]'
+                      - generic [ref=e144]: 提示词
+                    - generic [ref=e145]:
+                      - 'generic "参考图: image" [ref=e146]'
+                      - generic [ref=e147]: 参考图
+                    - generic [ref=e148]:
+                      - 'generic "种子: number" [ref=e149]'
+                      - generic [ref=e150]: 种子
+                    - generic [ref=e151]:
+                      - 'generic "图像: image" [ref=e152]'
+                      - generic [ref=e153]: 图像
+                  - generic [ref=e155]:
+                    - generic [ref=e156]:
+                      - generic [ref=e157]: 操作
+                      - combobox "操作" [ref=e158]:
+                        - option "image.generate" [selected]
+                        - option "image.edit"
+                        - option "echo"
+                    - generic [ref=e159]:
+                      - generic [ref=e160]: 步数
+                      - generic [ref=e161]:
+                        - slider "步数" [ref=e162]: "20"
+                        - status [ref=e163]: "20"
+        - img "React Flow mini map" [ref=e165]
+      - generic [ref=e169]:
+        - button "运行" [ref=e170] [cursor=pointer]
+        - button "运行历史" [ref=e173] [cursor=pointer]
+        - generic [ref=e174]:
+          - generic [ref=e175]: 范围
+          - combobox "范围" [ref=e176]:
+            - option "全画布" [selected]
+            - option "所选及上游" [disabled]
+            - option "仅所选" [disabled]
+        - generic [ref=e177]: 将运行 2 个节点
+      - generic:
+        - generic "browser preview (backend mocked)"
+        - button "撤销 — 后退一步 (Ctrl+Z)" [disabled] [ref=e178]
+        - button "前进 — 恢复刚撤销的一步 (Ctrl+Shift+Z)" [disabled] [ref=e182]
+  - generic [ref=e186]:
+    - button "› 制作" [ref=e187] [cursor=pointer]
+    - generic [ref=e188]: 0 个素材
+  - button "提示词助手" [ref=e189]
+  - generic [ref=e191]:
+    - button "关闭编辑器并释放内存（已保存的编辑下次打开恢复）" [ref=e194] [cursor=pointer]
+    - tablist [ref=e198]:
+      - button "+" [ref=e199] [cursor=pointer]
+    - generic [ref=e200]:
+      - generic [ref=e201]:
+        - generic [ref=e202]:
+          - button "移动" [ref=e204] [cursor=pointer]:
+            - generic: V
+          - button "裁剪" [ref=e210] [cursor=pointer]:
+            - generic: C
+          - button "吸管" [ref=e217] [cursor=pointer]:
+            - generic: I
+        - generic [ref=e223]:
+          - button "污点修复" [ref=e225] [cursor=pointer]:
+            - generic: J
+          - button "画笔" [ref=e231] [cursor=pointer]:
+            - generic: B
+          - button "仿制图章" [ref=e238] [cursor=pointer]:
+            - generic: S
+          - button "历史画笔" [ref=e245] [cursor=pointer]:
+            - generic: "Y"
+          - button "橡皮" [ref=e253] [cursor=pointer]:
+            - generic: E
+          - button "渐变" [ref=e260] [cursor=pointer]:
+            - generic: G
+          - button "减淡/加深" [ref=e267] [cursor=pointer]:
+            - generic: O
+        - generic [ref=e273]:
+          - button "横排文字" [ref=e275]:
+            - generic: T
+          - button "路径选择" [ref=e282] [cursor=pointer]:
+            - generic: A
+          - button "形状" [ref=e288] [cursor=pointer]:
+            - generic: U
+        - generic [ref=e292]:
+          - button "抓手" [ref=e294] [cursor=pointer]:
+            - generic: H
+          - button "旋转视图" [ref=e299] [cursor=pointer]:
+            - generic: R
+          - button "缩放" [ref=e305] [cursor=pointer]:
+            - generic: Z
+        - generic [ref=e311]:
+          - button "默认前景/背景" [ref=e312] [cursor=pointer]
+          - button "互换前景/背景" [ref=e315] [cursor=pointer]: ⇄
+          - generic "当前绘制为添加蒙版" [ref=e316]:
+            - button "背景色（点击设置）" [ref=e317] [cursor=pointer]
+            - button "前景色（点击设置）" [ref=e318] [cursor=pointer]
+      - toolbar "选区工具" [ref=e319]:
+        - button "Rect" [ref=e320] [cursor=pointer]:
+          - generic: M
+        - button "Ellipse" [ref=e324] [cursor=pointer]:
+          - generic: M
+        - button "Magnetic lasso" [ref=e328] [cursor=pointer]:
+          - generic: L
+        - button "Polygonal lasso" [ref=e333] [cursor=pointer]:
+          - generic: L
+        - button "Pen" [ref=e338] [cursor=pointer]:
+          - generic: P
+        - button "Object selection" [ref=e343] [cursor=pointer]:
+          - generic: W
+        - button "Quick selection" [ref=e349] [cursor=pointer]:
+          - generic: W
+        - button "Wand" [ref=e355] [cursor=pointer]:
+          - generic: W
+        - button "Point (SAM 2)" [ref=e360] [cursor=pointer]:
+          - generic: W
+      - separator "拖动调整面板栏宽度" [ref=e366]
+      - generic [ref=e367]:
+        - generic [ref=e370]:
+          - generic [ref=e371]:
+            - button "亮度/对比度" [ref=e372] [cursor=pointer]:
+              - generic [ref=e373]: BC
+            - button "色阶" [ref=e375] [cursor=pointer]:
+              - generic [ref=e376]: LV
+            - button "曲线" [ref=e378] [cursor=pointer]:
+              - generic [ref=e379]: CV
+            - button "曝光度" [disabled] [ref=e381]:
+              - generic [ref=e382]: EX
+            - button "自然饱和度" [disabled] [ref=e384]:
+              - generic [ref=e385]: VB
+            - button "色彩平衡" [disabled] [ref=e387]:
+              - generic [ref=e388]: CB
+            - button "照片滤镜" [disabled] [ref=e390]:
+              - generic [ref=e391]: PF
+            - button "通道混和器" [ref=e393] [cursor=pointer]:
+              - generic [ref=e394]: CM
+            - button "颜色查找" [disabled] [ref=e396]:
+              - generic [ref=e397]: CL
+            - button "色调分离" [disabled] [ref=e399]:
+              - generic [ref=e400]: PS
+            - button "阈值" [disabled] [ref=e402]:
+              - generic [ref=e403]: TH
+            - button "颜色范围" [ref=e405] [cursor=pointer]:
+              - generic [ref=e406]: CR
+            - button "渐变映射" [disabled] [ref=e408]:
+              - generic [ref=e409]: GM
+            - button "替换颜色" [ref=e411] [cursor=pointer]:
+              - generic [ref=e412]: RC
+          - text: 点击调整项——其参数会以小弹窗打开。
+        - generic [ref=e414]:
+          - tablist [ref=e415]:
+            - tab "图层（1）" [ref=e416] [cursor=pointer]
+            - tab "通道" [ref=e417] [cursor=pointer]
+            - tab "历史记录（1）" [ref=e418] [cursor=pointer]
+          - generic [ref=e420]:
+            - generic [ref=e421]:
+              - combobox "混合模式" [ref=e422]:
+                - option "正常" [selected]
+                - option "正片叠底"
+                - option "滤色"
+                - option "变暗"
+                - option "变亮"
+                - option "差值"
+              - button "L" [ref=e423] [cursor=pointer]
+              - generic [ref=e424]:
+                - generic [ref=e425]: 不透明度（%）
+                - spinbutton "不透明度（%）" [ref=e426]: "100"
+            - generic [ref=e427]:
+              - generic [ref=e428]:
+                - generic [ref=e429]: 分组
+                - textbox "分组" [ref=e430]:
+                  - /placeholder: 新增标签...
+              - generic "分组" [ref=e431]
+            - generic [ref=e433] [cursor=pointer]:
+              - button "V" [ref=e434]
+              - combobox "未分组，保持默认图层颜色" [disabled] [ref=e436]:
+                - option "-" [selected]
+              - button "图层内容——点击编辑像素" [ref=e437]
+              - button "+" [ref=e439]
+              - generic "Background" [ref=e440]
+              - button "x" [ref=e441]
+            - generic [ref=e442]:
+              - button "反相当前图层" [ref=e443] [cursor=pointer]
+              - button "链接当前图层（链接的图层一起移动）" [ref=e447] [cursor=pointer]
+              - button "为当前图层添加图层蒙版" [ref=e452] [cursor=pointer]
+              - button "复制当前图层（Ctrl+J）" [ref=e456] [cursor=pointer]
+              - button "在栈顶新建空图层" [ref=e460] [cursor=pointer]
+              - button "删除该图层" [ref=e463] [cursor=pointer]
