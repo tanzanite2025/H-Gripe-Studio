@@ -10,6 +10,26 @@ pub(crate) fn composite_image_document(
     document_width: u32,
     document_height: u32,
 ) -> Result<RgbaImage, String> {
+    composite_image_document_with_sources(
+        source,
+        document,
+        document_width,
+        document_height,
+        &mut |path| Err(format!("no loader for per-layer image source {path}")),
+    )
+}
+
+/// [`composite_image_document`] with a loader for layers that carry their own
+/// image resource (`source_image.source.path`). Each layer draws either the
+/// shared opened image or its own resource, placed at the document-space
+/// `placement` rect its op records, so one layer's bounds never clip another.
+pub(crate) fn composite_image_document_with_sources(
+    source: &RgbaImage,
+    document: &Value,
+    document_width: u32,
+    document_height: u32,
+    load_source: &mut dyn FnMut(&str) -> Result<RgbaImage, String>,
+) -> Result<RgbaImage, String> {
     let Some(layers) = document.get("layers").and_then(Value::as_array) else {
         return Ok(source.clone());
     };
@@ -54,8 +74,16 @@ pub(crate) fn composite_image_document(
             .and_then(|mask| mask.get("unlinked"))
             .and_then(Value::as_bool)
             != Some(true);
+        let placed = placed_layer_surface(
+            layer,
+            &source_surface,
+            document_width,
+            document_height,
+            load_source,
+        )?;
+        let layer_base = placed.as_ref().unwrap_or(&source_surface);
         let (surface, gate) =
-            transformed_layer(&source_surface, mask.as_deref(), transform, mask_linked);
+            transformed_layer(layer_base, mask.as_deref(), transform, mask_linked);
         let mode = layer
             .get("blend")
             .and_then(Value::as_str)
@@ -75,6 +103,104 @@ pub(crate) fn composite_image_document(
         composite_over(&mut composite, &surface, mode, opacity, gate.as_deref());
     }
     surface_to_rgba(&composite)
+}
+
+/// Resolve a layer whose `source_image` op carries its own image resource
+/// and/or a document-space placement rect into a canvas-sized surface: the
+/// layer's image is resampled into its placement, transparent elsewhere.
+/// Returns `None` for legacy layers that draw the shared image full-canvas.
+fn placed_layer_surface(
+    layer: &Value,
+    shared: &GradeSurface,
+    document_width: u32,
+    document_height: u32,
+    load_source: &mut dyn FnMut(&str) -> Result<RgbaImage, String>,
+) -> Result<Option<GradeSurface>, String> {
+    let Some(op) = layer
+        .get("ops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|op| {
+            op.get("type").and_then(Value::as_str) == Some("source_image")
+                && op.get("disabled").and_then(Value::as_bool) != Some(true)
+        })
+    else {
+        return Ok(None);
+    };
+    let source_path = op
+        .get("source")
+        .and_then(|source| source.get("path"))
+        .and_then(Value::as_str);
+    let placement = op
+        .get("placement")
+        .and_then(Value::as_array)
+        .and_then(|values| {
+            Some([
+                values.first()?.as_f64()? as f32,
+                values.get(1)?.as_f64()? as f32,
+                values.get(2)?.as_f64()? as f32,
+                values.get(3)?.as_f64()? as f32,
+            ])
+        });
+    if source_path.is_none() && placement.is_none() {
+        return Ok(None);
+    }
+    let own_surface = match source_path {
+        Some(path) => Some(srgb_proxy_surface(&load_source(path)?)?),
+        None => None,
+    };
+    let image = own_surface.as_ref().unwrap_or(shared);
+    let natural = op.get("source").and_then(|source| {
+        Some((
+            source.get("width")?.as_f64()? as f32,
+            source.get("height")?.as_f64()? as f32,
+        ))
+    });
+    let dw = document_width.max(1) as f32;
+    let dh = document_height.max(1) as f32;
+    let placement = placement.unwrap_or_else(|| {
+        // Contain-fit the image's natural size inside the canvas, centred.
+        let (nw, nh) = natural.unwrap_or((image.w as f32, image.h as f32));
+        let scale = (dw / nw.max(1.0)).min(dh / nh.max(1.0)).min(1.0);
+        let w = nw * scale;
+        let h = nh * scale;
+        let x0 = (dw - w) / 2.0;
+        let y0 = (dh - h) / 2.0;
+        [x0, y0, x0 + w, y0 + h]
+    });
+    let sx = shared.w as f32 / dw;
+    let sy = shared.h as f32 / dh;
+    let px0 = placement[0].min(placement[2]) * sx;
+    let py0 = placement[1].min(placement[3]) * sy;
+    let px1 = placement[0].max(placement[2]) * sx;
+    let py1 = placement[1].max(placement[3]) * sy;
+    let pw = (px1 - px0).max(1e-6);
+    let ph = (py1 - py0).max(1e-6);
+    let mut data = vec![0.0; (shared.w * shared.h * 4) as usize];
+    for y in 0..shared.h {
+        let fy = (y as f32 + 0.5 - py0) / ph;
+        if !(0.0..1.0).contains(&fy) {
+            continue;
+        }
+        let iy = ((fy * image.h as f32) as u32).min(image.h - 1);
+        for x in 0..shared.w {
+            let fx = (x as f32 + 0.5 - px0) / pw;
+            if !(0.0..1.0).contains(&fx) {
+                continue;
+            }
+            let ix = ((fx * image.w as f32) as u32).min(image.w - 1);
+            let dst = ((y * shared.w + x) * 4) as usize;
+            let src = ((iy * image.w + ix) * 4) as usize;
+            data[dst..dst + 4].copy_from_slice(&image.data[src..src + 4]);
+        }
+    }
+    Ok(Some(GradeSurface {
+        w: shared.w,
+        h: shared.h,
+        data,
+        space: shared.space,
+    }))
 }
 
 #[derive(Clone, Copy)]
@@ -489,6 +615,41 @@ mod tests {
                 composite_image_document(&source, &document, 2, 1).expect("composite image");
             assert_eq!(output.get_pixel(1, 0).0, case.expected, "{}", case.name);
         }
+    }
+
+    #[test]
+    fn placed_layer_draws_its_own_image_without_clipping_others() {
+        let source = RgbaImage::from_pixel(4, 4, Rgba([255, 0, 0, 255]));
+        let document = json!({
+            "layers": [
+                { "kind": "mask", "visible": true, "opacity": 1.0, "blend": "normal", "ops": [] },
+                {
+                    "kind": "mask",
+                    "visible": true,
+                    "opacity": 1.0,
+                    "blend": "normal",
+                    "ops": [
+                        {
+                            "type": "source_image",
+                            "source": { "path": "green.png", "width": 2, "height": 2 },
+                            "placement": [1.0, 1.0, 3.0, 3.0]
+                        }
+                    ]
+                }
+            ]
+        });
+        let mut load = |path: &str| {
+            assert_eq!(path, "green.png");
+            Ok(RgbaImage::from_pixel(2, 2, Rgba([0, 255, 0, 255])))
+        };
+        let output = composite_image_document_with_sources(&source, &document, 4, 4, &mut load)
+            .expect("composite placed layer");
+        // Outside the placement the base layer still shows (not clipped).
+        assert_eq!(output.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(output.get_pixel(3, 3).0, [255, 0, 0, 255]);
+        // Inside the placement the layer's own image draws.
+        assert_eq!(output.get_pixel(1, 1).0, [0, 255, 0, 255]);
+        assert_eq!(output.get_pixel(2, 2).0, [0, 255, 0, 255]);
     }
 
     #[test]

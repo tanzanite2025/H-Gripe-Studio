@@ -889,7 +889,18 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
     } else if (op.type === "transform") {
       mask = transformMask(mask, (op.dx ?? 0) * scale, (op.dy ?? 0) * scale, op.scale ?? 1, op.rotate ?? 0);
     } else if (op.type === SOURCE_IMAGE_OP_TYPE) {
-      mask.data.fill(255);
+      const placement = op.placement;
+      if (placement && placement.length >= 4) {
+        const px0 = Math.max(0, Math.floor(Math.min(placement[0], placement[2]) * scale));
+        const py0 = Math.max(0, Math.floor(Math.min(placement[1], placement[3]) * scale));
+        const px1 = Math.min(mask.w - 1, Math.ceil(Math.max(placement[0], placement[2]) * scale));
+        const py1 = Math.min(mask.h - 1, Math.ceil(Math.max(placement[1], placement[3]) * scale));
+        for (let y = py0; y <= py1; y++) {
+          for (let x = px0; x <= px1; x++) mask.data[y * mask.w + x] = 255;
+        }
+      } else {
+        mask.data.fill(255);
+      }
     } else if (op.type === "wand" || op.type === "quick_select" || op.type === "background_eraser" || op.type === "red_eye" || op.type === "object_select" || op.type === "remove") {
       // Need the real image; not previewable on the proxy.
     } else {

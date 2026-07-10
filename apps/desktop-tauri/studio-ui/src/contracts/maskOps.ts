@@ -26,6 +26,14 @@ export interface BrushStroke {
   spacing?: number;
 }
 
+/** The image resource a `source_image` op draws, with its natural pixel
+ * dimensions. Absent on legacy ops that reuse the document's opened image. */
+export interface LayerImageSource {
+  path: string;
+  width: number;
+  height: number;
+}
+
 /** A recorded morphology, selection, or raster operation. */
 export interface MaskOperation {
   type: string;
@@ -38,6 +46,10 @@ export interface MaskOperation {
   dy?: number;
   scale?: number;
   rotate?: number;
+  source?: LayerImageSource;
+  /** Document-space rect `[x0, y0, x1, y1]` where the layer's own image
+   * draws. Absent means the legacy full-canvas placement. */
+  placement?: [number, number, number, number];
 }
 
 /** Fields shared by every ordered edit-stack entry. The `clip` selection is

@@ -41,11 +41,23 @@ pub(super) fn render_image_composite_path(
     let proxy = cached_proxy(id, key, || {
         load_image_srgb_proxy(std::path::Path::new(path), detail)
     })?;
-    let mut image = crate::studio::image_document::composite_image_document(
+    let mut load_source = |source_path: &str| {
+        let key = ProxyKey {
+            path: source_path.to_string(),
+            time_bits: None,
+            size: detail,
+        };
+        cached_proxy(id, key, || {
+            load_image_srgb_proxy(std::path::Path::new(source_path), detail)
+        })
+        .map(|proxy| (*proxy).clone())
+    };
+    let mut image = crate::studio::image_document::composite_image_document_with_sources(
         &proxy,
         document,
         document_width.max(1),
         document_height.max(1),
+        &mut load_source,
     )?;
     let full_dims = image.dimensions();
     if !view.is_identity() {

@@ -1,6 +1,7 @@
 import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
+import { isMaskOperation, type EditOpBase, type MaskOperation } from "../contracts/maskOps";
 import type { ViewportTarget } from "../bridge/viewport";
-import { composeTransforms, hasSourceImageContent, type TransformParams } from "./maskEdit";
+import { composeTransforms, hasSourceImageContent, SOURCE_IMAGE_OP_TYPE, type TransformParams } from "./maskEdit";
 import { layerAlphaBounds, type AlphaBounds, type LayerAlphaBoundsOptions } from "./maskMorphology";
 
 export interface ImageCompositeDims {
@@ -12,8 +13,21 @@ export function imageDocumentNeedsComposite(doc: MaskDocument): boolean {
   const base = doc.layers[0];
   if (!base) return false;
   if (base.kind !== "adjustment" && (base.visible === false || base.opacity < 1 || base.mask)) return true;
+  if (doc.layers.some((layer) => layerSourceImageOp(layer))) return true;
   return doc.layers.some((layer, index) => index > 0 && imageLayerDrawsSource(layer, index));
 }
+
+/** The layer's `source_image` op when it carries its own image resource or a
+ * placement rect — the placed-layer model the compositor must resolve. */
+export function layerSourceImageOp(layer: MaskLayer): (MaskOperation & EditOpBase) | null {
+  if (layer.kind === "adjustment") return null;
+  for (const op of layer.ops) {
+    if (op.type !== SOURCE_IMAGE_OP_TYPE || op.disabled || !isMaskOperation(op)) continue;
+    if (op.source || op.placement) return op;
+  }
+  return null;
+}
+
 
 export function imageLayerDrawsSource(layer: MaskLayer, index: number): boolean {
   return layer.visible !== false && (layer.opacity ?? 1) > 0 && imageLayerHasSourceContent(layer, index);

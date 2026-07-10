@@ -9,8 +9,10 @@ import {
   imageLayerDrawsSource,
   imageLayerHasSourceContent,
   layerCompositeTransform,
+  layerSourceImageOp,
   withActiveLayerDraftTransform,
 } from "./imageCompositeSource";
+import { addImageLayer, fitPlacement, initEditState } from "./maskEdit";
 
 describe("image composite viewport source", () => {
   it("keeps a plain background image on the light underlay path", () => {
@@ -147,6 +149,30 @@ describe("image composite viewport source", () => {
     expect(doc.layers[1].ops).toEqual([{ type: "source_image" }]);
     expect(preview.layers[0].ops).toEqual([]);
     expect(preview.layers[1].ops).toEqual([{ type: "source_image" }, { type: "transform", dx: 8, dy: -3 }]);
+  });
+
+  it("contain-fits placements: small images centre 1:1, large images scale down", () => {
+    expect(fitPlacement({ width: 800, height: 800 }, { w: 1600, h: 1200 })).toEqual([400, 200, 1200, 1000]);
+    expect(fitPlacement({ width: 2000, height: 1000 }, { w: 1000, h: 1000 })).toEqual([0, 250, 1000, 750]);
+  });
+
+  it("adds a placed image layer that composites within its own bounds", () => {
+    const state = addImageLayer(
+      initEditState(emptyMaskDocument()),
+      { path: "C:/imgs/photo.png", width: 800, height: 600 },
+      { w: 1600, h: 1200 },
+    );
+    const doc = state.current;
+    expect(doc.layers).toHaveLength(2);
+    expect(doc.active).toBe(1);
+    expect(doc.layers[1].name).toBe("photo.png");
+    const op = layerSourceImageOp(doc.layers[1]);
+    expect(op?.source).toEqual({ path: "C:/imgs/photo.png", width: 800, height: 600 });
+    expect(op?.placement).toEqual([400, 300, 1200, 900]);
+    // A placed layer always goes through the compositor, and legacy source
+    // copies never read as placed.
+    expect(imageDocumentNeedsComposite(doc)).toBe(true);
+    expect(layerSourceImageOp({ ...doc.layers[1], ops: [{ type: "source_image" }] })).toBeNull();
   });
 
   it("resolves the layer display transform from committed ops plus live draft", () => {
