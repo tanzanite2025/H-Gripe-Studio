@@ -46,6 +46,9 @@ import { API_PROFILE_PRESETS, profileFromPreset } from "./apiProfilePresets";
 
 export type ManagerTab = "api" | "local";
 
+/** Sub-view of the API tab: configured profiles vs the preset template gallery. */
+export type ApiView = "configured" | "templates";
+
 interface ModelManagerModalProps {
   /** Preselect entries matching this capability (card "Manage…" entry point). */
   capability?: ModelCapability | null;
@@ -112,6 +115,7 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   const t = useT();
   const [registry, setRegistry] = useState<BackendRegistry>(() => loadRegistry());
   const [tab, setTab] = useState<ManagerTab>("api");
+  const [apiView, setApiView] = useState<ApiView>("configured");
   const [editingApi, setEditingApi] = useState<ApiProfileEntry | null>(null);
   const [editingLocal, setEditingLocal] = useState<LocalModelEntry | null>(null);
   const [message, setMessage] = useState<string>("");
@@ -250,6 +254,44 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
         <div className="model-manager-body">
           {tab === "api" ? (
             <>
+              <div className="model-manager-list-actions model-manager-api-views">
+                <button
+                  className={apiView === "configured" ? "active" : ""}
+                  onClick={() => setApiView("configured")}
+                >
+                  {t("models.apiViewConfigured")}
+                </button>
+                <button
+                  className={apiView === "templates" ? "active" : ""}
+                  onClick={() => setApiView("templates")}
+                >
+                  {t("models.apiViewTemplates")}
+                </button>
+              </div>
+              {apiView === "templates" ? (
+                <div className="model-manager-presets">
+                  <span className="muted">{t("models.presetsTitle")}</span>
+                  <div className="model-manager-preset-cards">
+                    {API_PROFILE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setEditingApi(profileFromPreset(preset, registry));
+                          setApiView("configured");
+                        }}
+                        title={preset.base_url}
+                      >
+                        <strong>{preset.display_name}</strong>
+                        <span className="muted">{preset.provider_kind}</span>
+                        <span className="muted">{preset.base_url}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <span className="muted">{t("models.presetsHint")}</span>
+                </div>
+              ) : (
+              <>
               <div className="model-manager-list-actions">
                 <button
                   className="primary"
@@ -261,23 +303,6 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   {t("models.importLegacy")}
                 </button>
                 <span className="muted">{message}</span>
-              </div>
-              <div className="model-manager-presets">
-                <span className="muted">{t("models.presetsTitle")}</span>
-                <div className="model-manager-preset-cards">
-                  {API_PROFILE_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => setEditingApi(profileFromPreset(preset, registry))}
-                      title={preset.base_url}
-                    >
-                      <strong>{preset.display_name}</strong>
-                      <span className="muted">{preset.provider_kind}</span>
-                    </button>
-                  ))}
-                </div>
-                <span className="muted">{t("models.presetsHint")}</span>
               </div>
               {apiProfiles.length === 0 && (
                 <p className="muted">{t("models.emptyApi")}</p>
@@ -404,6 +429,8 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     </button>
                   </div>
                 </form>
+              )}
+              </>
               )}
             </>
           ) : (
