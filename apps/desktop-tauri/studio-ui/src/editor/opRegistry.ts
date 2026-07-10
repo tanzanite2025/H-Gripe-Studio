@@ -1,4 +1,4 @@
-﻿// Op registry (image-kernel K0, docs/design/image-kernel.md §3).
+// Op registry (image-kernel K0, docs/design/image-kernel.md §3).
 //
 // Every editing action in the studio is recorded as an Op — plain revisable
 // data replayed in order. This table is the single place ops are *declared*:

@@ -1,4 +1,4 @@
-﻿// Shared contracts of the Mask-Edit pointer state machine: the mutable
+// Shared contracts of the Mask-Edit pointer state machine: the mutable
 // in-flight gesture record (`PointerGestures`) and the environment the tool
 // modules read from / write back into the editor shell (`PointerEnv`). The
 // per-tool-type handlers live in the sibling modules; pointerMachine.ts only

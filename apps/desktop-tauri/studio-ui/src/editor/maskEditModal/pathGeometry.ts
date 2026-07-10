@@ -1,4 +1,4 @@
-﻿// Curvature-pen geometry: fit a smooth closed curve through clicked anchors.
+// Curvature-pen geometry: fit a smooth closed curve through clicked anchors.
 //
 // The curvature pen records the same `EditPath` polygon as the pen / lasso —
 // the smoothing happens up front, at commit time, by sampling a closed

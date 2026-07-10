@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { emptyLayerMask, emptyMaskDocument, type MaskDocument } from "../contracts/maskDocument";
 import { type EditPath } from "../contracts/maskOps";
 import {

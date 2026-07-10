@@ -4,7 +4,7 @@ import { useT } from "../i18n";
 import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import type { DrawerMode } from "./drawerState";
 import { DrawerToolbar, type TimelineTool } from "./DrawerToolbar";
-import { findLayer, type LayeredImageAsset } from "./layeredImage";
+import { findLayer, type LayeredImageAsset } from "../domain/layeredImage";
 import type { AddableAsset } from "./MediaWorkspacePopover";
 import type { MediaAsset } from "./mediaBin";
 import { ProgramMonitor } from "./ProgramMonitor";

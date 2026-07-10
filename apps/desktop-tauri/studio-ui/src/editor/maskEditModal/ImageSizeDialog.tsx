@@ -1,4 +1,4 @@
-﻿// Image Size dialog (PS Ctrl+Alt+I): pixel W×H inputs with a linked-aspect
+// Image Size dialog (PS Ctrl+Alt+I): pixel W×H inputs with a linked-aspect
 // checkbox and a resample-filter picker over the current canvas size; 确定
 // records the size on the document as an undoable step (see useDialogDrafts).
 import { useT, type MsgKey } from "../../i18n";

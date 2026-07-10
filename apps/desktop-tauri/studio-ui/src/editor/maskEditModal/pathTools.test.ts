@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { catmullRomClosed } from "./pathGeometry";
 import { hitTestPathOp, translateAnchors } from "./pathEditTools";
 import { type EditOp } from "../../contracts/maskOps";

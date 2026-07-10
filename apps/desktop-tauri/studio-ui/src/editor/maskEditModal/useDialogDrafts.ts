@@ -1,4 +1,4 @@
-﻿// Dialog draft state: the free-transform panel (Ctrl+T), the fill dialog
+// Dialog draft state: the free-transform panel (Ctrl+T), the fill dialog
 // (Shift+F5) and the Image Size dialog (Ctrl+Alt+I) — three "draft +
 // open / apply / close" clusters the modal shell surfaces.
 import { useCallback, useRef, useState } from "react";

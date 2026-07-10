@@ -1,4 +1,4 @@
-﻿// Pure edit-state model for the Mask-Edit modal.
+// Pure edit-state model for the Mask-Edit modal.
 //
 // The modal owns an `EditState` (the current `MaskDocument` plus an undo/redo
 // stack) and mutates it only through these pure helpers. Keeping the model

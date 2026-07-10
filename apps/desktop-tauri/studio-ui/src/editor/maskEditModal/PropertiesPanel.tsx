@@ -1,4 +1,4 @@
-﻿// Right rail — "Properties" panel (PS's 属性): parameters of the active
+// Right rail — "Properties" panel (PS's 属性): parameters of the active
 // adjustment layer; an empty hint when the active layer has none.
 
 import { useT } from "../../i18n";

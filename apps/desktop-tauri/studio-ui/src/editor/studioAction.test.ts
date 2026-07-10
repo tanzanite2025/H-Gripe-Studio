@@ -1,4 +1,4 @@
-﻿// Studio Action runtime (plan steps 5–7): compute block registry, action
+// Studio Action runtime (plan steps 5–7): compute block registry, action
 // registry stages (dry_run -> preview -> commit -> undo), and the first
 // non-agent actions. Every commit must land as an ordinary undo step and
 // must refuse to touch anything but its resolved target.

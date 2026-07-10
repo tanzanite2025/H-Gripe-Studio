@@ -18,7 +18,7 @@ import {
   splitLayerInAsset,
   stubLayeredImageAsset,
   type LayeredImageAsset,
-} from "../production/layeredImage";
+} from "../domain/layeredImage";
 import {
   assetKindForNodeKind,
   assetKindForPath,

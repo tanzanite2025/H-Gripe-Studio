@@ -1,4 +1,4 @@
-﻿// Studio Action runtime (docs/plans/active/
+// Studio Action runtime (docs/plans/active/
 // MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md, steps 6–7). Actions are the
 // only surface an assistant/API/local model may call — never UI clicks and
 // never raw `edit_paths` JSON. Every action resolves a first-class

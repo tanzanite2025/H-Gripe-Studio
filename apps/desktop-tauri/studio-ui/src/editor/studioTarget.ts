@@ -1,4 +1,4 @@
-﻿// Studio target vocabulary (docs/plans/active/
+// Studio target vocabulary (docs/plans/active/
 // MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md). Every manual tool, compute
 // block, and future Studio Action addresses the same first-class target ids:
 //

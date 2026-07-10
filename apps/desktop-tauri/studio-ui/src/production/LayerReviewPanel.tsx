@@ -6,7 +6,7 @@ import {
   useViewportUnderlay,
   type ViewportUnderlaySource,
 } from "../viewport/useViewportUnderlay";
-import type { LayerCandidate, LayeredImageAsset } from "./layeredImage";
+import type { LayerCandidate, LayeredImageAsset } from "../domain/layeredImage";
 
 export interface LayerReviewPanelProps {
   asset: LayeredImageAsset;

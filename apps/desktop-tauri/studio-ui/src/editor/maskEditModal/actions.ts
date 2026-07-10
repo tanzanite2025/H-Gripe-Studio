@@ -1,4 +1,4 @@
-﻿// Mask-Edit modal state actions: the reducer over `maskEdit.ts`'s pure
+// Mask-Edit modal state actions: the reducer over `maskEdit.ts`'s pure
 // document-editing functions, shared by the modal shell and its panels.
 
 import {

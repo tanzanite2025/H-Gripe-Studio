@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { emptyMaskDocument, type MaskDocument } from "../../contracts/maskDocument";
 import { buildViewportOverlayScene } from "./stageScene";
 

@@ -1,4 +1,4 @@
-﻿// The parameter controls of one adjustment layer (sliders / curve editor),
+// The parameter controls of one adjustment layer (sliders / curve editor),
 // shared by the Properties panel and the Adjustments panel's detail column.
 
 import { useState } from "react";

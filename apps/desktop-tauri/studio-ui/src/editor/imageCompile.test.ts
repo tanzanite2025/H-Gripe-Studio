@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { compileImageAdjustments } from "./imageCompile";
 import { applyDoc } from "./gradeKernel";
 import type { GradeSurface } from "./gradeKernel";

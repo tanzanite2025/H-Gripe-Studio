@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { ViewportMaskOverlay } from "../../bridge/viewport";
 import { type MaskDocument } from "../../contracts/maskDocument";
 import { PreviewLane } from "../../runtime/previewLane";

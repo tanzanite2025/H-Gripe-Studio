@@ -1,4 +1,4 @@
-﻿import { tauriInvoke } from "./core";
+import { tauriInvoke } from "./core";
 import { type Bounds } from "../contracts/context";
 
 // --- Image Enhance ----------------------------------------------------------

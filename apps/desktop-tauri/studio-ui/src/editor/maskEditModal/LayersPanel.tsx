@@ -1,4 +1,4 @@
-﻿// Right rail "Layers" panel block: the layer stack (top first).
+// Right rail "Layers" panel block: the layer stack (top first).
 // The active adjustment layer's parameters live in PropertiesPanel.
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";

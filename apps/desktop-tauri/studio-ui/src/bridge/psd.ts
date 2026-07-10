@@ -1,4 +1,4 @@
-﻿// PSD Studio integration: provider profiles, output directory, PSD outputs,
+// PSD Studio integration: provider profiles, output directory, PSD outputs,
 // compose/export, inspection, and context analysis.
 // Reuses the same backend commands the static PSD Studio tab uses, so the node
 // editor shares provider profiles and the output directory rather than

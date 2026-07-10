@@ -1,4 +1,4 @@
-﻿// Path / direct selection: hit-test a canvas click against the committed
+// Path / direct selection: hit-test a canvas click against the committed
 // path steps of the active layer, and translate a whole anchor draft.
 //
 // Both tools re-open a committed `EditPath` through the existing anchor-edit

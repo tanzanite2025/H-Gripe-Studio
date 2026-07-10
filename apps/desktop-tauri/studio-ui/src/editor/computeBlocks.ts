@@ -1,4 +1,4 @@
-﻿// Compute block capability registry (docs/plans/active/
+// Compute block capability registry (docs/plans/active/
 // MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md, step 5). A compute block is a
 // structured, capability-addressed computation — `image + prompts -> mask` —
 // never a hidden UI click and never a magical layer creator. Blocks are the

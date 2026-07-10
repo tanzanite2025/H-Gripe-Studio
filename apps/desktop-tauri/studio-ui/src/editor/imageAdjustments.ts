@@ -1,4 +1,4 @@
-﻿// Mask-adjustment → grade-op lowering (image-kernel K2,
+// Mask-adjustment → grade-op lowering (image-kernel K2,
 // docs/design/image-kernel.md §4).
 //
 // A bridged adjustment layer carries the mask editor's u8 tone map

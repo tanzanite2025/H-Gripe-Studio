@@ -1,4 +1,4 @@
-﻿import { tauriInvoke } from "./core";
+import { tauriInvoke } from "./core";
 import { type Bounds, type VisualContext } from "../contracts/context";
 import { type QualityReport } from "../contracts/quality";
 

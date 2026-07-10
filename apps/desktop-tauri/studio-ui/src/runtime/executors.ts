@@ -1,4 +1,4 @@
-﻿// Default executor registry: maps node kinds to runtime behaviour.
+// Default executor registry: maps node kinds to runtime behaviour.
 //
 // The `generate` node composes an ApiTask and runs it through the existing
 // H-Gripe broker (`run_task_json`). Source nodes (`promptOptimize`, `imageSource`,
@@ -15,7 +15,7 @@ import {
   stubLayeredImageAsset,
   STUB_ORIGINAL_LAYER_ID,
   type LayeredImageAsset,
-} from "../production/layeredImage";
+} from "../domain/layeredImage";
 import type { ExecutorRegistry } from "./dag";
 import { defaultDeviceParam } from "./devicePreference";
 import {

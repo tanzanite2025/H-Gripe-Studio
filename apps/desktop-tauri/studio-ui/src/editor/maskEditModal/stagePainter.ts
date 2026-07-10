@@ -1,4 +1,4 @@
-﻿// Pure canvas painters for the mask-edit stage overlay. Every function takes
+// Pure canvas painters for the mask-edit stage overlay. Every function takes
 // a 2D context plus plain data and draws one scene element — no React state,
 // no refs. MaskEditModal assembles the scene; painting lives here.
 

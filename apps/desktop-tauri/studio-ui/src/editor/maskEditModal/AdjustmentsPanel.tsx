@@ -1,4 +1,4 @@
-﻿// Right rail "Adjustments" panel: the list selects a tool to inspect. It does
+// Right rail "Adjustments" panel: the list selects a tool to inspect. It does
 // not create layers until the user presses the explicit add button.
 
 import { useEffect, useMemo, useRef, useState } from "react";

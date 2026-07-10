@@ -1,4 +1,4 @@
-﻿// Layer-mask target contract (MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN):
+// Layer-mask target contract (MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN):
 // masks are attachments on a layer, the document stores the active target
 // explicitly, and edits route to the targeted stack.
 

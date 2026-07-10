@@ -1,4 +1,4 @@
-﻿// Stage scene assembly: pure functions that turn the shell's state into the
+// Stage scene assembly: pure functions that turn the shell's state into the
 // host vector overlay scene (committed geometry stroked over rendered frames
 // at view-window detail) and the canvas overlay painting pass (live gesture
 // feedback plus the fallback stage when no host frame presents). The shell

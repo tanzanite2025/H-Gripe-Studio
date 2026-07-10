@@ -1,4 +1,4 @@
-﻿// Front-end, best-effort mask morphology on a downscaled proxy buffer.
+// Front-end, best-effort mask morphology on a downscaled proxy buffer.
 //
 // The Mask-Edit modal records morphology as *intent* (`MaskOperation` entries)
 // and the Rust backend rasterises the authoritative result on run — see the

@@ -1,4 +1,4 @@
-﻿// Path editing state: the pending pen anchors awaiting a close-path click
+// Path editing state: the pending pen anchors awaiting a close-path click
 // and the anchor re-edit session on a committed path op (double-click a path
 // step to drag its anchors, Enter commits / Escape reverts).
 import { useCallback, useRef, useState } from "react";

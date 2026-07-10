@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ViewportMaskOverlay, ViewportOverlayScene } from "../../bridge/viewport";
 import { probeImageDims, registerResource } from "../../bridge/files";
 import { type MaskDocument } from "../../contracts/maskDocument";

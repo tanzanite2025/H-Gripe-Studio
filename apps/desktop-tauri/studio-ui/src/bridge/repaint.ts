@@ -1,4 +1,4 @@
-﻿import { tauriInvoke } from "./core";
+import { tauriInvoke } from "./core";
 import { type QualityReport, type RepaintReport } from "../contracts/quality";
 
 // --- Detail Repaint ---------------------------------------------------------
