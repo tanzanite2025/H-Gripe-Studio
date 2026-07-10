@@ -15,6 +15,7 @@ pub(crate) fn composite_image_document(
         document,
         document_width,
         document_height,
+        document_width.max(document_height),
         &mut |path| Err(format!("no loader for per-layer image source {path}")),
     )
 }
@@ -23,21 +24,43 @@ pub(crate) fn composite_image_document(
 /// image resource (`source_image.source.path`). Each layer draws either the
 /// shared opened image or its own resource, placed at the document-space
 /// `placement` rect its op records, so one layer's bounds never clip another.
+///
+/// The output is document-proportioned: the document rect scaled to fit
+/// within `output_limit` (never upscaled past its native size), independent
+/// of the shared source proxy's dimensions — a small opened image must not
+/// drop the whole canvas to its own resolution.
 pub(crate) fn composite_image_document_with_sources(
     source: &RgbaImage,
     document: &Value,
     document_width: u32,
     document_height: u32,
+    output_limit: u32,
     load_source: &mut dyn FnMut(&str) -> Result<RgbaImage, String>,
 ) -> Result<RgbaImage, String> {
     let Some(layers) = document.get("layers").and_then(Value::as_array) else {
         return Ok(source.clone());
     };
+    let dw = document_width.max(1);
+    let dh = document_height.max(1);
+    let out_scale = (output_limit.max(1) as f32 / dw.max(dh) as f32).min(1.0);
+    let out_w = ((dw as f32 * out_scale).round() as u32).max(1);
+    let out_h = ((dh as f32 * out_scale).round() as u32).max(1);
     let source_surface = srgb_proxy_surface(source)?;
+    // Legacy full-canvas layers draw the shared image over the whole output;
+    // resampled once (bilinear) when the proxy and output sizes differ.
+    let mut shared_full: Option<GradeSurface> = None;
+    let mut shared_at_output = |shared: &GradeSurface| -> GradeSurface {
+        if shared.w == out_w && shared.h == out_h {
+            return shared.clone();
+        }
+        shared_full
+            .get_or_insert_with(|| resample_surface(shared, out_w, out_h))
+            .clone()
+    };
     let mut composite = GradeSurface {
-        w: source.width(),
-        h: source.height(),
-        data: vec![0.0; source.as_raw().len()],
+        w: out_w,
+        h: out_h,
+        data: vec![0.0; (out_w * out_h * 4) as usize],
         space: GradeSpace::Srgb,
     };
     for (index, layer) in layers.iter().enumerate() {
@@ -55,20 +78,8 @@ pub(crate) fn composite_image_document_with_sources(
         if opacity <= 0.0 {
             continue;
         }
-        let mask = raster_layer_gate(
-            layer,
-            source.width(),
-            source.height(),
-            document_width,
-            document_height,
-        );
-        let transform = layer_transform(
-            layer,
-            source.width(),
-            source.height(),
-            document_width,
-            document_height,
-        );
+        let mask = raster_layer_gate(layer, out_w, out_h, document_width, document_height);
+        let transform = layer_transform(layer, out_w, out_h, document_width, document_height);
         let mask_linked = layer
             .get("mask")
             .and_then(|mask| mask.get("unlinked"))
@@ -77,13 +88,18 @@ pub(crate) fn composite_image_document_with_sources(
         let placed = placed_layer_surface(
             layer,
             &source_surface,
+            out_w,
+            out_h,
             document_width,
             document_height,
             load_source,
         )?;
-        let layer_base = placed.as_ref().unwrap_or(&source_surface);
+        let layer_base = match placed {
+            Some(placed) => placed,
+            None => shared_at_output(&source_surface),
+        };
         let (surface, gate) =
-            transformed_layer(layer_base, mask.as_deref(), transform, mask_linked);
+            transformed_layer(&layer_base, mask.as_deref(), transform, mask_linked);
         let mode = layer
             .get("blend")
             .and_then(Value::as_str)
@@ -112,6 +128,8 @@ pub(crate) fn composite_image_document_with_sources(
 fn placed_layer_surface(
     layer: &Value,
     shared: &GradeSurface,
+    out_w: u32,
+    out_h: u32,
     document_width: u32,
     document_height: u32,
     load_source: &mut dyn FnMut(&str) -> Result<RgbaImage, String>,
@@ -169,38 +187,88 @@ fn placed_layer_surface(
         let y0 = (dh - h) / 2.0;
         [x0, y0, x0 + w, y0 + h]
     });
-    let sx = shared.w as f32 / dw;
-    let sy = shared.h as f32 / dh;
+    let sx = out_w as f32 / dw;
+    let sy = out_h as f32 / dh;
     let px0 = placement[0].min(placement[2]) * sx;
     let py0 = placement[1].min(placement[3]) * sy;
     let px1 = placement[0].max(placement[2]) * sx;
     let py1 = placement[1].max(placement[3]) * sy;
     let pw = (px1 - px0).max(1e-6);
     let ph = (py1 - py0).max(1e-6);
-    let mut data = vec![0.0; (shared.w * shared.h * 4) as usize];
-    for y in 0..shared.h {
+    let mut data = vec![0.0; (out_w * out_h * 4) as usize];
+    for y in 0..out_h {
         let fy = (y as f32 + 0.5 - py0) / ph;
         if !(0.0..1.0).contains(&fy) {
             continue;
         }
-        let iy = ((fy * image.h as f32) as u32).min(image.h - 1);
-        for x in 0..shared.w {
+        for x in 0..out_w {
             let fx = (x as f32 + 0.5 - px0) / pw;
             if !(0.0..1.0).contains(&fx) {
                 continue;
             }
-            let ix = ((fx * image.w as f32) as u32).min(image.w - 1);
-            let dst = ((y * shared.w + x) * 4) as usize;
-            let src = ((iy * image.w + ix) * 4) as usize;
-            data[dst..dst + 4].copy_from_slice(&image.data[src..src + 4]);
+            let dst = ((y * out_w + x) * 4) as usize;
+            let px = bilinear_sample(image, fx * image.w as f32 - 0.5, fy * image.h as f32 - 0.5);
+            data[dst..dst + 4].copy_from_slice(&px);
         }
     }
     Ok(Some(GradeSurface {
-        w: shared.w,
-        h: shared.h,
+        w: out_w,
+        h: out_h,
         data,
         space: shared.space,
     }))
+}
+
+/// Clamped bilinear sample of a surface at pixel-space `(fx, fy)` (the pixel
+/// grid's sample points sit at integer coordinates here).
+fn bilinear_sample(surface: &GradeSurface, fx: f32, fy: f32) -> [f32; 4] {
+    let max_x = (surface.w - 1) as f32;
+    let max_y = (surface.h - 1) as f32;
+    let fx = fx.clamp(0.0, max_x);
+    let fy = fy.clamp(0.0, max_y);
+    let x0 = fx.floor() as u32;
+    let y0 = fy.floor() as u32;
+    let x1 = (x0 + 1).min(surface.w - 1);
+    let y1 = (y0 + 1).min(surface.h - 1);
+    let tx = fx - x0 as f32;
+    let ty = fy - y0 as f32;
+    let read = |x: u32, y: u32| -> [f32; 4] {
+        let i = ((y * surface.w + x) * 4) as usize;
+        [
+            surface.data[i],
+            surface.data[i + 1],
+            surface.data[i + 2],
+            surface.data[i + 3],
+        ]
+    };
+    let (a, b, c, d) = (read(x0, y0), read(x1, y0), read(x0, y1), read(x1, y1));
+    let mut out = [0.0; 4];
+    for i in 0..4 {
+        let top = a[i] + (b[i] - a[i]) * tx;
+        let bottom = c[i] + (d[i] - c[i]) * tx;
+        out[i] = top + (bottom - top) * ty;
+    }
+    out
+}
+
+/// Bilinear resample of a whole surface to `w × h`.
+fn resample_surface(surface: &GradeSurface, w: u32, h: u32) -> GradeSurface {
+    let mut data = vec![0.0; (w * h * 4) as usize];
+    for y in 0..h {
+        let fy = (y as f32 + 0.5) / h as f32 * surface.h as f32 - 0.5;
+        for x in 0..w {
+            let fx = (x as f32 + 0.5) / w as f32 * surface.w as f32 - 0.5;
+            let px = bilinear_sample(surface, fx, fy);
+            let dst = ((y * w + x) * 4) as usize;
+            data[dst..dst + 4].copy_from_slice(&px);
+        }
+    }
+    GradeSurface {
+        w,
+        h,
+        data,
+        space: surface.space,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -503,12 +571,18 @@ fn transformed_layer(
                 continue;
             };
             let dst_index = (y * source.w + x) as usize;
-            let src_index = (sy * source.w + sx) as usize;
-            data[dst_index * 4..dst_index * 4 + 4]
-                .copy_from_slice(&source.data[src_index * 4..src_index * 4 + 4]);
+            let px = bilinear_sample(source, sx, sy);
+            data[dst_index * 4..dst_index * 4 + 4].copy_from_slice(&px);
             if let (Some(mask), Some(gate)) = (mask, gate.as_mut()) {
-                gate[dst_index] =
-                    f32::from(mask[if mask_linked { src_index } else { dst_index }]) / 255.0;
+                let src_index = (sy.round() as u32).min(source.h - 1) * source.w
+                    + (sx.round() as u32).min(source.w - 1);
+                gate[dst_index] = f32::from(
+                    mask[if mask_linked {
+                        src_index as usize
+                    } else {
+                        dst_index
+                    }],
+                ) / 255.0;
             }
         }
     }
@@ -529,9 +603,9 @@ fn inverse_layer_sample(
     width: u32,
     height: u32,
     transform: LayerTransform,
-) -> Option<(u32, u32)> {
+) -> Option<(f32, f32)> {
     if transform.is_identity() {
-        return Some((x, y));
+        return Some((x as f32, y as f32));
     }
     let cx = width as f32 / 2.0;
     let cy = height as f32 / 2.0;
@@ -540,12 +614,12 @@ fn inverse_layer_sample(
     let (sin, cos) = rad.sin_cos();
     let tx = x as f32 + 0.5 - transform.dx - cx;
     let ty = y as f32 + 0.5 - transform.dy - cy;
-    let sx = (tx * cos + ty * sin) / s + cx;
-    let sy = (-tx * sin + ty * cos) / s + cy;
-    if sx < 0.0 || sy < 0.0 || sx >= width as f32 || sy >= height as f32 {
+    let sx = (tx * cos + ty * sin) / s + cx - 0.5;
+    let sy = (-tx * sin + ty * cos) / s + cy - 0.5;
+    if sx < -0.5 || sy < -0.5 || sx >= width as f32 - 0.5 || sy >= height as f32 - 0.5 {
         return None;
     }
-    Some((sx.floor() as u32, sy.floor() as u32))
+    Some((sx, sy))
 }
 
 #[cfg(test)]
@@ -642,7 +716,7 @@ mod tests {
             assert_eq!(path, "green.png");
             Ok(RgbaImage::from_pixel(2, 2, Rgba([0, 255, 0, 255])))
         };
-        let output = composite_image_document_with_sources(&source, &document, 4, 4, &mut load)
+        let output = composite_image_document_with_sources(&source, &document, 4, 4, 4, &mut load)
             .expect("composite placed layer");
         // Outside the placement the base layer still shows (not clipped).
         assert_eq!(output.get_pixel(0, 0).0, [255, 0, 0, 255]);
@@ -650,6 +724,33 @@ mod tests {
         // Inside the placement the layer's own image draws.
         assert_eq!(output.get_pixel(1, 1).0, [0, 255, 0, 255]);
         assert_eq!(output.get_pixel(2, 2).0, [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn output_follows_the_document_size_not_the_shared_proxy() {
+        // A small opened image must not drop a larger canvas's resolution:
+        // the composite output is document-proportioned within the limit.
+        let source = RgbaImage::from_pixel(2, 2, Rgba([255, 0, 0, 255]));
+        let document = json!({
+            "layers": [
+                { "kind": "mask", "visible": true, "opacity": 1.0, "blend": "normal", "ops": [] }
+            ]
+        });
+        let output =
+            composite_image_document_with_sources(&source, &document, 8, 4, 8, &mut |_| {
+                Err("unused".into())
+            })
+            .expect("composite at document size");
+        assert_eq!(output.dimensions(), (8, 4));
+        assert_eq!(output.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(output.get_pixel(7, 3).0, [255, 0, 0, 255]);
+        // The limit caps the output without changing the aspect.
+        let capped =
+            composite_image_document_with_sources(&source, &document, 8, 4, 4, &mut |_| {
+                Err("unused".into())
+            })
+            .expect("composite capped");
+        assert_eq!(capped.dimensions(), (4, 2));
     }
 
     #[test]

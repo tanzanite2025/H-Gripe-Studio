@@ -57,6 +57,7 @@ pub(super) fn render_image_composite_path(
         document,
         document_width.max(1),
         document_height.max(1),
+        detail,
         &mut load_source,
     )?;
     let full_dims = image.dimensions();
