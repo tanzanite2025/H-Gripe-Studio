@@ -486,9 +486,13 @@ ProfileMergePolicy {
 - 拆 `AssetBinView`、`TimelineView`、`DrawerToolbar`、`ClipInspector`；
 - 避免把 store 的每个 action 再包装成一条 prop。
 
+状态（2026-07-10）：已完成。drawer container 已直接订阅 production store，并将编辑器、图层、导出和素材箱能力聚合为显式 ports；toolbar 与 inspector 已拆为独立组件，`App.tsx` 不再逐项传递 timeline/clip/store actions。
+
 ---
 
 ### A10 / P2：node spec 与 executor registry 需要更强的一致性边界
+
+状态（2026-07-10）：已完成。node specs 已按 source、generation、image、PSD、quality、video、workflow、output 与 internal 领域拆分，browser-preview executors 已按 graph、API、image 与 video 执行域拆分；聚合层拒绝重复注册，并新增跨 registry 一致性测试。
 
 #### 证据
 
