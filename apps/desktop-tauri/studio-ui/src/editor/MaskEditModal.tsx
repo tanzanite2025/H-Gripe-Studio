@@ -12,12 +12,11 @@ import {
   psSlotOf,
   type ShapeKind,
 } from "./maskTools";
-import { parseCombo, useShortcutScope, type ShortcutHandlers } from "../shortcuts";
+import { parseCombo } from "../shortcuts";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
-import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
+import { toolCombo } from "../shortcuts/scopes/maskEdit";
 import { useT } from "../i18n";
 import { isPreviewableOp } from "./maskMorphology";
-import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
 import { applyDoc } from "./gradeKernel";
 import { compileImageAdjustments } from "./imageCompile";
 import { fromMaskDocument } from "./imageDocument";
@@ -82,6 +81,8 @@ import { opsAlphaBounds } from "./maskMorphology";
 import { useBrushParams } from "./maskEditModal/useBrushParams";
 import { useToolSlots } from "./maskEditModal/useToolSlots";
 import { useMaskPreviewController } from "./maskEditModal/useMaskPreviewController";
+import { useMaskEditorShortcuts } from "./maskEditModal/useMaskEditorShortcuts";
+import type { ActiveSelection } from "./maskEditModal/selection";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
@@ -148,12 +149,6 @@ const SHELL_HANDOFF_MS = 300;
 // their global meaning even while a selection is up (PS transforms / crops
 // the selection contents, which the mask model has no notion of).
 const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
-interface ActiveSelection {
-  region: [number, number, number, number];
-  ellipse: boolean;
-  polygon?: [number, number][];
-}
-
 function polygonSelection(points: [number, number][]): ActiveSelection {
   const xs = points.map(([x]) => x);
   const ys = points.map(([, y]) => y);
@@ -396,7 +391,6 @@ export function MaskEditModal({
     editingPath,
     anchorDraft,
     setAnchorDraft,
-    penPendingRef,
     editingPathRef,
     startPathEdit,
     commitPathEdit,
@@ -548,7 +542,7 @@ export function MaskEditModal({
   // plus the derived (settle-debounced) underlay view window, Alt+wheel zoom
   // and Space hold-to-pan (see useCanvasNavigation).
   const nav = useCanvasNavigation(canvasRef, imageTransform, gestures);
-  const { view, setView, viewRef, viewBase, targetViewportView, viewportView, spacePan, setSpacePan } = nav;
+  const { view, setView, viewRef, viewBase, targetViewportView, viewportView, spacePan } = nav;
   // Image-workspace adjustment preview (image-kernel K2): the adjustment
   // stack compiles to a grade document and grades the displayed frame on the
   // f32 kernel — the same maths the video grade dialog runs. Null in the
@@ -734,14 +728,29 @@ export function MaskEditModal({
     setFillDraft,
     imageSizeDraft,
     setImageSizeDraft,
-    openFreeTransform: openFreeTransformPanel,
     openFillDialog,
   } = dialogs;
 
-  const openFreeTransform = () => {
-    selectTool("move");
-    openFreeTransformPanel();
-  };
+  const { openFreeTransform } = useMaskEditorShortcuts({
+    workspace,
+    dims,
+    dispatch,
+    toolSlots: { toolId, selectTool, selectSlot, cycleSlot },
+    brushParams: { shrinkBrush, growBrush, softenBrush, hardenBrush },
+    dialogs,
+    pathEditing,
+    navigation: nav,
+    colors,
+    lastMarqueeRef,
+    setLastMarquee,
+    workSelection,
+    setWorkSelection,
+    setQuickMask,
+    setOverlayOnly,
+    setScreenMode,
+    closePenPath: () => closePenPath(),
+    requestClose,
+  });
 
   const disabledMenuAction = () => {};
   const selectionMenuItems: MenuItem[] = [
@@ -791,99 +800,6 @@ export function MaskEditModal({
     frameView,
     dims,
   };
-
-  const shortcutHandlers: ShortcutHandlers = {
-    tool_brush: () => selectSlot("brush"),
-    tool_eraser: () => selectSlot("eraser"),
-    tool_wand: () => selectSlot("selection"),
-    tool_pen: () => selectSlot("pen"),
-    tool_lasso: () => selectTool("magnetic_lasso"),
-    tool_rect: () => selectSlot("marquee"),
-    tool_ellipse: () => cycleSlot("marquee"),
-    tool_gradient: () => selectSlot("fill"),
-    tool_move: () => selectSlot("move"),
-    tool_crop: () => selectSlot("crop"),
-    free_transform: () => openFreeTransform(),
-    // PS `A`: the path-selection slot (path / direct selection tools).
-    tool_path_select: () => selectSlot("path_select"),
-    undo: () => dispatch({ type: "undo" }),
-    redo: () => dispatch({ type: "redo" }),
-    redo_alt: () => dispatch({ type: "redo" }),
-    step_backward: () => dispatch({ type: "undo" }),
-    clear: () => {
-      // PS Ctrl+D: with an active selection, deselect; otherwise clear edits.
-      if (lastMarqueeRef.current) setLastMarquee(null);
-      else if (workSelection) setWorkSelection(null);
-      else dispatch({ type: "clear" });
-    },
-    select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
-    delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
-    reselect: () => dispatch({ type: "reselect" }),
-    duplicate: () => {
-      // PS Ctrl+J: with a selection, Layer Via Copy — the new layer holds
-      // the selected region (its mask) and the marching ants drop.
-      const selection = lastMarqueeRef.current;
-      dispatch({
-        type: "layer_duplicate",
-        ...(selection ? { selection } : null),
-        ...(workspace === "image" ? { includeSourceImage: true } : null),
-      });
-      if (selection) setLastMarquee(null);
-    },
-    invert: () => dispatch({ type: "op", op: { type: "invert" } }),
-    brush_smaller: shrinkBrush,
-    brush_larger: growBrush,
-    brush_softer: softenBrush,
-    brush_harder: hardenBrush,
-    default_colors: () => resetColors(),
-    quick_mask: () => setQuickMask((v) => !v),
-    tool_healing: () => selectSlot("repair"),
-    tool_clone: () => selectSlot("stamp"),
-    tool_history_brush: () => selectSlot("history"),
-    tool_dodge_burn: () => selectSlot("dodge"),
-    tool_eyedropper: () => selectSlot("sample"),
-    tool_shape: () => selectSlot("shape"),
-    tool_hand: () => selectSlot("hand"),
-    tool_rotate_view: () => selectSlot("rotate_view"),
-    tool_zoom: () => selectSlot("zoom"),
-    screen_mode: () => setScreenMode((m) => ((m + 1) % 3) as 0 | 1 | 2),
-    pan_space: () => setSpacePan(true),
-    zoom_in: () => setView((v) => zoomIn(v, ...viewBase())),
-    zoom_out: () => setView((v) => zoomOut(v, ...viewBase())),
-    zoom_fit: () => setView(FIT_VIEW),
-    zoom_100: () => setView((v) => zoom100(v, dims.w, ...viewBase())),
-    adjust_levels: () => dispatch({ type: "layer_add_adjustment", adjType: "levels" }),
-    adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
-    fill_dialog: () => dialogs.openFillDialog(),
-    image_size: () => dialogs.openImageSize(),
-    feather_dialog: () => {
-      // The feather "dialog" is the existing preview lane: pick the radius
-      // with the amount slider, then Apply commits a revisable `feather` op.
-      selectTool("feather");
-    },
-    swap_mode: () => swapColors(),
-    close_path: () => {
-      if (editingPathRef.current != null) {
-        commitPathEdit();
-        return;
-      }
-      if (!penPendingRef.current || penAnchors.length < 3) return false;
-      closePenPath();
-    },
-    cancel: () => {
-      // Anchor re-editing, an open dialog draft, or a pending pen path
-      // swallows the first Escape.
-      if (editingPathRef.current != null) cancelPathEdit();
-      else if (dialogs.cancelDialog()) return;
-      else if (penPendingRef.current) setPenAnchors([]);
-      else if (toolId === "rotate_view" && viewRef.current.rotate) setView((v) => rotateTo(v, 0));
-      // The image editor closes only via the header's collapse arrow;
-      // Escape never dismisses it (the mask editor keeps PS behaviour).
-      else if (workspace !== "image") requestClose();
-    },
-    toggle_overlay: () => setOverlayOnly((v) => !v),
-  };
-  useShortcutScope(MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, shortcutHandlers);
 
   // Map a pointer event to image-pixel coordinates: offset from the rendered
   // centre (the transform's fixed point), un-rotated and un-scaled back into
