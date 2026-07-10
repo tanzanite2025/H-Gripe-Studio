@@ -11,7 +11,6 @@ import {
   type MaskTool,
   PS_SLOTS,
   psSlotOf,
-  type PaintTarget,
   type ShapeKind,
 } from "./maskTools";
 import { parseCombo, useShortcutScope, type ShortcutHandlers } from "../shortcuts";
@@ -51,7 +50,7 @@ import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
 import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
-import { buildEdgeMap, DEFAULT_MAGNETIC_SNAP } from "./maskEditModal/magneticSnap";
+import { buildEdgeMap } from "./maskEditModal/magneticSnap";
 import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
@@ -82,6 +81,7 @@ import { getCommand, getCommandCapability, type CommandId } from "./studioComman
 import { ContextActionBar } from "./maskEditModal/ContextActionBar";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import { opsAlphaBounds } from "./maskMorphology";
+import { useBrushParams } from "./maskEditModal/useBrushParams";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
@@ -267,20 +267,31 @@ export function MaskEditModal({
   // Last-used variant per multi-tool PS slot: the slot button's visible face,
   // and what the slot's shortcut letter re-selects.
   const [slotFaces, setSlotFaces] = useState<Record<string, string>>({});
-  const [brushSize, setBrushSize] = useState(24);
-  // Soft-brush parameters (M4): hardness / flow are 0..1 (1 = the legacy hard
-  // stamp), spacing is the stamp interval as a fraction of the diameter.
-  const [brushHardness, setBrushHardness] = useState(1);
-  const [brushFlow, setBrushFlow] = useState(1);
-  const [brushSpacing, setBrushSpacing] = useState(0.25);
-  const [magneticWidth, setMagneticWidth] = useState(DEFAULT_MAGNETIC_SNAP.width);
-  const [magneticContrast, setMagneticContrast] = useState(DEFAULT_MAGNETIC_SNAP.contrast);
-  const [magneticFrequency, setMagneticFrequency] = useState(DEFAULT_MAGNETIC_SNAP.frequency);
-  // What paint strokes are recorded onto (M4 tool/target decoupling): the
-  // active mask layer, or the trimap matting band.
-  const [paintTarget, setPaintTarget] = useState<PaintTarget>("layer");
+  const {
+    brushSize,
+    setBrushSize,
+    brushHardness,
+    setBrushHardness,
+    brushFlow,
+    setBrushFlow,
+    brushSpacing,
+    setBrushSpacing,
+    magneticWidth,
+    setMagneticWidth,
+    magneticContrast,
+    setMagneticContrast,
+    magneticFrequency,
+    setMagneticFrequency,
+    paintTarget,
+    setPaintTarget,
+    tolerance,
+    setTolerance,
+    shrinkBrush,
+    growBrush,
+    softenBrush,
+    hardenBrush,
+  } = useBrushParams(wandTolerance);
   const [amount, setAmount] = useState(4);
-  const [tolerance, setTolerance] = useState(wandTolerance);
   const [overlayOnly, setOverlayOnly] = useState(false);
   // Quick-mask (Q): PS-style ruby overlay of the unselected area.
   const [quickMask, setQuickMask] = useState(false);
@@ -851,10 +862,10 @@ export function MaskEditModal({
       if (selection) setLastMarquee(null);
     },
     invert: () => dispatch({ type: "op", op: { type: "invert" } }),
-    brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
-    brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),
-    brush_softer: () => setBrushHardness((h) => Math.max(0, Math.round((h - 0.25) * 100) / 100)),
-    brush_harder: () => setBrushHardness((h) => Math.min(1, Math.round((h + 0.25) * 100) / 100)),
+    brush_smaller: shrinkBrush,
+    brush_larger: growBrush,
+    brush_softer: softenBrush,
+    brush_harder: hardenBrush,
     default_colors: () => resetColors(),
     quick_mask: () => setQuickMask((v) => !v),
     tool_healing: () => selectSlot("repair"),
