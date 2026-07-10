@@ -423,6 +423,8 @@ domain <- viewport
 
 ### A08 / P1：API provider 重复 profile、credentials 和参数合并
 
+状态（2026-07-10）：已完成。`custom_http`、`openai_compatible` 与后续加入的 `replicate` 已共享 `providers/common/` 下的 task 参数读取、profile merge policy、credentials/API key 优先级及输出文件类型辅助逻辑；provider 差异通过显式 policy 保留。
+
 #### 证据
 
 `custom_http.rs:703-915` 与 `openai_compatible.rs:716-1079` 存在相同或高度相似的：

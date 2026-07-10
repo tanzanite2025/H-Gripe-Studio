@@ -1,7 +1,10 @@
-use crate::credentials::{load_credential_ref, CredentialEntry};
+use super::common::credentials::{resolve_api_key, resolve_credentials, OPENAI_COMPATIBLE_API_KEY};
+use super::common::output_files::normalized_content_type_or_original;
+use super::common::profile_merge::{apply_provider_profile, OPENAI_COMPATIBLE_PROFILE_MERGE};
+use super::common::task_params::{value, value_bool, value_str};
+use crate::credentials::CredentialEntry;
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
-use crate::profiles::{load_provider_profile, ProviderProfile};
 use crate::provider::{BrokerError, BrokerResult, Provider, ProviderExecutionContext};
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -90,7 +93,7 @@ impl Provider for OpenAiCompatibleProvider {
         context: &ProviderExecutionContext,
     ) -> BrokerResult<ApiResult> {
         context.check_cancelled()?;
-        let task = apply_provider_profile(task)?;
+        let task = apply_provider_profile(task, &OPENAI_COMPATIBLE_PROFILE_MERGE)?;
         // OpenAI-style synchronous endpoints have no server-side cancel; the
         // native mechanism is aborting the in-flight HTTP request, which
         // dropping the future does.
@@ -504,7 +507,7 @@ impl OpenAiCompatibleProvider {
         path: &str,
         request_body: Value,
     ) -> BrokerResult<JsonResponse> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "openai_compatible")?;
         let url = endpoint_url(task, path, credentials.as_ref());
         let mut request = self.client.post(url).json(&request_body);
 
@@ -512,7 +515,9 @@ impl OpenAiCompatibleProvider {
             request = request.timeout(Duration::from_millis(timeout_ms));
         }
 
-        if let Some(api_key) = resolve_api_key(task, credentials.as_ref())? {
+        if let Some(api_key) =
+            resolve_api_key(task, credentials.as_ref(), &OPENAI_COMPATIBLE_API_KEY)?
+        {
             request = request.bearer_auth(api_key);
         }
 
@@ -579,7 +584,7 @@ impl OpenAiCompatibleProvider {
         path: &str,
         request_body: Value,
     ) -> BrokerResult<BinaryResponse> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "openai_compatible")?;
         let url = endpoint_url(task, path, credentials.as_ref());
         let mut request = self.client.post(url).json(&request_body);
 
@@ -587,7 +592,9 @@ impl OpenAiCompatibleProvider {
             request = request.timeout(Duration::from_millis(timeout_ms));
         }
 
-        if let Some(api_key) = resolve_api_key(task, credentials.as_ref())? {
+        if let Some(api_key) =
+            resolve_api_key(task, credentials.as_ref(), &OPENAI_COMPATIBLE_API_KEY)?
+        {
             request = request.bearer_auth(api_key);
         }
 
@@ -622,7 +629,7 @@ impl OpenAiCompatibleProvider {
         let content_type = headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .map(normalized_content_type);
+            .map(normalized_content_type_or_original);
         let body = response
             .bytes()
             .await
@@ -643,7 +650,7 @@ impl OpenAiCompatibleProvider {
         path: &str,
         form: Form,
     ) -> BrokerResult<JsonResponse> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "openai_compatible")?;
         let url = endpoint_url(task, path, credentials.as_ref());
         let mut request = self.client.post(url).multipart(form);
 
@@ -651,7 +658,9 @@ impl OpenAiCompatibleProvider {
             request = request.timeout(Duration::from_millis(timeout_ms));
         }
 
-        if let Some(api_key) = resolve_api_key(task, credentials.as_ref())? {
+        if let Some(api_key) =
+            resolve_api_key(task, credentials.as_ref(), &OPENAI_COMPATIBLE_API_KEY)?
+        {
             request = request.bearer_auth(api_key);
         }
 
@@ -711,18 +720,6 @@ impl OpenAiCompatibleProvider {
             provider_request_id,
         })
     }
-}
-
-fn value<'a>(task: &'a ApiTask, key: &str) -> Option<&'a Value> {
-    task.params.get(key).or_else(|| task.inputs.get(key))
-}
-
-fn value_str<'a>(task: &'a ApiTask, key: &str) -> Option<&'a str> {
-    value(task, key).and_then(Value::as_str)
-}
-
-fn value_bool(task: &ApiTask, key: &str) -> Option<bool> {
-    value(task, key).and_then(Value::as_bool)
 }
 
 fn multipart_image_from_task(task: &ApiTask, prefix: &str) -> BrokerResult<Option<MultipartImage>> {
@@ -948,134 +945,6 @@ fn mime_type_from_path(path: &Path) -> Option<String> {
     }
 }
 
-fn credentials_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "credentials_file")
-}
-
-fn profiles_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "profiles_file")
-}
-
-fn profile_ref(task: &ApiTask) -> Option<&str> {
-    value_str(task, "profile_ref").or_else(|| value_str(task, "provider_profile_ref"))
-}
-
-fn apply_provider_profile(task: &ApiTask) -> BrokerResult<ApiTask> {
-    let Some(profile_ref) = profile_ref(task)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(task.clone());
-    };
-
-    let profile = load_provider_profile(profile_ref, profiles_file(task))?.ok_or_else(|| {
-        BrokerError::Provider(format!("provider profile '{profile_ref}' was not found"))
-    })?;
-
-    if let Some(provider) = profile.provider.as_deref() {
-        let provider = provider.trim();
-        if !provider.is_empty() && provider != task.provider {
-            return Err(BrokerError::Provider(format!(
-                "provider profile '{profile_ref}' is for provider '{provider}', not '{}'",
-                task.provider
-            )));
-        }
-    }
-
-    Ok(merge_provider_profile(task, &profile))
-}
-
-fn merge_provider_profile(task: &ApiTask, profile: &ProviderProfile) -> ApiTask {
-    let mut merged = task.clone();
-    let task_params = task.params.clone();
-    merged.params = BTreeMap::new();
-
-    if let Some(params) = &profile.params {
-        for (key, value) in params {
-            insert_effective_param(&mut merged.params, key, value.clone());
-        }
-    }
-
-    insert_optional_string(&mut merged.params, "base_url", profile.base_url.as_deref());
-    insert_optional_string(&mut merged.params, "model", profile.model.as_deref());
-    insert_optional_string(&mut merged.params, "path", profile.path.as_deref());
-    insert_optional_string(
-        &mut merged.params,
-        "api_key_env",
-        profile.api_key_env.as_deref(),
-    );
-    if let Some(no_auth) = profile.no_auth {
-        merged.params.insert("no_auth".to_string(), json!(no_auth));
-    }
-    if let Some(headers) = &profile.headers {
-        merged.params.insert("headers".to_string(), json!(headers));
-    }
-    if let Some(extra_body) = &profile.extra_body {
-        merged
-            .params
-            .insert("extra_body".to_string(), json!(extra_body));
-    }
-
-    for (key, value) in task_params {
-        merge_task_param(&mut merged.params, key, value);
-    }
-
-    if task
-        .credentials_ref
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_none()
-    {
-        merged.credentials_ref = profile
-            .credentials_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-    }
-
-    merged
-}
-
-fn insert_optional_string(params: &mut BTreeMap<String, Value>, key: &str, value: Option<&str>) {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        params.insert(key.to_string(), json!(value));
-    }
-}
-
-fn insert_effective_param(params: &mut BTreeMap<String, Value>, key: &str, value: Value) {
-    if !value_is_blank_string(&value) {
-        params.insert(key.to_string(), value);
-    }
-}
-
-fn merge_task_param(params: &mut BTreeMap<String, Value>, key: String, value: Value) {
-    if value_is_blank_string(&value) && params.contains_key(&key) {
-        return;
-    }
-
-    if key == "headers" || key == "extra_body" {
-        if let (Some(existing), Some(incoming)) = (
-            params.get_mut(&key).and_then(Value::as_object_mut),
-            value.as_object(),
-        ) {
-            for (item_key, item_value) in incoming {
-                if !value_is_blank_string(item_value) {
-                    existing.insert(item_key.clone(), item_value.clone());
-                }
-            }
-            return;
-        }
-    }
-
-    params.insert(key, value);
-}
-
-fn value_is_blank_string(value: &Value) -> bool {
-    value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
 fn detect_image_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Some(("image/png", "png"));
@@ -1278,16 +1147,6 @@ fn audio_mime_type_from_extension(extension: &str) -> Option<String> {
     }
 }
 
-fn normalized_content_type(value: &str) -> String {
-    value
-        .split(';')
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(value)
-        .to_string()
-}
-
 fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry>) -> String {
     let base_url = value_str(task, "base_url")
         .filter(|value| !value.trim().is_empty())
@@ -1306,73 +1165,6 @@ fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry
         format!("/{path}")
     };
     format!("{}{}", base_url.trim_end_matches('/'), path)
-}
-
-fn resolve_credentials(task: &ApiTask) -> BrokerResult<Option<CredentialEntry>> {
-    let Some(credential_ref) = task.credentials_ref.as_deref() else {
-        return Ok(None);
-    };
-    let credential_ref = credential_ref.trim();
-    if credential_ref.is_empty() {
-        return Ok(None);
-    }
-
-    let credentials = load_credential_ref(credential_ref, credentials_file(task))?;
-    credentials
-        .ok_or_else(|| {
-            BrokerError::Provider(format!("credentials_ref '{credential_ref}' was not found"))
-        })
-        .map(Some)
-}
-
-fn resolve_api_key(
-    task: &ApiTask,
-    credentials: Option<&CredentialEntry>,
-) -> BrokerResult<Option<String>> {
-    if value_bool(task, "no_auth").unwrap_or(false) {
-        return Ok(None);
-    }
-
-    if let Some(api_key) = value_str(task, "api_key") {
-        let api_key = api_key.trim();
-        if !api_key.is_empty() {
-            return Ok(Some(api_key.to_string()));
-        }
-    }
-
-    if let Some(api_key_env) = value_str(task, "api_key_env") {
-        let api_key_env = api_key_env.trim();
-        if api_key_env.is_empty() {
-            return Ok(None);
-        }
-        return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
-    }
-
-    if let Some(credentials) = credentials {
-        if let Some(api_key) = credentials.api_key.as_deref() {
-            let api_key = api_key.trim();
-            if !api_key.is_empty() {
-                return Ok(Some(api_key.to_string()));
-            }
-        }
-
-        if let Some(api_key_env) = credentials.api_key_env.as_deref() {
-            let api_key_env = api_key_env.trim();
-            if api_key_env.is_empty() {
-                return Ok(None);
-            }
-            return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
-        }
-    }
-
-    Ok(env::var("HGRIPE_OPENAI_COMPATIBLE_API_KEY")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|value| !value.is_empty())
-        }))
 }
 
 fn extract_chat_text(body: &Value) -> String {

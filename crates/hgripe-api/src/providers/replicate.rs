@@ -1,7 +1,10 @@
-use crate::credentials::{load_credential_ref, CredentialEntry};
+use super::common::credentials::{resolve_api_key, resolve_credentials, REPLICATE_API_KEY};
+use super::common::output_files::{extension_for_content_type, normalized_content_type};
+use super::common::profile_merge::{apply_provider_profile, REPLICATE_PROFILE_MERGE};
+use super::common::task_params::{value, value_bool, value_str, value_u64};
+use crate::credentials::CredentialEntry;
 use crate::model::{ApiErrorInfo, ApiResult, ApiStatus, ApiTask, OutputFile};
 use crate::outputs::write_task_output_bytes;
-use crate::profiles::{load_provider_profile, ProviderProfile};
 use crate::provider::{BrokerError, BrokerResult, Provider, ProviderExecutionContext};
 use async_trait::async_trait;
 use reqwest::header::CONTENT_TYPE;
@@ -55,7 +58,7 @@ impl Provider for ReplicateProvider {
         context: &ProviderExecutionContext,
     ) -> BrokerResult<ApiResult> {
         context.check_cancelled()?;
-        let task = apply_provider_profile(task)?;
+        let task = apply_provider_profile(task, &REPLICATE_PROFILE_MERGE)?;
         self.run_prediction(&task, context).await
     }
 }
@@ -66,7 +69,7 @@ impl ReplicateProvider {
         task: &ApiTask,
         context: &ProviderExecutionContext,
     ) -> BrokerResult<ApiResult> {
-        let credentials = resolve_credentials(task)?;
+        let credentials = resolve_credentials(task, "replicate")?;
         let (submit_path, submit_body) = build_submit_request(task)?;
         let submit_url = endpoint_url(task, &submit_path, credentials.as_ref());
 
@@ -270,7 +273,7 @@ impl ReplicateProvider {
             request = request.timeout(Duration::from_millis(timeout_ms));
         }
 
-        if let Some(api_key) = resolve_api_key(task, credentials)? {
+        if let Some(api_key) = resolve_api_key(task, credentials, &REPLICATE_API_KEY)? {
             request = request.bearer_auth(api_key);
         }
 
@@ -348,7 +351,7 @@ impl ReplicateProvider {
         }
 
         if value_bool(task, "download_with_auth").unwrap_or(false) {
-            if let Some(api_key) = resolve_api_key(task, credentials)? {
+            if let Some(api_key) = resolve_api_key(task, credentials, &REPLICATE_API_KEY)? {
                 request = request.bearer_auth(api_key);
             }
         }
@@ -385,7 +388,7 @@ impl ReplicateProvider {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .or_else(|| extension_from_url(url))
-            .unwrap_or_else(|| extension_for_content_type(mime_type.as_deref()));
+            .unwrap_or_else(|| extension_for_content_type(mime_type.as_deref(), &[]));
 
         write_task_output_bytes(
             value_str(task, "output_dir"),
@@ -718,26 +721,6 @@ fn prediction_failed_result(
     }
 }
 
-fn value<'a>(task: &'a ApiTask, key: &str) -> Option<&'a Value> {
-    task.params.get(key).or_else(|| task.inputs.get(key))
-}
-
-fn value_str<'a>(task: &'a ApiTask, key: &str) -> Option<&'a str> {
-    value(task, key).and_then(Value::as_str)
-}
-
-fn value_bool(task: &ApiTask, key: &str) -> Option<bool> {
-    value(task, key).and_then(Value::as_bool)
-}
-
-fn value_u64(task: &ApiTask, key: &str) -> Option<u64> {
-    match value(task, key)? {
-        Value::Number(number) => number.as_u64(),
-        Value::String(value) => value.trim().parse().ok(),
-        _ => None,
-    }
-}
-
 fn merge_extra_body(task: &ApiTask, body: &mut Map<String, Value>) -> BrokerResult<()> {
     let Some(extra_body) = value(task, "extra_body") else {
         return Ok(());
@@ -776,236 +759,6 @@ fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry
         format!("/{path}")
     };
     format!("{}{}", base_url.trim_end_matches('/'), path)
-}
-
-fn credentials_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "credentials_file")
-}
-
-fn profiles_file(task: &ApiTask) -> Option<&str> {
-    value_str(task, "profiles_file")
-}
-
-fn profile_ref(task: &ApiTask) -> Option<&str> {
-    value_str(task, "profile_ref").or_else(|| value_str(task, "provider_profile_ref"))
-}
-
-fn resolve_credentials(task: &ApiTask) -> BrokerResult<Option<CredentialEntry>> {
-    let Some(credential_ref) = task.credentials_ref.as_deref() else {
-        return Ok(None);
-    };
-    let credential_ref = credential_ref.trim();
-    if credential_ref.is_empty() {
-        return Ok(None);
-    }
-
-    let credential =
-        load_credential_ref(credential_ref, credentials_file(task))?.ok_or_else(|| {
-            BrokerError::Provider(format!("credentials_ref '{credential_ref}' was not found"))
-        })?;
-    if let Some(provider) = credential.provider.as_deref() {
-        let provider = provider.trim();
-        if !provider.is_empty() && provider != "replicate" {
-            return Err(BrokerError::Provider(format!(
-                "credentials_ref '{credential_ref}' is for provider '{provider}', not replicate"
-            )));
-        }
-    }
-
-    Ok(Some(credential))
-}
-
-fn resolve_api_key(
-    task: &ApiTask,
-    credentials: Option<&CredentialEntry>,
-) -> BrokerResult<Option<String>> {
-    if value_bool(task, "no_auth").unwrap_or(false) {
-        return Ok(None);
-    }
-
-    if let Some(api_key) = value_str(task, "api_key") {
-        let api_key = api_key.trim();
-        if !api_key.is_empty() {
-            return Ok(Some(api_key.to_string()));
-        }
-    }
-
-    if let Some(api_key_env) = value_str(task, "api_key_env") {
-        let api_key_env = api_key_env.trim();
-        if api_key_env.is_empty() {
-            return Ok(None);
-        }
-        return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
-    }
-
-    if let Some(credentials) = credentials {
-        if let Some(api_key) = credentials.api_key.as_deref() {
-            let api_key = api_key.trim();
-            if !api_key.is_empty() {
-                return Ok(Some(api_key.to_string()));
-            }
-        }
-
-        if let Some(api_key_env) = credentials.api_key_env.as_deref() {
-            let api_key_env = api_key_env.trim();
-            if api_key_env.is_empty() {
-                return Ok(None);
-            }
-            return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
-        }
-    }
-
-    Ok(env::var("HGRIPE_REPLICATE_API_KEY")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            env::var("REPLICATE_API_TOKEN")
-                .ok()
-                .filter(|value| !value.is_empty())
-        }))
-}
-
-fn apply_provider_profile(task: &ApiTask) -> BrokerResult<ApiTask> {
-    let Some(profile_ref) = profile_ref(task)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(task.clone());
-    };
-
-    let profile = load_provider_profile(profile_ref, profiles_file(task))?.ok_or_else(|| {
-        BrokerError::Provider(format!("provider profile '{profile_ref}' was not found"))
-    })?;
-
-    if let Some(provider) = profile.provider.as_deref() {
-        let provider = provider.trim();
-        if !provider.is_empty() && provider != task.provider {
-            return Err(BrokerError::Provider(format!(
-                "provider profile '{profile_ref}' is for provider '{provider}', not '{}'",
-                task.provider
-            )));
-        }
-    }
-
-    Ok(merge_provider_profile(task, &profile))
-}
-
-fn merge_provider_profile(task: &ApiTask, profile: &ProviderProfile) -> ApiTask {
-    let mut merged = task.clone();
-    let task_params = task.params.clone();
-    merged.params = BTreeMap::new();
-
-    if let Some(params) = &profile.params {
-        for (key, value) in params {
-            insert_effective_param(&mut merged.params, key, value.clone());
-        }
-    }
-
-    insert_optional_string(&mut merged.params, "base_url", profile.base_url.as_deref());
-    insert_optional_string(&mut merged.params, "model", profile.model.as_deref());
-    insert_optional_string(
-        &mut merged.params,
-        "api_key_env",
-        profile.api_key_env.as_deref(),
-    );
-    if let Some(no_auth) = profile.no_auth {
-        merged.params.insert("no_auth".to_string(), json!(no_auth));
-    }
-    if let Some(headers) = &profile.headers {
-        merged.params.insert("headers".to_string(), json!(headers));
-    }
-    if let Some(extra_body) = &profile.extra_body {
-        merged
-            .params
-            .insert("extra_body".to_string(), json!(extra_body));
-    }
-
-    for (key, value) in task_params {
-        merge_task_param(&mut merged.params, key, value);
-    }
-
-    if task
-        .credentials_ref
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_none()
-    {
-        merged.credentials_ref = profile
-            .credentials_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-    }
-
-    merged
-}
-
-fn insert_optional_string(params: &mut BTreeMap<String, Value>, key: &str, value: Option<&str>) {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        params.insert(key.to_string(), json!(value));
-    }
-}
-
-fn insert_effective_param(params: &mut BTreeMap<String, Value>, key: &str, value: Value) {
-    if !value_is_blank_string(&value) {
-        params.insert(key.to_string(), value);
-    }
-}
-
-fn merge_task_param(params: &mut BTreeMap<String, Value>, key: String, value: Value) {
-    if value_is_blank_string(&value) && params.contains_key(&key) {
-        return;
-    }
-
-    if key == "headers" || key == "extra_body" || key == "input" {
-        if let (Some(existing), Some(incoming)) = (
-            params.get_mut(&key).and_then(Value::as_object_mut),
-            value.as_object(),
-        ) {
-            for (item_key, item_value) in incoming {
-                if !value_is_blank_string(item_value) {
-                    existing.insert(item_key.clone(), item_value.clone());
-                }
-            }
-            return;
-        }
-    }
-
-    params.insert(key, value);
-}
-
-fn value_is_blank_string(value: &Value) -> bool {
-    value.as_str().map(str::trim).is_some_and(str::is_empty)
-}
-
-fn normalized_content_type(content_type: &str) -> Option<String> {
-    content_type
-        .split(';')
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn extension_for_content_type(content_type: Option<&str>) -> String {
-    match content_type.unwrap_or("").to_ascii_lowercase().as_str() {
-        "application/json" => "json",
-        "application/pdf" => "pdf",
-        "audio/mpeg" => "mp3",
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/webm" => "webm",
-        "image/gif" => "gif",
-        "image/jpeg" => "jpg",
-        "image/png" => "png",
-        "image/webp" => "webp",
-        "text/plain" => "txt",
-        "video/mp4" => "mp4",
-        "video/webm" => "webm",
-        _ => "bin",
-    }
-    .to_string()
 }
 
 fn normalized_status_value(value: &str) -> String {
