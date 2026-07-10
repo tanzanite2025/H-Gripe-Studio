@@ -531,6 +531,12 @@ bridge/viewport/
   index.ts
 ```
 
+#### 状态
+
+已完成。viewport contracts、Tauri client 与 browser/test mock 已拆分；生产入口继续从
+`bridge/viewport` 导出兼容 API，测试通过 `bridge/viewport/testing` 注入独立 mock client，
+不再从生产 bridge 暴露 mock 计数器。
+
 生产调用方只依赖 `client` 接口；测试通过注入 mock client，而不是从生产 bridge 暴露 mock 计数器。
 
 ---
