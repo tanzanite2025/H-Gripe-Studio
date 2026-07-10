@@ -1,57 +1,41 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useViewportUnderlay, type ViewportUnderlaySource } from "../viewport/useViewportUnderlay";
-import { IDENTITY_VIEW } from "../viewport/view";
-import type { ViewportMaskOverlay, ViewportOverlayScene } from "../bridge/viewport";
-import { probeImageDims, registerResource } from "../bridge/files";
+import type { ViewportOverlayScene } from "../bridge/viewport";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
   maskTool,
   DEFAULT_TOOL_ID,
   type MaskTool,
-  PS_SLOTS,
   psSlotOf,
-  type PaintTarget,
   type ShapeKind,
 } from "./maskTools";
-import { parseCombo, useShortcutScope, type ShortcutHandlers } from "../shortcuts";
+import { parseCombo } from "../shortcuts";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
-import { MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, toolCombo } from "../shortcuts/scopes/maskEdit";
+import { toolCombo } from "../shortcuts/scopes/maskEdit";
 import { useT } from "../i18n";
-import { PreviewLane } from "../runtime/previewLane";
-import { applyOp, buildProxyMask, isPreviewableOp, ProxyLayerCache, type ProxyMask } from "./maskMorphology";
-import { FIT_VIEW, rotateTo, zoom100, zoomIn, zoomOut } from "./canvasView";
+import { isPreviewableOp } from "./maskMorphology";
 import { applyDoc } from "./gradeKernel";
-import { compileImageAdjustments } from "./imageCompile";
-import { fromMaskDocument } from "./imageDocument";
 import {
-  imageDocumentFrameHidden,
-  imageCompositeTarget,
   imageLayerContentBounds,
   imageLayerDrawsSource,
-  imageDocumentNeedsComposite,
-  layerCompositeTransform,
-  withActiveLayerDraftTransform,
 } from "./imageCompositeSource";
 import {
   activeOps,
-  composeTransforms,
   currentHistoryIndex,
   editCount,
   historySnapshots,
   initEditState,
   type EditState,
-  type TransformParams,
 } from "./maskEdit";
 import type {
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
-import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
+import { activeTargetKind } from "../types/production";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
 import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
-import { buildEdgeMap, DEFAULT_MAGNETIC_SNAP } from "./maskEditModal/magneticSnap";
+import { buildEdgeMap } from "./maskEditModal/magneticSnap";
 import type { RulerLine } from "./maskEditModal/stagePainter";
 import { PanelDock, type DockPanel } from "./maskEditModal/PanelDock";
 import { useDockLayout, type DockLayoutState } from "./maskEditModal/dockLayout";
@@ -68,7 +52,6 @@ import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
 import { ColorPicker } from "./maskEditModal/ColorPicker";
 import { createPointerGestures, pointerDown, pointerMove, pointerUp, type PointerEnv } from "./maskEditModal/pointerMachine";
-import { useCanvasNavigation } from "./maskEditModal/useCanvasNavigation";
 import { useCropTool } from "./maskEditModal/useCropTool";
 import { useColorTools, type ColorToolsEnv } from "./maskEditModal/useColorTools";
 import { useDialogDrafts } from "./maskEditModal/useDialogDrafts";
@@ -82,6 +65,12 @@ import { getCommand, getCommandCapability, type CommandId } from "./studioComman
 import { ContextActionBar } from "./maskEditModal/ContextActionBar";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import { opsAlphaBounds } from "./maskMorphology";
+import { useBrushParams } from "./maskEditModal/useBrushParams";
+import { useToolSlots } from "./maskEditModal/useToolSlots";
+import { useMaskPreviewController } from "./maskEditModal/useMaskPreviewController";
+import { useMaskEditorShortcuts } from "./maskEditModal/useMaskEditorShortcuts";
+import type { ActiveSelection } from "./maskEditModal/selection";
+import { useUnderlayController } from "./maskEditModal/useUnderlayController";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
@@ -148,12 +137,6 @@ const SHELL_HANDOFF_MS = 300;
 // their global meaning even while a selection is up (PS transforms / crops
 // the selection contents, which the mask model has no notion of).
 const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
-interface ActiveSelection {
-  region: [number, number, number, number];
-  ellipse: boolean;
-  polygon?: [number, number][];
-}
-
 function polygonSelection(points: [number, number][]): ActiveSelection {
   const xs = points.map(([x]) => x);
   const ys = points.map(([, y]) => y);
@@ -263,31 +246,66 @@ export function MaskEditModal({
   }, [state]);
   // Open on the move tool (PS V) — reaching for the brush is opt-in, so a
   // stray first drag never paints the mask.
-  const [toolId, setToolId] = useState<string>("move");
-  // Last-used variant per multi-tool PS slot: the slot button's visible face,
-  // and what the slot's shortcut letter re-selects.
-  const [slotFaces, setSlotFaces] = useState<Record<string, string>>({});
-  const [brushSize, setBrushSize] = useState(24);
-  // Soft-brush parameters (M4): hardness / flow are 0..1 (1 = the legacy hard
-  // stamp), spacing is the stamp interval as a fraction of the diameter.
-  const [brushHardness, setBrushHardness] = useState(1);
-  const [brushFlow, setBrushFlow] = useState(1);
-  const [brushSpacing, setBrushSpacing] = useState(0.25);
-  const [magneticWidth, setMagneticWidth] = useState(DEFAULT_MAGNETIC_SNAP.width);
-  const [magneticContrast, setMagneticContrast] = useState(DEFAULT_MAGNETIC_SNAP.contrast);
-  const [magneticFrequency, setMagneticFrequency] = useState(DEFAULT_MAGNETIC_SNAP.frequency);
-  // What paint strokes are recorded onto (M4 tool/target decoupling): the
-  // active mask layer, or the trimap matting band.
-  const [paintTarget, setPaintTarget] = useState<PaintTarget>("layer");
+  const {
+    toolId,
+    setToolId,
+    slotFaces,
+    setSlotFace,
+    selectTool,
+    selectSlot,
+    cycleSlot,
+  } = useToolSlots({
+    initialToolId: "move",
+    onBeforeSelect: (id) => {
+      if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
+      cancelPathEdit();
+      if (id !== "patch") {
+        gestures.patchLoop = null;
+        gestures.patchDrag = null;
+      }
+      if (id !== "perspective_crop") setQuadDraft(null);
+    },
+  });
+  const {
+    brushSize,
+    setBrushSize,
+    brushHardness,
+    setBrushHardness,
+    brushFlow,
+    setBrushFlow,
+    brushSpacing,
+    setBrushSpacing,
+    magneticWidth,
+    setMagneticWidth,
+    magneticContrast,
+    setMagneticContrast,
+    magneticFrequency,
+    setMagneticFrequency,
+    paintTarget,
+    setPaintTarget,
+    tolerance,
+    setTolerance,
+    shrinkBrush,
+    growBrush,
+    softenBrush,
+    hardenBrush,
+  } = useBrushParams(wandTolerance);
   const [amount, setAmount] = useState(4);
-  const [tolerance, setTolerance] = useState(wandTolerance);
   const [overlayOnly, setOverlayOnly] = useState(false);
-  // Quick-mask (Q): PS-style ruby overlay of the unselected area.
-  const [quickMask, setQuickMask] = useState(false);
-  const [quickProxy, setQuickProxy] = useState<ProxyMask | null>(null);
-  // Morphology preview proxy (grow/shrink/feather/smooth), recomputed by the
-  // preview lane effect below.
-  const [preview, setPreview] = useState<ProxyMask | null>(null);
+  const {
+    quickMask,
+    setQuickMask,
+    quickProxy,
+    preview,
+    previewing,
+    viewportMaskOverlay,
+    setDimensions: setPreviewDimensions,
+  } = useMaskPreviewController({
+    toolId,
+    amount,
+    document: state.current,
+    initialDimensions: state.current.canvas ?? EMPTY_DOCUMENT_DIMS,
+  });
   // Boolean mode the next committed path-selection shape combines with.
   const [pathMode, setPathMode] = useState<"add" | "subtract" | "intersect">("add");
   // PS-style right rail: tabbed dock groups driven by a persisted layout
@@ -314,14 +332,6 @@ export function MaskEditModal({
   // host-side over the rendered frame, so it follows the view window's
   // detail; when no host frame presents (browser preview) the canvas
   // painters below draw the same tint locally.
-  const previewing = isPreviewableOp(toolId) && preview != null;
-  const viewportMaskOverlay = useMemo<ViewportMaskOverlay | null>(() => {
-    const proxy = previewing && preview ? preview : quickMask && quickProxy ? quickProxy : null;
-    if (!proxy) return null;
-    return previewing && preview
-      ? { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [86, 168, 255], alpha: 0.55 }
-      : { w: proxy.w, h: proxy.h, data: proxy.data, rgb: [224, 32, 32], alpha: 0.5, invert: true };
-  }, [previewing, preview, quickMask, quickProxy]);
   // The active rect/ellipse marquee selection (PS-style): marching ants stay
   // visible across tools, subsequent edit steps are confined to it (`clip`),
   // and Ctrl+D / a plain marquee click deselects.
@@ -369,7 +379,6 @@ export function MaskEditModal({
     editingPath,
     anchorDraft,
     setAnchorDraft,
-    penPendingRef,
     editingPathRef,
     startPathEdit,
     commitPathEdit,
@@ -423,152 +432,47 @@ export function MaskEditModal({
     [workspace, lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
   const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
-  const plainSource = imagePath ?? undefined;
-  const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
-  const compositeDims = state.current.canvas ?? sourceDims ?? frameDimsRef.current;
-  const needsCompositeSource = workspace === "image" && Boolean(imagePath) && imageDocumentNeedsComposite(state.current);
-  const compositeDocument = useMemo(
-    () => withActiveLayerDraftTransform(state.current, needsCompositeSource ? moveDraft : null),
-    [state.current, needsCompositeSource, moveDraft],
-  );
-  const [compositeResourceId, setCompositeResourceId] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!imagePath) {
-      setCompositeResourceId(null);
-      setSourceDims(null);
-      return;
-    }
-    setCompositeResourceId(null);
-    setSourceDims(null);
-    void (async () => {
-      const resource = await registerResource(imagePath);
-      if (cancelled) return;
-      setCompositeResourceId(resource?.id ?? null);
-      if (resource?.width && resource.height) {
-        setSourceDims({ w: resource.width, h: resource.height });
-        return;
-      }
-      const probed = await probeImageDims(imagePath);
-      if (!cancelled) {
-        setSourceDims(probed?.width && probed.height ? { w: probed.width, h: probed.height } : null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePath]);
-  const source = useMemo<ViewportUnderlaySource | undefined>(() => {
-    if (!needsCompositeSource) return plainSource;
-    if (!compositeResourceId) return undefined;
-    return imageCompositeTarget(compositeResourceId, compositeDocument, compositeDims);
-  }, [needsCompositeSource, plainSource, compositeResourceId, compositeDocument, compositeDims.w, compositeDims.h]);
-  // Native surface presentation (surface swap): the underlay presents on a
-  // surface window placed under the anchor's rect while the view is one the
-  // surface can represent — a rotated view or the transparency preview hides
-  // it and frames fall back to the PNG transport. The brush/path/marquee
-  // canvas is DOM, so it keeps compositing above the hole.
-  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
-  // Image-workspace crop: the last confirmed crop step on any visible layer.
-  // After confirm, the stage shows only this kept region (PS crop semantics)
-  // while the op remains undoable in the edit stack.
-  const cropRegion = useMemo(() => {
-    if (workspace !== "image") return null;
-    let last: [number, number, number, number] | null = null;
-    for (const layer of state.current.layers) {
-      if (!layer.visible) continue;
-      for (const op of layer.ops) {
-        if (op.type === "crop" && op.region && op.region.length >= 4) {
-          last = [op.region[0], op.region[1], op.region[2], op.region[3]];
-        }
-      }
-    }
-    return last;
-  }, [workspace, state]);
-  // Image-workspace layer transform (move tool / free transform): the render
-  // target does not apply `transform` ops to the image, so the stage carries
-  // the composed committed transforms — plus the in-progress move drag — as a
-  // CSS transform on the presented window; the move reads live on screen.
-  const imageTransform = useMemo(() => {
-    if (workspace !== "image" || needsCompositeSource) return null;
-    let t: TransformParams | null = null;
-    for (const layer of state.current.layers) {
-      if (!layer.visible) continue;
-      for (const op of layer.ops) {
-        if (isPathOp(op) || isBrushOp(op) || op.type !== "transform" || op.disabled) continue;
-        const params = { dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 };
-        t = t ? composeTransforms(t, params) : params;
-      }
-    }
-    if (moveDraft) {
-      const base = t ?? { dx: 0, dy: 0, scale: 1, rotate: 0 };
-      t = { ...base, dx: base.dx + moveDraft[0], dy: base.dy + moveDraft[1] };
-    }
-    return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
-  }, [workspace, needsCompositeSource, state, moveDraft]);
-  const activeCompositeTransform = useMemo(() => {
-    if (workspace !== "image" || !needsCompositeSource) return null;
-    return layerCompositeTransform(state.current.layers[state.current.active], moveDraft);
-  }, [workspace, needsCompositeSource, state.current.layers, state.current.active, moveDraft]);
   // All in-flight pointer gesture state (drags, picked sources, pending
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
   const gestures = useRef(createPointerGestures()).current;
   const magneticEdgeKeyRef = useRef<string | null>(null);
   const magneticEdgePendingKeyRef = useRef<string | null>(null);
-  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
-  // frame — the render path and pointer→image mapping are untouched by it —
-  // plus the derived (settle-debounced) underlay view window, Alt+wheel zoom
-  // and Space hold-to-pan (see useCanvasNavigation).
-  const nav = useCanvasNavigation(canvasRef, imageTransform, gestures);
-  const { view, setView, viewRef, viewBase, targetViewportView, viewportView, spacePan, setSpacePan } = nav;
-  // Image-workspace adjustment preview (image-kernel K2): the adjustment
-  // stack compiles to a grade document and grades the displayed frame on the
-  // f32 kernel — the same maths the video grade dialog runs. Null in the
-  // mask workspace (adjustments there tone-map the mask, not the image) and
-  // for stacks the grade kernel cannot express yet.
-  const gradePreview = useMemo(() => {
-    if (workspace !== "image") return null;
-    const compiled = compileImageAdjustments(fromMaskDocument(state.current));
-    return compiled && compiled.layers.some((l) => l.visible && l.ops.length > 0) ? compiled : null;
-  }, [workspace, state]);
-  // Composite visibility source of truth: hide the frame only when no
-  // visible layer can draw source pixels.
-  const frameHidden = useMemo(() => {
-    if (workspace !== "image") return false;
-    return imageDocumentFrameHidden(state.current);
-  }, [workspace, state]);
-  // Grading needs frame pixels, so it forces the PNG transport (a natively
-  // presented surface frame has no readable data URL). Any image-layer
-  // transform also uses the full-frame PNG path for now: transforming a
-  // cropped view-window texture exposes hard edges inside the visible stage.
-  const presentEnabled =
-    !overlayOnly && !frameHidden && !view.rotate && !imageTransform && !cropRegion && !gradePreview && !entering && !closing;
-  const underlayViewportView = imageTransform || cropRegion ? IDENTITY_VIEW : viewportView;
-  // The anchor moves under CSS transforms (view zoom/pan and the layer
-  // transform) without firing the resize observer: re-measure on either.
-  const placementKey = useMemo(() => ({ view, imageTransform, cropRegion }), [view, imageTransform, cropRegion]);
-  const viewport = useViewportUnderlay(
-    "image_edit",
-    source,
-    1280,
-    underlayViewportView,
-    viewportMaskOverlay,
+  const {
+    navigation: nav,
+    viewport,
     underlayAnchorRef,
-    presentEnabled,
+    underlay,
+    presented,
+    frameView,
+    documentDimensions: documentDims,
+    dimensions: dims,
+    needsCompositeSource,
+    activeCompositeTransform,
+    cropRegion,
+    imageTransform,
+    gradePreview,
+    frameHidden,
+  } = useUnderlayController({
+    workspace,
+    imagePath,
+    document: state.current,
+    moveDraft,
+    canvasRef,
+    gestures,
+    overlayOnly,
+    entering,
+    closing,
+    viewportMaskOverlay,
     viewportOverlayScene,
-    placementKey,
-    // Un-debounced view: every zoom/pan tick re-presents the surface's
-    // cached frame as a GPU crop (the fast path) while `viewportView` above
-    // waits for the settle re-render.
-    imageTransform || cropRegion ? null : targetViewportView,
-  );
-  const underlay = viewport.underlay;
-  const presented = viewport.presented;
-  const frameView = viewport.frameView;
-  const documentDims = state.current.canvas ?? sourceDims ?? viewport.dims;
-  const dims = documentDims ?? EMPTY_DOCUMENT_DIMS;
+    fallbackDimensions: frameDimsRef.current,
+    emptyDimensions: EMPTY_DOCUMENT_DIMS,
+  });
+  const { view, setView, viewRef, viewBase, spacePan } = nav;
   frameDimsRef.current = dims;
+  useEffect(() => {
+    setPreviewDimensions(dims);
+  }, [dims.w, dims.h, setPreviewDimensions]);
   const activeStudioTarget = useMemo(() => {
     const docRef = { canvasId: "mask-edit-stage", documentId: imagePath ?? "active-document" };
     return resolveActiveTarget(state.current, docRef);
@@ -676,15 +580,6 @@ export function MaskEditModal({
   const { quadDraft, setQuadDraft, cropDraft, setCropDraft, setCropAspect, cropLock, confirmCropDraft } = crop;
   const [, forceRedraw] = useState(0);
 
-  // Preview lane for morphology ops: a live, best-effort proxy render of
-  // grow/shrink/feather/smooth so a slider drag shows roughly what Apply will
-  // do — off the global run lock, latest-wins so rapid drags don't pile up
-  // (docs/cards/editor-resource-model.md § "Four lanes" → Preview).
-  const previewLane = useRef(new PreviewLane());
-  // Persistent proxy render cache (M7): per-layer surfaces are reused across
-  // rebuilds and the composite recomputes dirty tiles only, so a slider drag
-  // or brush commit on a large document stays cheap.
-  const proxyCache = useRef(new ProxyLayerCache());
   // Screen-mode cycle (PS `F`): 0 full UI → 1 panels hidden → 2 canvas only.
   const [screenMode, setScreenMode] = useState<0 | 1 | 2>(0);
 
@@ -713,55 +608,29 @@ export function MaskEditModal({
     setFillDraft,
     imageSizeDraft,
     setImageSizeDraft,
-    openFreeTransform: openFreeTransformPanel,
     openFillDialog,
   } = dialogs;
 
-  // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
-  // active only while this modal is mounted, shadowing the canvas shortcuts.
-  const selectTool = (id: string) => {
-    if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
-    cancelPathEdit();
-    if (id !== "patch") {
-      gestures.patchLoop = null;
-      gestures.patchDrag = null;
-    }
-    if (id !== "perspective_crop") setQuadDraft(null);
-    setToolId(id);
-    const slot = psSlotOf(id);
-    if (slot && slot.variants.length > 1) setSlotFaces((f) => ({ ...f, [slot.id]: id }));
-  };
-
-  // A slot's PS letter selects the slot's visible face — the remembered
-  // last-used variant, falling back to the first ready one (PS: the shortcut
-  // picks the slot, not a fixed tool).
-  const selectSlot = (slotId: string) => {
-    const slot = PS_SLOTS.find((s) => s.id === slotId);
-    if (!slot) return;
-    const ready = slot.variants.filter((id) => maskTool(id)?.status === "ready");
-    if (ready.length === 0) return;
-    const remembered = slotFaces[slotId];
-    selectTool(remembered && ready.includes(remembered) ? remembered : ready[0]);
-  };
-
-  // Shift+letter cycles the slot's ready variants (PS "Shift cycles tools").
-  const cycleSlot = (slotId: string) => {
-    const slot = PS_SLOTS.find((s) => s.id === slotId);
-    if (!slot) return;
-    const ready = slot.variants.filter((id) => maskTool(id)?.status === "ready");
-    if (ready.length === 0) return;
-    const at = ready.indexOf(toolId);
-    if (at === -1) {
-      selectSlot(slotId);
-      return;
-    }
-    selectTool(ready[(at + 1) % ready.length]);
-  };
-
-  const openFreeTransform = () => {
-    selectTool("move");
-    openFreeTransformPanel();
-  };
+  const { openFreeTransform } = useMaskEditorShortcuts({
+    workspace,
+    dims,
+    dispatch,
+    toolSlots: { toolId, selectTool, selectSlot, cycleSlot },
+    brushParams: { shrinkBrush, growBrush, softenBrush, hardenBrush },
+    dialogs,
+    pathEditing,
+    navigation: nav,
+    colors,
+    lastMarqueeRef,
+    setLastMarquee,
+    workSelection,
+    setWorkSelection,
+    setQuickMask,
+    setOverlayOnly,
+    setScreenMode,
+    closePenPath: () => closePenPath(),
+    requestClose,
+  });
 
   const disabledMenuAction = () => {};
   const selectionMenuItems: MenuItem[] = [
@@ -811,99 +680,6 @@ export function MaskEditModal({
     frameView,
     dims,
   };
-
-  const shortcutHandlers: ShortcutHandlers = {
-    tool_brush: () => selectSlot("brush"),
-    tool_eraser: () => selectSlot("eraser"),
-    tool_wand: () => selectSlot("selection"),
-    tool_pen: () => selectSlot("pen"),
-    tool_lasso: () => selectTool("magnetic_lasso"),
-    tool_rect: () => selectSlot("marquee"),
-    tool_ellipse: () => cycleSlot("marquee"),
-    tool_gradient: () => selectSlot("fill"),
-    tool_move: () => selectSlot("move"),
-    tool_crop: () => selectSlot("crop"),
-    free_transform: () => openFreeTransform(),
-    // PS `A`: the path-selection slot (path / direct selection tools).
-    tool_path_select: () => selectSlot("path_select"),
-    undo: () => dispatch({ type: "undo" }),
-    redo: () => dispatch({ type: "redo" }),
-    redo_alt: () => dispatch({ type: "redo" }),
-    step_backward: () => dispatch({ type: "undo" }),
-    clear: () => {
-      // PS Ctrl+D: with an active selection, deselect; otherwise clear edits.
-      if (lastMarqueeRef.current) setLastMarquee(null);
-      else if (workSelection) setWorkSelection(null);
-      else dispatch({ type: "clear" });
-    },
-    select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
-    delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
-    reselect: () => dispatch({ type: "reselect" }),
-    duplicate: () => {
-      // PS Ctrl+J: with a selection, Layer Via Copy — the new layer holds
-      // the selected region (its mask) and the marching ants drop.
-      const selection = lastMarqueeRef.current;
-      dispatch({
-        type: "layer_duplicate",
-        ...(selection ? { selection } : null),
-        ...(workspace === "image" ? { includeSourceImage: true } : null),
-      });
-      if (selection) setLastMarquee(null);
-    },
-    invert: () => dispatch({ type: "op", op: { type: "invert" } }),
-    brush_smaller: () => setBrushSize((s) => Math.max(1, s - 4)),
-    brush_larger: () => setBrushSize((s) => Math.min(96, s + 4)),
-    brush_softer: () => setBrushHardness((h) => Math.max(0, Math.round((h - 0.25) * 100) / 100)),
-    brush_harder: () => setBrushHardness((h) => Math.min(1, Math.round((h + 0.25) * 100) / 100)),
-    default_colors: () => resetColors(),
-    quick_mask: () => setQuickMask((v) => !v),
-    tool_healing: () => selectSlot("repair"),
-    tool_clone: () => selectSlot("stamp"),
-    tool_history_brush: () => selectSlot("history"),
-    tool_dodge_burn: () => selectSlot("dodge"),
-    tool_eyedropper: () => selectSlot("sample"),
-    tool_shape: () => selectSlot("shape"),
-    tool_hand: () => selectSlot("hand"),
-    tool_rotate_view: () => selectSlot("rotate_view"),
-    tool_zoom: () => selectSlot("zoom"),
-    screen_mode: () => setScreenMode((m) => ((m + 1) % 3) as 0 | 1 | 2),
-    pan_space: () => setSpacePan(true),
-    zoom_in: () => setView((v) => zoomIn(v, ...viewBase())),
-    zoom_out: () => setView((v) => zoomOut(v, ...viewBase())),
-    zoom_fit: () => setView(FIT_VIEW),
-    zoom_100: () => setView((v) => zoom100(v, dims.w, ...viewBase())),
-    adjust_levels: () => dispatch({ type: "layer_add_adjustment", adjType: "levels" }),
-    adjust_curve: () => dispatch({ type: "layer_add_adjustment", adjType: "curve" }),
-    fill_dialog: () => dialogs.openFillDialog(),
-    image_size: () => dialogs.openImageSize(),
-    feather_dialog: () => {
-      // The feather "dialog" is the existing preview lane: pick the radius
-      // with the amount slider, then Apply commits a revisable `feather` op.
-      selectTool("feather");
-    },
-    swap_mode: () => swapColors(),
-    close_path: () => {
-      if (editingPathRef.current != null) {
-        commitPathEdit();
-        return;
-      }
-      if (!penPendingRef.current || penAnchors.length < 3) return false;
-      closePenPath();
-    },
-    cancel: () => {
-      // Anchor re-editing, an open dialog draft, or a pending pen path
-      // swallows the first Escape.
-      if (editingPathRef.current != null) cancelPathEdit();
-      else if (dialogs.cancelDialog()) return;
-      else if (penPendingRef.current) setPenAnchors([]);
-      else if (toolId === "rotate_view" && viewRef.current.rotate) setView((v) => rotateTo(v, 0));
-      // The image editor closes only via the header's collapse arrow;
-      // Escape never dismisses it (the mask editor keeps PS behaviour).
-      else if (workspace !== "image") requestClose();
-    },
-    toggle_overlay: () => setOverlayOnly((v) => !v),
-  };
-  useShortcutScope(MASK_EDIT_SCOPE, MASK_EDIT_SHORTCUTS, shortcutHandlers);
 
   // Map a pointer event to image-pixel coordinates: offset from the rendered
   // centre (the transform's fixed point), un-rotated and un-scaled back into
@@ -1081,41 +857,6 @@ export function MaskEditModal({
   useEffect(() => {
     redraw();
   }, [redraw]);
-
-  // Recompute the morphology preview whenever the active op, its amount, or the
-  // underlying edits change. The compute is cheap (a downscaled proxy) but is
-  // routed through PreviewLane so an in-flight job is superseded by the next
-  // slider tick rather than blocking it.
-  useEffect(() => {
-    if (!isPreviewableOp(toolId)) {
-      setPreview(null);
-      previewLane.current.cancel();
-      return;
-    }
-    let disposed = false;
-    void previewLane.current
-      .run<ProxyMask | null>(async (signal) => {
-        const { mask, scale } = buildProxyMask(state.current, dims, { cache: proxyCache.current });
-        if (signal.cancelled) return null;
-        return applyOp(mask, toolId, Math.max(0, Math.round(amount * scale)));
-      })
-      .then((outcome) => {
-        if (!disposed && outcome.status === "applied" && outcome.value) setPreview(outcome.value);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [toolId, amount, state.current, dims]);
-
-  // Rebuild the quick-mask proxy whenever the overlay is on and the document
-  // changes (cheap: a downscaled rasterisation, and only on committed edits).
-  useEffect(() => {
-    if (!quickMask) {
-      setQuickProxy(null);
-      return;
-    }
-    setQuickProxy(buildProxyMask(state.current, dims, { cache: proxyCache.current }).mask);
-  }, [quickMask, state.current, dims]);
 
   // Commit a closed path (straight anchors; no handles from the UI). The
   // tool name is recorded for provenance — the rasteriser only reads
@@ -1385,7 +1126,7 @@ export function MaskEditModal({
             onToolClick={onToolClick}
             hiddenSlotIds={workspace === "image" ? SELECTION_TOP_SLOT_IDS : []}
             faces={slotFaces}
-            onPickFace={(slotId, id) => setSlotFaces((f) => ({ ...f, [slotId]: id }))}
+            onPickFace={setSlotFace}
             paintMode={tool.mode === "subtract" || (tool.kind === "path" && pathMode === "subtract") ? "subtract" : "add"}
             fgColor={fgColor}
             bgColor={bgColor}
