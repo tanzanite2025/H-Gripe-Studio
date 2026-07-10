@@ -7,6 +7,7 @@ import {
 } from "../contracts/maskDocument";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import type { MaskEditAction } from "./maskEditModal/actions";
+import type { ActiveSelection } from "./maskEditModal/selection";
 import type { StudioTarget } from "./studioTarget";
 
 function docWithTwoLayers(): MaskDocument {
@@ -60,5 +61,36 @@ describe("runMaskEditorCommand", () => {
     expect(runMaskEditorCommand("target.transform", { doc, target, dispatch, setToolId: (id) => { toolId = id; } })).toBe(true);
 
     expect(toolId).toBe("move");
+  });
+
+  it("routes layer duplicate with an active selection through Layer Via Copy", () => {
+    const doc = docWithTwoLayers();
+    const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-1" };
+    const selection: ActiveSelection = {
+      region: [10, 20, 80, 90],
+      ellipse: false,
+      source: "rect_marquee",
+      combineMode: "replace",
+    };
+    const { actions, dispatch } = capture();
+    let cleared = false;
+
+    expect(runMaskEditorCommand("layer.duplicate", {
+      doc,
+      target,
+      dispatch,
+      includeSourceImage: true,
+      activeSelection: selection,
+      clearActiveSelection: () => {
+        cleared = true;
+      },
+    })).toBe(true);
+
+    expect(actions).toEqual([{
+      type: "layer_duplicate",
+      selection,
+      includeSourceImage: true,
+    }]);
+    expect(cleared).toBe(true);
   });
 });

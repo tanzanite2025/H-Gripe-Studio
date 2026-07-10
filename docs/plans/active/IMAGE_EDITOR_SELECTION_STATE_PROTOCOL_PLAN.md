@@ -321,6 +321,31 @@ WGPU must not own:
 
 ## Implementation Order
 
+### Current Code Landing
+
+The first implementation slice now exists in the image editor code:
+
+- `selection.ts` defines `SelectionDraft` and `ActiveSelection`; solid draft
+  geometry and marching-ants selection are separate states.
+- `useSelectionController.ts` owns draft commit/cancel, active selection clear,
+  visible-selection resize, and the single active-selection ref used by command
+  dispatch.
+- `selectionActions.ts` applies the active selection as an exact edit `clip`
+  for ordinary paint/path/op actions. Polygon selections must stay polygon
+  clips; they must not fall back to only their bounding box.
+- `selectionCommands.ts` owns keyboard/system selection command resolution for
+  Clear, Escape/Cancel, Delete, Invert, and Duplicate. `Ctrl+J` / Layer
+  Duplicate with an active selection is Layer Via Copy and clears the active
+  marching-ants selection after dispatch.
+- `runMaskEditorCommand()` and the Layers panel duplicate button route layer
+  duplicate through the same selection command resolver, so shortcuts, context
+  actions, and layer-panel actions do not fork selection semantics.
+
+This is still a first command layer, not the final full command registry. The
+remaining long-term work is to move future Feather, Refine Edge, Selection To
+Mask, and persistent selection targets into the same resolver/capability path
+instead of adding one-off handlers.
+
 1. Add a first-class selection state model that contains both `draft` and
    `active`, replacing ad-hoc `workSelection` / `lastMarquee` naming.
 2. Move rectangle, ellipse, pen, polygon, and magnetic lasso into

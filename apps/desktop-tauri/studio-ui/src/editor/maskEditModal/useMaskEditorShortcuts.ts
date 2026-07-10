@@ -10,6 +10,7 @@ import type { ColorTools } from "./useColorTools";
 import type { ToolSlotsController } from "./useToolSlots";
 import type { BrushParamsController } from "./useBrushParams";
 import type { ActiveSelection, SelectionDraft } from "./selection";
+import { resolveSelectionCommand, type SelectionCommandId } from "./selectionCommands";
 
 interface UseMaskEditorShortcutsArgs {
   workspace: "image" | "mask";
@@ -64,6 +65,19 @@ export function useMaskEditorShortcuts({
     dialogs.openFreeTransform();
   };
 
+  const runSelectionCommand = (id: SelectionCommandId): boolean => {
+    const resolution = resolveSelectionCommand(id, {
+      workspace,
+      activeSelection: activeSelectionRef.current,
+      selectionDraft,
+    });
+    if (!resolution.handled) return false;
+    if (resolution.action) dispatch(resolution.action);
+    if (resolution.clearActiveSelection) setActiveSelection(null);
+    if (resolution.clearSelectionDraft) setSelectionDraft(null);
+    return true;
+  };
+
   const handlers: ShortcutHandlers = {
     tool_brush: () => toolSlots.selectSlot("brush"),
     tool_eraser: () => toolSlots.selectSlot("eraser"),
@@ -82,23 +96,19 @@ export function useMaskEditorShortcuts({
     redo_alt: () => dispatch({ type: "redo" }),
     step_backward: () => dispatch({ type: "undo" }),
     clear: () => {
-      if (activeSelectionRef.current) setActiveSelection(null);
-      else if (selectionDraft) setSelectionDraft(null);
-      else dispatch({ type: "clear" });
+      runSelectionCommand("clear");
     },
     select_all: () => dispatch({ type: "op", op: { type: "select_all" } }),
-    delete_selection: () => dispatch({ type: "op", op: { type: "delete" } }),
+    delete_selection: () => {
+      runSelectionCommand("delete");
+    },
     reselect: () => dispatch({ type: "reselect" }),
     duplicate: () => {
-      const selection = activeSelectionRef.current;
-      dispatch({
-        type: "layer_duplicate",
-        ...(selection ? { selection } : null),
-        ...(workspace === "image" ? { includeSourceImage: true } : null),
-      });
-      if (selection) setActiveSelection(null);
+      runSelectionCommand("duplicate");
     },
-    invert: () => dispatch({ type: "op", op: { type: "invert" } }),
+    invert: () => {
+      runSelectionCommand("invert");
+    },
     brush_smaller: brushParams.shrinkBrush,
     brush_larger: brushParams.growBrush,
     brush_softer: brushParams.softenBrush,
@@ -138,8 +148,7 @@ export function useMaskEditorShortcuts({
       if (pathEditing.editingPathRef.current != null) pathEditing.cancelPathEdit();
       else if (dialogs.cancelDialog()) return;
       else if (pathEditing.penPendingRef.current) pathEditing.setPenAnchors([]);
-      else if (selectionDraft) setSelectionDraft(null);
-      else if (activeSelectionRef.current) setActiveSelection(null);
+      else if (runSelectionCommand("cancel")) return;
       else if (toolSlots.toolId === "rotate_view" && navigation.viewRef.current.rotate) {
         navigation.setView((view) => rotateTo(view, 0));
       } else if (workspace !== "image") {

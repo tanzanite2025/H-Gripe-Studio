@@ -69,10 +69,10 @@ import { useMaskEditorShortcuts } from "./maskEditModal/useMaskEditorShortcuts";
 import {
   createPolygonSelection,
   pointInSelection,
-  selectionClipFromActive,
   selectionSourceFromToolId,
   type SelectionDraft,
 } from "./maskEditModal/selection";
+import { applyActiveSelectionClip } from "./maskEditModal/selectionActions";
 import { useSelectionController } from "./maskEditModal/useSelectionController";
 import { useUnderlayController } from "./maskEditModal/useUnderlayController";
 
@@ -136,11 +136,6 @@ const nextId = (prefix: string) => `${prefix}_${Date.now()}_${strokeSeq++}`;
 // entrance animation.
 let shellHandoffAt = 0;
 const SHELL_HANDOFF_MS = 300;
-
-// Ops an active marquee selection does NOT confine: whole-mask reshapes keep
-// their global meaning even while a selection is up (PS transforms / crops
-// the selection contents, which the mask model has no notion of).
-const UNCLIPPED_OPS = new Set(["transform", "crop", "perspective_crop", "select_all"]);
 
 // Default right-rail dock layout, mirroring PS: a 调整/属性 top group (plus
 // the mask-specific tool options / mask ops / info tabs) over a growing
@@ -338,18 +333,7 @@ export function MaskEditModal({
   // action's `clip` so rasterisation confines the op to the selection.
   // Whole-mask reshapes (transform / crop / select-all) stay global.
   const dispatch = useCallback((action: MaskEditAction) => {
-    const lm = activeSelectionRef.current;
-    if (lm) {
-      const clip = selectionClipFromActive(lm);
-      if (action.type === "stroke") {
-        action = { ...action, stroke: { ...action.stroke, clip } };
-      } else if (action.type === "path") {
-        action = { ...action, path: { ...action.path, clip } };
-      } else if (action.type === "op" && !UNCLIPPED_OPS.has(action.op.type)) {
-        action = { ...action, op: { ...action.op, clip } };
-      }
-    }
-    rawDispatch(action);
+    rawDispatch(applyActiveSelectionClip(action, activeSelectionRef.current));
   }, []);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -889,8 +873,12 @@ export function MaskEditModal({
       },
       setToolId,
       includeSourceImage: workspace === "image",
+      activeSelection: activeSelectionRef.current,
+      selectionDraft,
+      clearActiveSelection,
+      clearSelectionDraft: () => setSelectionDraft(null),
     });
-  }, [activeStudioTarget, cancelPathEdit, editingPathRef, stateRef, setToolId, workspace]);
+  }, [activeStudioTarget, cancelPathEdit, clearActiveSelection, editingPathRef, selectionDraft, setSelectionDraft, stateRef, setToolId, workspace]);
 
   // Pointer gestures: the shell only captures the pointer, serves one-shot
   // requests (the armed colour pick) and keeps the brush ring on the cursor;
@@ -1338,10 +1326,12 @@ export function MaskEditModal({
               dims={dims}
               imagePath={imagePath}
               workspace={workspace}
+              activeSelection={activeSelection}
               dispatch={dispatch}
               onBeforeLayerChange={() => {
                 if (editingPath != null) cancelPathEdit();
               }}
+              clearActiveSelection={clearActiveSelection}
             />
                   ),
                 },

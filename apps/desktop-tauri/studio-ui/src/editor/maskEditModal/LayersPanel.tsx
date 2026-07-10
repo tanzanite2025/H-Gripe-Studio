@@ -19,6 +19,7 @@ import { getCommand, getCommandCapability, type CommandId } from "../studioComma
 import type { StudioTarget } from "../studioTarget";
 import { imageLayerHasSourceContent } from "../imageCompositeSource";
 import type { MaskEditDispatch } from "./actions";
+import type { ActiveSelection } from "./selection";
 
 const LAYER_MIME = "application/x-hgripe-layer";
 const MAX_THUMBNAIL_CACHE = 64;
@@ -39,9 +40,11 @@ interface LayersPanelProps {
   /** Product surface: the image workspace's bottom layer is the image itself,
    * so it keeps the file's name and thumbnail even once it records edits. */
   workspace?: "image" | "mask";
+  activeSelection?: ActiveSelection | null;
   dispatch: MaskEditDispatch;
   /** Called before any layer switch/removal to drop an in-flight anchor edit. */
   onBeforeLayerChange: () => void;
+  clearActiveSelection?: () => void;
 }
 
 function loadLayerThumbnail(imagePath: string, size = 96): Promise<string | null> {
@@ -269,7 +272,20 @@ function LayerActionIcon({ icon }: { icon: "invert" | "link" | "mask" | "duplica
   );
 }
 
-export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, dims, imagePath, workspace = "mask", dispatch, onBeforeLayerChange }: LayersPanelProps) {
+export function LayersPanel({
+  doc,
+  layers,
+  layerGroups,
+  active,
+  activeTarget,
+  dims,
+  imagePath,
+  workspace = "mask",
+  activeSelection = null,
+  dispatch,
+  onBeforeLayerChange,
+  clearActiveSelection,
+}: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
   const [renaming, setRenaming] = useState<number | null>(null);
@@ -401,6 +417,8 @@ export function LayersPanel({ doc, layers, layerGroups, active, activeTarget, di
       dispatch,
       beforeStructuralChange: onBeforeLayerChange,
       includeSourceImage: workspace === "image",
+      activeSelection,
+      clearActiveSelection,
     });
   };
 

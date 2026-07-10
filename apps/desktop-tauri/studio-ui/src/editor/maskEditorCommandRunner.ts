@@ -1,5 +1,7 @@
 import { type MaskDocument } from "../contracts/maskDocument";
 import type { MaskEditDispatch } from "./maskEditModal/actions";
+import { resolveSelectionCommand, type SelectionCommandId } from "./maskEditModal/selectionCommands";
+import type { ActiveSelection, SelectionDraft } from "./maskEditModal/selection";
 import type { CommandId } from "./studioCommands";
 import type { StudioTarget } from "./studioTarget";
 
@@ -10,10 +12,27 @@ export interface MaskEditorCommandEnv {
   beforeStructuralChange?: () => void;
   setToolId?: (toolId: string) => void;
   includeSourceImage?: boolean;
+  activeSelection?: ActiveSelection | null;
+  selectionDraft?: SelectionDraft | null;
+  clearActiveSelection?: () => void;
+  clearSelectionDraft?: () => void;
+}
+
+function runSelectionCommand(id: SelectionCommandId, env: MaskEditorCommandEnv): boolean {
+  const resolution = resolveSelectionCommand(id, {
+    workspace: env.includeSourceImage ? "image" : "mask",
+    activeSelection: env.activeSelection ?? null,
+    selectionDraft: env.selectionDraft ?? null,
+  });
+  if (!resolution.handled) return false;
+  if (resolution.action) env.dispatch(resolution.action);
+  if (resolution.clearActiveSelection) env.clearActiveSelection?.();
+  if (resolution.clearSelectionDraft) env.clearSelectionDraft?.();
+  return true;
 }
 
 export function runMaskEditorCommand(id: CommandId, env: MaskEditorCommandEnv): boolean {
-  const { doc, target, dispatch, beforeStructuralChange, setToolId, includeSourceImage } = env;
+  const { doc, target, dispatch, beforeStructuralChange, setToolId } = env;
   const active = doc.active;
   switch (id) {
     case "layer.invert":
@@ -29,8 +48,7 @@ export function runMaskEditorCommand(id: CommandId, env: MaskEditorCommandEnv): 
       dispatch({ type: "layer_mask_add", index: active });
       return true;
     case "layer.duplicate":
-      dispatch({ type: "layer_duplicate", ...(includeSourceImage ? { includeSourceImage: true } : null) });
-      return true;
+      return runSelectionCommand("duplicate", env);
     case "layer.add":
       dispatch({ type: "layer_add" });
       return true;
