@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useViewportUnderlay, type ViewportUnderlaySource } from "../viewport/useViewportUnderlay";
-import { IDENTITY_VIEW } from "../viewport/view";
 import type { ViewportOverlayScene } from "../bridge/viewport";
-import { probeImageDims, registerResource } from "../bridge/files";
 import {
   ANCHOR_PATH_TOOLS,
   MASK_TOOLS,
@@ -18,32 +15,23 @@ import { toolCombo } from "../shortcuts/scopes/maskEdit";
 import { useT } from "../i18n";
 import { isPreviewableOp } from "./maskMorphology";
 import { applyDoc } from "./gradeKernel";
-import { compileImageAdjustments } from "./imageCompile";
-import { fromMaskDocument } from "./imageDocument";
 import {
-  imageDocumentFrameHidden,
-  imageCompositeTarget,
   imageLayerContentBounds,
   imageLayerDrawsSource,
-  imageDocumentNeedsComposite,
-  layerCompositeTransform,
-  withActiveLayerDraftTransform,
 } from "./imageCompositeSource";
 import {
   activeOps,
-  composeTransforms,
   currentHistoryIndex,
   editCount,
   historySnapshots,
   initEditState,
   type EditState,
-  type TransformParams,
 } from "./maskEdit";
 import type {
   LayerAdjustment,
   MaskDocument,
 } from "../types/production";
-import { activeTargetKind, isBrushOp, isPathOp } from "../types/production";
+import { activeTargetKind } from "../types/production";
 import { maskEditReducer, type MaskEditAction } from "./maskEditModal/actions";
 import { buildViewportOverlayScene, paintStage } from "./maskEditModal/stageScene";
 import { catmullRomClosed, pointInPolygon } from "./maskEditModal/pathGeometry";
@@ -64,7 +52,6 @@ import { ChannelsPanel } from "./maskEditModal/ChannelsPanel";
 import { PathsPanel } from "./maskEditModal/PathsPanel";
 import { ColorPicker } from "./maskEditModal/ColorPicker";
 import { createPointerGestures, pointerDown, pointerMove, pointerUp, type PointerEnv } from "./maskEditModal/pointerMachine";
-import { useCanvasNavigation } from "./maskEditModal/useCanvasNavigation";
 import { useCropTool } from "./maskEditModal/useCropTool";
 import { useColorTools, type ColorToolsEnv } from "./maskEditModal/useColorTools";
 import { useDialogDrafts } from "./maskEditModal/useDialogDrafts";
@@ -83,6 +70,7 @@ import { useToolSlots } from "./maskEditModal/useToolSlots";
 import { useMaskPreviewController } from "./maskEditModal/useMaskPreviewController";
 import { useMaskEditorShortcuts } from "./maskEditModal/useMaskEditorShortcuts";
 import type { ActiveSelection } from "./maskEditModal/selection";
+import { useUnderlayController } from "./maskEditModal/useUnderlayController";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
@@ -444,151 +432,43 @@ export function MaskEditModal({
     [workspace, lastMarquee, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, toolId, rulerLine, colorSamples],
   );
   const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
-  const plainSource = imagePath ?? undefined;
-  const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
-  const compositeDims = state.current.canvas ?? sourceDims ?? frameDimsRef.current;
-  const needsCompositeSource = workspace === "image" && Boolean(imagePath) && imageDocumentNeedsComposite(state.current);
-  const compositeDocument = useMemo(
-    () => withActiveLayerDraftTransform(state.current, needsCompositeSource ? moveDraft : null),
-    [state.current, needsCompositeSource, moveDraft],
-  );
-  const [compositeResourceId, setCompositeResourceId] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!imagePath) {
-      setCompositeResourceId(null);
-      setSourceDims(null);
-      return;
-    }
-    setCompositeResourceId(null);
-    setSourceDims(null);
-    void (async () => {
-      const resource = await registerResource(imagePath);
-      if (cancelled) return;
-      setCompositeResourceId(resource?.id ?? null);
-      if (resource?.width && resource.height) {
-        setSourceDims({ w: resource.width, h: resource.height });
-        return;
-      }
-      const probed = await probeImageDims(imagePath);
-      if (!cancelled) {
-        setSourceDims(probed?.width && probed.height ? { w: probed.width, h: probed.height } : null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePath]);
-  const source = useMemo<ViewportUnderlaySource | undefined>(() => {
-    if (!needsCompositeSource) return plainSource;
-    if (!compositeResourceId) return undefined;
-    return imageCompositeTarget(compositeResourceId, compositeDocument, compositeDims);
-  }, [needsCompositeSource, plainSource, compositeResourceId, compositeDocument, compositeDims.w, compositeDims.h]);
-  // Native surface presentation (surface swap): the underlay presents on a
-  // surface window placed under the anchor's rect while the view is one the
-  // surface can represent — a rotated view or the transparency preview hides
-  // it and frames fall back to the PNG transport. The brush/path/marquee
-  // canvas is DOM, so it keeps compositing above the hole.
-  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
-  // Image-workspace crop: the last confirmed crop step on any visible layer.
-  // After confirm, the stage shows only this kept region (PS crop semantics)
-  // while the op remains undoable in the edit stack.
-  const cropRegion = useMemo(() => {
-    if (workspace !== "image") return null;
-    let last: [number, number, number, number] | null = null;
-    for (const layer of state.current.layers) {
-      if (!layer.visible) continue;
-      for (const op of layer.ops) {
-        if (op.type === "crop" && op.region && op.region.length >= 4) {
-          last = [op.region[0], op.region[1], op.region[2], op.region[3]];
-        }
-      }
-    }
-    return last;
-  }, [workspace, state]);
-  // Image-workspace layer transform (move tool / free transform): the render
-  // target does not apply `transform` ops to the image, so the stage carries
-  // the composed committed transforms — plus the in-progress move drag — as a
-  // CSS transform on the presented window; the move reads live on screen.
-  const imageTransform = useMemo(() => {
-    if (workspace !== "image" || needsCompositeSource) return null;
-    let t: TransformParams | null = null;
-    for (const layer of state.current.layers) {
-      if (!layer.visible) continue;
-      for (const op of layer.ops) {
-        if (isPathOp(op) || isBrushOp(op) || op.type !== "transform" || op.disabled) continue;
-        const params = { dx: op.dx ?? 0, dy: op.dy ?? 0, scale: op.scale ?? 1, rotate: op.rotate ?? 0 };
-        t = t ? composeTransforms(t, params) : params;
-      }
-    }
-    if (moveDraft) {
-      const base = t ?? { dx: 0, dy: 0, scale: 1, rotate: 0 };
-      t = { ...base, dx: base.dx + moveDraft[0], dy: base.dy + moveDraft[1] };
-    }
-    return t && (t.dx !== 0 || t.dy !== 0 || t.scale !== 1 || t.rotate !== 0) ? t : null;
-  }, [workspace, needsCompositeSource, state, moveDraft]);
-  const activeCompositeTransform = useMemo(() => {
-    if (workspace !== "image" || !needsCompositeSource) return null;
-    return layerCompositeTransform(state.current.layers[state.current.active], moveDraft);
-  }, [workspace, needsCompositeSource, state.current.layers, state.current.active, moveDraft]);
   // All in-flight pointer gesture state (drags, picked sources, pending
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
   const gestures = useRef(createPointerGestures()).current;
   const magneticEdgeKeyRef = useRef<string | null>(null);
   const magneticEdgePendingKeyRef = useRef<string | null>(null);
-  // Canvas navigation (M8): zoom/pan applied as a CSS transform on the stage
-  // frame — the render path and pointer→image mapping are untouched by it —
-  // plus the derived (settle-debounced) underlay view window, Alt+wheel zoom
-  // and Space hold-to-pan (see useCanvasNavigation).
-  const nav = useCanvasNavigation(canvasRef, imageTransform, gestures);
-  const { view, setView, viewRef, viewBase, targetViewportView, viewportView, spacePan } = nav;
-  // Image-workspace adjustment preview (image-kernel K2): the adjustment
-  // stack compiles to a grade document and grades the displayed frame on the
-  // f32 kernel — the same maths the video grade dialog runs. Null in the
-  // mask workspace (adjustments there tone-map the mask, not the image) and
-  // for stacks the grade kernel cannot express yet.
-  const gradePreview = useMemo(() => {
-    if (workspace !== "image") return null;
-    const compiled = compileImageAdjustments(fromMaskDocument(state.current));
-    return compiled && compiled.layers.some((l) => l.visible && l.ops.length > 0) ? compiled : null;
-  }, [workspace, state]);
-  // Composite visibility source of truth: hide the frame only when no
-  // visible layer can draw source pixels.
-  const frameHidden = useMemo(() => {
-    if (workspace !== "image") return false;
-    return imageDocumentFrameHidden(state.current);
-  }, [workspace, state]);
-  // Grading needs frame pixels, so it forces the PNG transport (a natively
-  // presented surface frame has no readable data URL). Any image-layer
-  // transform also uses the full-frame PNG path for now: transforming a
-  // cropped view-window texture exposes hard edges inside the visible stage.
-  const presentEnabled =
-    !overlayOnly && !frameHidden && !view.rotate && !imageTransform && !cropRegion && !gradePreview && !entering && !closing;
-  const underlayViewportView = imageTransform || cropRegion ? IDENTITY_VIEW : viewportView;
-  // The anchor moves under CSS transforms (view zoom/pan and the layer
-  // transform) without firing the resize observer: re-measure on either.
-  const placementKey = useMemo(() => ({ view, imageTransform, cropRegion }), [view, imageTransform, cropRegion]);
-  const viewport = useViewportUnderlay(
-    "image_edit",
-    source,
-    1280,
-    underlayViewportView,
-    viewportMaskOverlay,
+  const {
+    navigation: nav,
+    viewport,
     underlayAnchorRef,
-    presentEnabled,
+    underlay,
+    presented,
+    frameView,
+    documentDimensions: documentDims,
+    dimensions: dims,
+    needsCompositeSource,
+    activeCompositeTransform,
+    cropRegion,
+    imageTransform,
+    gradePreview,
+    frameHidden,
+  } = useUnderlayController({
+    workspace,
+    imagePath,
+    document: state.current,
+    moveDraft,
+    canvasRef,
+    gestures,
+    overlayOnly,
+    entering,
+    closing,
+    viewportMaskOverlay,
     viewportOverlayScene,
-    placementKey,
-    // Un-debounced view: every zoom/pan tick re-presents the surface's
-    // cached frame as a GPU crop (the fast path) while `viewportView` above
-    // waits for the settle re-render.
-    imageTransform || cropRegion ? null : targetViewportView,
-  );
-  const underlay = viewport.underlay;
-  const presented = viewport.presented;
-  const frameView = viewport.frameView;
-  const documentDims = state.current.canvas ?? sourceDims ?? viewport.dims;
-  const dims = documentDims ?? EMPTY_DOCUMENT_DIMS;
+    fallbackDimensions: frameDimsRef.current,
+    emptyDimensions: EMPTY_DOCUMENT_DIMS,
+  });
+  const { view, setView, viewRef, viewBase, spacePan } = nav;
   frameDimsRef.current = dims;
   useEffect(() => {
     setPreviewDimensions(dims);
