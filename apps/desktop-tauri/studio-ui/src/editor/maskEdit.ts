@@ -879,11 +879,12 @@ export function reselect(state: EditState): EditState {
  * PS duplicate-via-copy (Ctrl+J; M9): copy the active layer (fresh id,
  * "… copy" name) directly above itself and make the copy active (undoable).
  * Adjustment layers duplicate too — the copy re-tone-maps the composite.
- * With an active selection this is PS Layer Via Copy: the copy carries a
- * layer mask filled with the selection, so it holds only the selected region's
- * content. In the image workspace the base layer is the opened image even
- * when its op stack is empty; `includeSourceImage` records that source-backed
- * content explicitly so the copy is not mistaken for a transparent layer.
+ * With an active selection this is PS Layer Via Copy: the copy holds only the
+ * selected region's pixels — every replayed step carries the selection as its
+ * `clip`, so the layer's own content is the cut-out (no mask attachment). In
+ * the image workspace the base layer is the opened image even when its op
+ * stack is empty; `includeSourceImage` records that source-backed content
+ * explicitly so the copy is not mistaken for a transparent layer.
  */
 export function duplicateLayer(
   state: EditState,
@@ -899,31 +900,27 @@ export function duplicateLayer(
   if (shouldCarrySourceImage && !copyOps.some((op) => op.type === SOURCE_IMAGE_OP_TYPE)) {
     copyOps.unshift({ type: SOURCE_IMAGE_OP_TYPE });
   }
-  const mask: LayerMask | null = selection
-    ? {
-        ...emptyLayerMask(),
-        ops:
-          selection.polygon && selection.polygon.length >= 3
-            ? [
-                {
-                  type: "path",
-                  id: `copy-mask-${Math.random().toString(36).slice(2, 10)}`,
-                  mode: "add",
-                  tool: "selection",
-                  closed: true,
-                  points: selection.polygon.map(([x, y]) => ({ x, y })),
-                },
-              ]
-            : [{ type: selection.ellipse ? "ellipse" : "rect", region: [...selection.region] }],
-      }
-    : source.mask
-      ? { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) }
+  const clip: NonNullable<EditOp["clip"]> | null =
+    selection && source.kind !== "adjustment"
+      ? selection.polygon && selection.polygon.length >= 3
+        ? {
+            region: [...selection.region] as [number, number, number, number],
+            points: selection.polygon.map(([x, y]) => [x, y] as [number, number]),
+          }
+        : {
+            region: [...selection.region] as [number, number, number, number],
+            ...(selection.ellipse ? { ellipse: true } : null),
+          }
       : null;
+  const ops = clip ? copyOps.map((op) => ({ ...op, clip })) : copyOps;
+  const mask: LayerMask | null = source.mask
+    ? { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) }
+    : null;
   const copy: MaskLayer = {
     ...source,
     id: emptyMaskLayer().id,
     name: `${source.name} copy`,
-    ops: copyOps,
+    ops,
     ...(mask ? { mask } : null),
   };
   const layers = [...doc.layers.slice(0, index + 1), copy, ...doc.layers.slice(index + 1)];

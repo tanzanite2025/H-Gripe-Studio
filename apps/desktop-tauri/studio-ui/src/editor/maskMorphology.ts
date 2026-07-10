@@ -860,13 +860,28 @@ function fillPath(mask: ProxyMask, path: EditPath, scale: number): void {
   }
 }
 
+function clipPolygonContains(x: number, y: number, points: [number, number][], scale: number): boolean {
+  let inside = false;
+  let j = points.length - 1;
+  for (let i = 0; i < points.length; i++) {
+    const xi = points[i][0] * scale;
+    const yi = points[i][1] * scale;
+    const xj = points[j][0] * scale;
+    const yj = points[j][1] * scale;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    j = i;
+  }
+  return inside;
+}
+
 /**
- * Confine a replayed step to its recorded marquee selection (PS selection
- * semantics): pixels outside the `clip` region are restored from the
- * pre-step mask. Mirrors the Rust `restore_outside_clip`.
+ * Confine a replayed step to its recorded selection (PS selection semantics):
+ * pixels outside the `clip` shape — rect, ellipse, or exact polygon — are
+ * restored from the pre-step mask. Mirrors the Rust `restore_outside_clip`.
  */
 function restoreOutsideClip(mask: ProxyMask, before: ProxyMask, clip: NonNullable<EditOp["clip"]>, scale: number): void {
   const [rx1, ry1, rx2, ry2] = clip.region;
+  const polygon = clip.points && clip.points.length >= 3 ? clip.points : null;
   const x1 = Math.min(rx1, rx2) * scale;
   const y1 = Math.min(ry1, ry2) * scale;
   const x2 = Math.max(rx1, rx2) * scale;
@@ -880,7 +895,9 @@ function restoreOutsideClip(mask: ProxyMask, before: ProxyMask, clip: NonNullabl
       const px = x + 0.5;
       const py = y + 0.5;
       let inside = px >= x1 && px <= x2 && py >= y1 && py <= y2;
-      if (inside && clip.ellipse) {
+      if (inside && polygon) {
+        inside = clipPolygonContains(px, py, polygon, scale);
+      } else if (inside && clip.ellipse) {
         const nx = (px - cx) / rx;
         const ny = (py - cy) / ry;
         inside = nx * nx + ny * ny <= 1;
@@ -1057,7 +1074,12 @@ export function buildLayerThumb(layer: MaskLayer, dims: { w: number; h: number }
   const w = Math.max(1, Math.min(thumbWidth, dims.w || thumbWidth));
   const scale = w / Math.max(1, dims.w || w);
   const h = Math.max(1, Math.round((dims.h || w) * scale));
-  return renderLayerSurface(layer, w, h, scale);
+  // The thumbnail shows the layer's pixel content itself; move/transform
+  // steps place that content on the canvas and are not replayed here.
+  const staticLayer = layer.ops.some((op) => op.type === "transform")
+    ? { ...layer, ops: layer.ops.filter((op) => op.type !== "transform") }
+    : layer;
+  return renderLayerSurface(staticLayer, w, h, scale);
 }
 
 export interface LayerAlphaBoundsOptions {

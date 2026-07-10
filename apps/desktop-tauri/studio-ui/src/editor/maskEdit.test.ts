@@ -379,22 +379,22 @@ describe("maskEdit reducer-style helpers", () => {
     expect(s.current.layers).toHaveLength(1);
   });
 
-  it("layer-via-copy: a selection becomes the copy's layer mask (undoable)", () => {
+  it("layer-via-copy: a selection clips the copy's own ops, no mask (undoable)", () => {
     let s = initEditState();
     s = addOperation(s, { type: "invert" });
     s = duplicateLayer(s, { region: [2, 3, 20, 15] });
     expect(s.current.layers).toHaveLength(2);
     expect(s.current.active).toBe(1);
-    expect(s.current.layers[1].ops.map((op) => op.type)).toEqual(["invert"]);
-    expect(s.current.layers[1].mask?.ops).toEqual([{ type: "rect", region: [2, 3, 20, 15] }]);
+    expect(s.current.layers[1].ops).toEqual([{ type: "invert", clip: { region: [2, 3, 20, 15] } }]);
+    expect(s.current.layers[1].mask).toBeUndefined();
     s = undo(s);
     expect(s.current.layers).toHaveLength(1);
-    // An elliptical selection fills the mask elliptically.
+    // An elliptical selection clips elliptically.
     s = duplicateLayer(s, { region: [0, 0, 8, 8], ellipse: true });
-    expect(s.current.layers[1].mask?.ops).toEqual([{ type: "ellipse", region: [0, 0, 8, 8] }]);
+    expect(s.current.layers[1].ops).toEqual([{ type: "invert", clip: { region: [0, 0, 8, 8], ellipse: true } }]);
   });
 
-  it("image layer-via-copy records source image content and exact polygon masks", () => {
+  it("image layer-via-copy records source image content clipped to the exact polygon", () => {
     let s = initEditState();
     s = duplicateLayer(
       s,
@@ -410,14 +410,20 @@ describe("maskEdit reducer-style helpers", () => {
     );
 
     expect(s.current.layers).toHaveLength(2);
-    expect(s.current.layers[1].ops.map((op) => op.type)).toEqual(["source_image"]);
-    expect(s.current.layers[1].mask?.ops[0]).toMatchObject({
-      type: "path",
-      mode: "add",
-      tool: "selection",
-      closed: true,
-      points: [{ x: 2, y: 3 }, { x: 20, y: 3 }, { x: 12, y: 15 }],
-    });
+    expect(s.current.layers[1].ops).toEqual([
+      {
+        type: "source_image",
+        clip: {
+          region: [2, 3, 20, 15],
+          points: [
+            [2, 3],
+            [20, 3],
+            [12, 15],
+          ],
+        },
+      },
+    ]);
+    expect(s.current.layers[1].mask).toBeUndefined();
   });
 
   it("renames a layer (undoable) and ignores blank or unchanged names", () => {
