@@ -72,6 +72,10 @@ fn main() {
             // handle-free `Compute` segmenter needs it captured here to resolve
             // the weight in a packaged install.
             studio::set_subject_model_resource_dir(resource_dir);
+            if let Some(window) = app.get_webview_window("main") {
+                window.show()?;
+                window.set_focus()?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

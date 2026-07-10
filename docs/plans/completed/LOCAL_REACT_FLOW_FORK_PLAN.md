@@ -1,6 +1,8 @@
 # Local React Flow Fork Plan
 
-> Status: active implementation document.
+> Status: completed and archived. The adapter boundary, vendored upstream
+> source, product trimming, H-Gripe edge system, and graph optimizations have
+> landed; deeper render-layer alternatives remain optional future work.
 > Purpose: define how H-Gripe Studio can take ownership of the node-graph
 > canvas layer without conflicting with WGPU viewports, AMD/GPU compatibility,
 > or the media-processing kernel roadmap.
