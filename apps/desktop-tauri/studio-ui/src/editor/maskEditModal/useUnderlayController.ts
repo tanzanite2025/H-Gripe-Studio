@@ -7,7 +7,6 @@ import { IDENTITY_VIEW } from "../../viewport/view";
 import { compileImageAdjustments } from "../imageCompile";
 import {
   imageCompositeTarget,
-  imageDocumentFrameHidden,
   layerCompositeTransform,
   withActiveLayerDraftTransform,
 } from "../imageCompositeSource";
@@ -125,10 +124,6 @@ export function useUnderlayController({
     const compiled = compileImageAdjustments(fromMaskDocument(document));
     return compiled && compiled.layers.some((layer) => layer.visible && layer.ops.length > 0) ? compiled : null;
   }, [workspace, document]);
-  const frameHidden = useMemo(
-    () => workspace === "image" && imageDocumentFrameHidden(document),
-    [workspace, document],
-  );
   // Native surface presentation (surface swap Phase S2) is disabled here: the
   // surface sits under the webview, but the app root and modal chrome paint
   // opaque backgrounds over its rect, so a presented frame is invisible — the
@@ -138,7 +133,6 @@ export function useUnderlayController({
   const presentEnabled =
     SURFACE_HOLE_SUPPORTED
     && !overlayOnly
-    && !frameHidden
     && !view.rotate
     && !cropRegion
     && !gradePreview
@@ -178,6 +172,5 @@ export function useUnderlayController({
     activeCompositeTransform,
     cropRegion,
     gradePreview,
-    frameHidden,
   };
 }

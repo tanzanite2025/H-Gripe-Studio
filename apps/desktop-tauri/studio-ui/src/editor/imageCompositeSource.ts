@@ -29,14 +29,6 @@ export function imageLayerHasSourceContent(layer: MaskLayer, index: number): boo
   return layer.kind !== "adjustment" && (index === 0 || hasSourceImageContent(layer));
 }
 
-export function imageDocumentHasVisibleSource(doc: MaskDocument): boolean {
-  return doc.layers.some((layer, index) => imageLayerDrawsSource(layer, index));
-}
-
-export function imageDocumentFrameHidden(doc: MaskDocument): boolean {
-  return !imageDocumentHasVisibleSource(doc);
-}
-
 export function imageLayerContentBounds(
   layer: MaskLayer,
   index: number,
