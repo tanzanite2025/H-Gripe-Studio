@@ -4,7 +4,10 @@ use image::{GrayImage, Luma, RgbaImage};
 use rayon::prelude::*;
 use serde_json::Value;
 
-use super::{json_f32, MASK_OFF, MASK_ON, SELECTED_THRESHOLD};
+use super::document::json_f32;
+use super::{MASK_OFF, MASK_ON, SELECTED_THRESHOLD};
+use crate::studio::subject_sam2::Sam2Variant;
+use crate::studio::subject_segment::{segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest};
 
 /// Fill a marquee `rect` / `ellipse` region (`[x1, y1, x2, y2]` image-space).
 pub(super) fn fill_marquee(mask: &mut GrayImage, kind: &str, region: &[f64]) {
@@ -581,7 +584,7 @@ pub(super) fn background_erase(
 
 /// Separable box blur (one pass), clamped at the borders. Mirrors the proxy
 /// `boxBlur` in `maskMorphology.ts` (round-half-up on positive values).
-pub(super) fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
+fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
     let (w, h) = mask.dimensions();
     if radius == 0 {
         return mask.clone();
@@ -659,6 +662,305 @@ pub(super) fn healing_brush_region(
                 Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]),
             );
         }
+    }
+}
+
+/// Object selection (PS W flyout, on a mask): run the segmentation kernel
+/// constrained to the `region` box — the box becomes a placeholder
+/// constraint plus a positive point prompt at its centre — and union the
+/// segmented object into the mask. Needs the real image, so it has no proxy
+/// preview (render lane).
+pub(super) fn object_select_region(image: &RgbaImage, mask: &mut GrayImage, region: &[f64]) {
+    let (w, h) = image.dimensions();
+    let x1 = region[0].min(region[2]).max(0.0) as u32;
+    let y1 = region[1].min(region[3]).max(0.0) as u32;
+    let x2 = (region[0].max(region[2]) as u32).min(w.saturating_sub(1));
+    let y2 = (region[1].max(region[3]) as u32).min(h.saturating_sub(1));
+    if x2 <= x1 || y2 <= y1 {
+        return;
+    }
+    let mut placeholder = GrayImage::new(w, h);
+    for y in y1..=y2 {
+        for x in x1..=x2 {
+            placeholder.put_pixel(x, y, Luma([MASK_ON]));
+        }
+    }
+    let points = [PointPrompt {
+        x: x1 + (x2 - x1) / 2,
+        y: y1 + (y2 - y1) / 2,
+        positive: true,
+    }];
+    let segmenter = segmenter_for_mode(AutoMode::Subject, &points, Sam2Variant::default());
+    let Ok(result) = segmenter.segment(&SegmentRequest {
+        image,
+        mode: AutoMode::Subject,
+        placeholder: Some(&placeholder),
+        prompt: None,
+        points: &points,
+    }) else {
+        return;
+    };
+    for (m, s) in mask.pixels_mut().zip(result.mask.pixels()) {
+        m.0[0] = m.0[0].max(s.0[0]);
+    }
+}
+
+/// Remove (PS J flyout, on a mask): the stroke points seed the segmentation
+/// kernel — constrained to the stroke's bounding box expanded by four brush
+/// radii — and the segmented object is subtracted from the mask. Needs the
+/// real image, so it has no proxy preview (render lane).
+pub(super) fn remove_region(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    points: &[(f32, f32)],
+    radius: u32,
+) {
+    let (w, h) = image.dimensions();
+    let prompts: Vec<PointPrompt> = points
+        .iter()
+        .filter(|&&(px, py)| px >= 0.0 && py >= 0.0 && px < w as f32 && py < h as f32)
+        .map(|&(px, py)| PointPrompt {
+            x: px as u32,
+            y: py as u32,
+            positive: true,
+        })
+        .collect();
+    if prompts.is_empty() {
+        return;
+    }
+    let pad = 4 * radius;
+    let x1 = prompts
+        .iter()
+        .map(|p| p.x)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(pad);
+    let y1 = prompts
+        .iter()
+        .map(|p| p.y)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(pad);
+    let x2 = (prompts.iter().map(|p| p.x).max().unwrap_or(0) + pad).min(w.saturating_sub(1));
+    let y2 = (prompts.iter().map(|p| p.y).max().unwrap_or(0) + pad).min(h.saturating_sub(1));
+    let mut placeholder = GrayImage::new(w, h);
+    for y in y1..=y2 {
+        for x in x1..=x2 {
+            placeholder.put_pixel(x, y, Luma([MASK_ON]));
+        }
+    }
+    let segmenter = segmenter_for_mode(AutoMode::Subject, &prompts, Sam2Variant::default());
+    let Ok(result) = segmenter.segment(&SegmentRequest {
+        image,
+        mode: AutoMode::Subject,
+        placeholder: Some(&placeholder),
+        prompt: None,
+        points: &prompts,
+    }) else {
+        return;
+    };
+    for (m, s) in mask.pixels_mut().zip(result.mask.pixels()) {
+        m.0[0] = m.0[0].min(MASK_ON - s.0[0]);
+    }
+}
+
+/// Content-aware move (PS J flyout, on a mask): the lassoed polygon's values
+/// blend into the `dx`/`dy` destination through a feathered coverage, and
+/// the hole behind it is healed from its surroundings by the same diffusion
+/// the heal tool uses. Mirrors the proxy `contentAwareMove` in
+/// `maskMorphology.ts`.
+pub(super) fn content_aware_move_region(
+    mask: &mut GrayImage,
+    points: &[(f32, f32)],
+    dx: i64,
+    dy: i64,
+) {
+    let (w, h) = mask.dimensions();
+    let mut coverage = GrayImage::new(w, h);
+    apply_mask_path(
+        &mut coverage,
+        &MaskPath {
+            mode: PathMode::Add,
+            tool: "content_aware_move".to_string(),
+            polygon: points.to_vec(),
+        },
+    );
+    let soft = box_blur(&coverage, PATCH_FEATHER);
+    let base = mask.clone();
+    heal_region(mask, &coverage);
+    for y in 0..h {
+        for x in 0..w {
+            let sx = x as i64 - dx;
+            let sy = y as i64 - dy;
+            if sx < 0 || sx >= i64::from(w) || sy < 0 || sy >= i64::from(h) {
+                continue;
+            }
+            let weight = f64::from(soft.get_pixel(sx as u32, sy as u32).0[0]) / 255.0;
+            if weight == 0.0 {
+                continue;
+            }
+            let moved = f64::from(base.get_pixel(sx as u32, sy as u32).0[0]);
+            let v = f64::from(mask.get_pixel(x, y).0[0]);
+            mask.put_pixel(
+                x,
+                y,
+                Luma([(v * (1.0 - weight) + moved * weight).round() as u8]),
+            );
+        }
+    }
+}
+
+/// Cell size (px) of the pattern stamp's checkerboard. Mirrors
+/// `PATTERN_CELL` in `maskMorphology.ts`.
+const PATTERN_CELL: u32 = 8;
+
+/// Pattern stamp (PS S flyout, on a mask): covered pixels take the repeating
+/// checker pattern at their image-space cell. Mirrors the proxy
+/// `patternStampStroke` in `maskMorphology.ts`.
+pub(super) fn pattern_stamp_region(mask: &mut GrayImage, coverage: &GrayImage) {
+    let (w, h) = mask.dimensions();
+    for y in 0..h {
+        for x in 0..w {
+            if coverage.get_pixel(x, y).0[0] == 0 {
+                continue;
+            }
+            let on = (x / PATTERN_CELL + y / PATTERN_CELL).is_multiple_of(2);
+            mask.put_pixel(x, y, Luma([if on { MASK_ON } else { MASK_OFF }]));
+        }
+    }
+}
+
+/// Art history brush (PS Y flyout, on a mask): restore the mask inside
+/// `coverage` to the layer's pre-edit state `base` through a deterministic
+/// per-pixel jitter — each covered pixel reads `base` at a hashed offset
+/// within half the brush radius. Mirrors the proxy `artHistoryStroke` in
+/// `maskMorphology.ts`.
+pub(super) fn art_history_region(
+    mask: &mut GrayImage,
+    base: &GrayImage,
+    coverage: &GrayImage,
+    radius: u32,
+) {
+    let (w, h) = mask.dimensions();
+    let amp = ((f64::from(radius) / 2.0).round() as i64).max(1);
+    let span = (2 * amp + 1) as u64;
+    for y in 0..h {
+        for x in 0..w {
+            if coverage.get_pixel(x, y).0[0] == 0 {
+                continue;
+            }
+            let hash = (u64::from(x) * 374_761_393 + u64::from(y) * 668_265_263) % 4_294_967_296;
+            let sx = (i64::from(x) + ((hash / 8) % span) as i64 - amp).clamp(0, i64::from(w) - 1);
+            let sy =
+                (i64::from(y) + ((hash / 131_072) % span) as i64 - amp).clamp(0, i64::from(h) - 1);
+            mask.put_pixel(x, y, Luma([base.get_pixel(sx as u32, sy as u32).0[0]]));
+        }
+    }
+}
+
+/// Per-stroke exposure of the sponge tool: each pass moves the covered pixels
+/// half-way toward hard on/off (saturate) or toward mid-grey (desaturate).
+const SPONGE_EXPOSURE: f64 = 0.5;
+
+/// Feathered edge (px) of the patch tool's blend into the surroundings — the
+/// patch op runs `healing_brush_region` at radius `2 * PATCH_FEATHER` (its
+/// blur is half the radius). Mirrors `PATCH_FEATHER` in `maskMorphology.ts`.
+pub(super) const PATCH_FEATHER: u32 = 4;
+
+/// Homography coefficients mapping the unit square onto the quad
+/// `[p00, p10, p11, p01]` (TL, TR, BR, BL):
+/// `X = (a·u + b·v + c) / (g·u + h·v + 1)`, same for `Y` with `d, e, f`.
+/// Degenerate quads fall back to the affine map (`g = h = 0`). Mirrors the
+/// proxy `quadHomography` in `maskMorphology.ts`.
+fn quad_homography(quad: &[(f64, f64); 4]) -> [f64; 8] {
+    let (p00, p10, p11, p01) = (quad[0], quad[1], quad[2], quad[3]);
+    let sx = p00.0 - p10.0 + p11.0 - p01.0;
+    let sy = p00.1 - p10.1 + p11.1 - p01.1;
+    let d1x = p10.0 - p11.0;
+    let d1y = p10.1 - p11.1;
+    let d2x = p01.0 - p11.0;
+    let d2y = p01.1 - p11.1;
+    let den = d1x * d2y - d1y * d2x;
+    let mut g = 0.0;
+    let mut h = 0.0;
+    if (sx != 0.0 || sy != 0.0) && den.abs() > 1e-9 {
+        g = (sx * d2y - sy * d2x) / den;
+        h = (d1x * sy - sx * d1y) / den;
+    }
+    [
+        p10.0 - p00.0 + g * p10.0,
+        p01.0 - p00.0 + h * p01.0,
+        p00.0,
+        p10.1 - p00.1 + g * p10.1,
+        p01.1 - p00.1 + h * p01.1,
+        p00.1,
+        g,
+        h,
+    ]
+}
+
+/// Perspective crop (PS C flyout, on a mask): straighten the quad
+/// `region: [x0,y0, x1,y1, x2,y2, x3,y3]` (TL, TR, BR, BL image-space) into
+/// its bounding rectangle — each rect pixel inverse-maps through the
+/// rect→quad homography (nearest-neighbour), everything outside the rect is
+/// cleared. Mirrors the proxy `perspectiveCrop` in `maskMorphology.ts`.
+pub(super) fn perspective_crop_mask(mask: &GrayImage, region: &[f64]) -> GrayImage {
+    let quad = [
+        (region[0], region[1]),
+        (region[2], region[3]),
+        (region[4], region[5]),
+        (region[6], region[7]),
+    ];
+    let bx1 = quad.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let by1 = quad.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let bx2 = quad.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let by2 = quad.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+    let bw = (bx2 - bx1).max(1e-6);
+    let bh = (by2 - by1).max(1e-6);
+    let [a, b, c, d, e, f, g, hh] = quad_homography(&quad);
+    let (w, h) = mask.dimensions();
+    let mut out = GrayImage::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let cx = f64::from(x) + 0.5;
+            let cy = f64::from(y) + 0.5;
+            if cx < bx1 || cx > bx2 || cy < by1 || cy > by2 {
+                continue;
+            }
+            let u = (cx - bx1) / bw;
+            let v = (cy - by1) / bh;
+            let den = g * u + hh * v + 1.0;
+            if den.abs() < 1e-9 {
+                continue;
+            }
+            let sx = ((a * u + b * v + c) / den).floor();
+            let sy = ((d * u + e * v + f) / den).floor();
+            if sx < 0.0 || sy < 0.0 || sx >= f64::from(w) || sy >= f64::from(h) {
+                continue;
+            }
+            out.put_pixel(x, y, *mask.get_pixel(sx as u32, sy as u32));
+        }
+    }
+    out
+}
+
+/// Sponge (PS O flyout, on a mask): locally push the mask's soft values
+/// toward hard on/off (saturate) or toward mid-grey (desaturate) inside
+/// `coverage`. Mirrors the proxy `spongeStroke` in `maskMorphology.ts`.
+pub(super) fn sponge_region(mask: &mut GrayImage, coverage: &GrayImage, desaturate: bool) {
+    for (m, c) in mask.pixels_mut().zip(coverage.pixels()) {
+        if c.0[0] == 0 {
+            continue;
+        }
+        let v = f64::from(m.0[0]);
+        let out = if desaturate {
+            v + (128.0 - v) * SPONGE_EXPOSURE
+        } else if v >= 128.0 {
+            v + (255.0 - v) * SPONGE_EXPOSURE
+        } else {
+            v * (1.0 - SPONGE_EXPOSURE)
+        };
+        m.0[0] = out.round().clamp(0.0, 255.0) as u8;
     }
 }
 
