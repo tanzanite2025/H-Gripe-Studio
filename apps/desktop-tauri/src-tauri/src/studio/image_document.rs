@@ -633,6 +633,46 @@ mod tests {
     #[serde(rename_all = "camelCase")]
     struct ImageDocumentFixtures {
         rgba_composite_cases: Vec<RgbaCompositeCase>,
+        transform_compose_cases: Vec<TransformComposeCase>,
+        transform_inverse_sample_cases: Vec<TransformInverseSampleCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct TransformCaseParams {
+        dx: f32,
+        dy: f32,
+        scale: f32,
+        rotate: f32,
+    }
+
+    impl From<&TransformCaseParams> for LayerTransform {
+        fn from(params: &TransformCaseParams) -> Self {
+            LayerTransform {
+                dx: params.dx,
+                dy: params.dy,
+                scale: params.scale,
+                rotate: params.rotate,
+            }
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct TransformComposeCase {
+        name: String,
+        a: TransformCaseParams,
+        b: TransformCaseParams,
+        expected: TransformCaseParams,
+    }
+
+    #[derive(Deserialize)]
+    struct TransformInverseSampleCase {
+        name: String,
+        width: u32,
+        height: u32,
+        transform: TransformCaseParams,
+        x: u32,
+        y: u32,
+        expected: Option<[f32; 2]>,
     }
 
     #[derive(Deserialize)]
@@ -645,20 +685,67 @@ mod tests {
         expected: [u8; 4],
     }
 
-    fn rgba_composite_cases() -> Vec<RgbaCompositeCase> {
+    fn contract_fixtures() -> ImageDocumentFixtures {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../studio-ui/src/editor/imageDocumentContractFixtures.json"
         );
         let raw = std::fs::read_to_string(path).expect("image-document fixtures readable");
-        serde_json::from_str::<ImageDocumentFixtures>(&raw)
-            .expect("image-document fixtures parse")
-            .rgba_composite_cases
+        serde_json::from_str::<ImageDocumentFixtures>(&raw).expect("image-document fixtures parse")
+    }
+
+    #[test]
+    fn compose_matches_the_shared_transform_contract() {
+        let cases = contract_fixtures().transform_compose_cases;
+        assert!(!cases.is_empty());
+        for case in cases {
+            let composed =
+                compose_layer_transform(LayerTransform::from(&case.a), LayerTransform::from(&case.b));
+            let expected = LayerTransform::from(&case.expected);
+            assert!((composed.dx - expected.dx).abs() < 1e-4, "{}: dx", case.name);
+            assert!((composed.dy - expected.dy).abs() < 1e-4, "{}: dy", case.name);
+            assert!(
+                (composed.scale - expected.scale).abs() < 1e-4,
+                "{}: scale",
+                case.name
+            );
+            assert!(
+                (composed.rotate - expected.rotate).abs() < 1e-4,
+                "{}: rotate",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn inverse_sample_matches_the_shared_transform_contract() {
+        let cases = contract_fixtures().transform_inverse_sample_cases;
+        assert!(!cases.is_empty());
+        for case in cases {
+            let sample = inverse_layer_sample(
+                case.x,
+                case.y,
+                case.width,
+                case.height,
+                LayerTransform::from(&case.transform),
+            );
+            match (sample, case.expected) {
+                (Some((sx, sy)), Some([ex, ey])) => {
+                    assert!((sx - ex).abs() < 1e-4, "{}: sx", case.name);
+                    assert!((sy - ey).abs() < 1e-4, "{}: sy", case.name);
+                }
+                (None, None) => {}
+                (sample, expected) => panic!(
+                    "{}: sample {:?} does not match expected {:?}",
+                    case.name, sample, expected
+                ),
+            }
+        }
     }
 
     #[test]
     fn composite_matches_the_shared_rgba_contract() {
-        let cases = rgba_composite_cases();
+        let cases = contract_fixtures().rgba_composite_cases;
         assert!(!cases.is_empty());
         for case in cases {
             let mut source = RgbaImage::new(2, 1);

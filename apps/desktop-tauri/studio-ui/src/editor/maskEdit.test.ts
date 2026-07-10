@@ -69,6 +69,16 @@ describe("maskEdit composeTransforms", () => {
     expect(t.scale).toBe(2);
     expect(t.rotate).toBe(90);
   });
+  it("matches the shared transform-compose contract", () => {
+    expect(fixtures.transformComposeCases.length).toBeGreaterThan(0);
+    for (const testCase of fixtures.transformComposeCases) {
+      const composed = composeTransforms(testCase.a, testCase.b);
+      expect(composed.dx, testCase.name).toBeCloseTo(testCase.expected.dx, 4);
+      expect(composed.dy, testCase.name).toBeCloseTo(testCase.expected.dy, 4);
+      expect(composed.scale, testCase.name).toBeCloseTo(testCase.expected.scale, 4);
+      expect(composed.rotate, testCase.name).toBeCloseTo(testCase.expected.rotate, 4);
+    }
+  });
 });
 
 describe("maskEdit normalizeEditPaths", () => {
