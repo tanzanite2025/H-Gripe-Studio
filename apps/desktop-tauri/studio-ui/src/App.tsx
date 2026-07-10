@@ -51,65 +51,23 @@ import { validateGraph } from "./runtime/dag";
 import {
   isTauri,
   listenFileDrop,
-  mergeLayerMasks,
   pickFile,
   primeIngest,
-  splitLayerMask,
 } from "./bridge/tauri";
 import { ProductionDrawer } from "./production/ProductionDrawer";
-import type { AddableAsset } from "./production/MediaWorkspacePopover";
+import { toggleDrawer } from "./production/drawerState";
 import {
-  loadDrawerMode,
-  saveDrawerMode,
-  toggleDrawer,
-  type DrawerMode,
-} from "./production/drawerState";
-import {
-  assetKindForNodeKind,
-  assetKindForPath,
   IMAGE_MEDIA_EXTS,
-  MEDIA_IMPORT_EXTS,
   VIDEO_MEDIA_EXTS,
 } from "./production/mediaBin";
-import {
-  assetTarget,
-  imageLayerTarget,
-  layeredImageTarget,
-  nodeOutputTarget,
-  type ProductionTarget,
-} from "./production/productionTarget";
-import {
-  findLayer,
-  mergeLayersIntoAsset,
-  setLayerProtected,
-  splitLayerInAsset,
-  stubLayeredImageAsset,
-  type LayeredImageAsset,
-} from "./production/layeredImage";
-import { findClip, type TrackKind } from "./production/timeline";
+import { findClip } from "./production/timeline";
 import { defaultAudioEdit, type AudioClipEdit } from "./production/audioEdit";
-import { defaultClipProperties, type ClipProperties } from "./production/clipProps";
 import {
-  addAssetClip,
-  addAssetToBin,
-  addTimelineTrack,
-  clearProductionSelection,
   clipGradeKey,
   commitAudioEdit,
   productionStore,
-  removeAssetFromBin,
-  removeTimelineClip,
-  removeTimelineMarker,
-  removeTimelineTrack,
-  selectBinAsset,
   selectClip,
   setClipGradeDoc,
-  setClipProperties,
-  splitTimelineClip,
-  toggleTimelineMarker,
-  toggleTimelineTrackHidden,
-  toggleTimelineTrackLock,
-  useProductionState,
 } from "./production/productionStore";
 import { applyGpuMaxJobs, getGpuMaxJobs } from "./bridge/scheduler";
 import { unregisterNodeOutput } from "./bridge/viewport";
@@ -129,6 +87,7 @@ import {
 import type { ModelCapability } from "./models/backendRegistry";
 import { useT } from "./i18n";
 import { useProjectRestoreController } from "./app/useProjectRestoreController";
+import { useProductionWorkspaceController } from "./app/useProductionWorkspaceController";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -187,26 +146,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const { openNewCanvas, activateCanvas, closeCanvas, renameCanvas } = canvas;
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
-  // Bottom production drawer (Edit / Timeline + Grade) shell state, plus the
-  // lightweight media bin and the unified production selection it consumes.
-  const [drawerMode, setDrawerMode] = useState<DrawerMode>(() => loadDrawerMode());
-  // The media bin, timeline, bin/clip selection, and per-clip edit documents
-  // live in the global production store (productionStore.ts): mutations that
-  // remove an entity cascade there, so edit docs never outlive their clips.
-  const binAssets = useProductionState((s) => s.binAssets);
-  const activeAssetId = useProductionState((s) => s.activeAssetId);
-  const timeline = useProductionState((s) => s.timeline);
-  const selectedClipId = useProductionState((s) => s.selectedClipId);
-  const gradeDocs = useProductionState((s) => s.gradeDocs);
-  const audioEdits = useProductionState((s) => s.audioEdits);
-  const clipProps = useProductionState((s) => s.clipProps);
   // Clip whose grade modal is open (clip context menu → “grade”).
   const [gradeClipId, setGradeClipId] = useState<string | null>(null);
   const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
-  // Layer selection inside the targeted layered image asset (review panel):
-  // the selected candidate layer id plus per-layer visibility overrides.
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
-  const [layerVisibility, setLayerVisibility] = useState<Record<string, boolean>>({});
   // On-demand export dialog (plan step 9): opened by the drawer's export command.
   const [exportOpen, setExportOpen] = useState(false);
   // System "Models / APIs" manager (system model manager surface plan): one
@@ -262,317 +204,56 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const history = useHistory({ nodes, edges, setNodes, setEdges, scopeId: canvas.documentId });
   const { takeSnapshot, undo, redo } = history;
 
-  const selectedNode = useMemo(
-    () => nodes.find((n) => n.id === selectedId) ?? null,
-    [nodes, selectedId],
-  );
-
-  // The selected split node's layered image asset. The last run's real
-  // segmented asset (surfaced onto the card by the run controller) wins;
-  // before any run the panel falls back to the client-side stub builder so
-  // it still works, e.g. in the browser preview.
-  const layeredAsset = useMemo<LayeredImageAsset | null>(() => {
-    if (!selectedNode) return null;
-    const data = selectedNode.data as HgripeNodeData;
-    if (data.kind !== "smartLayerSplit") return null;
-    if (data.layeredAsset) return data.layeredAsset;
-    const edge = edges.find((e) => e.target === selectedNode.id && e.targetHandle === "image");
-    const src = edge ? nodes.find((n) => n.id === edge.source) : undefined;
-    const d = src?.data as HgripeNodeData | undefined;
-    const imagePath =
-      d?.imagePath ?? (typeof d?.params?.path === "string" ? (d.params.path as string) : null);
-    if (!imagePath) return null;
-    return stubLayeredImageAsset({ imagePath, nodeId: selectedNode.id });
-  }, [selectedNode, nodes, edges]);
-
-  const importMediaPathsToBin = useCallback(
-    (paths: string[]) => {
-      const imported: string[] = [];
-      let skipped = 0;
-      for (const path of paths) {
-        const kind = assetKindForPath(path);
-        if (!kind) {
-          skipped += 1;
-          continue;
-        }
-        addAssetToBin(productionStore, { kind, path });
-        imported.push(path);
-      }
-      if (imported.length === 0) {
-        setMessage(t("drawer.importUnsupported"));
-        return;
-      }
-      void primeIngest(imported.filter((path) => assetKindForPath(path) === "image"));
-      setMessage(t("drawer.importedMedia", { n: imported.length, skipped }));
-    },
-    [setMessage, t],
-  );
-
-  const handleImportMediaToBin = useCallback(async () => {
-    const path = await pickFile({
-      title: t("drawer.importMediaTitle"),
-      filterName: "Media",
-      extensions: [...MEDIA_IMPORT_EXTS],
-    });
-    if (path) {
-      importMediaPathsToBin([path]);
-      return;
-    }
-    if (!isDesktop) window.alert(t("drawer.importNeedsDesktop"));
-  }, [importMediaPathsToBin, isDesktop, t]);
-
-  const handleAddExportedFrame = useCallback((asset: { path: string; name: string }) => {
-    addAssetToBin(productionStore, { kind: "image", path: asset.path, name: asset.name });
-    void primeIngest([asset.path]);
-    setMessage(t("exportFrame.addedToProject"));
-  }, [setMessage, t]);
-
-  // Persisted drawer shell state so the drawer reopens how it was left.
-  const changeDrawerMode = useCallback((m: DrawerMode) => {
-    setDrawerMode(m);
-    saveDrawerMode(m);
-  }, []);
-
-  // The selected canvas node as a bin-addable media reference (image / video
-  // source card with a path), or null when the selection isn't one.
-  const addableAsset = useMemo<AddableAsset | null>(() => {
-    if (!selectedNode) return null;
-    // A split node registers its layered asset's composite preview, so a
-    // timeline still clip can reference the layered image.
-    if (layeredAsset) {
-      return {
-        kind: "image",
-        path: layeredAsset.preview_composite.path,
-        sourceNodeId: selectedNode.id,
-      };
-    }
-    const data = selectedNode.data as HgripeNodeData;
-    const kind = assetKindForNodeKind(data.kind);
-    const path = typeof data.params?.path === "string" ? (data.params.path as string) : "";
-    if (!kind || !path) return null;
-    return { kind, path, sourceNodeId: selectedNode.id };
-  }, [selectedNode, layeredAsset]);
-
-  const handleAddSelectedToBin = useCallback(() => {
-    if (addableAsset) addAssetToBin(productionStore, addableAsset);
-  }, [addableAsset]);
-
-  const handleRemoveBinAsset = useCallback((id: string) => {
-    // Clips are references to bin assets, so they leave with the asset (and
-    // their edit documents cascade away with the clips).
-    removeAssetFromBin(productionStore, id);
-  }, []);
-
-  const handleAddActiveToTimeline = useCallback(() => {
-    const { activeAssetId: active } = productionStore.getState();
-    if (active) addAssetClip(productionStore, active);
-  }, []);
-
-  const handleAddActiveToTrack = useCallback((trackId: string) => {
-    const { activeAssetId: active } = productionStore.getState();
-    if (active) addAssetClip(productionStore, active, { trackId });
-  }, []);
-
-  const handleAddTrack = useCallback((kind: TrackKind) => {
-    addTimelineTrack(productionStore, kind);
-  }, []);
-
-  const handleRemoveTrack = useCallback((trackId: string) => {
-    removeTimelineTrack(productionStore, trackId);
-  }, []);
-
-  const handleRemoveClip = useCallback((clipId: string) => {
-    removeTimelineClip(productionStore, clipId);
-  }, []);
-
-  const handleSplitTimelineClip = useCallback((clipId: string, atSec: number) => {
-    splitTimelineClip(productionStore, clipId, atSec);
-  }, []);
-
-  const handleToggleMarker = useCallback((sec: number) => {
-    toggleTimelineMarker(productionStore, sec);
-  }, []);
-
-  const handleRemoveMarker = useCallback((markerId: string) => {
-    removeTimelineMarker(productionStore, markerId);
-  }, []);
-
-  const handleToggleTrackLock = useCallback((trackId: string) => {
-    toggleTimelineTrackLock(productionStore, trackId);
-  }, []);
-
-  const handleToggleTrackHidden = useCallback((trackId: string) => {
-    toggleTimelineTrackHidden(productionStore, trackId);
-  }, []);
-
-  const handleSelectClip = useCallback((clipId: string | null) => {
-    selectClip(productionStore, clipId);
-  }, []);
-
-  const handleSetClipProperties = useCallback((clipId: string, props: ClipProperties) => {
-    setClipProperties(productionStore, clipId, props);
-  }, []);
-
-  const selectedClipProperties = useMemo(
-    () => (selectedClipId ? (clipProps[selectedClipId] ?? defaultClipProperties()) : undefined),
-    [selectedClipId, clipProps],
-  );
-
-  const handleSelectBinAsset = useCallback((assetId: string | null) => {
-    selectBinAsset(productionStore, assetId);
-  }, []);
-
-  // Unified production selection: a timeline clip when one is selected, else
-  // an active bin asset, else the selected canvas node's output. The drawer
-  // and (later) the on-demand editors consume this target rather than
-  // per-media-type selection state.
-  const productionTarget = useMemo<ProductionTarget | null>(() => {
-    if (selectedClipId) {
-      const found = findClip(timeline, selectedClipId);
-      if (found) {
-        const base = { timelineId: timeline.id, trackId: found.track.id, clipId: found.clip.id };
-        return found.clip.kind === "audio"
-          ? { kind: "audio_clip", ...base }
-          : { kind: "video_clip", ...base };
-      }
-    }
-    if (activeAssetId) return assetTarget(activeAssetId);
-    if (selectedId && layeredAsset) {
-      return selectedLayerId
-        ? imageLayerTarget(layeredAsset.id, selectedLayerId)
-        : layeredImageTarget(layeredAsset.id, selectedId);
-    }
-    if (selectedId) return nodeOutputTarget(selectedId);
-    return null;
-  }, [selectedClipId, timeline, activeAssetId, selectedId, layeredAsset, selectedLayerId]);
-
-  // Selecting a canvas node retargets production selection to that node.
-  const handleCanvasSelect = useCallback((id: string | null) => {
-    setSelectedId(id);
-    setSelectedLayerId(null);
-    setLayerVisibility({});
-    if (id) clearProductionSelection(productionStore);
-  }, []);
-
-  const handleToggleLayerVisibility = useCallback(
-    (layerId: string) => {
-      const current =
-        layerVisibility[layerId] ??
-        (layeredAsset ? (findLayer(layeredAsset, layerId)?.visible ?? true) : true);
-      setLayerVisibility((vis) => ({ ...vis, [layerId]: !current }));
-    },
-    [layerVisibility, layeredAsset],
-  );
-
-  // Review Editor "mark protected": flip the layer's protected flag in the
-  // node's stored asset. Pure asset transform — works in every runtime.
-  const handleToggleProtected = useCallback(
-    (layerId: string) => {
-      const node = selectedNode;
-      const asset = layeredAsset;
-      if (!node || !asset) return;
-      const layer = findLayer(asset, layerId);
-      if (!layer || layer.locked) return;
-      const next = setLayerProtected(asset, layerId, !(layer.protected ?? false));
-      if (next === asset) return;
-      setNodes((ns) =>
-        ns.map((n) =>
-          n.id === node.id
-            ? { ...n, data: { ...(n.data as HgripeNodeData), layeredAsset: next } }
-            : n,
-        ),
-      );
-    },
-    [selectedNode, layeredAsset, setNodes],
-  );
-
-  // Review Editor "merge layers": union the checked layers' masks on the
-  // backend, then replace them in the node's stored asset with one merged
-  // layer. Desktop-only — the browser preview has no backend to union masks.
-  const handleMergeLayers = useCallback(
-    (layerIds: string[]) => {
-      const node = selectedNode;
-      const asset = layeredAsset;
-      if (!node || !asset || layerIds.length < 2) return;
-      const members = layerIds
-        .map((id) => findLayer(asset, id))
-        .filter((layer): layer is NonNullable<typeof layer> => layer !== null && !layer.locked);
-      if (members.length < 2) return;
-      const mergedId = `layer_merged_${Date.now().toString(36)}`;
-      void mergeLayerMasks({
-        imagePath: asset.base_image.path,
-        maskPaths: members.map((layer) => layer.mask.path),
-        outputName: `${asset.id}_${mergedId}`,
-      })
-        .then((artifacts) => {
-          if (!artifacts) return;
-          const next = mergeLayersIntoAsset(
-            asset,
-            members.map((layer) => layer.id),
-            {
-              id: mergedId,
-              name: `merged (${members.map((layer) => layer.name).join(" + ")})`,
-              mask: { path: artifacts.mask_path, width: artifacts.width, height: artifacts.height },
-              rgba: { path: artifacts.rgba_path, width: artifacts.width, height: artifacts.height },
-              bbox: artifacts.bbox,
-            },
-          );
-          setNodes((ns) =>
-            ns.map((n) =>
-              n.id === node.id
-                ? { ...n, data: { ...(n.data as HgripeNodeData), layeredAsset: next } }
-                : n,
-            ),
-          );
-          setSelectedLayerId((id) => (id && layerIds.includes(id) ? mergedId : id));
-        })
-        .catch((err) => setMessage(String(err)));
-    },
-    [selectedNode, layeredAsset, setNodes, setMessage],
-  );
-
-  // Review Editor "split layer": break the selected layer's mask into its
-  // connected components on the backend, then replace it in the node's stored
-  // asset with one part layer per component. Desktop-only.
-  const handleSplitLayer = useCallback(
-    (layerId: string) => {
-      const node = selectedNode;
-      const asset = layeredAsset;
-      if (!node || !asset) return;
-      const source = findLayer(asset, layerId);
-      if (!source || source.locked) return;
-      const splitTag = `layer_part_${Date.now().toString(36)}`;
-      void splitLayerMask({
-        imagePath: asset.base_image.path,
-        maskPath: source.mask.path,
-        outputName: `${asset.id}_${splitTag}`,
-      })
-        .then((artifacts) => {
-          if (!artifacts || artifacts.length < 2) return;
-          const next = splitLayerInAsset(
-            asset,
-            layerId,
-            artifacts.map((part, n) => ({
-              id: `${splitTag}_${n + 1}`,
-              name: `${source.name} part ${n + 1}`,
-              mask: { path: part.mask_path, width: part.width, height: part.height },
-              rgba: { path: part.rgba_path, width: part.width, height: part.height },
-              bbox: part.bbox,
-            })),
-          );
-          setNodes((ns) =>
-            ns.map((n) =>
-              n.id === node.id
-                ? { ...n, data: { ...(n.data as HgripeNodeData), layeredAsset: next } }
-                : n,
-            ),
-          );
-          setSelectedLayerId((id) => (id === layerId ? `${splitTag}_1` : id));
-        })
-        .catch((err) => setMessage(String(err)));
-    },
-    [selectedNode, layeredAsset, setNodes, setMessage],
-  );
+  const {
+    activeAssetId,
+    addableAsset,
+    audioEdits,
+    binAssets,
+    changeDrawerMode,
+    clipProps,
+    drawerMode,
+    gradeDocs,
+    handleAddActiveToTimeline,
+    handleAddActiveToTrack,
+    handleAddExportedFrame,
+    handleAddSelectedToBin,
+    handleAddTrack,
+    handleCanvasSelect,
+    handleImportMediaToBin,
+    handleMergeLayers,
+    handleRemoveBinAsset,
+    handleRemoveClip,
+    handleRemoveMarker,
+    handleRemoveTrack,
+    handleSelectBinAsset,
+    handleSelectClip,
+    handleSetClipProperties,
+    handleSplitLayer,
+    handleSplitTimelineClip,
+    handleToggleLayerVisibility,
+    handleToggleMarker,
+    handleToggleProtected,
+    handleToggleTrackHidden,
+    handleToggleTrackLock,
+    importMediaPathsToBin,
+    layeredAsset,
+    layerVisibility,
+    productionTarget,
+    selectedClipId,
+    selectedClipProperties,
+    selectedLayerId,
+    setSelectedLayerId,
+    timeline,
+  } = useProductionWorkspaceController({
+    nodes,
+    edges,
+    selectedId,
+    setSelectedId,
+    setNodes,
+    setMessage,
+    isDesktop,
+    t,
+  });
 
   // The active graph in the renderer-agnostic model, shared by validation and
   // the run HUD preview so each edit converts once.
