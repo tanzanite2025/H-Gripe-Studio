@@ -36,7 +36,7 @@ import { buildRunReport } from "./runReport";
 import { useProjectScopedStore } from "./useProjectScopedStore";
 import { lowerWorkflowGraph, originNodeId } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
-import { parseLayeredImageAsset } from "../production/layeredImage";
+import { parseLayeredImageAsset } from "../domain/layeredImage";
 import { runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
 import { beginGpuWork } from "../runtime/gpuLoad";
 import { describeDeviceReport, deviceReportFromNodeOutputs } from "../runtime/deviceReport";

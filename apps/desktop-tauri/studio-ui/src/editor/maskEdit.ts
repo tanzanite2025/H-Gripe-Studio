@@ -9,24 +9,26 @@
 // (see `docs/design/ps-editor-architecture.md`, M3), plus the document-level
 // `matte_strokes` band.
 
-import type {
-  AdjustmentType,
-  BrushStroke,
-  EditOp,
-  EditPath,
-  EditPathPoint,
-  ImageCanvasSize,
-  ImageResample,
-  LayerGroup,
-  LayerAdjustment,
-  LayerBlend,
-  LayerMask,
-  LayerTargetKind,
-  MaskDocument,
-  MaskLayer,
-  MaskOperation,
-  PointPrompt,
-} from "../types/production";
+import {
+  type AdjustmentType,
+  type ImageCanvasSize,
+  type ImageResample,
+  type LayerGroup,
+  type LayerAdjustment,
+  type LayerBlend,
+  type LayerMask,
+  type LayerTargetKind,
+  type MaskDocument,
+  type MaskLayer,
+} from "../contracts/maskDocument";
+import {
+  type BrushStroke,
+  type EditOp,
+  type EditPath,
+  type EditPathPoint,
+  type MaskOperation,
+  type PointPrompt,
+} from "../contracts/maskOps";
 import {
   activeLayer,
   activeTargetKind,
@@ -34,11 +36,9 @@ import {
   emptyLayerMask,
   emptyMaskDocument,
   emptyMaskLayer,
-  isBrushOp,
-  isMaskOperation,
-  isPathOp,
   LAYER_BLENDS,
-} from "../types/production";
+} from "../contracts/maskDocument";
+import { isBrushOp, isMaskOperation, isPathOp } from "../contracts/maskOps";
 
 export const SOURCE_IMAGE_OP_TYPE = "source_image";
 

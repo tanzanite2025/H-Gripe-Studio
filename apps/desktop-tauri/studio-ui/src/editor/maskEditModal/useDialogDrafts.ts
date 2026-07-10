@@ -3,7 +3,8 @@
 // open / apply / close" clusters the modal shell surfaces.
 import { useCallback, useRef, useState } from "react";
 import { activeOps, type EditState, type TransformParams } from "../maskEdit";
-import { isBrushOp, isPathOp, type EditOp, type ImageResample } from "../../types/production";
+import { isBrushOp, isPathOp, type EditOp } from "../../contracts/maskOps";
+import { type ImageResample } from "../../contracts/maskDocument";
 import type { FillDraft, MaskEditDispatch } from "./actions";
 
 /** Image Size dialog draft: pixel size + linked aspect + resample filter. */

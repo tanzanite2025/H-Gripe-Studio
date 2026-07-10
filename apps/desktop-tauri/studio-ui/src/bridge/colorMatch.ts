@@ -1,5 +1,5 @@
-﻿import { tauriInvoke } from "./core";
-import type { VisualContext } from "../types/production";
+import { tauriInvoke } from "./core";
+import { type VisualContext } from "../contracts/context";
 
 // --- Light & Color Match ----------------------------------------------------
 // Wraps the Rust `match_light_color` command, which shells out to the

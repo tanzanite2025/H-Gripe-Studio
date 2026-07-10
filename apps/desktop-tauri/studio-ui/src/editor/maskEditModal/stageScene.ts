@@ -4,7 +4,8 @@
 // feedback plus the fallback stage when no host frame presents). The shell
 // keeps only thin memo/callback wrappers around these.
 import type { ViewportOverlayItem, ViewportOverlayScene } from "../../bridge/viewport";
-import { activeTargetKind, isBrushOp, isPathOp, type MaskDocument, type EditPathPoint } from "../../types/production";
+import { activeTargetKind, type MaskDocument } from "../../contracts/maskDocument";
+import { isBrushOp, isPathOp, type EditPathPoint } from "../../contracts/maskOps";
 import { layerOpStacks } from "../maskEdit";
 import type { MaskTool, PaintTarget, ShapeKind } from "../maskTools";
 import type { ProxyMask } from "../maskMorphology";

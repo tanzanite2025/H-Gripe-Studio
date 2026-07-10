@@ -6,7 +6,7 @@
 // selection drags one anchor at a time. Neither adds a new kernel op — the
 // commit is the ordinary `path_anchors` history step.
 
-import { isPathOp, type EditOp, type EditPathPoint } from "../../types/production";
+import { isPathOp, type EditOp, type EditPathPoint } from "../../contracts/maskOps";
 
 /** Distance from `pt` to the segment `a`–`b` (image px). */
 function segmentDistance(pt: [number, number], a: EditPathPoint, b: EditPathPoint): number {

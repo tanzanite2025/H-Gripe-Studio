@@ -3,7 +3,7 @@ import { adjustmentToGradeOps } from "./imageAdjustments";
 import { applyOp } from "./gradeKernel";
 import type { GradeSurface } from "./gradeKernel";
 import { adjustmentLut } from "./maskMorphology";
-import type { LayerAdjustment } from "../types/production";
+import { type LayerAdjustment } from "../contracts/maskDocument";
 
 // A 256×1 grayscale ramp surface: pixel i holds level i/255 on all channels.
 function rampSurface(): GradeSurface {

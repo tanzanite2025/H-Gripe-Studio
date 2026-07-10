@@ -1,5 +1,6 @@
-﻿import { tauriInvoke } from "./core";
-import type { Bounds, QualityReport, VisualContext } from "../types/production";
+import { tauriInvoke } from "./core";
+import { type Bounds, type VisualContext } from "../contracts/context";
+import { type QualityReport } from "../contracts/quality";
 
 // --- Detail Watchdog --------------------------------------------------------
 // Wraps the Rust `detect_quality_issues` command, which shells out to the

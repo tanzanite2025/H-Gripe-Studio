@@ -43,20 +43,22 @@ import {
   type LayerCopySelection,
   type TransformParams,
 } from "../maskEdit";
-import type {
-  AdjustmentType,
-  BrushStroke,
-  EditOpBase,
-  EditPath,
-  EditPathPoint,
-  ImageCanvasSize,
-  LayerAdjustment,
-  LayerBlend,
-  LayerGroup,
-  LayerTargetKind,
-  MaskOperation,
-  PointPrompt,
-} from "../../types/production";
+import {
+  type AdjustmentType,
+  type ImageCanvasSize,
+  type LayerAdjustment,
+  type LayerBlend,
+  type LayerGroup,
+  type LayerTargetKind,
+} from "../../contracts/maskDocument";
+import {
+  type BrushStroke,
+  type EditOpBase,
+  type EditPath,
+  type EditPathPoint,
+  type MaskOperation,
+  type PointPrompt,
+} from "../../contracts/maskOps";
 
 export type MaskEditAction =
   | { type: "stroke"; stroke: BrushStroke & EditOpBase }

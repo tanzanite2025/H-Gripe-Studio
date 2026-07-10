@@ -1,4 +1,4 @@
-import type { MaskDocument, MaskLayer } from "../types/production";
+import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
 import type { MsgKey } from "../i18n";
 import type { StudioTarget } from "./studioTarget";
 

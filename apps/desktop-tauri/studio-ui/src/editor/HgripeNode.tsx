@@ -20,7 +20,7 @@ import { useNodeEditing } from "./editingContext";
 import { psdTemplatePathWarning } from "./psdcheck";
 import { NodeCardShell } from "./NodeCardShell";
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
-import type { LayeredImageAsset } from "../production/layeredImage";
+import type { LayeredImageAsset } from "../domain/layeredImage";
 import type { DeviceReport } from "../runtime/deviceReport";
 
 export interface HgripeNodeData extends Record<string, unknown> {

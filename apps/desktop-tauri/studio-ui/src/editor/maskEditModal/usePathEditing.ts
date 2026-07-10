@@ -3,7 +3,7 @@
 // step to drag its anchors, Enter commits / Escape reverts).
 import { useCallback, useRef, useState } from "react";
 import { activeOps, type EditState } from "../maskEdit";
-import { isPathOp, type EditPathPoint } from "../../types/production";
+import { isPathOp, type EditPathPoint } from "../../contracts/maskOps";
 import type { MaskEditDispatch } from "./actions";
 
 export interface PathEditing {

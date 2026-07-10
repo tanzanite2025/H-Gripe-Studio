@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { emptyAdjustmentLayer, emptyLayerMask, emptyMaskDocument, emptyMaskLayer, type MaskDocument } from "../types/production";
+import {
+  emptyAdjustmentLayer,
+  emptyLayerMask,
+  emptyMaskDocument,
+  emptyMaskLayer,
+  type MaskDocument,
+} from "../contracts/maskDocument";
 import { availableCommands, getCommandCapability } from "./studioCommands";
 import type { StudioTarget } from "./studioTarget";
 

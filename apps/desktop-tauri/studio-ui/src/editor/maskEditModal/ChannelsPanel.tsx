@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { generateThumbnail } from "../../bridge/tauri";
 import { useT } from "../../i18n";
-import type { MaskLayer } from "../../types/production";
+import { type MaskLayer } from "../../contracts/maskDocument";
 import { buildLayerThumb } from "../maskMorphology";
 
 interface ChannelsPanelProps {

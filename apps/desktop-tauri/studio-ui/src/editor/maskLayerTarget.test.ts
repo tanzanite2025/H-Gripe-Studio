@@ -20,8 +20,8 @@ import {
 } from "./maskEdit";
 import { fromMaskDocument, toMaskDocument } from "./imageDocument";
 import { resolveActiveTarget } from "./studioTarget";
-import type { BrushStroke } from "../types/production";
-import { activeTargetKind, emptyAdjustmentLayer } from "../types/production";
+import { type BrushStroke } from "../contracts/maskOps";
+import { activeTargetKind, emptyAdjustmentLayer } from "../contracts/maskDocument";
 
 const stroke = (id: string): BrushStroke => ({
   id,

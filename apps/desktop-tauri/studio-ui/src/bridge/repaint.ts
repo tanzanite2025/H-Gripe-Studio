@@ -1,5 +1,5 @@
-﻿import { tauriInvoke } from "./core";
-import type { QualityReport, RepaintReport } from "../types/production";
+import { tauriInvoke } from "./core";
+import { type QualityReport, type RepaintReport } from "../contracts/quality";
 
 // --- Detail Repaint ---------------------------------------------------------
 // The two pixel halves of the Detail Repaint node, wrapping the Rust

@@ -3,7 +3,7 @@ import * as bridge from "../bridge/tauri";
 import { GRAPH_VERSION, type WorkflowGraph } from "../graph/model";
 import { runGraph, validateGraph } from "./dag";
 import { batchItems, defaultExecutors } from "./executors";
-import { stubLayeredImageAsset as stubAsset } from "../production/layeredImage";
+import { stubLayeredImageAsset as stubAsset } from "../domain/layeredImage";
 
 function ctx(kind: string, params: Record<string, unknown>, inputs: Record<string, unknown> = {}) {
   return { nodeId: `${kind}-1`, kind, params, inputs };

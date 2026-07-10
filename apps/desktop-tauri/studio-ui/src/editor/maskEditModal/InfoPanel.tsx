@@ -2,7 +2,7 @@
 // prompts, and the edit-paths note.
 
 import { useT } from "../../i18n";
-import type { BrushStroke, PointPrompt } from "../../types/production";
+import { type BrushStroke, type PointPrompt } from "../../contracts/maskOps";
 
 interface InfoPanelProps {
   matteStrokes: readonly BrushStroke[];

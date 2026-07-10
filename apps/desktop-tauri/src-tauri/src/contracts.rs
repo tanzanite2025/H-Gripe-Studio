@@ -3,9 +3,9 @@
 //! These structs are the **single source of truth** for the JSON exchanged
 //! between the Python bridge (which produces them), the Rust orchestration
 //! layer (which (de)serializes them here), and the studio-ui front end (which
-//! mirrors them 1:1 in `studio-ui/src/types/production.ts`). Field names are
+//! mirrors them in the focused modules under `studio-ui/src/contracts/`). Field names are
 //! `snake_case` so the same JSON object round-trips unchanged across all three
-//! layers; keep the TypeScript interfaces in lock-step with any change here.
+//! layers; keep the TypeScript interfaces in lock-step with changes here.
 //!
 //! - [`VisualContext`]: machine-usable production context extracted from a PSD
 //!   template by the **PSD Context Analyze** node (background stats, lighting

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ViewportMaskOverlay, ViewportOverlayScene } from "../../bridge/viewport";
 import { probeImageDims, registerResource } from "../../bridge/files";
-import type { MaskDocument } from "../../types/production";
-import { isBrushOp, isPathOp } from "../../types/production";
+import { type MaskDocument } from "../../contracts/maskDocument";
+import { isBrushOp, isPathOp } from "../../contracts/maskOps";
 import { useViewportUnderlay, type ViewportUnderlaySource } from "../../viewport/useViewportUnderlay";
 import { IDENTITY_VIEW } from "../../viewport/view";
 import { compileImageAdjustments } from "../imageCompile";

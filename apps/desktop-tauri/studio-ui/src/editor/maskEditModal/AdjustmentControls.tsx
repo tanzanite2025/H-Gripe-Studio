@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useT, type MsgKey } from "../../i18n";
-import type { AdjustmentColorRange, LayerAdjustment } from "../../types/production";
+import { type AdjustmentColorRange, type LayerAdjustment } from "../../contracts/maskDocument";
 import { CurveEditor } from "./CurveEditor";
 
 const COLOR_RANGES: { range: AdjustmentColorRange; label: MsgKey }[] = [

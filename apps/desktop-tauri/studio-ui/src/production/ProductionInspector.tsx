@@ -4,7 +4,7 @@ import { useT } from "../i18n";
 import { ClipPropertiesPanel } from "./ClipPropertiesPanel";
 import type { ClipProperties } from "./clipProps";
 import { LayerReviewPanel } from "./LayerReviewPanel";
-import type { LayeredImageAsset } from "./layeredImage";
+import type { LayeredImageAsset } from "../domain/layeredImage";
 import { mediaAssetKindLabel } from "./MediaWorkspacePopover";
 import type { MediaAsset } from "./mediaBin";
 import type { TimelineClip } from "./timeline";

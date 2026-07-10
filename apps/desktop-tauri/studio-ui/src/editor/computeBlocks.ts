@@ -8,7 +8,7 @@
 
 import { sam2PromptMask } from "../bridge/sam2";
 import type { ManagedBackendRef, ModelCapability } from "../models/backendRegistry";
-import type { PointPrompt } from "../types/production";
+import { type PointPrompt } from "../contracts/maskOps";
 
 /**
  * The capability taxonomy Studio Actions speak. Finer-grained than the model

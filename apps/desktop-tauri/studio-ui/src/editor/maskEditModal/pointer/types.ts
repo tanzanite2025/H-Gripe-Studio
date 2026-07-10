@@ -5,7 +5,8 @@
 // dispatches.
 import type React from "react";
 import type { CanvasView } from "../../canvasView";
-import type { EditPathPoint, MaskDocument } from "../../../types/production";
+import { type EditPathPoint } from "../../../contracts/maskOps";
+import { type MaskDocument } from "../../../contracts/maskDocument";
 import type { EdgeMap, MagneticSnapSettings } from "../magneticSnap";
 import type { MaskTool, PaintTarget, ShapeKind } from "../../maskTools";
 import type { MaskEditAction } from "../actions";

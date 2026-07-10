@@ -7,14 +7,15 @@
 
 import { analyzePsdContext, composePsd, compositeRepaint, detectQualityIssues, enhanceImage, getOutputDir, localRepaintRegions, matchLightColor, prepareRepaintRegions, refineMaskEdge, runTaskJson } from "../bridge/tauri";
 import type { RepaintedCrop } from "../bridge/tauri";
-import type { Bounds, QualityReport, RepaintReport, VisualContext } from "../types/production";
+import { type Bounds, type VisualContext } from "../contracts/context";
+import { type QualityReport, type RepaintReport } from "../contracts/quality";
 import {
   findLayer,
   layeredAssetManifest,
   stubLayeredImageAsset,
   STUB_ORIGINAL_LAYER_ID,
   type LayeredImageAsset,
-} from "../production/layeredImage";
+} from "../domain/layeredImage";
 import type { ExecutorRegistry } from "./dag";
 import { defaultDeviceParam } from "./devicePreference";
 import {

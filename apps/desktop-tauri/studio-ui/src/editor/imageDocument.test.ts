@@ -11,9 +11,9 @@ import {
   emptyAdjustmentLayer,
   emptyMaskDocument,
   emptyMaskLayer,
-  type EditOp,
   type MaskDocument,
-} from "../types/production";
+} from "../contracts/maskDocument";
+import { type EditOp } from "../contracts/maskOps";
 import { addBrushStroke, historySnapshots, initEditState, serializeEditState } from "./maskEdit";
 
 function sampleMaskDocument(): MaskDocument {

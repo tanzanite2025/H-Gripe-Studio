@@ -8,7 +8,7 @@ import {
   STUB_ORIGINAL_LAYER_ID,
   STUB_SUBJECT_LAYER_ID,
   stubLayeredImageAsset,
-} from "./layeredImage";
+} from "../domain/layeredImage";
 
 const asset = stubLayeredImageAsset({ imagePath: "/a/b.png", nodeId: "n1", createdAt: "0" });
 
