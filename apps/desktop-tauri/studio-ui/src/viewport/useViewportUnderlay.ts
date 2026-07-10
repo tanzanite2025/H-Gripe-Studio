@@ -93,6 +93,17 @@ export interface ViewportUnderlay {
   host: WgpuViewportHost | null;
 }
 
+/** Decode a PNG-transport frame before committing it. The `<img>` src and
+ * the window rect swap in one React commit, but the browser keeps painting
+ * the old bitmap at the new rect until the new src decodes — a wrong-scale
+ * flash on zoom. Pre-decoding makes the swap visually atomic. */
+async function frameDecoded(frame: { presented: boolean; data_url: string }): Promise<void> {
+  if (frame.presented || !frame.data_url || typeof Image === "undefined") return;
+  const img = new Image();
+  img.src = frame.data_url;
+  if (typeof img.decode === "function") await img.decode().catch(() => undefined);
+}
+
 /**
  * Open a `kind` viewport targeting `source` for the lifetime of the caller
  * and present its rendered frame. The viewport is created on demand (never at
@@ -218,6 +229,7 @@ export function useViewportUnderlay(
     if (!host || !host.isOpen || !presentEnabledRef.current) return;
     runCoalesced(host, async () => {
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (hostRef.current !== host) return;
       framePresentedRef.current = frame.presented;
       setState((s) => ({
@@ -297,6 +309,7 @@ export function useViewportUnderlay(
         }
       }
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (cancelled) return;
       hostRef.current = host;
       setOpenHost(host);
@@ -352,6 +365,7 @@ export function useViewportUnderlay(
       }
       await host.command({ kind: "set_target", target });
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (cancelled || hostRef.current !== host) return;
       const zoom = Math.max(sentViewRef.current.zoom, 1);
       framePresentedRef.current = frame.presented;
@@ -385,6 +399,7 @@ export function useViewportUnderlay(
         await host.command({ kind: "set_presented", presented: false });
       }
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (cancelled || hostRef.current !== host) return;
       framePresentedRef.current = frame.presented;
       setState((s) => ({
@@ -433,6 +448,7 @@ export function useViewportUnderlay(
     runCoalesced(host, async () => {
       await host.command({ kind: "set_view", ...view });
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (cancelled || hostRef.current !== host) return;
       // Keep `dims`: the view window changes size, the frame does not.
       framePresentedRef.current = frame.presented;
@@ -459,6 +475,7 @@ export function useViewportUnderlay(
     runCoalesced(host, async () => {
       await host.command({ kind: "set_mask_overlay", overlay: maskOverlay });
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (cancelled || hostRef.current !== host) return;
       framePresentedRef.current = frame.presented;
       setState((s) => ({
@@ -483,6 +500,7 @@ export function useViewportUnderlay(
     runCoalesced(host, async () => {
       await host.command({ kind: "set_overlay_scene", scene: overlayScene });
       const frame = await host.renderFrame();
+      await frameDecoded(frame);
       if (cancelled || hostRef.current !== host) return;
       framePresentedRef.current = frame.presented;
       setState((s) => ({
