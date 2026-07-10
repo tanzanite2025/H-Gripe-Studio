@@ -30,6 +30,12 @@ mod proxy_cache;
 use proxy_cache::*;
 mod render;
 use render::*;
+mod render_image;
+use render_image::*;
+#[cfg(feature = "native-ffmpeg")]
+mod render_video;
+#[cfg(feature = "native-ffmpeg")]
+use render_video::*;
 mod state;
 pub(crate) use state::*;
 mod temporal;
