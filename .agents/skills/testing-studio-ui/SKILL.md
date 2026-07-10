@@ -50,6 +50,12 @@ Windows file dialogs can receive paths reliably through the clipboard:
 
 Keep generated runtime fixtures outside the repository so tests do not dirty the worktree.
 
+## Editor Quirks to Expect
+
+- After a Vite HMR/full reload (e.g. after merging a PR into the checked-out branch), the app may return to the node canvas; re-enter the layer editor via the Edit button on the image source card. The restored editor canvas can render blank until the first click inside the stage triggers a composite.
+- Layer visibility toggles are the eye icons in the leftmost column of each Layers-panel row; hover tooltips read "Hide this layer"/"Show this layer".
+- Frame visibility is owned by the Rust compositor: hiding every layer should yield a genuinely transparent frame (blank stage), not a stale last frame. If a stale frame appears, the compositor path might be broken — check `image_document.rs` layer-skip logic before blaming the frontend.
+
 ## Runtime Evidence
 
 - Record one focused flow after setup is complete.
@@ -57,6 +63,7 @@ Keep generated runtime fixtures outside the repository so tests do not dirty the
 - For load-time claims, record from file confirmation through first visible render and define a concrete threshold before execution.
 - Capture before/after screenshots for undo and cancellation behavior.
 - Report transient Windows `Not Responding` states even when the app recovers.
+- Save a full screenshot at every assertion moment even while recording: recordings can be lost if the session VM restarts mid-run, and per-assertion screenshots remain sufficient evidence to finish the report.
 
 ## Devin Secrets Needed
 
