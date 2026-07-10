@@ -33,6 +33,14 @@ import {
   type ProductionState,
 } from "../production/productionStore";
 import { findClip } from "../production/timeline";
+import {
+  imageSourceParamsFromPaths,
+  normalizeImageSourceSlots,
+} from "../domain/imageSourceSlots";
+import {
+  IMAGE_SOURCE_THUMB_MODE,
+  IMAGE_SOURCE_THUMB_SIZE,
+} from "../editor/nodeGeometry";
 
 type Translate = (key: MsgKey, vars?: Record<string, string | number>) => string;
 type NodeEditingActions = Pick<
@@ -198,7 +206,7 @@ export function useEditorLaunchController({
     });
     const node = {
       ...makeNode(newNodeId("imageSource"), "imageSource", origin.x, origin.y, {
-        path,
+        ...imageSourceParamsFromPaths([path]),
       }),
       selected: true,
     };
@@ -207,6 +215,7 @@ export function useEditorLaunchController({
       node,
     ]);
     setSelectedId(node.id);
+    void primeIngest([path], IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
     setMediaEditBlank(false);
     openMediaEdit(node.id);
   };
@@ -353,9 +362,8 @@ export function useEditorLaunchController({
                 const imagePath = data
                   ? (data.cutoutImagePath ??
                     data.imagePath ??
-                    (typeof data.params?.path === "string"
-                      ? data.params.path
-                      : null))
+                    normalizeImageSourceSlots(data.params)[0]?.path ??
+                    (typeof data.params?.path === "string" ? data.params.path : null))
                   : null;
                 const base = imagePath?.split(/[\\/]/).pop();
                 const tabs = nodes
@@ -367,9 +375,8 @@ export function useEditorLaunchController({
                     const nodeData = node.data as HgripeNodeData;
                     const path =
                       nodeData.imagePath ??
-                      (typeof nodeData.params?.path === "string"
-                        ? nodeData.params.path
-                        : null);
+                      normalizeImageSourceSlots(nodeData.params)[0]?.path ??
+                      (typeof nodeData.params?.path === "string" ? nodeData.params.path : null);
                     return {
                       id: node.id,
                       label: path?.split(/[\\/]/).pop() || null,
@@ -483,7 +490,9 @@ export function useEditorLaunchController({
     const owner = nodes.find(
       (node) =>
         (node.data as HgripeNodeData).kind === "imageSource" &&
-        (node.data as HgripeNodeData).params?.path === path,
+        normalizeImageSourceSlots((node.data as HgripeNodeData).params).some(
+          (slot) => slot.path === path,
+        ),
     );
     if (owner) {
       openMediaEdit(owner.id);
@@ -496,7 +505,7 @@ export function useEditorLaunchController({
     });
     const node = {
       ...makeNode(newNodeId("imageSource"), "imageSource", origin.x, origin.y, {
-        path,
+        ...imageSourceParamsFromPaths([path]),
       }),
       selected: true,
     };
@@ -505,7 +514,7 @@ export function useEditorLaunchController({
       node,
     ]);
     setSelectedId(node.id);
-    void primeIngest([path]);
+    void primeIngest([path], IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
     openMediaEdit(node.id);
   };
 

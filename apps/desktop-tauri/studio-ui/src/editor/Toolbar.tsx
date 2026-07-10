@@ -1,8 +1,6 @@
 import type {
-  Dispatch,
   MouseEvent,
   MutableRefObject,
-  SetStateAction,
 } from "react";
 
 import { WindowControls } from "./WindowControls";
@@ -119,14 +117,6 @@ export interface ToolbarProps {
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 
-  // Panels
-  showSnapshots: boolean;
-  setShowSnapshots: Dispatch<SetStateAction<boolean>>;
-  showLog: boolean;
-  setShowLog: Dispatch<SetStateAction<boolean>>;
-  snapshotCount: number;
-  logCount: number;
-
   // File actions
   fileInputRef: MutableRefObject<HTMLInputElement | null>;
   onFilePicked: (file: File) => void;
@@ -147,12 +137,6 @@ export function Toolbar({
   onOpenImageEdit,
   drawerOpen,
   onToggleDrawer,
-  showSnapshots,
-  setShowSnapshots,
-  showLog,
-  setShowLog,
-  snapshotCount,
-  logCount,
   fileInputRef,
   onFilePicked,
 }: ToolbarProps) {
@@ -198,24 +182,6 @@ export function Toolbar({
             className="module-btn module-settings"
           >
             <SettingsIcon />
-          </button>
-          <button
-            onClick={() => setShowSnapshots((s) => !s)}
-            title={t("btn.snapshotsTitle")}
-            aria-label={`${showSnapshots ? t("btn.hideSnapshots") : t("btn.snapshots")}${snapshotCount > 0 ? ` (${snapshotCount})` : ""}`}
-            className={`module-btn module-snapshots${showSnapshots ? " active" : ""}`}
-          >
-            <SnapshotIcon />
-            {snapshotCount > 0 ? <span className="module-count-badge">{snapshotCount}</span> : null}
-          </button>
-          <button
-            onClick={() => setShowLog((s) => !s)}
-            title={t("btn.logTitle")}
-            aria-label={`${showLog ? t("btn.hideLog") : t("btn.log")}${logCount > 0 ? ` (${logCount})` : ""}`}
-            className={`module-btn module-log${showLog ? " active" : ""}`}
-          >
-            <LogIcon />
-            {logCount > 0 ? <span className="module-count-badge">{logCount}</span> : null}
           </button>
           <button
             onClick={onOpenModels}

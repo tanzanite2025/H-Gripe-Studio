@@ -9,6 +9,37 @@ use serde::Serialize;
 
 use crate::{studio, thumb_cache};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ThumbnailMode {
+    /// Preserve the source aspect ratio and return the resized image bounds.
+    Fit,
+    /// Preserve the full source image, centered on a fixed square canvas.
+    ContainSquare,
+}
+
+impl ThumbnailMode {
+    pub(crate) fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("contain_square") | Some("contain-square") => Self::ContainSquare,
+            _ => Self::Fit,
+        }
+    }
+
+    fn cache_key(self) -> &'static str {
+        match self {
+            Self::Fit => "fit-v1",
+            Self::ContainSquare => "contain-square-v1",
+        }
+    }
+
+    pub(crate) fn wire_value(self) -> &'static str {
+        match self {
+            Self::Fit => "fit",
+            Self::ContainSquare => "contain_square",
+        }
+    }
+}
+
 pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -65,7 +96,7 @@ pub(crate) fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
 /// mtime and length, so editing or replacing the file invalidates its entry.
 /// Returns `None` if the file's metadata cannot be read (the caller then just
 /// skips the memory cache and takes the normal disk/decode path).
-fn thumb_mem_key(src: &Path, target: u32) -> Option<String> {
+fn thumb_mem_key(src: &Path, target: u32, mode: ThumbnailMode) -> Option<String> {
     let meta = std::fs::metadata(src).ok()?;
     let len = meta.len();
     let mtime = meta
@@ -76,7 +107,8 @@ fn thumb_mem_key(src: &Path, target: u32) -> Option<String> {
         .unwrap_or(0);
     let canon = std::fs::canonicalize(src).unwrap_or_else(|_| src.to_path_buf());
     Some(format!(
-        "{}|{target}|{mtime}|{len}",
+        "{}|{target}|{}|{mtime}|{len}",
+        mode.cache_key(),
         canon.to_string_lossy()
     ))
 }
@@ -111,6 +143,7 @@ pub(crate) fn generate_thumbnail_inner(
     path: &str,
     size: u32,
     dpr: Option<f64>,
+    mode: ThumbnailMode,
 ) -> Result<ThumbnailResult, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -131,7 +164,7 @@ pub(crate) fn generate_thumbnail_inner(
     // Fast path: an in-memory hit returns the finished thumbnail without reading
     // (let alone decoding) the source at all. Keyed by path + size + mtime/len,
     // so an edited source misses and regenerates.
-    let mem_key = thumb_mem_key(src, target);
+    let mem_key = thumb_mem_key(src, target, mode);
     if let Some(key) = &mem_key {
         if let Some(hit) = thumb_cache::get(key) {
             return Ok(ThumbnailResult {
@@ -153,7 +186,7 @@ pub(crate) fn generate_thumbnail_inner(
     // PNG write). The file is still written today, so a miss (never published /
     // evicted / stale) falls through to the disk decode below.
     if let Some(decoded) = studio::image_buffer::lookup_dynamic(src) {
-        return finish_thumbnail_from_decoded(decoded, target, mem_key);
+        return finish_thumbnail_from_decoded(decoded, target, mem_key, mode);
     }
 
     if !src.is_file() {
@@ -164,7 +197,7 @@ pub(crate) fn generate_thumbnail_inner(
     let source_hash = fnv1a_hex(&bytes);
 
     let cache_dir = crate::cache_subdir(".thumbnails")?;
-    let cache_path = cache_dir.join(format!("{source_hash}_{target}.png"));
+    let cache_path = cache_dir.join(format!("{source_hash}_{target}_{}.png", mode.cache_key()));
 
     // Disk cache hit: reuse the previously generated thumbnail PNG.
     let (data_url, width, height) = if let Some((cached, decoded)) = std::fs::read(&cache_path)
@@ -177,8 +210,7 @@ pub(crate) fn generate_thumbnail_inner(
         // Display decode: identical to a plain decode except that a 16-bit
         // ProPhoto manual output is colour-managed to sRGB for the thumbnail.
         let source = studio::studio_image::decode_display_from_memory(&bytes)?;
-        // `resize` preserves aspect ratio, fitting within target x target.
-        let thumb = source.resize(target, target, image::imageops::FilterType::Lanczos3);
+        let thumb = render_thumbnail(source, target, mode);
 
         let mut png: Vec<u8> = Vec::new();
         thumb
@@ -227,9 +259,9 @@ fn finish_thumbnail_from_decoded(
     decoded: image::DynamicImage,
     target: u32,
     mem_key: Option<String>,
+    mode: ThumbnailMode,
 ) -> Result<ThumbnailResult, String> {
-    // `resize` preserves aspect ratio, fitting within target x target.
-    let thumb = decoded.resize(target, target, image::imageops::FilterType::Lanczos3);
+    let thumb = render_thumbnail(decoded, target, mode);
     let mut png: Vec<u8> = Vec::new();
     thumb
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
@@ -237,7 +269,7 @@ fn finish_thumbnail_from_decoded(
     let source_hash = fnv1a_hex(&png);
 
     let cache_dir = crate::cache_subdir(".thumbnails")?;
-    let cache_path = cache_dir.join(format!("{source_hash}_{target}.png"));
+    let cache_path = cache_dir.join(format!("{source_hash}_{target}_{}.png", mode.cache_key()));
     // Best-effort cache write; a failure here should not fail the request.
     let _ = std::fs::write(&cache_path, &png);
 
@@ -268,4 +300,49 @@ fn finish_thumbnail_from_decoded(
         source_hash,
         mime,
     })
+}
+
+fn render_thumbnail(
+    source: image::DynamicImage,
+    target: u32,
+    mode: ThumbnailMode,
+) -> image::DynamicImage {
+    let resized = source.resize(target, target, image::imageops::FilterType::Lanczos3);
+    if mode == ThumbnailMode::Fit {
+        return resized;
+    }
+
+    let resized = resized.to_rgba8();
+    let mut canvas = image::RgbaImage::from_pixel(target, target, image::Rgba([0, 0, 0, 0]));
+    let x = ((target.saturating_sub(resized.width())) / 2) as i64;
+    let y = ((target.saturating_sub(resized.height())) / 2) as i64;
+    image::imageops::overlay(&mut canvas, &resized, x, y);
+    image::DynamicImage::ImageRgba8(canvas)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn solid(w: u32, h: u32) -> image::DynamicImage {
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            w,
+            h,
+            image::Rgba([255, 0, 0, 255]),
+        ))
+    }
+
+    #[test]
+    fn fit_mode_preserves_resized_aspect_bounds() {
+        let thumb = render_thumbnail(solid(20, 40), 64, ThumbnailMode::Fit);
+        assert_eq!((thumb.width(), thumb.height()), (32, 64));
+    }
+
+    #[test]
+    fn contain_square_mode_returns_fixed_square_canvas() {
+        let thumb = render_thumbnail(solid(20, 40), 64, ThumbnailMode::ContainSquare).to_rgba8();
+        assert_eq!((thumb.width(), thumb.height()), (64, 64));
+        assert_eq!(thumb.get_pixel(0, 0).0, [0, 0, 0, 0]);
+        assert_eq!(thumb.get_pixel(32, 32).0, [255, 0, 0, 255]);
+    }
 }

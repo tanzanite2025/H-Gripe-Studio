@@ -63,6 +63,7 @@ import { useProjectRestoreController } from "./app/useProjectRestoreController";
 import { useProductionWorkspaceController } from "./app/useProductionWorkspaceController";
 import { useEditorLaunchController } from "./app/useEditorLaunchController";
 import { useCanvasWorkspaceController } from "./app/useCanvasWorkspaceController";
+import { NODE_COLUMN_GAP } from "./editor/nodeGeometry";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
 // land on the generic image card (`imageSource`); videos land on the generic
@@ -74,7 +75,7 @@ const VIDEO_DROP_EXTS = new Set<string>(VIDEO_MEDIA_EXTS);
 // Minimal pre-wired workflow: Prompt -> Generate.
 const initialNodes: Node[] = [
   makeNode("prompt-1", "promptOptimize", 40, 120, { text: "a watercolor fox" }),
-  makeNode("generate-1", "generate", 360, 80),
+  makeNode("generate-1", "generate", 40 + NODE_COLUMN_GAP, 80),
 ];
 const initialEdges: Edge[] = [
   withHgripeDataEdge({
@@ -303,7 +304,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     restoredMessage: t("canvasTabs.restored"),
   });
 
-  // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
+  // Project-level run (multi-canvas plan Phase 5): run every open canvas's
   // graph in tab order. Defined below the run controller (see runAllCanvases).
   const runProjectRef = useRef<((canvases: ProjectRunCanvas[]) => Promise<void>) | null>(null);
   const runAllCanvases = useCallback(() => {
@@ -380,6 +381,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     newNodeId,
     patchNode,
     onParamChange,
+    appendImageSourcePaths,
     addNode,
     copySelection,
     pasteClipboard,
@@ -450,7 +452,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       const id = newNodeId("promptOptimize");
       setNodes((ns) =>
         ns.concat(
-          makeNode(id, "promptOptimize", target.position.x - 320, target.position.y + 40, {
+          makeNode(id, "promptOptimize", target.position.x - NODE_COLUMN_GAP, target.position.y + 40, {
             text,
           }),
         ),
@@ -473,6 +475,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       nodes,
       edges,
       onParamChange,
+      appendImageSourcePaths,
       takeSnapshot,
       newNodeId,
       setNodes,
@@ -522,11 +525,8 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     runSelection,
     runSelectionOnly,
     runNodeDownstream,
-    runBatch,
     runProject,
     cancelRun,
-    hasBatch,
-    batchCount,
   } = useStudioRunController({
     nodes,
     edges,
@@ -613,6 +613,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const editing = useMemo(
     () => ({
       onParamChange,
+      appendImageSourcePaths,
       // The card settings (gear) button; its surface is to be designed, so
       // clicking only selects the node for now.
       onCardSettings: (nodeId: string) => {
@@ -637,7 +638,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       runCard,
       runNodeDownstream,
     }),
-    [onParamChange, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, handleCanvasSelect, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
+    [onParamChange, appendImageSourcePaths, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, handleCanvasSelect, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
   );
 
   const {
@@ -687,12 +688,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
         onOpenImageEdit={openImageEditor}
         drawerOpen={drawerMode !== "collapsed"}
         onToggleDrawer={() => changeDrawerMode(toggleDrawer(drawerMode))}
-        showSnapshots={showSnapshots}
-        setShowSnapshots={setShowSnapshots}
-        showLog={showLog}
-        setShowLog={setShowLog}
-        snapshotCount={snapshots.length}
-        logCount={runLog.length}
         fileInputRef={fileInputRef}
         onFilePicked={(f) => void load(f)}
       />
@@ -813,12 +808,15 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
                 selectedNodeIds={selectedNodeIds}
                 onRunScope={runHudScope}
                 onCancelRun={cancelRun}
-                hasBatch={hasBatch}
-                batchCount={batchCount}
-                onRunBatch={() => void runBatch()}
                 showHistory={showHistory}
                 historyCount={runHistory.length}
                 onToggleHistory={() => setShowHistory((s) => !s)}
+                showSnapshots={showSnapshots}
+                snapshotCount={snapshots.length}
+                onToggleSnapshots={() => setShowSnapshots((s) => !s)}
+                showLog={showLog}
+                logCount={runLog.length}
+                onToggleLog={() => setShowLog((s) => !s)}
               />
               <div className="canvas-status" aria-live="polite">
                 {message && (

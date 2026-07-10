@@ -63,7 +63,7 @@ export function NodeCardShell({
     <div
       ref={rootRef}
       style={style}
-      className={`node ${selected ? "selected" : ""} status-${status} ${
+      className={`node node-kind-${spec.kind} ${selected ? "selected" : ""} status-${status} ${
         lod === "collapsed" ? "lod" : lod === "mid" ? "lod-mid" : ""
       }`}
     >

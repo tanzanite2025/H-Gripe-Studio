@@ -6,6 +6,7 @@ import { localizeSpec } from "../graph/nodeSpecsI18n";
 import type { RunScope } from "../runtime/runScope";
 import type { WorkflowGraph } from "../graph/model";
 import { buildRunPreview, type PreviewCategory } from "./runPreview";
+import { LogIcon, SnapshotIcon } from "./Toolbar";
 
 function PlayIcon() {
   return (
@@ -39,13 +40,16 @@ export interface RunHudProps {
   /** Execute the chosen scope (the host maps it to the run controller). */
   onRunScope: (scope: RunHudScope) => void;
   onCancelRun: () => void;
-  hasBatch: boolean;
-  batchCount: number;
-  onRunBatch: () => void;
   /** Run-history modal toggle — lives next to Run so past runs sit by the entry point. */
   showHistory: boolean;
   historyCount: number;
   onToggleHistory: () => void;
+  showSnapshots: boolean;
+  snapshotCount: number;
+  onToggleSnapshots: () => void;
+  showLog: boolean;
+  logCount: number;
+  onToggleLog: () => void;
 }
 
 /**
@@ -64,12 +68,15 @@ export function RunHud({
   selectedNodeIds,
   onRunScope,
   onCancelRun,
-  hasBatch,
-  batchCount,
-  onRunBatch,
   showHistory,
   historyCount,
   onToggleHistory,
+  showSnapshots,
+  snapshotCount,
+  onToggleSnapshots,
+  showLog,
+  logCount,
+  onToggleLog,
 }: RunHudProps) {
   const t = useT();
   const lang = useContext(LangContext);
@@ -121,6 +128,30 @@ export function RunHud({
           {showHistory ? t("btn.hideHistory") : t("btn.history")}
           {historyCount > 0 ? ` (${historyCount})` : ""}
         </button>
+        <button
+          type="button"
+          className={`run-hud-icon-btn run-hud-snapshots${showSnapshots ? " active" : ""}`}
+          onClick={onToggleSnapshots}
+          title={t("btn.snapshotsTitle")}
+          aria-label={`${showSnapshots ? t("btn.hideSnapshots") : t("btn.snapshots")}${
+            snapshotCount > 0 ? ` (${snapshotCount})` : ""
+          }`}
+        >
+          <SnapshotIcon />
+          {snapshotCount > 0 ? <span className="run-hud-count-badge">{snapshotCount}</span> : null}
+        </button>
+        <button
+          type="button"
+          className={`run-hud-icon-btn run-hud-log${showLog ? " active" : ""}`}
+          onClick={onToggleLog}
+          title={t("btn.logTitle")}
+          aria-label={`${showLog ? t("btn.hideLog") : t("btn.log")}${
+            logCount > 0 ? ` (${logCount})` : ""
+          }`}
+        >
+          <LogIcon />
+          {logCount > 0 ? <span className="run-hud-count-badge">{logCount}</span> : null}
+        </button>
         <label className="run-hud-scope">
           <span className="muted">{t("hud.scope")}</span>
           <select
@@ -140,15 +171,6 @@ export function RunHud({
         <span className="muted run-hud-count">
           {t("hud.willRun", { count: preview.total })}
         </span>
-        {hasBatch && (
-          <button
-            onClick={onRunBatch}
-            disabled={disabled || batchCount === 0}
-            title={t("btn.runBatchTitle")}
-          >
-            {t("btn.run")} x{batchCount}
-          </button>
-        )}
         {canCancel && (
           <button onClick={onCancelRun} title={t("btn.cancelTitle")}>
             {t("btn.cancel")}

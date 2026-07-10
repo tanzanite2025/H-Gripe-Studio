@@ -3,6 +3,8 @@
 // level are stacked vertically. Pure and deterministic so it is unit-testable;
 // the host computes the levels (via topoLevels) and feeds them in.
 
+import { NODE_COLUMN_GAP } from "./nodeGeometry";
+
 export interface LayoutOptions {
   /** Horizontal gap between columns (levels). */
   xGap?: number;
@@ -19,7 +21,7 @@ export type Positions = Map<string, { x: number; y: number }>;
 // the nodes that should move). Columns are vertically centered against the
 // tallest column so the result looks balanced rather than top-aligned.
 export function layeredPositions(levels: string[][], opts: LayoutOptions = {}): Positions {
-  const xGap = opts.xGap ?? 260;
+  const xGap = opts.xGap ?? NODE_COLUMN_GAP;
   const yGap = opts.yGap ?? 140;
   const xStart = opts.xStart ?? 40;
   const yStart = opts.yStart ?? 40;

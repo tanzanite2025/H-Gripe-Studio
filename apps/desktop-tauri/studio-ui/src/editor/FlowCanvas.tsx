@@ -21,6 +21,7 @@ import { HgripeNode, type HgripeNodeData } from "./HgripeNode";
 import { GroupNode } from "./GroupNode";
 import { HelperLineOverlay } from "./HelperLineOverlay";
 import { withEdgeExecutionStates } from "./edgeExecutionState";
+import { withImageSourceSlotEdgeColors } from "./edgeSlotColors";
 import {
   addEdgeWaypoint,
   clearEdgeWaypoints,
@@ -32,6 +33,7 @@ import { miniMapColor } from "./minimap";
 import { DND_NODE_KIND } from "./Palette";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { arePortsCompatible } from "../graph/model";
+import { resolveNodePort } from "../graph/portResolution";
 import { toWorkflowGraph } from "./adapter";
 import { wouldCreateCycle } from "../runtime/dag";
 import { useGpuBusy } from "../runtime/gpuLoad";
@@ -115,9 +117,8 @@ export function FlowCanvas({
     (nodeId: string | null, handleId: string | null | undefined, dir: "in" | "out") => {
       const node = viewNodes.find((n) => n.id === nodeId);
       if (!node) return undefined;
-      const spec = nodeSpec((node.data as { kind: string }).kind);
-      const ports = dir === "in" ? spec.inputs : spec.outputs;
-      return ports.find((p) => p.id === handleId)?.type;
+      const data = node.data as HgripeNodeData;
+      return resolveNodePort(data.kind, data.params, dir, handleId)?.type;
     },
     [viewNodes],
   );
@@ -131,34 +132,37 @@ export function FlowCanvas({
   );
   const renderedEdges = useMemo(
     () =>
-      withEdgeExecutionStates(edges, nodes).map((edge) =>
-        edgeWaypoints(edge).length > 0
-          ? {
-              ...edge,
-              data: {
-                ...edge.data,
-                onWaypointDragStart: onBeforeEdgeEdit,
-                onWaypointChange: (index: number, point: Pt) =>
-                  setEdges((current) =>
-                    current.map((candidate) =>
-                      candidate.id === edge.id
-                        ? moveEdgeWaypoint(candidate, index, point)
-                        : candidate,
+      withImageSourceSlotEdgeColors(
+        withEdgeExecutionStates(edges, nodes).map((edge) =>
+          edgeWaypoints(edge).length > 0
+            ? {
+                ...edge,
+                data: {
+                  ...edge.data,
+                  onWaypointDragStart: onBeforeEdgeEdit,
+                  onWaypointChange: (index: number, point: Pt) =>
+                    setEdges((current) =>
+                      current.map((candidate) =>
+                        candidate.id === edge.id
+                          ? moveEdgeWaypoint(candidate, index, point)
+                          : candidate,
+                      ),
                     ),
-                  ),
-                onWaypointRemove: (index: number) => {
-                  onBeforeEdgeEdit?.();
-                  setEdges((current) =>
-                    current.map((candidate) =>
-                      candidate.id === edge.id
-                        ? removeEdgeWaypoint(candidate, index)
-                        : candidate,
-                    ),
-                  );
+                  onWaypointRemove: (index: number) => {
+                    onBeforeEdgeEdit?.();
+                    setEdges((current) =>
+                      current.map((candidate) =>
+                        candidate.id === edge.id
+                          ? removeEdgeWaypoint(candidate, index)
+                          : candidate,
+                      ),
+                    );
+                  },
                 },
-              },
-            }
-          : edge,
+              }
+            : edge,
+        ),
+        nodes,
       ),
     [edges, nodes, onBeforeEdgeEdit, setEdges],
   );

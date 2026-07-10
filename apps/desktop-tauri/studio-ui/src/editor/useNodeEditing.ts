@@ -10,10 +10,15 @@ import { withHgripeBindingEdge, type Edge, type Node } from "@hgripe/flow";
 import { buildPaste, clipFromSelection, type Clip } from "./clipboard";
 import { detachChildren, isGroupNode, makeGroupNode, orderNodes } from "./grouping";
 import { layeredPositions } from "./layout";
+import { IMAGE_SOURCE_COLUMN_GAP, NODE_COLUMN_GAP } from "./nodeGeometry";
 import type { HgripeNodeData } from "./HgripeNode";
 import { toWorkflowGraph } from "./adapter";
 import { defaultParams } from "../graph/nodeSpecs";
 import { topoLevels } from "../runtime/dag";
+import {
+  appendImageSourcePaths,
+  firstImageSourceSlotPortId,
+} from "../domain/imageSourceSlots";
 
 export function makeNode(id: string, kind: string, x: number, y: number, params?: Record<string, unknown>): Node {
   const data: HgripeNodeData = { kind, params: { ...defaultParams(kind), ...params }, status: "idle" };
@@ -102,6 +107,29 @@ export function useNodeEditing({
       setNodes((ns) => ns.concat(makeNode(id, kind, pos.x, pos.y)));
     },
     [setNodes, takeSnapshot, newNodeId],
+  );
+
+  const appendImageSourcePathsToNode = useCallback(
+    (id: string, paths: string[]) => {
+      const clean = paths.map((path) => path.trim()).filter(Boolean);
+      if (clean.length === 0) return;
+      takeSnapshot();
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.id !== id) return n;
+          const d = n.data as HgripeNodeData;
+          if (d.kind !== "imageSource") return n;
+          return {
+            ...n,
+            data: {
+              ...d,
+              params: appendImageSourcePaths(d.params, clean),
+            },
+          };
+        }),
+      );
+    },
+    [setNodes, takeSnapshot],
   );
 
   const copySelection = useCallback(() => {
@@ -231,7 +259,9 @@ export function useNodeEditing({
       if (!source) return;
       takeSnapshot();
       const editId = newNodeId(editKind);
-      const pos = { x: source.position.x + 320, y: source.position.y };
+      const sourceData = source.data as HgripeNodeData;
+      const xGap = sourceData.kind === "imageSource" ? IMAGE_SOURCE_COLUMN_GAP : NODE_COLUMN_GAP;
+      const pos = { x: source.position.x + xGap, y: source.position.y };
       setNodes((ns) =>
         ns
           .map((n) => ({ ...n, selected: false }))
@@ -242,7 +272,10 @@ export function useNodeEditing({
           withHgripeBindingEdge({
             id: `binding-${editId}`,
             source: sourceId,
-            sourceHandle: "image",
+            sourceHandle:
+              sourceData.kind === "imageSource"
+                ? firstImageSourceSlotPortId(sourceData.params)
+                : "image",
             target: editId,
             targetHandle: "image",
           }),
@@ -276,6 +309,7 @@ export function useNodeEditing({
     newNodeId,
     patchNode,
     onParamChange,
+    appendImageSourcePaths: appendImageSourcePathsToNode,
     addNode,
     copySelection,
     pasteClipboard,

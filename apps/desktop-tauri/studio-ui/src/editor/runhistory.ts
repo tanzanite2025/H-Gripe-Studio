@@ -1,6 +1,6 @@
 // Run history model + persistence helpers.
 //
-// A RunRecord captures one Run/Batch execution -- when it started/ended, its
+// A RunRecord captures one graph/project execution -- when it started/ended, its
 // outcome, and the log lines it produced -- so past runs can be reviewed after
 // a refresh or on another machine, instead of the run log living only in memory
 // (see runlog.ts). Mutation/parse helpers are pure for unit testing; the
@@ -10,7 +10,7 @@
 
 import type { RunLogEntry } from "./runlog";
 
-export type RunKind = "run" | "batch" | "project";
+export type RunKind = "run" | "project";
 export type RunOutcome = "succeeded" | "failed" | "cancelled";
 
 export interface RunRecord {
@@ -75,7 +75,7 @@ function isRunRecord(value: unknown): value is RunRecord {
   const r = value as Record<string, unknown>;
   return (
     typeof r.id === "string" &&
-    (r.kind === "run" || r.kind === "batch" || r.kind === "project") &&
+    (r.kind === "run" || r.kind === "project") &&
     typeof r.startedAt === "number" &&
     typeof r.endedAt === "number" &&
     (r.outcome === "succeeded" || r.outcome === "failed" || r.outcome === "cancelled") &&

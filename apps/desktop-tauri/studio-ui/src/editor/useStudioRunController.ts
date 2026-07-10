@@ -41,7 +41,7 @@ import { runGraph, type NodeRunInfo, type NodeStatus } from "../runtime/dag";
 import { beginGpuWork } from "../runtime/gpuLoad";
 import { describeDeviceReport, deviceReportFromNodeOutputs } from "../runtime/deviceReport";
 import { describeRunScope, resolveRunScope, type RunScope } from "../runtime/runScope";
-import { batchItems, defaultExecutors } from "../runtime/executors";
+import { defaultExecutors } from "../runtime/executors";
 import {
   cancelStudioRun,
   createStudioRunId,
@@ -79,20 +79,7 @@ function studioOutputsToMap(
   return new Map(Object.entries(result.outputs));
 }
 
-function graphWithParamOverrides(
-  graph: WorkflowGraph,
-  nodeId: string,
-  params: Record<string, unknown>,
-): WorkflowGraph {
-  return {
-    ...graph,
-    nodes: graph.nodes.map((node) =>
-      node.id === nodeId ? { ...node, params: { ...node.params, ...params } } : node,
-    ),
-  };
-}
-
-/** One open canvas as submitted to the project-level batch run. */
+/** One open canvas as submitted to the project-level run. */
 export interface ProjectRunCanvas {
   id: string;
   /** Display title for the run log (file stem or "untitled"). */
@@ -121,7 +108,7 @@ export interface StudioRunControllerOptions {
 }
 
 export interface StudioRunController {
-  /** True while a run/batch is in flight. */
+  /** True while a run is in flight. */
   running: boolean;
   /** Active Rust run id (desktop), or null. */
   currentRunId: string | null;
@@ -156,16 +143,10 @@ export interface StudioRunController {
   runSelectionOnly: (nodeIds: string[]) => Promise<void>;
   /** Run `nodeId` and everything downstream of it (explicit downstream run). */
   runNodeDownstream: (nodeId: string) => Promise<void>;
-  /** Run the graph once per item of the (first) batch node. */
-  runBatch: () => Promise<void>;
-  /** Project-level batch: run every open canvas's graph sequentially. */
+  /** Project-level run: run every open canvas's graph sequentially. */
   runProject: (canvases: ProjectRunCanvas[]) => Promise<void>;
   /** Request cancellation of the active run (Rust backend or browser preview). */
   cancelRun: () => void;
-  /** Whether the graph contains a batch node. */
-  hasBatch: boolean;
-  /** Number of items the batch node fans out to. */
-  batchCount: number;
 }
 
 // Owns the studio run lifecycle along with its run log and run history:
@@ -197,7 +178,7 @@ export function useStudioRunController({
   const [runHistory, setRunHistory] = useState<RunRecord[]>(() => loadRunHistory());
   const [showHistory, setShowHistory] = useState(false);
 
-  // True from the moment a run/batch starts until it settles. Guards against
+  // True from the moment a run starts until it settles. Guards against
   // re-entrancy (e.g. the keyboard shortcut firing while a run is in flight),
   // which would otherwise let two runs clobber each other's refs and history.
   const inFlight = useRef(false);
@@ -658,109 +639,7 @@ export function useStudioRunController({
     [runScope],
   );
 
-  // Batch fan-out: run the graph once per item of the (first) batch node,
-  // sweeping its `index`. In Tauri, the graph is copied with an index override
-  // and sent to Rust; in browser preview, runGraph uses paramOverrides.
-  const batchNode = useMemo(
-    () => nodes.find((n) => (n.data as HgripeNodeData).kind === "batch") ?? null,
-    [nodes],
-  );
-  const batchCount = useMemo(
-    () => (batchNode ? batchItems((batchNode.data as HgripeNodeData).params.items).length : 0),
-    [batchNode],
-  );
-
-  const runBatch = useCallback(async () => {
-    if (!batchNode || batchCount === 0) {
-      setMessage("batch: no items");
-      return;
-    }
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setRunning(true);
-    setShowLog(true);
-    runFailures.current = [];
-    autoSnapshotBeforeRun();
-    clearRunInfo();
-    const useRustBackend = isTauri();
-    const backend = useRustBackend ? "Rust backend" : "browser preview";
-    const rustRunId = useRustBackend ? beginRustRun() : null;
-    const startedAt = Date.now();
-    runEntriesRef.current = [];
-    let outcome: RunOutcome = "succeeded";
-    pushLog("info", `▶ batch started: ${batchCount} run(s) (${backend})`);
-    const browserToken = useRustBackend ? null : { cancelled: false };
-    if (browserToken) browserCancel.current = browserToken;
-    try {
-      const authored = toWorkflowGraph(nodes, edges);
-      await warnPsdChain(authored);
-      const { graph, origin } = lowerWorkflowGraph(authored);
-      loweredOrigin.current = origin;
-      const collected: string[] = [];
-      for (let i = 0; i < batchCount; i++) {
-        if (browserToken?.cancelled) throw new Error("batch cancelled");
-        setMessage(
-          `batch ${i + 1}/${batchCount}${useRustBackend ? " (Rust backend)" : " (browser preview)"}…`,
-        );
-        pushLog("info", `— batch item ${i + 1}/${batchCount}`);
-        if (useRustBackend) {
-          const graphForRun = graphWithParamOverrides(graph, batchNode.id, { index: i });
-          const result = await runStudioGraph(graphForRun, applyStudioRunEvent, rustRunId ?? undefined);
-          applyStudioRunResult(result);
-          collected.push(...applyPreviews(graphForRun, { outputs: studioOutputsToMap(result) }));
-        } else {
-          const overrides = new Map([[batchNode.id, { index: i }]]);
-          const result = await runGraph(
-            graph,
-            defaultExecutors,
-            observer,
-            overrides,
-            () => browserToken?.cancelled ?? false,
-          );
-          collected.push(...applyPreviews(graph, result));
-        }
-      }
-      setMessage(
-        `batch done: ${batchCount} run(s), ${collected.length} output(s)${
-          useRustBackend ? " via Rust backend" : ""
-        }`,
-      );
-      pushLog("success", `✔ batch finished: ${batchCount} run(s), ${collected.length} output(s)`);
-    } catch (err) {
-      const message = String(err);
-      const cancelled = message.toLowerCase().includes("cancel");
-      outcome = cancelled ? "cancelled" : "failed";
-      setMessage(cancelled ? "batch cancelled" : `batch error: ${message}`);
-      pushLog(cancelled ? "warn" : "error", cancelled ? "batch cancelled" : `batch failed: ${message}`);
-    } finally {
-      if (rustRunId) endRustRun(rustRunId);
-      setRunning(false);
-      inFlight.current = false;
-      browserCancel.current = null;
-      highlightFailures();
-      recordRunHistory("batch", startedAt, outcome, backend);
-    }
-  }, [
-    batchNode,
-    batchCount,
-    nodes,
-    edges,
-    observer,
-    clearRunInfo,
-    applyPreviews,
-    applyStudioRunResult,
-    applyStudioRunEvent,
-    beginRustRun,
-    endRustRun,
-    pushLog,
-    autoSnapshotBeforeRun,
-    highlightFailures,
-    warnPsdChain,
-    recordRunHistory,
-    setMessage,
-  ]);
-
-  // Project-level batch (multi-canvas plan Phase 5): run every open canvas's
+  // Project-level run (multi-canvas plan Phase 5): run every open canvas's
   // graph sequentially. Only the active canvas has visible cards, so only its
   // statuses/previews are applied back; parked canvases run headlessly and
   // report through the run log.
@@ -927,10 +806,7 @@ export function useStudioRunController({
     runSelection,
     runSelectionOnly,
     runNodeDownstream,
-    runBatch,
     runProject,
     cancelRun,
-    hasBatch: !!batchNode,
-    batchCount,
   };
 }

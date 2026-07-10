@@ -1,5 +1,5 @@
 import { getOutputDir } from "../../bridge/tauri";
-import { batchItems } from "./graph";
+import { nonEmptyLines } from "./graph";
 import type { ExecutorRegistry } from "../dag";
 
 export const VIDEO_EXECUTORS = {
@@ -11,7 +11,7 @@ export const VIDEO_EXECUTORS = {
     const wired = ctx.inputs.frames;
     const frames = Array.isArray(wired)
       ? wired.map((f) => String(f ?? "").trim()).filter((f) => f.length > 0)
-      : batchItems(typeof wired === "string" && wired.trim() ? wired : ctx.params.frames);
+      : nonEmptyLines(typeof wired === "string" && wired.trim() ? wired : ctx.params.frames);
     if (frames.length === 0) {
       throw new Error("Video Assemble needs at least one frame (connect frames or set the frames param)");
     }

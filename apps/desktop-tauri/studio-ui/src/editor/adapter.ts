@@ -15,6 +15,7 @@ import { defaultParams } from "../graph/nodeSpecs";
 import { GROUP_KIND, DEFAULT_GROUP_WIDTH, DEFAULT_GROUP_HEIGHT, orderNodes } from "./grouping";
 import type { HgripeNodeData } from "./HgripeNode";
 import { edgeWaypoints } from "./edgeWaypoints";
+import { firstImageSourceSlotPortId } from "../domain/imageSourceSlots";
 
 export function toWorkflowGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   const graphNodes: GraphNode[] = nodes.map((n) => {
@@ -56,6 +57,13 @@ export function toWorkflowGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
  * param was introduced still get sensible values.
  */
 export function fromWorkflowGraph(graph: WorkflowGraph): { nodes: Node[]; edges: Edge[] } {
+  const sourcePortFor = (edge: GraphEdge) => {
+    const source = graph.nodes.find((node) => node.id === edge.source);
+    if (source?.kind === "imageSource" && edge.sourcePort === "image") {
+      return firstImageSourceSlotPortId(source.params);
+    }
+    return edge.sourcePort;
+  };
   const nodes: Node[] = graph.nodes.map((n) => {
     if (n.kind === GROUP_KIND) {
       const node: Node = {
@@ -83,7 +91,7 @@ export function fromWorkflowGraph(graph: WorkflowGraph): { nodes: Node[]; edges:
     const edge: Edge = {
       id: e.id,
       source: e.source,
-      sourceHandle: e.sourcePort || null,
+      sourceHandle: sourcePortFor(e) || null,
       target: e.target,
       targetHandle: e.targetPort || null,
     };

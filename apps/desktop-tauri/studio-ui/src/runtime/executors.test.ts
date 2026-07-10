@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as bridge from "../bridge/tauri";
 import { GRAPH_VERSION, type WorkflowGraph } from "../graph/model";
 import { runGraph, validateGraph } from "./dag";
-import { batchItems, defaultExecutors } from "./executors";
+import { defaultExecutors, nonEmptyLines } from "./executors";
 import { stubLayeredImageAsset as stubAsset } from "../domain/layeredImage";
 
 function ctx(kind: string, params: Record<string, unknown>, inputs: Record<string, unknown> = {}) {
@@ -13,8 +13,56 @@ describe("source executors", () => {
   it("imageSource emits its path as an image (or null when empty)", async () => {
     expect(await defaultExecutors.imageSource(ctx("imageSource", { path: "/a/b.png" }))).toEqual({
       image: "/a/b.png",
+      "image:slot-a": "/a/b.png",
     });
     expect(await defaultExecutors.imageSource(ctx("imageSource", { path: "" }))).toEqual({ image: null });
+  });
+
+  it("imageSource emits one output per image slot", async () => {
+    expect(
+      await defaultExecutors.imageSource(
+        ctx("imageSource", {
+          images: [
+            { id: "slot-a", label: "A", path: "/a/main.png" },
+            { id: "slot-b", label: "B", path: "/a/ref.png" },
+          ],
+        }),
+      ),
+    ).toEqual({
+      image: "/a/main.png",
+      "image:slot-a": "/a/main.png",
+      "image:slot-b": "/a/ref.png",
+    });
+  });
+
+  it("validates image source slot output ports", () => {
+    const graph: WorkflowGraph = {
+      version: GRAPH_VERSION,
+      nodes: [
+        {
+          id: "src",
+          kind: "imageSource",
+          position: { x: 0, y: 0 },
+          params: {
+            images: [
+              { id: "slot-a", label: "A", path: "/a/main.png" },
+              { id: "slot-b", label: "B", path: "/a/ref.png" },
+            ],
+          },
+        },
+        { id: "crop", kind: "crop", position: { x: 1, y: 0 }, params: {} },
+      ],
+      edges: [
+        {
+          id: "e1",
+          source: "src",
+          sourcePort: "image:slot-b",
+          target: "crop",
+          targetPort: "image",
+        },
+      ],
+    };
+    expect(validateGraph(graph)).toEqual([]);
   });
 
   it("videoSource emits its path as a video (or null when empty)", async () => {
@@ -76,19 +124,11 @@ describe("smartLayerSplit", () => {
   });
 });
 
-describe("batch", () => {
+describe("list params", () => {
   it("parses non-empty trimmed lines", () => {
-    expect(batchItems("a\n  b  \n\n c\n")).toEqual(["a", "b", "c"]);
-    expect(batchItems("")).toEqual([]);
-    expect(batchItems(undefined)).toEqual([]);
-  });
-
-  it("emits the item at the swept index, defaulting to the first", async () => {
-    const items = "red fox\nblue jay\ngreen frog";
-    expect(await defaultExecutors.batch(ctx("batch", { items }))).toEqual({ item: "red fox" });
-    expect(await defaultExecutors.batch(ctx("batch", { items, index: 2 }))).toEqual({ item: "green frog" });
-    // Out-of-range index falls back to the first item.
-    expect(await defaultExecutors.batch(ctx("batch", { items, index: 9 }))).toEqual({ item: "red fox" });
+    expect(nonEmptyLines("a\n  b  \n\n c\n")).toEqual(["a", "b", "c"]);
+    expect(nonEmptyLines("")).toEqual([]);
+    expect(nonEmptyLines(undefined)).toEqual([]);
   });
 });
 

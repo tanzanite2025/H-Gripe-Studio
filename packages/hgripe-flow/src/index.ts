@@ -16,9 +16,13 @@ export {
   cachedRoutedEdgePath,
   chamferPath,
   chamferPoints,
+  EDGE_PORT_STUB_LENGTH,
+  portedChamferPath,
+  portedChamferPoints,
   pointsToPath,
   routedEdgePath,
   routedEdgePoints,
+  type EdgeRouteOptions,
   type Pt,
 } from "./hgripe/edgeRouting";
 export {

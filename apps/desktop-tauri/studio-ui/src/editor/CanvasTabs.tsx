@@ -27,7 +27,7 @@ interface CanvasTabsProps {
   /** Dangerous per-tab actions, kept behind the "⋯" menu. */
   onResetTab: (id: string) => void;
   onClearTab: (id: string) => void;
-  /** Project-level batch: run every open canvas (multi-canvas plan Phase 5). */
+  /** Project-level run: run every open canvas (multi-canvas plan Phase 5). */
   onRunProject: () => void;
   /** Disables the project run while any run is in flight. */
   running: boolean;

@@ -22,7 +22,7 @@ export interface RunHistoryPanelProps {
 }
 
 /**
- * Left-rail run history: a list of past Run/Batch executions with their
+ * Left-rail run history: a list of past graph/project executions with their
  * outcome and timing; expanding a run shows the log lines it produced. Records
  * are persisted into the project folder on desktop (else localStorage), so they
  * survive a refresh, unlike the live in-memory run log.

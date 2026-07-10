@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use super::thumbnails::{base64_encode, generate_thumbnail_inner, ThumbnailResult};
+use super::thumbnails::{base64_encode, generate_thumbnail_inner, ThumbnailMode, ThumbnailResult};
 use crate::resource;
 
 /// The `<img>`-native MIME for a format the webview can render directly from
@@ -152,8 +152,10 @@ pub(crate) async fn generate_thumbnail(
     path: String,
     size: u32,
     dpr: Option<f64>,
+    mode: Option<String>,
 ) -> Result<ThumbnailResult, String> {
-    tauri::async_runtime::spawn_blocking(move || generate_thumbnail_inner(&path, size, dpr))
+    let mode = ThumbnailMode::from_wire(mode.as_deref());
+    tauri::async_runtime::spawn_blocking(move || generate_thumbnail_inner(&path, size, dpr, mode))
         .await
         .map_err(|err| format!("thumbnail worker failed: {err}"))?
 }
@@ -241,11 +243,15 @@ pub(crate) async fn resource_thumbnail(
     id: String,
     size: u32,
     dpr: Option<f64>,
+    mode: Option<String>,
 ) -> Result<ThumbnailResult, String> {
     let entry = resource::get(&id).ok_or_else(|| format!("unknown resource id: {id}"))?;
-    tauri::async_runtime::spawn_blocking(move || generate_thumbnail_inner(&entry.path, size, dpr))
-        .await
-        .map_err(|err| format!("thumbnail worker failed: {err}"))?
+    let mode = ThumbnailMode::from_wire(mode.as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        generate_thumbnail_inner(&entry.path, size, dpr, mode)
+    })
+    .await
+    .map_err(|err| format!("thumbnail worker failed: {err}"))?
 }
 
 /// Tauri event name for ingestion progress pushed by [`prime_ingest`].
@@ -263,6 +269,7 @@ const INGEST_CONCURRENCY: usize = 3;
 struct IngestEvent {
     path: String,
     phase: String,
+    mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     width: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -280,10 +287,11 @@ struct IngestEvent {
 }
 
 impl IngestEvent {
-    fn new(path: &str, phase: &str) -> Self {
+    fn new(path: &str, phase: &str, mode: ThumbnailMode) -> Self {
         Self {
             path: path.to_string(),
             phase: phase.to_string(),
+            mode: mode.wire_value().to_string(),
             width: None,
             height: None,
             data_url: None,
@@ -311,9 +319,11 @@ pub(crate) async fn prime_ingest(
     paths: Vec<String>,
     size: u32,
     dpr: Option<f64>,
+    mode: Option<String>,
 ) -> Result<(), String> {
     use tauri::Emitter;
 
+    let mode = ThumbnailMode::from_wire(mode.as_deref());
     let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(INGEST_CONCURRENCY));
     for path in paths {
         let app = app.clone();
@@ -326,7 +336,7 @@ pub(crate) async fn prime_ingest(
                 tokio::task::spawn_blocking(move || probe_image_dims_inner(&path)).await
             };
             if let Ok(Ok(d)) = dims {
-                let mut ev = IngestEvent::new(&path, "dims");
+                let mut ev = IngestEvent::new(&path, "dims", mode);
                 ev.width = Some(d.width);
                 ev.height = Some(d.height);
                 let _ = app.emit(INGEST_EVENT, ev);
@@ -336,12 +346,14 @@ pub(crate) async fn prime_ingest(
             let _permit = gate.acquire_owned().await;
             let thumb = {
                 let path = path.clone();
-                tokio::task::spawn_blocking(move || generate_thumbnail_inner(&path, size, dpr))
-                    .await
+                tokio::task::spawn_blocking(move || {
+                    generate_thumbnail_inner(&path, size, dpr, mode)
+                })
+                .await
             };
             match thumb {
                 Ok(Ok(t)) => {
-                    let mut ev = IngestEvent::new(&path, "thumb");
+                    let mut ev = IngestEvent::new(&path, "thumb", mode);
                     ev.width = Some(t.width);
                     ev.height = Some(t.height);
                     ev.data_url = Some(t.data_url);
@@ -351,12 +363,12 @@ pub(crate) async fn prime_ingest(
                     let _ = app.emit(INGEST_EVENT, ev);
                 }
                 Ok(Err(message)) => {
-                    let mut ev = IngestEvent::new(&path, "error");
+                    let mut ev = IngestEvent::new(&path, "error", mode);
                     ev.error = Some(message);
                     let _ = app.emit(INGEST_EVENT, ev);
                 }
                 Err(join_err) => {
-                    let mut ev = IngestEvent::new(&path, "error");
+                    let mut ev = IngestEvent::new(&path, "error", mode);
                     ev.error = Some(join_err.to_string());
                     let _ = app.emit(INGEST_EVENT, ev);
                 }

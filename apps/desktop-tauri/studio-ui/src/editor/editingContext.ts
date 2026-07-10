@@ -5,6 +5,8 @@ import type { ModelCapability } from "../models/backendRegistry";
 export interface NodeEditing {
   /** Update a single param of a node (used by inline node-card controls). */
   onParamChange: (nodeId: string, key: string, value: unknown) => void;
+  /** Append image paths into an image source card, capped by the source-slot protocol. */
+  appendImageSourcePaths?: (nodeId: string, paths: string[]) => void;
   /** The card's header settings (gear) entry point. Currently only selects
    * the node; the settings surface it opens is to be designed. */
   onCardSettings?: (nodeId: string) => void;

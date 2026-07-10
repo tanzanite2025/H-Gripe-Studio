@@ -41,6 +41,24 @@ describe("ingestStore", () => {
     expect(fn).toHaveBeenLastCalledWith({ dims: { w: 8000, h: 6000 }, thumb: "data:z" });
   });
 
+  it("keeps fit and contain-square previews separate for the same path", () => {
+    const fit = vi.fn();
+    const card = vi.fn();
+    subscribeIngest("/same.png", fit);
+    subscribeIngest("/same.png", card, "contain_square");
+
+    push({ path: "/same.png", phase: "thumb", mode: "fit", data_url: "data:fit" });
+    push({
+      path: "/same.png",
+      phase: "thumb",
+      mode: "contain_square",
+      data_url: "data:card",
+    });
+
+    expect(fit).toHaveBeenLastCalledWith({ thumb: "data:fit" });
+    expect(card).toHaveBeenLastCalledWith({ thumb: "data:card" });
+  });
+
   it("marks a path failed on an error event", () => {
     const fn = vi.fn();
     subscribeIngest("/d.png", fn);

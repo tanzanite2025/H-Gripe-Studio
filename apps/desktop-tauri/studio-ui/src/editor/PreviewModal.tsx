@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { probeImageDims } from "../bridge/files";
 import { useSettledView, useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
@@ -14,10 +14,10 @@ import { useT } from "../i18n";
 // itself stays read-only and cheap. See docs/cards/subject-mask-matte.md
 // (§ "Responsibility split").
 //
-// Like MediaViewer, it shows a backend-generated thumbnail (sized up) rather
-// than decoding the raw original in the webview, so the canvas/media discipline
-// is preserved. In browser preview the backend is mocked and returns an empty
-// data URL, so we degrade to a path-only card.
+// It presents through the shared viewport host rather than decoding the raw
+// original in the webview, so the canvas/media discipline is preserved. In
+// browser preview the backend is mocked and returns an empty data URL, so we
+// degrade to a path-only card.
 
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
@@ -86,19 +86,17 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
   // Full-detail re-renders wait for the view to settle; the live view rides
   // the surface's GPU crop fast path per tick below.
   const settledView = useSettledView(view);
-  // Presented through the viewport host (image_edit viewport); null in
-  // browser preview, where we degrade to a path-only card. Native surface
-  // presentation (surface swap): the frame presents on a surface window
-  // placed at the stage's rect, with the PNG transport as the fallback.
-  const underlayAnchorRef = useRef<HTMLDivElement | null>(null);
+  // The modal must always paint an in-webview frame. Native surface swap can
+  // be enabled later for heavy editors, but a read-only preview popup cannot
+  // risk reporting `presented` while the surface is hidden by the modal stack.
   const viewport = useViewportUnderlay(
     "image_edit",
     path && isImage ? path : undefined,
     1280,
     settledView,
     null,
-    underlayAnchorRef,
-    true,
+    null,
+    false,
     null,
     undefined,
     view,
@@ -153,7 +151,6 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
           className={`media-viewer-stage fit${viewport.presented ? " presented" : ""}`}
           {...stageProps}
         >
-          <div ref={underlayAnchorRef} className="media-viewer-underlay-anchor" />
           {!path ? (
             <p className="muted">No “{layer?.label}” produced yet — run the node to generate it.</p>
           ) : !isImage ? (

@@ -1,5 +1,14 @@
-import { memo, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { useStore, type NodeProps } from "@hgripe/flow";
+import {
+  memo,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import { Handle, Position, useStore, type NodeProps } from "@hgripe/flow";
 import { nodeSpec } from "../graph/nodeSpecs";
 import { localizeSpec } from "../graph/nodeSpecsI18n";
 import { LangContext, useT } from "../i18n";
@@ -8,7 +17,9 @@ import { connectedInputPorts } from "./connectedPorts";
 import type { NodeStatus } from "../runtime/dag";
 import {
   generateThumbnail,
+  pickFile,
   probeImageDims,
+  primeIngest,
   registerResource,
   resourceThumbnail,
   videoProbe,
@@ -22,6 +33,17 @@ import { NodeCardShell } from "./NodeCardShell";
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import type { LayeredImageAsset } from "../domain/layeredImage";
 import type { DeviceReport } from "../runtime/deviceReport";
+import {
+  imageSourceSlotPortId,
+  MAX_IMAGE_SOURCE_SLOTS,
+  normalizeImageSourceSlots,
+  type ImageSourceSlot,
+} from "../domain/imageSourceSlots";
+import {
+  IMAGE_SOURCE_THUMB_MODE,
+  IMAGE_SOURCE_THUMB_SIZE,
+  imageSourceCardWidthForSlots,
+} from "./nodeGeometry";
 
 export interface HgripeNodeData extends Record<string, unknown> {
   kind: string;
@@ -128,7 +150,7 @@ function LazyThumb({ path }: { path: string }) {
 // over `ingest://progress`. A header probe + IntersectionObserver-gated
 // thumbnail fetch remain as fallbacks for cards not created by a drop (manual
 // path entry, project load) or a missed event. See docs/cards/generic-media-card.md.
-function ImageSourceCard({ id, path }: { id: string; path: string }) {
+function ImageSourceTile({ nodeId, slot }: { nodeId: string; slot: ImageSourceSlot }) {
   const t = useT();
   const editing = useNodeEditing();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -141,17 +163,22 @@ function ImageSourceCard({ id, path }: { id: string; path: string }) {
   // id so the heavy pixels stay in Rust. Read from a ref inside the observer so
   // resolving it does not re-run (and reset) the observer effect.
   const resourceId = useRef<string | null>(null);
+  const path = slot.path;
 
   // Fast path: consume dims/thumbnail pushed by the backend ingestion pipeline.
   useEffect(() => {
     if (!path) return;
-    return subscribeIngest(path, (state) => {
-      if (state.dims) setDims(state.dims);
-      if (state.thumb) {
-        haveThumb.current = true;
-        setSrc(state.thumb);
-      }
-    });
+    return subscribeIngest(
+      path,
+      (state) => {
+        if (state.dims) setDims(state.dims);
+        if (state.thumb) {
+          haveThumb.current = true;
+          setSrc(state.thumb);
+        }
+      },
+      IMAGE_SOURCE_THUMB_MODE,
+    );
   }, [path]);
 
   // Resolve the lightweight ResourceId handle for this path. Registration also
@@ -213,8 +240,12 @@ function ImageSourceCard({ id, path }: { id: string; path: string }) {
         if (haveThumb.current) return;
         const id = resourceId.current;
         const req = id
-          ? resourceThumbnail(id, 256)
-          : generateThumbnail({ path, size: 256 });
+          ? resourceThumbnail(id, IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE)
+          : generateThumbnail({
+              path,
+              size: IMAGE_SOURCE_THUMB_SIZE,
+              mode: IMAGE_SOURCE_THUMB_MODE,
+            });
         req
           .then((thumb) => {
             if (cancelled || haveThumb.current || !thumb) return;
@@ -239,18 +270,28 @@ function ImageSourceCard({ id, path }: { id: string; path: string }) {
   }, [path]);
 
   return (
-    <div ref={ref} className="media-card">
-      {src ? (
-        <img
-          className="node-thumb"
-          src={src}
-          alt="preview"
-          title={t("node.thumbPreviewTitle")}
-          onDoubleClick={() => editing?.openImagePreview?.(path)}
-        />
-      ) : (
-        <div className="node-thumb placeholder">{t("common.loadingShort")}</div>
-      )}
+    <div
+      ref={ref}
+      className="image-source-tile"
+      style={{ "--slot-color": slot.color } as CSSProperties}
+    >
+      <div className="image-source-slot-head">
+        <span className="image-source-slot-badge">{slot.label}</span>
+        <span className="image-source-slot-role" title={slot.role}>
+          {slot.role}
+        </span>
+      </div>
+      <div
+        className="image-source-preview-well"
+        title={t("node.thumbPreviewTitle")}
+        onDoubleClick={() => editing?.openImagePreview?.(path)}
+      >
+        {src ? (
+          <img className="image-source-thumb" src={src} alt="preview" />
+        ) : (
+          <div className="image-source-placeholder">{t("common.loadingShort")}</div>
+        )}
+      </div>
       <div className="media-info">
         <span className="media-name" title={path}>
           {basename(path)}
@@ -261,15 +302,88 @@ function ImageSourceCard({ id, path }: { id: string; path: string }) {
           </span>
         ) : null}
       </div>
+      <Handle
+        id={imageSourceSlotPortId(slot.id)}
+        type="source"
+        position={Position.Bottom}
+        className="port image-source-slot-port"
+        title={`${slot.label}: image`}
+      />
       <div className="media-card-actions nodrag">
         <button
           type="button"
           className="primary"
-          title={t("node.mediaEditTitle")}
-          onClick={() => editing?.openMediaEdit?.(id)}
+          title={t("node.importImageEditorTitle")}
+          onClick={() => editing?.openMediaEdit?.(nodeId)}
         >
-          {t("node.mediaEdit")}
+          {t("node.importImageEditor")}
         </button>
+      </div>
+    </div>
+  );
+}
+
+const IMAGE_PICKER_EXTENSIONS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tiff",
+  "heic",
+  "heif",
+  "avif",
+];
+
+function ImageSourceAddTile({ nodeId }: { nodeId: string }) {
+  const t = useT();
+  const editing = useNodeEditing();
+  const pick = async () => {
+    const path = await pickFile({
+      title: t("imageEdit.pickTitle"),
+      filterName: "Images",
+      extensions: IMAGE_PICKER_EXTENSIONS,
+    });
+    if (!path) return;
+    editing?.appendImageSourcePaths?.(nodeId, [path]);
+    void primeIngest([path], IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    void pick();
+  };
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="image-source-add-tile nodrag"
+      data-image-source-node-id={nodeId}
+      title={t("node.imageSourceAddTitle")}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => void pick()}
+      onKeyDown={handleKeyDown}
+    >
+      <span className="image-source-add-head" aria-hidden="true" />
+      <span className="image-source-add-preview" aria-hidden="true">
+        <span className="image-source-add-icon">+</span>
+      </span>
+      <span className="image-source-add-label">{t("node.imageSourceAdd")}</span>
+      <span className="image-source-add-action" aria-hidden="true" />
+    </div>
+  );
+}
+
+function ImageSourceCard({ id, slots }: { id: string; slots: ImageSourceSlot[] }) {
+  const canAdd = slots.length < MAX_IMAGE_SOURCE_SLOTS;
+  return (
+    <div className="media-card image-source-card" data-image-source-node-id={id}>
+      <div className="image-source-grid">
+        {slots.map((slot) => (
+          <ImageSourceTile key={slot.id} nodeId={id} slot={slot} />
+        ))}
+        {canAdd ? <ImageSourceAddTile nodeId={id} /> : null}
       </div>
     </div>
   );
@@ -403,7 +517,9 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   // Card detail drops with zoom: full → mid (interior hidden) → collapsed
   // (title-only). A discrete-level selector means nodes only re-render when
   // crossing a threshold, not on every zoom tick.
-  const lodTier = useStore((s) => lodLevel(s.transform[2]));
+  const viewportLodTier = useStore((s) => lodLevel(s.transform[2]));
+  const fixedLayout = spec.kind === "imageSource";
+  const lodTier = fixedLayout ? "full" : viewportLodTier;
   const lod = lodTier === "collapsed";
   const slim = lodTier !== "full";
   // LOD hides the card's body for cheap rendering, but the card must keep its
@@ -422,7 +538,25 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   // Params flagged `inline` are edited directly on the card.
   // `imageSource`/`psdTemplate` paths get a basename caption so
   // the card stays readable even with a long absolute path.
-  const inlineParams = spec.params.filter((p) => p.inline && !p.port);
+  const imageSourceSlots =
+    spec.kind === "imageSource" ? normalizeImageSourceSlots(d.params) : [];
+  const imageSourceVisibleSlotCount =
+    spec.kind === "imageSource"
+      ? Math.min(
+          MAX_IMAGE_SOURCE_SLOTS,
+          Math.max(
+            1,
+            imageSourceSlots.length + (imageSourceSlots.length < MAX_IMAGE_SOURCE_SLOTS ? 1 : 0),
+          ),
+        )
+      : undefined;
+  const mediaSourceHasPath =
+    spec.kind === "imageSource"
+      ? true
+      : spec.kind === "videoSource" && Boolean(d.params.path);
+  const inlineParams = spec.params.filter(
+    (p) => p.inline && !p.port && !(mediaSourceHasPath && p.key === "path"),
+  );
   // Inline params bound to an input port render inside that port's function
   // block, keeping the field next to the connection dot that overrides it.
   const blockParams = spec.params.filter((p) => p.inline && p.port);
@@ -457,10 +591,22 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
     runCardRow && integrated ? (rowId: string) => runCardRow(id, rowId) : undefined;
   const runCard = editing?.runCard;
   const onRunCard = runCard && integrated ? () => runCard(id) : undefined;
+  const shellSpec = spec.kind === "imageSource" ? { ...spec, outputs: [] } : spec;
+  let nodeStyle: (CSSProperties & { "--image-source-card-width"?: string }) | undefined =
+    undefined;
+  if (slim && expandedHeight.current) {
+    nodeStyle = { minHeight: expandedHeight.current };
+  }
+  if (imageSourceVisibleSlotCount) {
+    nodeStyle = nodeStyle ?? {};
+    nodeStyle["--image-source-card-width"] = `${imageSourceCardWidthForSlots(
+      imageSourceVisibleSlotCount,
+    )}px`;
+  }
 
   return (
     <NodeCardShell
-      spec={spec}
+      spec={shellSpec}
       selected={!!selected}
       status={status}
       lod={lodTier}
@@ -474,7 +620,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
       onRunCard={lod ? undefined : onRunCard}
       runCardTitle={t("node.runCardTitle")}
       rootRef={cardRef}
-      style={slim && expandedHeight.current ? { minHeight: expandedHeight.current } : undefined}
+      style={nodeStyle}
     >
       {!slim && (status === "failed" || status === "cancelled") && d.error ? (
         <div className="node-error nodrag" title={d.error}>
@@ -582,8 +728,8 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
           </div>
         ) : null}
 
-        {spec.kind === "imageSource" && d.params.path ? (
-          <ImageSourceCard id={id} path={String(d.params.path)} />
+        {spec.kind === "imageSource" ? (
+          <ImageSourceCard id={id} slots={imageSourceSlots} />
         ) : null}
 
         {spec.kind === "videoSource" && d.params.path ? (

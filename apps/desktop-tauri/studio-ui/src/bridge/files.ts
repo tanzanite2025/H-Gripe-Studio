@@ -7,7 +7,10 @@ export interface ThumbnailRequest {
   /** Display size in CSS px; backend should generate at size * dpr. */
   size: number;
   dpr?: number;
+  mode?: ThumbnailMode;
 }
+
+export type ThumbnailMode = "fit" | "contain_square";
 
 // Fields are snake_case to match the Rust `ThumbnailResult` serialization.
 export interface ThumbnailResult {
@@ -35,6 +38,7 @@ export async function generateThumbnail(req: ThumbnailRequest): Promise<Thumbnai
     path: req.path,
     size: req.size,
     dpr: req.dpr ?? window.devicePixelRatio ?? 1,
+    mode: req.mode ?? null,
   })) as ThumbnailResult;
 }
 
@@ -147,6 +151,8 @@ export interface IngestProgress {
   path: string;
   /** `"dims"` (header W×H known), `"thumb"` (thumbnail ready), or `"error"`. */
   phase: "dims" | "thumb" | "error";
+  /** Thumbnail rendering contract used for this event. */
+  mode?: ThumbnailMode;
   width?: number;
   height?: number;
   /** `data:` URL of the ready thumbnail (only on the `"thumb"` phase). */
@@ -166,7 +172,12 @@ export interface IngestProgress {
  * `dims` and swap in the thumbnail from the pushed `thumb`, so ingestion never
  * touches the React main thread. No-op outside Tauri (browser preview).
  */
-export async function primeIngest(paths: string[], size = 256, dpr?: number): Promise<void> {
+export async function primeIngest(
+  paths: string[],
+  size = 256,
+  dpr?: number,
+  mode: ThumbnailMode = "fit",
+): Promise<void> {
   const invoke = tauriInvoke();
   if (!invoke || paths.length === 0) return;
   try {
@@ -174,6 +185,7 @@ export async function primeIngest(paths: string[], size = 256, dpr?: number): Pr
       paths,
       size,
       dpr: dpr ?? window.devicePixelRatio ?? 1,
+      mode,
     });
   } catch {
     /* best-effort warmup; cards still lazy-load on their own */
@@ -245,6 +257,7 @@ export async function resourceThumbnail(
   id: string,
   size = 256,
   dpr?: number,
+  mode: ThumbnailMode = "fit",
 ): Promise<ThumbnailResult | null> {
   const invoke = tauriInvoke();
   if (!invoke || !id) return null;
@@ -253,6 +266,7 @@ export async function resourceThumbnail(
       id,
       size,
       dpr: dpr ?? window.devicePixelRatio ?? 1,
+      mode,
     })) as ThumbnailResult;
   } catch {
     return null;

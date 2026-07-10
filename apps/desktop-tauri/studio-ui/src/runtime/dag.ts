@@ -9,7 +9,7 @@
 // from the renderer — the same graph could later run from a CRON job or webhook.
 
 import { arePortsCompatible, type GraphEdge, type WorkflowGraph } from "../graph/model";
-import { nodeSpec } from "../graph/nodeSpecs";
+import { resolveNodePort } from "../graph/portResolution";
 
 export type NodeStatus =
   | "idle"
@@ -184,8 +184,8 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
       issues.push({ severity: "error", code: "dangling_edge", message: "edge references a missing node", edgeId: edge.id });
       continue;
     }
-    const srcPort = nodeSpec(src.kind).outputs.find((p) => p.id === edge.sourcePort);
-    const dstPort = nodeSpec(dst.kind).inputs.find((p) => p.id === edge.targetPort);
+    const srcPort = resolveNodePort(src.kind, src.params, "out", edge.sourcePort);
+    const dstPort = resolveNodePort(dst.kind, dst.params, "in", edge.targetPort);
     if (!srcPort || !dstPort) {
       issues.push({ severity: "error", code: "unknown_port", message: "edge references an unknown port", edgeId: edge.id });
       continue;
@@ -232,7 +232,7 @@ export async function runGraph(
   observer: RunObserver = {},
   /**
    * Per-node param overrides merged on top of `node.params` for this run only
-   * (used by batch fan-out to sweep one node across a list without mutating the
+   * (used by scoped runs to adjust params without mutating the
    * graph). Overrides are part of the cache signature, so each sweep value is a
    * distinct cache entry.
    */

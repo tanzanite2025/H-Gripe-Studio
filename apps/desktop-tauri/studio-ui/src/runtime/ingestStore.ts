@@ -9,7 +9,12 @@
 // here for the card to render. Cards keep their own probe/lazy-thumbnail path
 // as a fallback (manual path entry, project load, or a missed event).
 
-import { listenIngestProgress, type IngestProgress, type UnlistenFn } from "../bridge/tauri";
+import {
+  listenIngestProgress,
+  type IngestProgress,
+  type ThumbnailMode,
+  type UnlistenFn,
+} from "../bridge/tauri";
 
 /** Latest known ingestion state for a single source path. */
 export interface IngestState {
@@ -30,6 +35,10 @@ const MAX_CACHED_PATHS = 256;
 
 const cache = new Map<string, IngestState>();
 const listeners = new Map<string, Set<Listener>>();
+
+function cacheKey(path: string, mode: ThumbnailMode = "fit"): string {
+  return `${mode}\n${path}`;
+}
 
 /** Store `state` as most-recent and evict the oldest idle paths past the cap. */
 function cachePut(path: string, state: IngestState): void {
@@ -61,9 +70,10 @@ function applyEvent(prev: IngestState, ev: IngestProgress): IngestState {
 
 /** Fold one event into the cache and notify that path's listeners. */
 function dispatch(ev: IngestProgress): void {
-  const next = applyEvent(cache.get(ev.path) ?? {}, ev);
-  cachePut(ev.path, next);
-  listeners.get(ev.path)?.forEach((fn) => fn(next));
+  const key = cacheKey(ev.path, ev.mode ?? "fit");
+  const next = applyEvent(cache.get(key) ?? {}, ev);
+  cachePut(key, next);
+  listeners.get(key)?.forEach((fn) => fn(next));
 }
 
 /**
@@ -83,24 +93,29 @@ export function startIngestListener(): void {
  * is replayed synchronously so late-mounting cards are not stuck waiting for
  * the next event. Returns an unsubscribe function.
  */
-export function subscribeIngest(path: string, fn: Listener): () => void {
+export function subscribeIngest(
+  path: string,
+  fn: Listener,
+  mode: ThumbnailMode = "fit",
+): () => void {
   startIngestListener();
-  let set = listeners.get(path);
+  const key = cacheKey(path, mode);
+  let set = listeners.get(key);
   if (!set) {
     set = new Set();
-    listeners.set(path, set);
+    listeners.set(key, set);
   }
   set.add(fn);
-  const cached = cache.get(path);
+  const cached = cache.get(key);
   if (cached) {
-    cachePut(path, cached); // subscribing counts as a touch
+    cachePut(key, cached); // subscribing counts as a touch
     fn(cached);
   }
   return () => {
-    const s = listeners.get(path);
+    const s = listeners.get(key);
     if (!s) return;
     s.delete(fn);
-    if (s.size === 0) listeners.delete(path);
+    if (s.size === 0) listeners.delete(key);
   };
 }
 

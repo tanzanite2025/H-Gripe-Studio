@@ -77,7 +77,6 @@ describe("nodeSpecs executor tagging", () => {
       "generate",
       "process",
       "review",
-      "workflow",
       "output",
     ]);
 
@@ -97,7 +96,6 @@ describe("nodeSpecs executor tagging", () => {
       detailRepaint: "process",
       matchLightColor: "process",
       detailWatchdog: "review",
-      batch: "workflow",
       save: "output",
       psdExport: "output",
       videoAssemble: "output",

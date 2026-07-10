@@ -6,7 +6,6 @@ import { IMAGE_NODE_SPECS } from "./nodeSpecs/image";
 import { PSD_NODE_SPECS } from "./nodeSpecs/psd";
 import { QUALITY_NODE_SPECS } from "./nodeSpecs/quality";
 import { VIDEO_NODE_SPECS } from "./nodeSpecs/video";
-import { WORKFLOW_NODE_SPECS } from "./nodeSpecs/workflow";
 import { OUTPUT_NODE_SPECS } from "./nodeSpecs/output";
 import { INTERNAL_NODE_SPECS } from "./nodeSpecs/internal";
 import type { NodeSpec } from "./nodeSpecs/types";
@@ -31,14 +30,12 @@ const NODE_SPEC_CATALOG = combineNodeSpecGroups(
   PSD_NODE_SPECS,
   QUALITY_NODE_SPECS,
   VIDEO_NODE_SPECS,
-  WORKFLOW_NODE_SPECS,
   OUTPUT_NODE_SPECS,
   INTERNAL_NODE_SPECS,
 );
 
 export const NODE_SPECS: Record<string, NodeSpec> = {
   promptOptimize: NODE_SPEC_CATALOG.promptOptimize,
-  batch: NODE_SPEC_CATALOG.batch,
   imageSource: NODE_SPEC_CATALOG.imageSource,
   videoSource: NODE_SPEC_CATALOG.videoSource,
   psdTemplate: NODE_SPEC_CATALOG.psdTemplate,
@@ -88,8 +85,10 @@ export type PaletteCategory = Exclude<NodeSpec["category"], "internal">;
 
 export function paletteGroups(): { category: PaletteCategory; specs: NodeSpec[] }[] {
   const order: PaletteCategory[] = ["source", "generate", "process", "review", "workflow", "output"];
-  return order.map((category) => ({
-    category,
-    specs: Object.values(NODE_SPECS).filter((s) => s.category === category && s.palette !== "internal"),
-  }));
+  return order
+    .map((category) => ({
+      category,
+      specs: Object.values(NODE_SPECS).filter((s) => s.category === category && s.palette !== "internal"),
+    }))
+    .filter((group) => group.specs.length > 0);
 }

@@ -99,7 +99,7 @@ export interface NodeSpec {
    * - `generate` a model/provider generation step.
    * - `process`  a production media operation (split/enhance/grade/crop/mask/repair).
    * - `review`   the user confirms or inspects a meaningful result.
-   * - `workflow` changes how the graph is executed (e.g. batch fan-out).
+   * - `workflow` changes how the graph is executed.
    * - `output`   produces a deliverable.
    * - `internal` implementation primitives kept only for saved-workflow /
    *   runtime compatibility; never shown in the palette.

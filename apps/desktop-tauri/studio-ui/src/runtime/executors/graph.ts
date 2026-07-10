@@ -1,7 +1,11 @@
 import type { ExecutorRegistry } from "../dag";
+import {
+  imageSourceSlotPortId,
+  normalizeImageSourceSlots,
+} from "../../domain/imageSourceSlots";
 
-/** Non-empty, trimmed lines of a batch node's `items` param. */
-export function batchItems(items: unknown): string[] {
+/** Non-empty, trimmed lines from a textarea/list param. */
+export function nonEmptyLines(items: unknown): string[] {
   return String(items ?? "")
     .split("\n")
     .map((s) => s.trim())
@@ -9,14 +13,14 @@ export function batchItems(items: unknown): string[] {
 }
 
 export const GRAPH_EXECUTORS = {
-  // Emits a single item from the list. A normal run emits index 0; batch
-  // fan-out sweeps `index` via runGraph's paramOverrides.
-  batch: async (ctx) => {
-    const items = batchItems(ctx.params.items);
-    const index = Number(ctx.params.index ?? 0);
-    return { item: items[index] ?? items[0] ?? "" };
+  imageSource: async (ctx) => {
+    const slots = normalizeImageSourceSlots(ctx.params);
+    const out: Record<string, unknown> = { image: slots[0]?.path ?? null };
+    for (const slot of slots) {
+      out[imageSourceSlotPortId(slot.id)] = slot.path;
+    }
+    return out;
   },
-  imageSource: async (ctx) => ({ image: String(ctx.params.path ?? "") || null }),
   videoSource: async (ctx) => ({ video: String(ctx.params.path ?? "") || null }),
   psdTemplate: async (ctx) => ({ template: String(ctx.params.path ?? "") || null }),
   number: async (ctx) => ({ value: Number(ctx.params.value ?? 0) }),

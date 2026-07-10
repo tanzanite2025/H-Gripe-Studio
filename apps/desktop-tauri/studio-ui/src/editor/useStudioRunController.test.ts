@@ -13,7 +13,7 @@ import {
 
 // Run execution is exercised through its mocked boundary (runGraph); the
 // controller's own orchestration -- logging, history recording, failure
-// highlighting, batch fan-out -- is what these tests pin down. The DAG runtime
+// highlighting, scoped runs -- is what these tests pin down. The DAG runtime
 // itself has its own suite (dag.test.ts).
 const { runGraphMock } = vi.hoisted(() => ({ runGraphMock: vi.fn() }));
 
@@ -211,38 +211,6 @@ describe("useStudioRunController", () => {
 
     expect(result.current.runHistory[0].outcome).toBe("cancelled");
     expect(setMessage).toHaveBeenCalledWith("cancelled");
-  });
-
-  it("fans out a batch run once per item", async () => {
-    const { options } = setup([makeNode("b1", "batch", { items: "a\nb\nc" })]);
-    const { result } = renderHook(() => useStudioRunController(options));
-
-    expect(result.current.hasBatch).toBe(true);
-    expect(result.current.batchCount).toBe(3);
-
-    await act(async () => {
-      await result.current.runBatch();
-    });
-
-    expect(runGraphMock).toHaveBeenCalledTimes(3);
-    expect(result.current.runHistory[0]).toMatchObject({ kind: "batch", outcome: "succeeded" });
-    expect(result.current.runLog.some((e) => e.message.includes("batch started: 3"))).toBe(true);
-  });
-
-  it("runBatch is a no-op without a batch node", async () => {
-    const { options, setMessage } = setup([makeNode("p1", "promptOptimize")]);
-    const { result } = renderHook(() => useStudioRunController(options));
-
-    expect(result.current.hasBatch).toBe(false);
-    expect(result.current.batchCount).toBe(0);
-
-    await act(async () => {
-      await result.current.runBatch();
-    });
-
-    expect(setMessage).toHaveBeenCalledWith("batch: no items");
-    expect(runGraphMock).not.toHaveBeenCalled();
-    expect(result.current.runHistory).toHaveLength(0);
   });
 
   it("runs every canvas of a project run and records a project record", async () => {

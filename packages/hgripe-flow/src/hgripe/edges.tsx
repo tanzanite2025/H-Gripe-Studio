@@ -12,7 +12,7 @@ import {
   type Node,
   type ReactFlowProps,
 } from "@xyflow/react";
-import { cachedRoutedEdgePath, chamferPath, type Pt } from "./edgeRouting";
+import { cachedRoutedEdgePath, portedChamferPath, type Pt } from "./edgeRouting";
 import {
   EDGE_ARROW_MARKER,
   EDGE_STROKE_WIDTH,
@@ -250,6 +250,8 @@ export const ChamferEdge = memo(function ChamferEdge({
   sourceY,
   targetX,
   targetY,
+  sourcePosition,
+  targetPosition,
   selected,
   data,
   style,
@@ -260,6 +262,7 @@ export const ChamferEdge = memo(function ChamferEdge({
     { x: sourceX, y: sourceY },
     { x: targetX, y: targetY },
     waypoints,
+    { sourcePosition, targetPosition },
   );
   const state = hgripeEdgeVisualState(data);
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
@@ -305,6 +308,8 @@ export const BindingEdge = memo(function BindingEdge({
   sourceY,
   targetX,
   targetY,
+  sourcePosition,
+  targetPosition,
   selected,
   data,
   style,
@@ -315,6 +320,7 @@ export const BindingEdge = memo(function BindingEdge({
     { x: sourceX, y: sourceY },
     { x: targetX, y: targetY },
     waypoints,
+    { sourcePosition, targetPosition },
   );
   const state = hgripeEdgeVisualState(data);
   const customStroke = style?.stroke ? String(style.stroke) : undefined;
@@ -361,13 +367,19 @@ export function DragConnectionLine({
   fromY,
   toX,
   toY,
+  fromPosition,
+  toPosition,
   connectionStatus,
   connectionLineStyle,
 }: ConnectionLineComponentProps) {
   const valid = connectionStatus !== "invalid";
   const stroke = valid ? DRAG_STROKE_VALID : DRAG_STROKE_INVALID;
   const markerId = valid ? DRAG_ARROW_VALID_ID : DRAG_ARROW_INVALID_ID;
-  const path = chamferPath({ x: fromX, y: fromY }, { x: toX, y: toY });
+  const path = portedChamferPath(
+    { x: fromX, y: fromY },
+    { x: toX, y: toY },
+    { sourcePosition: fromPosition, targetPosition: toPosition },
+  );
 
   return (
     <path

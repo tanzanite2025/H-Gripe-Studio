@@ -57,8 +57,8 @@ export const messages = {
   "canvasTabs.restored": { en: "restored open canvases", zh: "已恢复打开的画布" },
   "canvasTabs.runProject": { en: "Run all canvases", zh: "运行全部画布" },
   "canvasTabs.runProjectTitle": {
-    en: "project-level batch: run every open canvas in order (results land on the active canvas only)",
-    zh: "项目级批量：按顺序运行所有打开的画布（结果仅显示在当前画布上）",
+    en: "project-level run: run every open canvas in order (results land on the active canvas only)",
+    zh: "项目级运行：按顺序运行所有打开的画布（结果仅显示在当前画布上）",
   },
   "status.autosaveTitle": {
     en: "this workflow is autosaved to the workspace and restored on next open",
@@ -162,7 +162,6 @@ export const messages = {
     en: "request cancellation before the next node starts",
     zh: "在下一个节点开始前请求取消",
   },
-  "btn.runBatchTitle": { en: "run the graph once per batch item", zh: "对每个批处理项各运行一次" },
   "btn.runSelected": { en: "Run selected", zh: "运行所选" },
   "btn.runSelectedTitle": {
     en: "run the selected nodes plus their upstream dependencies",
@@ -290,10 +289,15 @@ export const messages = {
     en: "Create a bound crop node from this image and draw the box manually",
     zh: "基于此图新建一个绑定的裁剪节点，手动框选裁剪框",
   },
-  "node.mediaEdit": { en: "Edit", zh: "编辑" },
-  "node.mediaEditTitle": {
-    en: "Open the unified editor (mask + crop) and apply to a bound edit node",
-    zh: "打开统一编辑器（蒙版 + 裁剪），确定后生成一个绑定的编辑节点",
+  "node.importImageEditor": { en: "Import to Image Editor", zh: "导入图片编辑器" },
+  "node.importImageEditorTitle": {
+    en: "Open this image as its own document in the standalone image editor",
+    zh: "把这张图片作为独立文档导入图片编辑器",
+  },
+  "node.imageSourceAdd": { en: "Add image", zh: "添加图片" },
+  "node.imageSourceAddTitle": {
+    en: "Click to pick an image, or drop local images here",
+    zh: "点击选择图片，或把本地图片拖到这里",
   },
   "mediaEdit.editor": { en: "image editor", zh: "图片编辑器" },
   "preview.imageTitle": { en: "Image preview", zh: "图片预览" },

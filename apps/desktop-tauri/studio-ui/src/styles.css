@@ -218,18 +218,6 @@ button:disabled { opacity: 0.6; cursor: default; }
 .toolbar-title-status .module-grade:hover {
   background: rgba(192, 132, 252, 0.12);
 }
-.toolbar-title-status .module-snapshots .toolbar-icon {
-  stroke: #fbbf24;
-}
-.toolbar-title-status .module-snapshots:hover {
-  background: rgba(251, 191, 36, 0.12);
-}
-.toolbar-title-status .module-log .toolbar-icon {
-  stroke: #60a5fa;
-}
-.toolbar-title-status .module-log:hover {
-  background: rgba(96, 165, 250, 0.12);
-}
 .toolbar-title-status .module-model .toolbar-icon {
   stroke: var(--t-api);
 }
@@ -251,22 +239,6 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .toolbar-title-status .module-lang:hover {
   background: rgba(245, 158, 11, 0.12);
-}
-.toolbar-title-status .module-count-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 999px;
-  border: 1px solid var(--bg);
-  background: var(--accent);
-  color: white;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 13px;
-  pointer-events: none;
 }
 .toolbar-title-status .module-btn.active {
   border-color: transparent;

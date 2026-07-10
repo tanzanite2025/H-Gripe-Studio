@@ -5,8 +5,11 @@ import {
   chamferPath,
   chamferPoints,
   EDGE_LOD_ZOOM_THRESHOLD,
+  EDGE_PORT_STUB_LENGTH,
   isEdgeLodActive,
   pointsToPath,
+  portedChamferPath,
+  portedChamferPoints,
   routedEdgePath,
   routedEdgePoints,
 } from "@hgripe/flow";
@@ -38,6 +41,34 @@ describe("chamferPoints / path", () => {
 
   it("uses a straight segment when the ports are already aligned", () => {
     expect(chamferPath(s, { x: 200, y: 0 })).toBe("M 0,0 L 200,0");
+  });
+});
+
+describe("ported chamfer paths", () => {
+  it("keeps a short straight segment out of side ports before the 45 degree route", () => {
+    expect(
+      portedChamferPoints(
+        { x: 0, y: 0 },
+        { x: 80, y: 140 },
+        { sourcePosition: "right", targetPosition: "left" },
+      ),
+    ).toEqual([
+      { x: 0, y: 0 },
+      { x: EDGE_PORT_STUB_LENGTH, y: 0 },
+      { x: 58, y: 36 },
+      { x: 58, y: 140 },
+      { x: 80, y: 140 },
+    ]);
+  });
+
+  it("uses the real source side for bottom image-source ports", () => {
+    expect(
+      portedChamferPath(
+        { x: 0, y: 0 },
+        { x: 100, y: 100 },
+        { sourcePosition: "bottom", targetPosition: "left" },
+      ),
+    ).toBe("M 0,0 L 0,22 L 78,100 L 100,100");
   });
 });
 
@@ -73,6 +104,17 @@ describe("explicit edge waypoints", () => {
       "M 0,0 L 80,80 L 200,50",
     );
     expect(cachedRoutedEdgePath(s, target)).toBe(cachedChamferPath(s, target));
+  });
+
+  it("adds port stubs around explicit waypoint routes when positions are known", () => {
+    expect(
+      routedEdgePath(
+        s,
+        { x: 200, y: 100 },
+        [{ x: 80, y: 80 }],
+        { sourcePosition: "right", targetPosition: "left" },
+      ),
+    ).toBe("M 0,0 L 22,0 L 80,80 L 178,100 L 200,100");
   });
 });
 

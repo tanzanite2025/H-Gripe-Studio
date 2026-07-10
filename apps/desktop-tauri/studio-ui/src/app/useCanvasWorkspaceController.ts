@@ -23,6 +23,12 @@ import {
   reparentNode,
 } from "../editor/grouping";
 import { getHelperLines } from "../editor/helperLines";
+import {
+  IMAGE_SOURCE_COLUMN_GAP,
+  IMAGE_SOURCE_THUMB_MODE,
+  IMAGE_SOURCE_THUMB_SIZE,
+  NODE_COLUMN_GAP,
+} from "../editor/nodeGeometry";
 import type { RunHudScope } from "../editor/RunHud";
 import { makeNode, useNodeEditing } from "../editor/useNodeEditing";
 import type { UseCanvasDocument } from "../editor/useCanvasDocument";
@@ -31,6 +37,14 @@ import type { ProductionState } from "../production/productionStore";
 import { findClip } from "../production/timeline";
 import { startIngestListener } from "../runtime/ingestStore";
 import { useStudioRunController } from "../editor/useStudioRunController";
+import {
+  appendImageSourcePaths,
+  firstImageSourceSlotPortId,
+  imageSourcePathGroups,
+  imageSourceParamsFromPaths,
+  MAX_IMAGE_SOURCE_SLOTS,
+  normalizeImageSourceSlots,
+} from "../domain/imageSourceSlots";
 
 type Translate = (key: MsgKey, vars?: Record<string, string | number>) => string;
 type NewNodeId = ReturnType<typeof useNodeEditing>["newNodeId"];
@@ -121,30 +135,116 @@ export function useCanvasWorkspaceController({
         return;
       }
       takeSnapshot();
-      const created = media.map(({ path, kind }, index) => ({
-        ...makeNode(
-          newNodeId(kind),
-          kind,
-          origin.x + index * 28,
-          origin.y + index * 28,
-          { path },
-        ),
-        selected: index === media.length - 1,
+      const imagePaths = media
+        .filter((item) => item.kind === "imageSource")
+        .map((item) => item.path);
+      const videoPaths = media
+        .filter((item) => item.kind === "videoSource")
+        .map((item) => item.path);
+      const targetImageSourceId = (
+        dropTarget?.closest("[data-image-source-node-id]") as HTMLElement | null
+      )?.dataset.imageSourceNodeId;
+      const targetImageSource =
+        targetImageSourceId != null
+          ? nodes.find((node) => {
+              const data = node.data as { kind?: string };
+              return node.id === targetImageSourceId && data.kind === "imageSource";
+            })
+          : undefined;
+      if (targetImageSource && imagePaths.length > 0) {
+        const currentSlots = normalizeImageSourceSlots(
+          (targetImageSource.data as { params?: Record<string, unknown> }).params,
+        );
+        const remaining = Math.max(0, MAX_IMAGE_SOURCE_SLOTS - currentSlots.length);
+        const appendPaths = imagePaths.slice(0, remaining);
+        const overflowImages = imagePaths.slice(appendPaths.length);
+        const created: Node[] = [];
+        imageSourcePathGroups(overflowImages).forEach((group, index) => {
+          created.push(
+            makeNode(
+              newNodeId("imageSource"),
+              "imageSource",
+              targetImageSource.position.x + (index + 1) * IMAGE_SOURCE_COLUMN_GAP,
+              targetImageSource.position.y,
+              imageSourceParamsFromPaths(group),
+            ),
+          );
+        });
+        videoPaths.forEach((path, index) => {
+          created.push(
+            makeNode(
+              newNodeId("videoSource"),
+              "videoSource",
+              targetImageSource.position.x +
+                (created.length + 1) * IMAGE_SOURCE_COLUMN_GAP +
+                index * NODE_COLUMN_GAP,
+              targetImageSource.position.y + index * 28,
+              { path },
+            ),
+          );
+        });
+        const selectedId = created[created.length - 1]?.id ?? targetImageSource.id;
+        setNodes((items) =>
+          items
+            .map((item) => {
+              const selected = item.id === selectedId;
+              if (item.id !== targetImageSource.id) return { ...item, selected };
+              const data = item.data as { params?: Record<string, unknown> };
+              return {
+                ...item,
+                selected,
+                data: {
+                  ...item.data,
+                  params: appendImageSourcePaths(data.params, appendPaths),
+                },
+              };
+            })
+            .concat(created.map((node) => ({ ...node, selected: node.id === selectedId }))),
+        );
+        setSelectedId(selectedId);
+        void primeIngest(imagePaths, IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
+        setMessage(t("canvas.dropImages", { n: imagePaths.length }));
+        return;
+      }
+      const created: Node[] = [];
+      const imageGroups = imageSourcePathGroups(imagePaths);
+      imageGroups.forEach((group, index) => {
+        created.push(
+          makeNode(
+            newNodeId("imageSource"),
+            "imageSource",
+            origin.x + index * IMAGE_SOURCE_COLUMN_GAP,
+            origin.y,
+            imageSourceParamsFromPaths(group),
+          ),
+        );
+      });
+      videoPaths.forEach((path, index) => {
+        const videoBaseX =
+          imageGroups.length > 0 ? imageGroups.length * IMAGE_SOURCE_COLUMN_GAP : 0;
+        created.push(
+          makeNode(
+            newNodeId("videoSource"),
+            "videoSource",
+            origin.x + videoBaseX + index * NODE_COLUMN_GAP,
+            origin.y + index * 28,
+            { path },
+          ),
+        );
+      });
+      const selectedId = created[created.length - 1]?.id ?? null;
+      const selected = created.map((node) => ({
+        ...node,
+        selected: node.id === selectedId,
       }));
       setNodes((items) => [
         ...items.map((item) => ({ ...item, selected: false })),
-        ...created,
+        ...selected,
       ]);
-      setSelectedId(created[created.length - 1]?.id ?? null);
-      void primeIngest(
-        media
-          .filter((item) => item.kind === "imageSource")
-          .map((item) => item.path),
-      );
-      const images = media.filter(
-        (item) => item.kind === "imageSource",
-      ).length;
-      const videos = media.length - images;
+      setSelectedId(selectedId);
+      void primeIngest(imagePaths, IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
+      const images = imagePaths.length;
+      const videos = videoPaths.length;
       const note =
         images > 0 && videos > 0
           ? t("canvas.dropMedia", { images, videos })
@@ -157,6 +257,7 @@ export function useCanvasWorkspaceController({
       imageExtensions,
       importMediaPathsToBin,
       newNodeId,
+      nodes,
       screenToFlowPosition,
       setMessage,
       setNodes,
@@ -195,7 +296,7 @@ export function useCanvasWorkspaceController({
       const existing = asset.sourceNodeId
         ? nodes.find((node) => node.id === asset.sourceNodeId)
         : undefined;
-      const handle = asset.kind === "video" ? "video" : "image";
+      let handle = asset.kind === "video" ? "video" : "image";
       const created: Node[] = [];
       let sourceId: string;
       let sourcePosition: { x: number; y: number };
@@ -207,7 +308,7 @@ export function useCanvasWorkspaceController({
           asset.kind === "video" ? "videoSource" : "imageSource";
         sourceId = newNodeId(sourceKind);
         sourcePosition = screenToFlowPosition({
-          x: window.innerWidth / 2 - 320,
+          x: window.innerWidth / 2 - NODE_COLUMN_GAP,
           y: window.innerHeight / 3,
         });
         created.push(
@@ -216,16 +317,23 @@ export function useCanvasWorkspaceController({
             sourceKind,
             sourcePosition.x,
             sourcePosition.y,
-            { path: asset.path },
+            asset.kind === "video" ? { path: asset.path } : imageSourceParamsFromPaths([asset.path]),
           ),
         );
       }
+      if (asset.kind === "image") {
+        const sourceParams = existing
+          ? ((existing.data as { params?: Record<string, unknown> }).params ?? {})
+          : imageSourceParamsFromPaths([asset.path]);
+        handle = firstImageSourceSlotPortId(sourceParams);
+      }
       const splitId = newNodeId("smartLayerSplit");
+      const xGap = asset.kind === "image" ? IMAGE_SOURCE_COLUMN_GAP : NODE_COLUMN_GAP;
       created.push({
         ...makeNode(
           splitId,
           "smartLayerSplit",
-          sourcePosition.x + 320,
+          sourcePosition.x + xGap,
           sourcePosition.y,
         ),
         selected: true,

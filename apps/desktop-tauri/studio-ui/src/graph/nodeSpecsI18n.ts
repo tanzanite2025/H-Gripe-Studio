@@ -55,13 +55,6 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
     },
     ports: { text: "文本" },
   },
-  batch: {
-    title: "批处理",
-    description:
-      "遍历一组文本项（每行一个）。普通运行只发出第一项；用「Run ×N」可为每一项各跑一次。",
-    params: { items: { label: "项（每行一个）", hint: "每行一个 提示词 / 值" } },
-    ports: { item: "项" },
-  },
   imageSource: {
     title: "图像源",
     description: "磁盘上的图像文件，用作参考图 / 输入图。",

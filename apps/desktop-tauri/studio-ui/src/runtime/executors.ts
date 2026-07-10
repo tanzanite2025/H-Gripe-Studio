@@ -6,7 +6,7 @@ import { GRAPH_EXECUTORS } from "./executors/graph";
 import { IMAGE_EXECUTORS } from "./executors/image";
 import { VIDEO_EXECUTORS } from "./executors/video";
 
-export { batchItems } from "./executors/graph";
+export { nonEmptyLines } from "./executors/graph";
 
 function combineExecutorRegistries(...groups: ExecutorRegistry[]): ExecutorRegistry {
   const registry: ExecutorRegistry = {};
