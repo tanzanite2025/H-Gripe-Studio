@@ -168,7 +168,6 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const { takeSnapshot, undo, redo } = history;
 
   const {
-    activeAssetId,
     addableAsset,
     audioEdits,
     binAssets,
@@ -176,34 +175,18 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     clipProps,
     drawerMode,
     gradeDocs,
-    handleAddActiveToTimeline,
-    handleAddActiveToTrack,
     handleAddExportedFrame,
     handleAddSelectedToBin,
-    handleAddTrack,
     handleCanvasSelect,
     handleImportMediaToBin,
     handleMergeLayers,
-    handleRemoveBinAsset,
-    handleRemoveClip,
-    handleRemoveMarker,
-    handleRemoveTrack,
-    handleSelectBinAsset,
-    handleSelectClip,
-    handleSetClipProperties,
     handleSplitLayer,
-    handleSplitTimelineClip,
     handleToggleLayerVisibility,
-    handleToggleMarker,
     handleToggleProtected,
-    handleToggleTrackHidden,
-    handleToggleTrackLock,
     importMediaPathsToBin,
     layeredAsset,
     layerVisibility,
     productionTarget,
-    selectedClipId,
-    selectedClipProperties,
     selectedLayerId,
     setSelectedLayerId,
     timeline,
@@ -878,44 +861,33 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           mode={drawerMode}
           onSetMode={changeDrawerMode}
           target={productionTarget}
-          assets={binAssets}
-          activeAssetId={activeAssetId}
-          onSelectAsset={handleSelectBinAsset}
-          onRemoveAsset={handleRemoveBinAsset}
-          addableAsset={addableAsset}
-          onAddSelected={handleAddSelectedToBin}
-          onImportMedia={handleImportMediaToBin}
-          timeline={timeline}
-          selectedClipId={selectedClipId}
-          onSelectClip={handleSelectClip}
-          onAddActiveToTimeline={handleAddActiveToTimeline}
-          onAddActiveToTrack={handleAddActiveToTrack}
-          onAddTrack={handleAddTrack}
-          onRemoveTrack={handleRemoveTrack}
-          onRemoveClip={handleRemoveClip}
-          onSplitClipAt={handleSplitTimelineClip}
-          onToggleMarkerAt={handleToggleMarker}
-          onRemoveMarker={handleRemoveMarker}
-          onToggleTrackLock={handleToggleTrackLock}
-          onToggleTrackHidden={handleToggleTrackHidden}
-          onOpenImageEdit={handleOpenImageEdit}
-          onOpenAudioEdit={handleOpenAudioEdit}
-          onOpenClipGrade={handleOpenClipGrade}
-          onSplitClipToLayers={handleSplitClipToLayers}
-          onOpenExport={() => setExportOpen(true)}
-          onAddExportedFrame={handleAddExportedFrame}
-          clipGradeDoc={clipGradeDoc}
-          clipPropsDoc={clipPropsDoc}
-          clipProperties={selectedClipProperties}
-          onSetClipProperties={handleSetClipProperties}
-          layeredAsset={layeredAsset}
-          selectedLayerId={selectedLayerId}
-          onSelectLayer={setSelectedLayerId}
-          layerVisibility={layerVisibility}
-          onToggleLayerVisibility={handleToggleLayerVisibility}
-          onMergeLayers={isTauri() ? handleMergeLayers : undefined}
-          onSplitLayer={isTauri() ? handleSplitLayer : undefined}
-          onToggleProtected={handleToggleProtected}
+          ports={{
+            assetBin: {
+              addableAsset,
+              addSelected: handleAddSelectedToBin,
+              importMedia: handleImportMediaToBin,
+            },
+            editorLauncher: {
+              openImageEdit: handleOpenImageEdit,
+              openAudioEdit: handleOpenAudioEdit,
+              openClipGrade: handleOpenClipGrade,
+              splitClipToLayers: handleSplitClipToLayers,
+            },
+            exportService: {
+              open: () => setExportOpen(true),
+              addExportedFrame: handleAddExportedFrame,
+            },
+            layerService: {
+              asset: layeredAsset,
+              selectedLayerId,
+              selectLayer: setSelectedLayerId,
+              visibility: layerVisibility,
+              toggleVisibility: handleToggleLayerVisibility,
+              merge: isTauri() ? handleMergeLayers : undefined,
+              split: isTauri() ? handleSplitLayer : undefined,
+              toggleProtected: handleToggleProtected,
+            },
+          }}
         />
       </NodeEditingContext.Provider>
       <ToolRail assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} />

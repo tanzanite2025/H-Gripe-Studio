@@ -3,7 +3,10 @@ import { fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MediaAsset } from "./mediaBin";
-import { ProductionDrawer, type ProductionDrawerProps } from "./ProductionDrawer";
+import {
+  ProductionDrawerView as ProductionDrawer,
+  type ProductionDrawerViewProps as ProductionDrawerProps,
+} from "./ProductionDrawer";
 import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import type { TimelineModel } from "./timeline";
 
@@ -58,7 +61,6 @@ function drawerProps(overrides: Partial<ProductionDrawerProps> = {}): Production
     timeline,
     selectedClipId: null,
     onSelectClip: () => {},
-    onAddActiveToTimeline: () => {},
     onAddActiveToTrack: () => {},
     onAddTrack: () => {},
     onRemoveTrack: () => {},

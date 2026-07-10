@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useT, type MsgKey } from "../i18n";
 import { ClipPropertiesPanel } from "./ClipPropertiesPanel";
-import type { ClipProperties } from "./clipProps";
+import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import type { DrawerMode } from "./drawerState";
 import {
   moveKeyframesAtTime,
@@ -19,6 +19,24 @@ import {
 } from "./MediaWorkspacePopover";
 import { ProgramMonitor } from "./ProgramMonitor";
 import type { ProductionTarget } from "./productionTarget";
+import {
+  addAssetClip,
+  addTimelineTrack,
+  clipGradeDocOf,
+  productionStore,
+  removeAssetFromBin,
+  removeTimelineClip,
+  removeTimelineMarker,
+  removeTimelineTrack,
+  selectBinAsset,
+  selectClip,
+  setClipProperties,
+  splitTimelineClip,
+  toggleTimelineMarker,
+  toggleTimelineTrackHidden,
+  toggleTimelineTrackLock,
+  useProductionState,
+} from "./productionStore";
 import { TimelineRuler, timelineRulerDuration } from "./TimelineRuler";
 import {
   clipKindForAsset,
@@ -33,7 +51,42 @@ import {
   type TrackKind,
 } from "./timeline";
 
+export interface ProductionDrawerPorts {
+  assetBin: {
+    addableAsset: AddableAsset | null;
+    addSelected: () => void;
+    importMedia?: () => void;
+  };
+  editorLauncher: {
+    openImageEdit: (assetId: string) => void;
+    openAudioEdit: (clipId: string) => void;
+    openClipGrade: (clipId: string) => void;
+    splitClipToLayers: (clipId: string) => void;
+  };
+  exportService: {
+    open: () => void;
+    addExportedFrame?: (asset: { path: string; name: string }) => void;
+  };
+  layerService: {
+    asset: LayeredImageAsset | null;
+    selectedLayerId: string | null;
+    selectLayer: (layerId: string | null) => void;
+    visibility: Record<string, boolean>;
+    toggleVisibility: (layerId: string) => void;
+    merge?: (layerIds: string[]) => void;
+    split?: (layerId: string) => void;
+    toggleProtected?: (layerId: string) => void;
+  };
+}
+
 export interface ProductionDrawerProps {
+  mode: DrawerMode;
+  onSetMode: (mode: DrawerMode) => void;
+  target: ProductionTarget | null;
+  ports: ProductionDrawerPorts;
+}
+
+export interface ProductionDrawerViewProps {
   mode: DrawerMode;
   onSetMode: (mode: DrawerMode) => void;
   /** Current unified production selection (drawer + on-demand editors). */
@@ -50,8 +103,6 @@ export interface ProductionDrawerProps {
   timeline: TimelineModel;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
-  /** Append the active bin asset as a clip at the end of a compatible track. */
-  onAddActiveToTimeline: () => void;
   /** Append the active bin asset at the end of a specific track. */
   onAddActiveToTrack: (trackId: string) => void;
   /** Append an empty video / audio track to the timeline. */
@@ -103,6 +154,78 @@ export interface ProductionDrawerProps {
   onSplitLayer?: (layerId: string) => void;
   /** Mark / unmark a layer as protected (pure asset transform, runs anywhere). */
   onToggleProtected?: (layerId: string) => void;
+}
+
+export function ProductionDrawer({
+  mode,
+  onSetMode,
+  target,
+  ports,
+}: ProductionDrawerProps) {
+  const assets = useProductionState((state) => state.binAssets);
+  const activeAssetId = useProductionState((state) => state.activeAssetId);
+  const timeline = useProductionState((state) => state.timeline);
+  const selectedClipId = useProductionState((state) => state.selectedClipId);
+  const clipProps = useProductionState((state) => state.clipProps);
+  const clipProperties = selectedClipId
+    ? (clipProps[selectedClipId] ?? defaultClipProperties())
+    : undefined;
+  const clipGradeDoc = useCallback(
+    (clipId: string) => clipGradeDocOf(productionStore.getState(), clipId),
+    [],
+  );
+  const clipPropsDoc = useCallback((clipId: string) => {
+    const props = productionStore.getState().clipProps[clipId];
+    return props ? JSON.stringify(props) : null;
+  }, []);
+
+  return (
+    <ProductionDrawerView
+      mode={mode}
+      onSetMode={onSetMode}
+      target={target}
+      assets={assets}
+      activeAssetId={activeAssetId}
+      onSelectAsset={(assetId) => selectBinAsset(productionStore, assetId)}
+      onRemoveAsset={(assetId) => removeAssetFromBin(productionStore, assetId)}
+      addableAsset={ports.assetBin.addableAsset}
+      onAddSelected={ports.assetBin.addSelected}
+      onImportMedia={ports.assetBin.importMedia}
+      timeline={timeline}
+      selectedClipId={selectedClipId}
+      onSelectClip={(clipId) => selectClip(productionStore, clipId)}
+      onAddActiveToTrack={(trackId) => {
+        const assetId = productionStore.getState().activeAssetId;
+        if (assetId) addAssetClip(productionStore, assetId, { trackId });
+      }}
+      onAddTrack={(kind) => addTimelineTrack(productionStore, kind)}
+      onRemoveTrack={(trackId) => removeTimelineTrack(productionStore, trackId)}
+      onRemoveClip={(clipId) => removeTimelineClip(productionStore, clipId)}
+      onSplitClipAt={(clipId, atSec) => splitTimelineClip(productionStore, clipId, atSec)}
+      onToggleMarkerAt={(sec) => toggleTimelineMarker(productionStore, sec)}
+      onRemoveMarker={(markerId) => removeTimelineMarker(productionStore, markerId)}
+      onToggleTrackLock={(trackId) => toggleTimelineTrackLock(productionStore, trackId)}
+      onToggleTrackHidden={(trackId) => toggleTimelineTrackHidden(productionStore, trackId)}
+      onOpenImageEdit={ports.editorLauncher.openImageEdit}
+      onOpenAudioEdit={ports.editorLauncher.openAudioEdit}
+      onOpenClipGrade={ports.editorLauncher.openClipGrade}
+      onSplitClipToLayers={ports.editorLauncher.splitClipToLayers}
+      onOpenExport={ports.exportService.open}
+      onAddExportedFrame={ports.exportService.addExportedFrame}
+      clipGradeDoc={clipGradeDoc}
+      clipPropsDoc={clipPropsDoc}
+      clipProperties={clipProperties}
+      onSetClipProperties={(clipId, props) => setClipProperties(productionStore, clipId, props)}
+      layeredAsset={ports.layerService.asset}
+      selectedLayerId={ports.layerService.selectedLayerId}
+      onSelectLayer={ports.layerService.selectLayer}
+      layerVisibility={ports.layerService.visibility}
+      onToggleLayerVisibility={ports.layerService.toggleVisibility}
+      onMergeLayers={ports.layerService.merge}
+      onSplitLayer={ports.layerService.split}
+      onToggleProtected={ports.layerService.toggleProtected}
+    />
+  );
 }
 
 function AssetBinIcon() {
@@ -194,7 +317,7 @@ function TimelineToolIcon({ tool }: { tool: TimelineTool }) {
  * menu) instead of mounting with the drawer. Collapses to a slim rail so the
  * canvas keeps its space when unused.
  */
-export function ProductionDrawer({
+export function ProductionDrawerView({
   mode,
   onSetMode,
   target,
@@ -235,7 +358,7 @@ export function ProductionDrawer({
   onMergeLayers,
   onSplitLayer,
   onToggleProtected,
-}: ProductionDrawerProps) {
+}: ProductionDrawerViewProps) {
   const t = useT();
   const expanded = mode !== "collapsed";
   const [renderExpanded, setRenderExpanded] = useState(expanded);
