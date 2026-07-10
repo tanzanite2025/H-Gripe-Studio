@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { layeredPositions } from "./layout";
+import { NODE_COLUMN_GAP } from "./nodeGeometry";
 
 describe("layeredPositions", () => {
   it("places a linear chain in left-to-right columns at the same row", () => {
     const pos = layeredPositions([["a"], ["b"], ["c"]]);
     expect(pos.get("a")).toEqual({ x: 40, y: 40 });
-    expect(pos.get("b")).toEqual({ x: 300, y: 40 });
-    expect(pos.get("c")).toEqual({ x: 560, y: 40 });
+    expect(pos.get("b")).toEqual({ x: 40 + NODE_COLUMN_GAP, y: 40 });
+    expect(pos.get("c")).toEqual({ x: 40 + NODE_COLUMN_GAP * 2, y: 40 });
   });
 
   it("stacks nodes within a level and centers shorter columns", () => {
     const pos = layeredPositions([["a"], ["b", "c"]]);
     // tallest column has 2 nodes; the single-node column is offset down by half.
     expect(pos.get("a")).toEqual({ x: 40, y: 40 + 70 });
-    expect(pos.get("b")).toEqual({ x: 300, y: 40 });
-    expect(pos.get("c")).toEqual({ x: 300, y: 180 });
+    expect(pos.get("b")).toEqual({ x: 40 + NODE_COLUMN_GAP, y: 40 });
+    expect(pos.get("c")).toEqual({ x: 40 + NODE_COLUMN_GAP, y: 180 });
   });
 
   it("honours custom gaps / origin", () => {
