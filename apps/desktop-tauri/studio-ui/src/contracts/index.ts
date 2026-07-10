@@ -1,3 +1,4 @@
+export * from "./artifacts";
 export * from "./context";
 export * from "./maskDocument";
 export * from "./maskOps";

@@ -348,7 +348,7 @@ layers/
 
 ### A06 / P1：`types/production.ts` 是多个合同域的聚合桶
 
-状态（2026-07-10）：已完成。合同已按 context、quality、mask operations、mask document 与 subject mask 拆分到 `contracts/`；内部调用方已迁移到对应的聚焦模块，`types/production.ts` 仅保留兼容 re-export。
+状态（2026-07-10）：已完成。合同已按 artifacts、context、quality、mask operations、mask document 与 subject mask 拆分到 `contracts/`；内部调用方已迁移到对应的聚焦模块，`types/production.ts` 仅保留兼容 re-export。
 
 #### 证据
 
