@@ -9,7 +9,6 @@ import {
   maskTool,
   DEFAULT_TOOL_ID,
   type MaskTool,
-  PS_SLOTS,
   psSlotOf,
   type ShapeKind,
 } from "./maskTools";
@@ -82,6 +81,7 @@ import { ContextActionBar } from "./maskEditModal/ContextActionBar";
 import { runMaskEditorCommand } from "./maskEditorCommandRunner";
 import { opsAlphaBounds } from "./maskMorphology";
 import { useBrushParams } from "./maskEditModal/useBrushParams";
+import { useToolSlots } from "./maskEditModal/useToolSlots";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const ACTIVE_TARGET_BOUNDS_PROXY_WIDTH = 1024;
@@ -263,10 +263,26 @@ export function MaskEditModal({
   }, [state]);
   // Open on the move tool (PS V) — reaching for the brush is opt-in, so a
   // stray first drag never paints the mask.
-  const [toolId, setToolId] = useState<string>("move");
-  // Last-used variant per multi-tool PS slot: the slot button's visible face,
-  // and what the slot's shortcut letter re-selects.
-  const [slotFaces, setSlotFaces] = useState<Record<string, string>>({});
+  const {
+    toolId,
+    setToolId,
+    slotFaces,
+    setSlotFace,
+    selectTool,
+    selectSlot,
+    cycleSlot,
+  } = useToolSlots({
+    initialToolId: "move",
+    onBeforeSelect: (id) => {
+      if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
+      cancelPathEdit();
+      if (id !== "patch") {
+        gestures.patchLoop = null;
+        gestures.patchDrag = null;
+      }
+      if (id !== "perspective_crop") setQuadDraft(null);
+    },
+  });
   const {
     brushSize,
     setBrushSize,
@@ -727,47 +743,6 @@ export function MaskEditModal({
     openFreeTransform: openFreeTransformPanel,
     openFillDialog,
   } = dialogs;
-
-  // PS-aligned shortcuts, registered into the mask-edit scope (src/shortcuts):
-  // active only while this modal is mounted, shadowing the canvas shortcuts.
-  const selectTool = (id: string) => {
-    if (!ANCHOR_PATH_TOOLS.includes(id)) setPenAnchors([]);
-    cancelPathEdit();
-    if (id !== "patch") {
-      gestures.patchLoop = null;
-      gestures.patchDrag = null;
-    }
-    if (id !== "perspective_crop") setQuadDraft(null);
-    setToolId(id);
-    const slot = psSlotOf(id);
-    if (slot && slot.variants.length > 1) setSlotFaces((f) => ({ ...f, [slot.id]: id }));
-  };
-
-  // A slot's PS letter selects the slot's visible face — the remembered
-  // last-used variant, falling back to the first ready one (PS: the shortcut
-  // picks the slot, not a fixed tool).
-  const selectSlot = (slotId: string) => {
-    const slot = PS_SLOTS.find((s) => s.id === slotId);
-    if (!slot) return;
-    const ready = slot.variants.filter((id) => maskTool(id)?.status === "ready");
-    if (ready.length === 0) return;
-    const remembered = slotFaces[slotId];
-    selectTool(remembered && ready.includes(remembered) ? remembered : ready[0]);
-  };
-
-  // Shift+letter cycles the slot's ready variants (PS "Shift cycles tools").
-  const cycleSlot = (slotId: string) => {
-    const slot = PS_SLOTS.find((s) => s.id === slotId);
-    if (!slot) return;
-    const ready = slot.variants.filter((id) => maskTool(id)?.status === "ready");
-    if (ready.length === 0) return;
-    const at = ready.indexOf(toolId);
-    if (at === -1) {
-      selectSlot(slotId);
-      return;
-    }
-    selectTool(ready[(at + 1) % ready.length]);
-  };
 
   const openFreeTransform = () => {
     selectTool("move");
@@ -1396,7 +1371,7 @@ export function MaskEditModal({
             onToolClick={onToolClick}
             hiddenSlotIds={workspace === "image" ? SELECTION_TOP_SLOT_IDS : []}
             faces={slotFaces}
-            onPickFace={(slotId, id) => setSlotFaces((f) => ({ ...f, [slotId]: id }))}
+            onPickFace={setSlotFace}
             paintMode={tool.mode === "subtract" || (tool.kind === "path" && pathMode === "subtract") ? "subtract" : "add"}
             fgColor={fgColor}
             bgColor={bgColor}
