@@ -394,6 +394,85 @@
       "expected": 128
     }
   ],
+  "transformComposeCases": [
+    {
+      "name": "translations add",
+      "a": { "dx": 10, "dy": 5, "scale": 1, "rotate": 0 },
+      "b": { "dx": -4, "dy": 3, "scale": 1, "rotate": 0 },
+      "expected": { "dx": 6, "dy": 8, "scale": 1, "rotate": 0 }
+    },
+    {
+      "name": "earlier translation carries through later rotation and scale",
+      "a": { "dx": 10, "dy": 0, "scale": 1, "rotate": 0 },
+      "b": { "dx": 0, "dy": 0, "scale": 2, "rotate": 90 },
+      "expected": { "dx": 0, "dy": 20, "scale": 2, "rotate": 90 }
+    },
+    {
+      "name": "rotations accumulate with translations rotated through",
+      "a": { "dx": 3, "dy": -2, "scale": 1, "rotate": 30 },
+      "b": { "dx": 5, "dy": 7, "scale": 1, "rotate": 60 },
+      "expected": { "dx": 8.232050807568877, "dy": 8.598076211353316, "scale": 1, "rotate": 90 }
+    },
+    {
+      "name": "scale composes multiplicatively",
+      "a": { "dx": 0, "dy": 0, "scale": 0.5, "rotate": 0 },
+      "b": { "dx": 12, "dy": -8, "scale": 1, "rotate": 0 },
+      "expected": { "dx": 12, "dy": -8, "scale": 0.5, "rotate": 0 }
+    },
+    {
+      "name": "rotate 180 negates the carried translation",
+      "a": { "dx": 4, "dy": 6, "scale": 2, "rotate": 45 },
+      "b": { "dx": -2, "dy": 3, "scale": 1.5, "rotate": 180 },
+      "expected": { "dx": -8, "dy": -6, "scale": 3, "rotate": 225 }
+    }
+  ],
+  "transformInverseSampleCases": [
+    {
+      "name": "identity samples the same pixel",
+      "width": 8,
+      "height": 8,
+      "transform": { "dx": 0, "dy": 0, "scale": 1, "rotate": 0 },
+      "x": 3,
+      "y": 4,
+      "expected": [3, 4]
+    },
+    {
+      "name": "translation shifts the source sample back",
+      "width": 8,
+      "height": 8,
+      "transform": { "dx": 2, "dy": 0, "scale": 1, "rotate": 0 },
+      "x": 5,
+      "y": 3,
+      "expected": [3, 3]
+    },
+    {
+      "name": "scale samples toward the centre",
+      "width": 8,
+      "height": 8,
+      "transform": { "dx": 0, "dy": 0, "scale": 2, "rotate": 0 },
+      "x": 4,
+      "y": 4,
+      "expected": [3.75, 3.75]
+    },
+    {
+      "name": "rotation about the centre",
+      "width": 8,
+      "height": 8,
+      "transform": { "dx": 0, "dy": 0, "scale": 1, "rotate": 90 },
+      "x": 6,
+      "y": 4,
+      "expected": [4, 1]
+    },
+    {
+      "name": "samples outside the source are empty",
+      "width": 8,
+      "height": 8,
+      "transform": { "dx": 10, "dy": 0, "scale": 1, "rotate": 0 },
+      "x": 0,
+      "y": 0,
+      "expected": null
+    }
+  ],
   "rgbaCompositeCases": [
     {
       "name": "multiply uses the grade kernel",
