@@ -404,6 +404,264 @@ pub(super) fn apply_mask_path(mask: &mut GrayImage, path: &MaskPath) {
     }
 }
 
+/// Spot-heal (PS J on a mask): rebuild the mask inside `coverage` from its
+/// surroundings by diffusion - iterative 4-neighbour averaging with the
+/// boundary held fixed, converging toward the harmonic (smooth) fill.
+/// Alternating forward / backward Gauss-Seidel sweeps over the coverage
+/// bounding box; iterations scale with the region size under a fixed work
+/// budget. Mirrors the proxy `healStroke` in `maskMorphology.ts`.
+pub(super) fn heal_region(mask: &mut GrayImage, coverage: &GrayImage) {
+    let (w, h) = mask.dimensions();
+    let (mut x0, mut y0, mut x1, mut y1) = (w as i64, h as i64, -1i64, -1i64);
+    let mut area: u64 = 0;
+    for y in 0..h {
+        for x in 0..w {
+            if coverage.get_pixel(x, y).0[0] == 0 {
+                continue;
+            }
+            area += 1;
+            x0 = x0.min(x as i64);
+            x1 = x1.max(x as i64);
+            y0 = y0.min(y as i64);
+            y1 = y1.max(y as i64);
+        }
+    }
+    if x1 < 0 {
+        return;
+    }
+    let (x0, y0, x1, y1) = (x0 as u32, y0 as u32, x1 as u32, y1 as u32);
+    // Diffusion converges in ~O(d²) sweeps for a region d pixels across;
+    // clamped, and capped by a fixed total work budget for huge regions.
+    let max_dim = (x1 - x0 + 1).max(y1 - y0 + 1) as u64;
+    let iters = (max_dim * max_dim)
+        .min(512)
+        .min(400_000_000 / area.max(1))
+        .max(16);
+    let mut buf: Vec<f32> = mask.pixels().map(|p| f32::from(p.0[0])).collect();
+    let idx = |x: u32, y: u32| (y * w + x) as usize;
+    let relax = |buf: &mut Vec<f32>, x: u32, y: u32| {
+        if coverage.get_pixel(x, y).0[0] == 0 {
+            return;
+        }
+        let i = idx(x, y);
+        let left = if x > 0 { buf[i - 1] } else { buf[i] };
+        let right = if x < w - 1 { buf[i + 1] } else { buf[i] };
+        let up = if y > 0 { buf[i - w as usize] } else { buf[i] };
+        let down = if y < h - 1 {
+            buf[i + w as usize]
+        } else {
+            buf[i]
+        };
+        buf[i] = (left + right + up + down) / 4.0;
+    };
+    for it in 0..iters {
+        if it % 2 == 0 {
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    relax(&mut buf, x, y);
+                }
+            }
+        } else {
+            for y in (y0..=y1).rev() {
+                for x in (x0..=x1).rev() {
+                    relax(&mut buf, x, y);
+                }
+            }
+        }
+    }
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            if coverage.get_pixel(x, y).0[0] != 0 {
+                mask.put_pixel(x, y, Luma([buf[idx(x, y)].round().clamp(0.0, 255.0) as u8]));
+            }
+        }
+    }
+}
+
+/// Per-stroke exposure of the dodge / burn tool: each pass moves the covered
+/// pixels half-way toward on (dodge) or off (burn).
+const DODGE_BURN_EXPOSURE: f64 = 0.5;
+
+/// Dodge / burn (PS O on a mask): locally lighten (dodge) or darken (burn)
+/// the mask inside `coverage` — each covered pixel is lerped toward 255 / 0
+/// by the fixed exposure. Mirrors the proxy `dodgeBurnStroke` in
+/// `maskMorphology.ts`.
+pub(super) fn dodge_burn_region(mask: &mut GrayImage, coverage: &GrayImage, burn: bool) {
+    for (m, c) in mask.pixels_mut().zip(coverage.pixels()) {
+        if c.0[0] == 0 {
+            continue;
+        }
+        let v = f64::from(m.0[0]);
+        let out = if burn {
+            v * (1.0 - DODGE_BURN_EXPOSURE)
+        } else {
+            v + (255.0 - v) * DODGE_BURN_EXPOSURE
+        };
+        m.0[0] = out.round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// History brush (PS Y on a mask): restore the mask inside `coverage` to the
+/// layer's pre-edit state `base`. Mirrors the proxy `historyStroke` in
+/// `maskMorphology.ts`.
+pub(super) fn history_region(mask: &mut GrayImage, base: &GrayImage, coverage: &GrayImage) {
+    for ((m, b), c) in mask.pixels_mut().zip(base.pixels()).zip(coverage.pixels()) {
+        if c.0[0] != 0 {
+            m.0[0] = b.0[0];
+        }
+    }
+}
+
+/// Clone stamp (PS S on a mask): copy the mask inside `coverage` from the
+/// `dx`/`dy` source offset — each covered pixel `p` reads the pre-op mask at
+/// `p + [dx, dy]` (out-of-bounds reads as empty). Mirrors the proxy
+/// `cloneStroke` in `maskMorphology.ts`.
+pub(super) fn clone_region(mask: &mut GrayImage, coverage: &GrayImage, dx: i64, dy: i64) {
+    let (w, h) = mask.dimensions();
+    let base = mask.clone();
+    for y in 0..h {
+        for x in 0..w {
+            if coverage.get_pixel(x, y).0[0] == 0 {
+                continue;
+            }
+            let sx = x as i64 + dx;
+            let sy = y as i64 + dy;
+            let v = if sx >= 0 && sx < w as i64 && sy >= 0 && sy < h as i64 {
+                base.get_pixel(sx as u32, sy as u32).0[0]
+            } else {
+                0
+            };
+            mask.put_pixel(x, y, Luma([v]));
+        }
+    }
+}
+
+/// Background eraser (PS E flyout, on a mask): for each stamp along the
+/// stroke, erase mask pixels inside the brush disc whose colour stays within
+/// `tolerance` (max per-channel RGB distance) of the image colour under the
+/// stamp's centre.
+pub(super) fn background_erase(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    points: &[(f32, f32)],
+    radius: u32,
+    tolerance: i32,
+) {
+    let (width, height) = image.dimensions();
+    let r = radius as i32;
+    for &(px, py) in points {
+        let cx = px.round() as i32;
+        let cy = py.round() as i32;
+        if cx < 0 || cy < 0 || cx as u32 >= width || cy as u32 >= height {
+            continue;
+        }
+        let seed = image.get_pixel(cx as u32, cy as u32).0;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                let x = cx + dx;
+                let y = cy + dy;
+                if x < 0 || y < 0 || x as u32 >= width || y as u32 >= height {
+                    continue;
+                }
+                let c = image.get_pixel(x as u32, y as u32).0;
+                let dist = (0..3)
+                    .map(|ch| (i32::from(c[ch]) - i32::from(seed[ch])).abs())
+                    .max()
+                    .unwrap_or(0);
+                if dist <= tolerance {
+                    mask.put_pixel(x as u32, y as u32, Luma([MASK_OFF]));
+                }
+            }
+        }
+    }
+}
+
+/// Separable box blur (one pass), clamped at the borders. Mirrors the proxy
+/// `boxBlur` in `maskMorphology.ts` (round-half-up on positive values).
+pub(super) fn box_blur(mask: &GrayImage, radius: u32) -> GrayImage {
+    let (w, h) = mask.dimensions();
+    if radius == 0 {
+        return mask.clone();
+    }
+    let r = radius as i64;
+    let win = (2 * r + 1) as f64;
+    let at = |img: &GrayImage, x: i64, y: i64| {
+        f64::from(
+            img.get_pixel(
+                x.clamp(0, i64::from(w) - 1) as u32,
+                y.clamp(0, i64::from(h) - 1) as u32,
+            )
+            .0[0],
+        )
+    };
+    let mut tmp = GrayImage::new(w, h);
+    for y in 0..h {
+        let mut sum = 0.0;
+        for x in -r..=r {
+            sum += at(mask, x, i64::from(y));
+        }
+        for x in 0..w {
+            tmp.put_pixel(x, y, Luma([(sum / win).round() as u8]));
+            sum += at(mask, i64::from(x) + r + 1, i64::from(y))
+                - at(mask, i64::from(x) - r, i64::from(y));
+        }
+    }
+    let mut out = GrayImage::new(w, h);
+    for x in 0..w {
+        let mut sum = 0.0;
+        for y in -r..=r {
+            sum += at(&tmp, i64::from(x), y);
+        }
+        for y in 0..h {
+            out.put_pixel(x, y, Luma([(sum / win).round() as u8]));
+            sum += at(&tmp, i64::from(x), i64::from(y) + r + 1)
+                - at(&tmp, i64::from(x), i64::from(y) - r);
+        }
+    }
+    out
+}
+
+/// Healing brush (PS J flyout, on a mask): copy the mask inside `coverage`
+/// from the `dx`/`dy` source offset like `clone_region`, but blend through a
+/// feathered (box-blurred) coverage so the patch's edges melt into the
+/// surroundings. Mirrors the proxy `healingBrushStroke` in
+/// `maskMorphology.ts`.
+pub(super) fn healing_brush_region(
+    mask: &mut GrayImage,
+    coverage: &GrayImage,
+    dx: i64,
+    dy: i64,
+    radius: u32,
+) {
+    let (w, h) = mask.dimensions();
+    let soft = box_blur(coverage, ((f64::from(radius) / 2.0).round() as u32).max(1));
+    let base = mask.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let weight = f64::from(soft.get_pixel(x, y).0[0]) / 255.0;
+            if weight == 0.0 {
+                continue;
+            }
+            let sx = x as i64 + dx;
+            let sy = y as i64 + dy;
+            let cloned = if sx >= 0 && sx < i64::from(w) && sy >= 0 && sy < i64::from(h) {
+                f64::from(base.get_pixel(sx as u32, sy as u32).0[0])
+            } else {
+                0.0
+            };
+            let v = f64::from(base.get_pixel(x, y).0[0]);
+            mask.put_pixel(
+                x,
+                y,
+                Luma([(v * (1.0 - weight) + cloned * weight).round() as u8]),
+            );
+        }
+    }
+}
+
 /// Stamp filled discs of `radius` along a polyline, writing `value`.
 pub(super) fn stamp_stroke(mask: &mut GrayImage, points: &[(f32, f32)], radius: u32, value: u8) {
     for &(px, py) in points {
