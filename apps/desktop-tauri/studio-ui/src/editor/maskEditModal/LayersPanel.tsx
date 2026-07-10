@@ -17,7 +17,7 @@ import { runMaskEditorCommand } from "../maskEditorCommandRunner";
 import { buildLayerThumb } from "../maskMorphology";
 import { getCommand, getCommandCapability, type CommandId } from "../studioCommands";
 import type { StudioTarget } from "../studioTarget";
-import { imageLayerHasSourceContent } from "../imageCompositeSource";
+import { imageLayerHasSourceContent, layerSourceImageOp } from "../imageCompositeSource";
 import type { MaskEditDispatch } from "./actions";
 import type { ActiveSelection } from "./selection";
 
@@ -521,8 +521,11 @@ export function LayersPanel({
               ((workspace === "image" && i === 0 && !layer.mask && layer.ops.length === 0) ||
                 (workspace !== "image" && i === 0 && layer.ops.length === 0)),
           );
+          // A placed layer's thumbnail (and its "Background" display name)
+          // comes from its own source image, not the document's base image.
+          const layerImagePath = layerSourceImageOp(layer)?.source?.path ?? imagePath;
           const displayName =
-            showSourceImage && imagePath && layer.name === "Background" ? basename(imagePath) : layer.name;
+            showSourceImage && layerImagePath && layer.name === "Background" ? basename(layerImagePath) : layer.name;
           return (
             <div
               key={layer.id}
@@ -573,8 +576,8 @@ export function LayersPanel({
               >
                 {showPlainBaseImage && imagePath ? (
                   <BaseImageThumb imagePath={imagePath} />
-                ) : showSourceImage && imagePath ? (
-                  <SourceImageLayerThumb imagePath={imagePath} layer={layer} dims={dims} implicitSource={i === 0} />
+                ) : showSourceImage && layerImagePath ? (
+                  <SourceImageLayerThumb imagePath={layerImagePath} layer={layer} dims={dims} implicitSource={i === 0} />
                 ) : layer.kind === "adjustment" ? (
                   "ADJ"
                 ) : (
