@@ -70,8 +70,6 @@ describe("buildViewportOverlayScene", () => {
       selectionDraft: { region: [5, 5, 40, 40], ellipse: false, status: "closed" },
       activeSelection: { region: [10, 10, 80, 80], ellipse: false },
       antsPhase: 4,
-      toolId: "rect",
-      rulerLine: null,
       colorSamples: [],
     });
     expect(withDraft?.items.some((item) => item.kind === "marquee") ?? false).toBe(false);
@@ -85,8 +83,6 @@ describe("buildViewportOverlayScene", () => {
       selectionDraft: null,
       activeSelection: { region: [10, 10, 80, 80], ellipse: false },
       antsPhase: 4,
-      toolId: "rect",
-      rulerLine: null,
       colorSamples: [],
     });
     expect(withoutDraft?.items.some((item) => item.kind === "marquee")).toBe(true);
