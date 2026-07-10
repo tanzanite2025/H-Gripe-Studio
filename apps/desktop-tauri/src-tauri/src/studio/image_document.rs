@@ -35,7 +35,7 @@ pub(crate) fn composite_image_document(
         if opacity <= 0.0 {
             continue;
         }
-        let mask = raster_layer_mask(
+        let mask = raster_layer_gate(
             layer,
             source.width(),
             source.height(),
@@ -153,6 +153,73 @@ fn layer_sources_image(layer: &Value, index: usize) -> bool {
             .into_iter()
             .flatten()
             .any(|op| op.get("type").and_then(Value::as_str) == Some("source_image"))
+}
+
+/// The layer's alpha gate: its mask attachment intersected with the selection
+/// a PS Layer Via Copy recorded on its ops as `clip` (the copy holds only the
+/// selected region's pixels).
+fn raster_layer_gate(
+    layer: &Value,
+    width: u32,
+    height: u32,
+    document_width: u32,
+    document_height: u32,
+) -> Option<Vec<u8>> {
+    let mask = raster_layer_mask(layer, width, height, document_width, document_height);
+    let clip = raster_layer_clip(layer, width, height, document_width, document_height);
+    match (mask, clip) {
+        (Some(mut mask), Some(clip)) => {
+            for (dst, src) in mask.iter_mut().zip(clip.iter()) {
+                *dst = (*dst).min(*src);
+            }
+            Some(mask)
+        }
+        (mask, clip) => mask.or(clip),
+    }
+}
+
+/// Rasterise the selection recorded as `clip` on the layer's `source_image`
+/// op: a rect / ellipse `region`, or an exact polygon when `points` is set.
+fn raster_layer_clip(
+    layer: &Value,
+    width: u32,
+    height: u32,
+    document_width: u32,
+    document_height: u32,
+) -> Option<Vec<u8>> {
+    let clip = layer
+        .get("ops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|op| op.get("type").and_then(Value::as_str) == Some("source_image"))?
+        .get("clip")?;
+    let sx = width as f32 / document_width.max(1) as f32;
+    let sy = height as f32 / document_height.max(1) as f32;
+    if let Some(points) = clip.get("points").and_then(Value::as_array) {
+        let polygon = points
+            .iter()
+            .filter_map(|p| {
+                let pair = p.as_array()?;
+                Some((
+                    pair.first()?.as_f64()? as f32 * sx,
+                    pair.get(1)?.as_f64()? as f32 * sy,
+                ))
+            })
+            .collect::<Vec<_>>();
+        if polygon.len() >= 3 {
+            return Some(raster_polygon_shape(width, height, &polygon));
+        }
+    }
+    let region = op_region(clip)?;
+    Some(raster_region_shape(
+        width,
+        height,
+        &region,
+        clip.get("ellipse").and_then(Value::as_bool) == Some(true),
+        sx,
+        sy,
+    ))
 }
 
 fn raster_layer_mask(

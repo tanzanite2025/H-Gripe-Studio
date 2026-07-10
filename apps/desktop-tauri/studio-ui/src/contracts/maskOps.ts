@@ -40,10 +40,12 @@ export interface MaskOperation {
   rotate?: number;
 }
 
-/** Fields shared by every ordered edit-stack entry. */
+/** Fields shared by every ordered edit-stack entry. The `clip` selection is
+ * a rect by default, an ellipse when `ellipse`, or an exact polygon when
+ * `points` is present (`region` then holds the polygon's bounds). */
 export interface EditOpBase {
   disabled?: boolean;
-  clip?: { region: [number, number, number, number]; ellipse?: boolean };
+  clip?: { region: [number, number, number, number]; ellipse?: boolean; points?: [number, number][] };
 }
 
 export type PathOp = EditPath & EditOpBase & { type: "path" };

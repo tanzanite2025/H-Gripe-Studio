@@ -152,8 +152,15 @@ export function useUnderlayController({
     () => workspace === "image" && imageDocumentFrameHidden(document),
     [workspace, document],
   );
+  // Native surface presentation (surface swap Phase S2) is disabled here: the
+  // surface sits under the webview, but the app root and modal chrome paint
+  // opaque backgrounds over its rect, so a presented frame is invisible — the
+  // stage goes blank right after the PNG frame is dropped. Frames stay on the
+  // PNG transport until the see-through hole works end to end.
+  const SURFACE_HOLE_SUPPORTED = false;
   const presentEnabled =
-    !overlayOnly
+    SURFACE_HOLE_SUPPORTED
+    && !overlayOnly
     && !frameHidden
     && !view.rotate
     && !imageTransform

@@ -799,9 +799,10 @@ fn blend_layer(dst: &mut GrayImage, src: &GrayImage, blend: &str, opacity: f64) 
     }
 }
 
-/// The marquee selection recorded on an edit step (`clip`): image-space
-/// `[x1, y1, x2, y2]`, elliptical when `ellipse`.
-fn parse_clip(op: &Value) -> Option<(Vec<f64>, bool)> {
+/// The selection recorded on an edit step (`clip`): image-space
+/// `[x1, y1, x2, y2]`, elliptical when `ellipse`, or an exact polygon when
+/// `points` is present (`region` then holds the polygon's bounds).
+fn parse_clip(op: &Value) -> Option<(Vec<f64>, bool, Option<Vec<(f64, f64)>>)> {
     let clip = op.get("clip")?;
     let region: Vec<f64> = clip
         .get("region")?
@@ -813,13 +814,43 @@ fn parse_clip(op: &Value) -> Option<(Vec<f64>, bool)> {
         return None;
     }
     let ellipse = clip.get("ellipse").and_then(Value::as_bool) == Some(true);
-    Some((region, ellipse))
+    let points = clip.get("points").and_then(Value::as_array).map(|points| {
+        points
+            .iter()
+            .filter_map(|p| {
+                let pair = p.as_array()?;
+                Some((pair.first()?.as_f64()?, pair.get(1)?.as_f64()?))
+            })
+            .collect::<Vec<_>>()
+    });
+    Some((region, ellipse, points.filter(|points| points.len() >= 3)))
 }
 
-/// Confine a replayed step to its recorded marquee selection (PS selection
-/// semantics): pixels outside the clip region are restored from the pre-step
-/// mask. Mirrors the TS `restoreOutsideClip` in `maskMorphology.ts`.
-fn restore_outside_clip(mask: &mut GrayImage, before: &GrayImage, region: &[f64], ellipse: bool) {
+fn clip_polygon_contains(x: f64, y: f64, points: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    let mut j = points.len() - 1;
+    for i in 0..points.len() {
+        let (xi, yi) = points[i];
+        let (xj, yj) = points[j];
+        if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Confine a replayed step to its recorded selection (PS selection
+/// semantics): pixels outside the clip shape — rect, ellipse, or exact
+/// polygon — are restored from the pre-step mask. Mirrors the TS
+/// `restoreOutsideClip` in `maskMorphology.ts`.
+fn restore_outside_clip(
+    mask: &mut GrayImage,
+    before: &GrayImage,
+    region: &[f64],
+    ellipse: bool,
+    points: Option<&[(f64, f64)]>,
+) {
     let x1 = region[0].min(region[2]);
     let y1 = region[1].min(region[3]);
     let x2 = region[0].max(region[2]);
@@ -832,10 +863,14 @@ fn restore_outside_clip(mask: &mut GrayImage, before: &GrayImage, region: &[f64]
         let px = f64::from(x) + 0.5;
         let py = f64::from(y) + 0.5;
         let mut inside = px >= x1 && px <= x2 && py >= y1 && py <= y2;
-        if inside && ellipse {
-            let nx = (px - cx) / rx;
-            let ny = (py - cy) / ry;
-            inside = nx * nx + ny * ny <= 1.0;
+        if inside {
+            if let Some(points) = points {
+                inside = clip_polygon_contains(px, py, points);
+            } else if ellipse {
+                let nx = (px - cx) / rx;
+                let ny = (py - cy) / ry;
+                inside = nx * nx + ny * ny <= 1.0;
+            }
         }
         if !inside {
             p.0[0] = before.get_pixel(x, y).0[0];
@@ -977,8 +1012,8 @@ fn replay_ops(
             Some(_) => apply_queued_operation(image, mask, op, default_tolerance, operations),
             None => {}
         }
-        if let (Some((region, ellipse)), Some(before)) = (clip, before) {
-            restore_outside_clip(mask, &before, &region, ellipse);
+        if let (Some((region, ellipse, points)), Some(before)) = (clip, before) {
+            restore_outside_clip(mask, &before, &region, ellipse, points.as_deref());
         }
     }
 }
