@@ -207,7 +207,6 @@ export function useEditorLaunchController({
       node,
     ]);
     setSelectedId(node.id);
-    void primeIngest([path]);
     setMediaEditBlank(false);
     openMediaEdit(node.id);
   };

@@ -209,4 +209,23 @@ describe("scope stack dispatch", () => {
     input.remove();
     hook.unmount();
   });
+
+  it("prevents a handled modal shortcut from leaking to global listeners", () => {
+    const calls: string[] = [];
+    const globalListener = () => calls.push("global");
+    window.addEventListener("keydown", globalListener);
+    const hook = renderHook(() =>
+      useShortcutScope(
+        "modal",
+        [{ id: "undo", combo: "ctrl+z", status: "ready", hint: "" }],
+        { undo: () => void calls.push("modal") },
+      ),
+    );
+
+    window.dispatchEvent(key({ key: "z", ctrlKey: true }));
+    expect(calls).toEqual(["modal"]);
+
+    hook.unmount();
+    window.removeEventListener("keydown", globalListener);
+  });
 });

@@ -141,7 +141,16 @@ pub(crate) fn viewport_export_frame(
 /// pixels present directly on it — the payload then carries `presented: true`
 /// and no PNG bytes, so a slider drag does no encode and no pixel IPC.
 #[tauri::command]
-pub(crate) fn viewport_render_frame_bin(
+pub(crate) async fn viewport_render_frame_bin(
+    app: tauri::AppHandle,
+    viewport_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || viewport_render_frame_bin_inner(app, viewport_id))
+        .await
+        .map_err(|err| format!("viewport render worker failed: {err}"))?
+}
+
+fn viewport_render_frame_bin_inner(
     app: tauri::AppHandle,
     viewport_id: String,
 ) -> Result<tauri::ipc::Response, String> {

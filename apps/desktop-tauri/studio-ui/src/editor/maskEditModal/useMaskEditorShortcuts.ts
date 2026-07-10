@@ -138,6 +138,8 @@ export function useMaskEditorShortcuts({
       if (pathEditing.editingPathRef.current != null) pathEditing.cancelPathEdit();
       else if (dialogs.cancelDialog()) return;
       else if (pathEditing.penPendingRef.current) pathEditing.setPenAnchors([]);
+      else if (workSelection) setWorkSelection(null);
+      else if (lastMarqueeRef.current) setLastMarquee(null);
       else if (toolSlots.toolId === "rotate_view" && navigation.viewRef.current.rotate) {
         navigation.setView((view) => rotateTo(view, 0));
       } else if (workspace !== "image") {

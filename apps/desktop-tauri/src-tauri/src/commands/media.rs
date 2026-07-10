@@ -148,12 +148,14 @@ pub(crate) fn probe_image_dims(path: String) -> Result<ImageDims, String> {
 /// original `path` is never downscaled in the webview and remains the source of
 /// truth for execution/export.
 #[tauri::command]
-pub(crate) fn generate_thumbnail(
+pub(crate) async fn generate_thumbnail(
     path: String,
     size: u32,
     dpr: Option<f64>,
 ) -> Result<ThumbnailResult, String> {
-    generate_thumbnail_inner(&path, size, dpr)
+    tauri::async_runtime::spawn_blocking(move || generate_thumbnail_inner(&path, size, dpr))
+        .await
+        .map_err(|err| format!("thumbnail worker failed: {err}"))?
 }
 
 /// A registered media resource handed to the webview: a stable [`resource`] id
@@ -235,13 +237,15 @@ pub(crate) fn resource_info(id: String) -> Result<ResourceRef, String> {
 /// resolving the id to its path and reusing [`generate_thumbnail_inner`] so the
 /// same disk + in-memory caches back both the id and path entry points.
 #[tauri::command]
-pub(crate) fn resource_thumbnail(
+pub(crate) async fn resource_thumbnail(
     id: String,
     size: u32,
     dpr: Option<f64>,
 ) -> Result<ThumbnailResult, String> {
     let entry = resource::get(&id).ok_or_else(|| format!("unknown resource id: {id}"))?;
-    generate_thumbnail_inner(&entry.path, size, dpr)
+    tauri::async_runtime::spawn_blocking(move || generate_thumbnail_inner(&entry.path, size, dpr))
+        .await
+        .map_err(|err| format!("thumbnail worker failed: {err}"))?
 }
 
 /// Tauri event name for ingestion progress pushed by [`prime_ingest`].
