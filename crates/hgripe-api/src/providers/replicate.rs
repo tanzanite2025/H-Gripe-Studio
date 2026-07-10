@@ -1,4 +1,4 @@
-use super::common::credentials::resolve_credentials;
+use super::common::credentials::{resolve_api_key, resolve_credentials, REPLICATE_API_KEY};
 use super::common::output_files::{extension_for_content_type, normalized_content_type};
 use super::common::profile_merge::{apply_provider_profile, REPLICATE_PROFILE_MERGE};
 use super::common::task_params::{value, value_bool, value_str, value_u64};
@@ -273,7 +273,7 @@ impl ReplicateProvider {
             request = request.timeout(Duration::from_millis(timeout_ms));
         }
 
-        if let Some(api_key) = resolve_api_key(task, credentials)? {
+        if let Some(api_key) = resolve_api_key(task, credentials, &REPLICATE_API_KEY)? {
             request = request.bearer_auth(api_key);
         }
 
@@ -351,7 +351,7 @@ impl ReplicateProvider {
         }
 
         if value_bool(task, "download_with_auth").unwrap_or(false) {
-            if let Some(api_key) = resolve_api_key(task, credentials)? {
+            if let Some(api_key) = resolve_api_key(task, credentials, &REPLICATE_API_KEY)? {
                 request = request.bearer_auth(api_key);
             }
         }
@@ -759,56 +759,6 @@ fn endpoint_url(task: &ApiTask, path: &str, credentials: Option<&CredentialEntry
         format!("/{path}")
     };
     format!("{}{}", base_url.trim_end_matches('/'), path)
-}
-
-fn resolve_api_key(
-    task: &ApiTask,
-    credentials: Option<&CredentialEntry>,
-) -> BrokerResult<Option<String>> {
-    if value_bool(task, "no_auth").unwrap_or(false) {
-        return Ok(None);
-    }
-
-    if let Some(api_key) = value_str(task, "api_key") {
-        let api_key = api_key.trim();
-        if !api_key.is_empty() {
-            return Ok(Some(api_key.to_string()));
-        }
-    }
-
-    if let Some(api_key_env) = value_str(task, "api_key_env") {
-        let api_key_env = api_key_env.trim();
-        if api_key_env.is_empty() {
-            return Ok(None);
-        }
-        return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
-    }
-
-    if let Some(credentials) = credentials {
-        if let Some(api_key) = credentials.api_key.as_deref() {
-            let api_key = api_key.trim();
-            if !api_key.is_empty() {
-                return Ok(Some(api_key.to_string()));
-            }
-        }
-
-        if let Some(api_key_env) = credentials.api_key_env.as_deref() {
-            let api_key_env = api_key_env.trim();
-            if api_key_env.is_empty() {
-                return Ok(None);
-            }
-            return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
-        }
-    }
-
-    Ok(env::var("HGRIPE_REPLICATE_API_KEY")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            env::var("REPLICATE_API_TOKEN")
-                .ok()
-                .filter(|value| !value.is_empty())
-        }))
 }
 
 fn normalized_status_value(value: &str) -> String {

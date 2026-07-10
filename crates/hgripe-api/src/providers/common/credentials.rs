@@ -1,7 +1,24 @@
-use super::task_params::value_str;
+use super::task_params::{value_bool, value_str};
 use crate::credentials::{load_credential_ref, CredentialEntry};
 use crate::model::ApiTask;
 use crate::provider::{BrokerError, BrokerResult};
+use std::env;
+
+pub(in crate::providers) struct ApiKeyPolicy {
+    fallback_envs: &'static [&'static str],
+}
+
+pub(in crate::providers) const CUSTOM_HTTP_API_KEY: ApiKeyPolicy = ApiKeyPolicy {
+    fallback_envs: &["HGRIPE_CUSTOM_HTTP_API_KEY"],
+};
+
+pub(in crate::providers) const OPENAI_COMPATIBLE_API_KEY: ApiKeyPolicy = ApiKeyPolicy {
+    fallback_envs: &["HGRIPE_OPENAI_COMPATIBLE_API_KEY", "OPENAI_API_KEY"],
+};
+
+pub(in crate::providers) const REPLICATE_API_KEY: ApiKeyPolicy = ApiKeyPolicy {
+    fallback_envs: &["HGRIPE_REPLICATE_API_KEY", "REPLICATE_API_TOKEN"],
+};
 
 pub(in crate::providers) fn credentials_file(task: &ApiTask) -> Option<&str> {
     value_str(task, "credentials_file")
@@ -33,6 +50,53 @@ pub(in crate::providers) fn resolve_credentials(
     }
 
     Ok(Some(credential))
+}
+
+pub(in crate::providers) fn resolve_api_key(
+    task: &ApiTask,
+    credentials: Option<&CredentialEntry>,
+    policy: &ApiKeyPolicy,
+) -> BrokerResult<Option<String>> {
+    if value_bool(task, "no_auth").unwrap_or(false) {
+        return Ok(None);
+    }
+
+    if let Some(api_key) = value_str(task, "api_key") {
+        let api_key = api_key.trim();
+        if !api_key.is_empty() {
+            return Ok(Some(api_key.to_string()));
+        }
+    }
+
+    if let Some(api_key_env) = value_str(task, "api_key_env") {
+        let api_key_env = api_key_env.trim();
+        if api_key_env.is_empty() {
+            return Ok(None);
+        }
+        return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
+    }
+
+    if let Some(credentials) = credentials {
+        if let Some(api_key) = credentials.api_key.as_deref() {
+            let api_key = api_key.trim();
+            if !api_key.is_empty() {
+                return Ok(Some(api_key.to_string()));
+            }
+        }
+
+        if let Some(api_key_env) = credentials.api_key_env.as_deref() {
+            let api_key_env = api_key_env.trim();
+            if api_key_env.is_empty() {
+                return Ok(None);
+            }
+            return Ok(env::var(api_key_env).ok().filter(|value| !value.is_empty()));
+        }
+    }
+
+    Ok(policy
+        .fallback_envs
+        .iter()
+        .find_map(|name| env::var(name).ok().filter(|value| !value.is_empty())))
 }
 
 #[cfg(test)]
@@ -76,6 +140,24 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "provider error: credentials_ref 'wrong-provider' is for provider 'custom_http', not openai_compatible"
+        );
+    }
+
+    #[test]
+    fn explicit_task_api_key_precedes_credential_values() {
+        let mut task = ApiTask::new("custom_http", "request");
+        task.params
+            .insert("api_key".to_string(), json!(" task-key "));
+        let credentials = CredentialEntry {
+            api_key: Some("credential-key".to_string()),
+            ..CredentialEntry::default()
+        };
+
+        assert_eq!(
+            resolve_api_key(&task, Some(&credentials), &CUSTOM_HTTP_API_KEY)
+                .expect("API key resolution should succeed")
+                .as_deref(),
+            Some("task-key")
         );
     }
 }
