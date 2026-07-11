@@ -2,8 +2,24 @@ import { useRef, useState } from "react";
 
 import { useT } from "../i18n";
 import type { TimelineTool } from "./DrawerToolbar";
-import type { ClipProperties } from "./clipProps";
-import type { MediaAsset } from "./mediaBin";
+import { defaultClipProperties, type ClipProperties } from "./clipProps";
+import {
+  addAssetClip,
+  addTimelineTrack,
+  removeTimelineClip,
+  removeTimelineMarker,
+  removeTimelineTrack,
+  selectClip,
+  setClipProperties,
+  splitTimelineClip,
+  toggleTimelineMarker,
+  toggleTimelineTrackHidden,
+  toggleTimelineTrackLock,
+} from "./productionStore";
+import {
+  useProductionStateFromContext,
+  useProductionStoreFromContext,
+} from "./productionStoreContext";
 import {
   TimelineClipContextMenu,
   type TimelineClipMenuState,
@@ -17,32 +33,18 @@ import {
   timelineDuration,
   timelineSnapPoints,
   trackKindForClip,
-  type TimelineModel,
   type TrackKind,
 } from "./timeline";
 
+/** Timeline UI: reads/dispatches timeline state on the production store from
+ * context; only drawer-local UI state (tool, drag, playhead) and the editor
+ * launchers cross the props boundary. */
 interface ProductionTimelineProps {
-  timeline: TimelineModel;
-  assets: MediaAsset[];
-  activeAsset: MediaAsset | null;
-  selectedClipId: string | null;
-  clipProperties?: ClipProperties;
   timelineTool: TimelineTool;
   dragAssetId: string | null;
   playheadSec: number;
   onPlayheadSecChange: (sec: number) => void;
   onDragAssetChange: (assetId: string | null) => void;
-  onSelectClip: (clipId: string | null) => void;
-  onAddActiveToTrack: (trackId: string, atSec?: number) => void;
-  onAddTrack: (kind: TrackKind) => void;
-  onRemoveTrack: (trackId: string) => void;
-  onRemoveClip: (clipId: string) => void;
-  onSplitClipAt: (clipId: string, atSec: number) => void;
-  onToggleMarkerAt?: (sec: number) => void;
-  onRemoveMarker?: (markerId: string) => void;
-  onToggleTrackLock?: (trackId: string) => void;
-  onToggleTrackHidden?: (trackId: string) => void;
-  onSetClipProperties?: (clipId: string, props: ClipProperties) => void;
   onOpenImageEdit: (assetId: string) => void;
   onOpenAudioEdit: (clipId: string) => void;
   onOpenClipGrade: (clipId: string) => void;
@@ -78,33 +80,43 @@ function TrackToggleIcon({ kind }: { kind: "visible" | "hidden" | "locked" | "un
 }
 
 export function ProductionTimeline({
-  timeline,
-  assets,
-  activeAsset,
-  selectedClipId,
-  clipProperties,
   timelineTool,
   dragAssetId,
   playheadSec,
   onPlayheadSecChange,
   onDragAssetChange,
-  onSelectClip,
-  onAddActiveToTrack,
-  onAddTrack,
-  onRemoveTrack,
-  onRemoveClip,
-  onSplitClipAt,
-  onToggleMarkerAt,
-  onRemoveMarker,
-  onToggleTrackLock,
-  onToggleTrackHidden,
-  onSetClipProperties,
   onOpenImageEdit,
   onOpenAudioEdit,
   onOpenClipGrade,
   onSplitClipToLayers,
 }: ProductionTimelineProps) {
   const t = useT();
+  const store = useProductionStoreFromContext();
+  const timeline = useProductionStateFromContext((state) => state.timeline);
+  const assets = useProductionStateFromContext((state) => state.binAssets);
+  const activeAssetId = useProductionStateFromContext((state) => state.activeAssetId);
+  const selectedClipId = useProductionStateFromContext((state) => state.selectedClipId);
+  const clipProps = useProductionStateFromContext((state) => state.clipProps);
+  const activeAsset = assets.find((asset) => asset.id === activeAssetId) ?? null;
+  const clipProperties: ClipProperties | undefined = selectedClipId
+    ? (clipProps[selectedClipId] ?? defaultClipProperties())
+    : undefined;
+
+  const onSelectClip = (clipId: string | null) => selectClip(store, clipId);
+  const onAddActiveToTrack = (trackId: string, atSec?: number) => {
+    const assetId = store.getState().activeAssetId;
+    if (assetId) addAssetClip(store, assetId, { trackId, atSec });
+  };
+  const onAddTrack = (kind: TrackKind) => addTimelineTrack(store, kind);
+  const onRemoveTrack = (trackId: string) => removeTimelineTrack(store, trackId);
+  const onRemoveClip = (clipId: string) => removeTimelineClip(store, clipId);
+  const onSplitClipAt = (clipId: string, atSec: number) => splitTimelineClip(store, clipId, atSec);
+  const onToggleMarkerAt = (sec: number) => toggleTimelineMarker(store, sec);
+  const onRemoveMarker = (markerId: string) => removeTimelineMarker(store, markerId);
+  const onToggleTrackLock = (trackId: string) => toggleTimelineTrackLock(store, trackId);
+  const onToggleTrackHidden = (trackId: string) => toggleTimelineTrackHidden(store, trackId);
+  const onSetClipProperties = (clipId: string, props: ClipProperties) =>
+    setClipProperties(store, clipId, props);
   const [clipMenu, setClipMenu] = useState<TimelineClipMenuState | null>(null);
   const [timelineZoom, setTimelineZoom] = useState(1);
   const trackRefs = useRef<Record<string, HTMLDivElement | null>>({});
