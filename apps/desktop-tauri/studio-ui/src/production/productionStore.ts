@@ -10,7 +10,13 @@
 
 import { useSyncExternalStore } from "react";
 
-import { addAsset, removeAsset, type MediaAsset, type MediaAssetKind } from "./mediaBin";
+import {
+  addAsset,
+  removeAsset,
+  setAssetMediaInfo as setAssetMediaInfoInBin,
+  type MediaAsset,
+  type MediaAssetKind,
+} from "./mediaBin";
 import {
   addTrack,
   appendClip,
@@ -203,6 +209,19 @@ export function addAssetToBin(store: ProductionStore, draft: AssetDraft): MediaA
   return result.asset;
 }
 
+/** Attach probed media info (real duration, audio-stream presence) to a bin
+ * asset, so later timeline placements use it. */
+export function setBinAssetMediaInfo(
+  store: ProductionStore,
+  assetId: string,
+  info: { durationSec?: number | null; hasAudio?: boolean | null },
+): void {
+  store.mutate((state) => {
+    const next = setAssetMediaInfoInBin(state.binAssets, assetId, info);
+    return next === state.binAssets ? state : { ...state, binAssets: next };
+  });
+}
+
 /** Delete a bin asset. Clips referencing it leave with it (and their edit
  * documents cascade away with the clips). */
 export function removeAssetFromBin(store: ProductionStore, assetId: string): void {
@@ -221,13 +240,14 @@ export function removeAssetFromBin(store: ProductionStore, assetId: string): voi
 export function addAssetClip(
   store: ProductionStore,
   assetId: string,
-  opts: { trackId?: string } = {},
+  opts: { trackId?: string; atSec?: number } = {},
 ): void {
   store.mutate((state) => {
     const asset = state.binAssets.find((a) => a.id === assetId);
     if (!asset) return state;
-    if (asset.kind === "video") {
-      const result = appendVideoWithAudio(state.timeline, asset, opts);
+    const placement = { ...opts, duration: asset.durationSec };
+    if (asset.kind === "video" && asset.hasAudio !== false) {
+      const result = appendVideoWithAudio(state.timeline, asset, placement);
       if (opts.trackId && result.videoTrackId !== opts.trackId) return state;
       return {
         ...state,
@@ -235,7 +255,7 @@ export function addAssetClip(
         selectedClipId: result.video.id,
       };
     }
-    const result = appendClip(state.timeline, asset, opts);
+    const result = appendClip(state.timeline, asset, placement);
     if (!result) return state;
     if (opts.trackId && result.trackId !== opts.trackId) return state;
     return {

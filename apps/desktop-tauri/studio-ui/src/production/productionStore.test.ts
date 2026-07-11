@@ -14,6 +14,7 @@ import {
   removeTimelineTrack,
   selectBinAsset,
   selectClip,
+  setBinAssetMediaInfo,
   setClipGradeDoc,
   setClipProperties,
   splitTimelineClip,
@@ -186,6 +187,57 @@ describe("productionStore", () => {
     const state = store.getState();
     expect(state.audioEdits[clipId].edit.gainDb).toBeLessThanOrEqual(24);
     expect(findClip(state.timeline, clipId)!.clip.duration).toBeCloseTo(before.duration - 2);
+  });
+
+  it("uses probed media info when placing a video asset", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "video", path: "/media/a.mp4" });
+    setBinAssetMediaInfo(store, asset.id, { durationSec: 7.5 });
+    addAssetClip(store, asset.id);
+    const state = store.getState();
+    const videoClip = findClip(state.timeline, state.selectedClipId!)!.clip;
+    expect(videoClip.duration).toBe(7.5);
+    const audioTrack = state.timeline.tracks.find((t) => t.kind === "audio")!;
+    expect(audioTrack.clips).toHaveLength(1);
+    expect(audioTrack.clips[0].duration).toBe(7.5);
+    expect(audioTrack.clips[0].linkId).toBe(videoClip.linkId);
+  });
+
+  it("skips the audio counterpart for a video known to have no audio", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "video", path: "/media/silent.mp4" });
+    setBinAssetMediaInfo(store, asset.id, { hasAudio: false });
+    addAssetClip(store, asset.id);
+    const state = store.getState();
+    const audioTrack = state.timeline.tracks.find((t) => t.kind === "audio")!;
+    expect(audioTrack.clips).toHaveLength(0);
+    const videoClip = findClip(state.timeline, state.selectedClipId!)!.clip;
+    expect(videoClip.kind).toBe("video");
+    expect(videoClip.linkId).toBeUndefined();
+  });
+
+  it("places clips at the requested drop time", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
+    addAssetClip(store, asset.id, { atSec: 4 });
+    const state = store.getState();
+    expect(findClip(state.timeline, state.selectedClipId!)!.clip.start).toBe(4);
+  });
+
+  it("removing one half of a linked pair cascades both clips' documents", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "video", path: "/media/a.mp4" });
+    addAssetClip(store, asset.id);
+    const state = store.getState();
+    const videoClipId = state.selectedClipId!;
+    const audioClip = state.timeline.tracks.find((t) => t.kind === "audio")!.clips[0];
+    commitAudioEdit(store, audioClip.id, defaultAudioEdit());
+    expect(store.getState().audioEdits[audioClip.id]).toBeDefined();
+    removeTimelineClip(store, videoClipId);
+    const after = store.getState();
+    expect(findClip(after.timeline, videoClipId)).toBeNull();
+    expect(findClip(after.timeline, audioClip.id)).toBeNull();
+    expect(after.audioEdits[audioClip.id]).toBeUndefined();
   });
 
   it("reset returns to a fresh state", () => {

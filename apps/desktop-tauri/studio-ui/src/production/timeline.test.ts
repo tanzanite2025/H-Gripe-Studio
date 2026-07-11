@@ -216,4 +216,70 @@ describe("timeline model", () => {
     expect(clips[1]).toMatchObject({ start: 4, duration: 6, sourceStartSec: 4 });
     expect(splitClip(split!.timeline, clips[0].id, 0.01)).toBeNull();
   });
+
+  it("places a clip at the requested drop time, pushing past overlaps", () => {
+    const tl = createTimeline();
+    const first = appendClip(tl, videoAsset, { atSec: 3, duration: 10 });
+    expect(first.clip.start).toBe(3);
+    // Dropping into the occupied span lands just past the blocking clip.
+    const second = appendClip(first.timeline, videoAsset, { atSec: 5, duration: 10 });
+    expect(second.clip.start).toBe(13);
+    // A free gap before the first clip is used as-is.
+    const third = appendClip(second.timeline, videoAsset, { atSec: 0, duration: 2 });
+    expect(third.clip.start).toBe(0);
+  });
+
+  it("places a video pair at the drop time, keeping both starts aligned", () => {
+    const tl = createTimeline();
+    const first = appendVideoWithAudio(tl, videoAsset, { atSec: 2, duration: 5 });
+    expect(first.video.start).toBe(2);
+    expect(first.audio.start).toBe(2);
+    // Occupancy on either track pushes both clips to a shared free spot.
+    const blockedAudio = appendClip(first.timeline, audioAsset, { atSec: 7, duration: 4 });
+    const second = appendVideoWithAudio(blockedAudio.timeline, videoAsset, { atSec: 7, duration: 5 });
+    expect(second.video.start).toBe(11);
+    expect(second.audio.start).toBe(11);
+  });
+
+  it("links the A/V pair: deleting one clip removes the other", () => {
+    const r = appendVideoWithAudio(createTimeline(), videoAsset);
+    expect(r.video.linkId).toBeDefined();
+    expect(r.audio.linkId).toBe(r.video.linkId);
+    const withoutVideo = removeClip(r.timeline, r.video.id);
+    expect(findClip(withoutVideo, r.audio.id)).toBeNull();
+    const withoutAudio = removeClip(r.timeline, r.audio.id);
+    expect(findClip(withoutAudio, r.video.id)).toBeNull();
+  });
+
+  it("unlinked clips delete alone", () => {
+    const r = appendClip(createTimeline(), videoAsset);
+    expect(r.clip.linkId).toBeUndefined();
+    expect(findClip(removeClip(r.timeline, r.clip.id), r.clip.id)).toBeNull();
+  });
+
+  it("razor-splitting one half of an A/V pair splits the other too", () => {
+    const r = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 10 });
+    const split = splitClip(r.timeline, r.video.id, 4)!;
+    const videoClips = split.timeline.tracks.find((t) => t.kind === "video")!.clips;
+    const audioClips = split.timeline.tracks.find((t) => t.kind === "audio")!.clips;
+    expect(videoClips).toHaveLength(2);
+    expect(audioClips).toHaveLength(2);
+    expect(audioClips[0]).toMatchObject({ start: 0, duration: 4, sourceStartSec: 0 });
+    expect(audioClips[1]).toMatchObject({ start: 4, duration: 6, sourceStartSec: 4 });
+    // Left halves keep the original link; right halves share a fresh one.
+    expect(videoClips[0].linkId).toBe(audioClips[0].linkId);
+    expect(videoClips[1].linkId).toBe(audioClips[1].linkId);
+    expect(videoClips[1].linkId).not.toBe(videoClips[0].linkId);
+    // Deleting a right half takes its partner with it, leaving the left pair.
+    const cleaned = removeClip(split.timeline, videoClips[1].id);
+    expect(findClip(cleaned, audioClips[1].id)).toBeNull();
+    expect(findClip(cleaned, videoClips[0].id)).not.toBeNull();
+    expect(findClip(cleaned, audioClips[0].id)).not.toBeNull();
+  });
+
+  it("uses the provided duration for the A/V pair", () => {
+    const r = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 42.5 });
+    expect(r.video.duration).toBe(42.5);
+    expect(r.audio.duration).toBe(42.5);
+  });
 });

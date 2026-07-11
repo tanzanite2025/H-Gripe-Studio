@@ -21,6 +21,9 @@ export interface TimelineClip {
   duration: number;
   /** Source media in-point, seconds. Used by razor splits and trims. */
   sourceStartSec: number;
+  /** Clips sharing a linkId are a linked A/V pair: deletes and razor cuts
+   * propagate between them (Premiere/Resolve linked-clip behaviour). */
+  linkId?: string;
 }
 
 export interface TimelineTrack {
@@ -139,6 +142,26 @@ export function timelineDuration(timeline: TimelineModel): number {
   return timeline.tracks.reduce((end, t) => Math.max(end, trackEnd(t)), 0);
 }
 
+/**
+ * The earliest start >= `desiredSec` where a clip of `duration` fits in the
+ * track without overlapping existing clips (drops land at the pointer when
+ * the spot is free, else just past the blocking clips).
+ */
+export function fitStartInTrack(
+  track: TimelineTrack,
+  desiredSec: number,
+  duration: number,
+): number {
+  let candidate = Math.max(0, desiredSec);
+  const sorted = [...track.clips].sort((a, b) => a.start - b.start);
+  for (const clip of sorted) {
+    if (candidate + duration <= clip.start) break;
+    const clipEnd = clip.start + clip.duration;
+    if (candidate < clipEnd) candidate = clipEnd;
+  }
+  return candidate;
+}
+
 export interface AppendClipResult {
   timeline: TimelineModel;
   clip: TimelineClip;
@@ -154,7 +177,7 @@ export interface AppendClipResult {
 export function appendClip(
   timeline: TimelineModel,
   asset: { id: string; kind: MediaAssetKind },
-  opts: { trackId?: string; duration?: number } = {},
+  opts: { trackId?: string; duration?: number; atSec?: number } = {},
 ): AppendClipResult {
   const clipKind = clipKindForAsset(asset.kind);
   const wantTrackKind = trackKindForClip(clipKind);
@@ -168,12 +191,13 @@ export function appendClip(
     base = addTrack(timeline, wantTrackKind);
     track = base.tracks[base.tracks.length - 1];
   }
+  const duration = Math.max(MIN_CLIP_SECONDS, opts.duration ?? defaultClipDuration(clipKind));
   const clip: TimelineClip = {
     id: freshId("clip"),
     kind: clipKind,
     assetId: asset.id,
-    start: trackEnd(track),
-    duration: Math.max(MIN_CLIP_SECONDS, opts.duration ?? defaultClipDuration(clipKind)),
+    start: opts.atSec != null ? fitStartInTrack(track, opts.atSec, duration) : trackEnd(track),
+    duration,
     sourceStartSec: 0,
   };
   return {
@@ -202,7 +226,7 @@ export interface AppendVideoWithAudioResult {
 export function appendVideoWithAudio(
   timeline: TimelineModel,
   asset: { id: string; kind: MediaAssetKind },
-  opts: { trackId?: string; duration?: number } = {},
+  opts: { trackId?: string; duration?: number; atSec?: number } = {},
 ): AppendVideoWithAudioResult {
   let base = timeline;
   const requested = opts.trackId ? base.tracks.find((t) => t.id === opts.trackId) : undefined;
@@ -219,8 +243,20 @@ export function appendVideoWithAudio(
     base = addTrack(base, "audio");
     audioTrack = base.tracks[base.tracks.length - 1];
   }
-  const start = Math.max(trackEnd(videoTrack), trackEnd(audioTrack));
   const duration = Math.max(MIN_CLIP_SECONDS, opts.duration ?? defaultClipDuration("video"));
+  // Both clips need the same start; walk forward until the spot is free on
+  // both tracks (each fit can push past clips on the other track).
+  let start = Math.max(0, opts.atSec ?? Math.max(trackEnd(videoTrack), trackEnd(audioTrack)));
+  for (;;) {
+    const next = fitStartInTrack(
+      audioTrack,
+      fitStartInTrack(videoTrack, start, duration),
+      duration,
+    );
+    if (next === start) break;
+    start = next;
+  }
+  const linkId = freshId("link");
   const video: TimelineClip = {
     id: freshId("clip"),
     kind: "video",
@@ -228,6 +264,7 @@ export function appendVideoWithAudio(
     start,
     duration,
     sourceStartSec: 0,
+    linkId,
   };
   const audio: TimelineClip = {
     id: freshId("clip"),
@@ -236,6 +273,7 @@ export function appendVideoWithAudio(
     start,
     duration,
     sourceStartSec: 0,
+    linkId,
   };
   return {
     timeline: {
@@ -266,11 +304,16 @@ export function findClip(
   return null;
 }
 
+/** Remove a clip; a linked A/V partner (same linkId) leaves with it. */
 export function removeClip(timeline: TimelineModel, clipId: string): TimelineModel {
+  const found = findClip(timeline, clipId);
+  if (!found) return timeline;
+  const linkId = found.clip.linkId;
+  const doomed = (c: TimelineClip) => c.id === clipId || (linkId != null && c.linkId === linkId);
   return {
     ...timeline,
     tracks: timeline.tracks.map((t) =>
-      t.clips.some((c) => c.id === clipId) ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t,
+      t.clips.some(doomed) ? { ...t, clips: t.clips.filter((c) => !doomed(c)) } : t,
     ),
   };
 }
@@ -282,43 +325,73 @@ export interface SplitClipResult {
   right: TimelineClip;
 }
 
-/** Razor split: cut one clip at a timeline time, preserving source continuity. */
+/** Cut `clip` at `snappedAtSec`, or null when either side would be too short. */
+function splitOne(
+  clip: TimelineClip,
+  snappedAtSec: number,
+  rightLinkId: string | undefined,
+): { left: TimelineClip; right: TimelineClip } | null {
+  const offset = snappedAtSec - clip.start;
+  if (offset < MIN_CLIP_SECONDS || clip.duration - offset < MIN_CLIP_SECONDS) return null;
+  const left: TimelineClip = { ...clip, duration: offset };
+  const right: TimelineClip = {
+    ...clip,
+    id: freshId("clip"),
+    start: snappedAtSec,
+    duration: clip.duration - offset,
+    sourceStartSec: (clip.sourceStartSec ?? 0) + offset,
+    linkId: rightLinkId,
+  };
+  return { left, right };
+}
+
+/**
+ * Razor split: cut one clip at a timeline time, preserving source continuity.
+ * A linked A/V partner covering the cut point is split with it; the two right
+ * halves share a fresh linkId so the pairs stay linked.
+ */
 export function splitClip(timeline: TimelineModel, clipId: string, atSec: number): SplitClipResult | null {
   const snappedAtSec = snapTimeToFrame(atSec, timeline.fps ?? DEFAULT_TIMELINE_FPS);
-  for (const track of timeline.tracks) {
-    const index = track.clips.findIndex((c) => c.id === clipId);
-    if (index < 0) continue;
-    const clip = track.clips[index];
-    const offset = snappedAtSec - clip.start;
-    const leftDuration = offset;
-    const rightDuration = clip.duration - offset;
-    if (leftDuration < MIN_CLIP_SECONDS || rightDuration < MIN_CLIP_SECONDS) return null;
-    const left: TimelineClip = {
-      ...clip,
-      duration: leftDuration,
-    };
-    const right: TimelineClip = {
-      ...clip,
-      id: freshId("clip"),
-      start: snappedAtSec,
-      duration: rightDuration,
-      sourceStartSec: (clip.sourceStartSec ?? 0) + offset,
-    };
-    return {
-      trackId: track.id,
-      left,
-      right,
-      timeline: {
-        ...timeline,
-        tracks: timeline.tracks.map((t) =>
-          t.id === track.id
-            ? { ...t, clips: [...t.clips.slice(0, index), left, right, ...t.clips.slice(index + 1)] }
-            : t,
-        ),
-      },
-    };
-  }
-  return null;
+  const found = findClip(timeline, clipId);
+  if (!found) return null;
+  const clip = found.clip;
+  const rightLinkId = clip.linkId != null ? freshId("link") : undefined;
+  const primary = splitOne(clip, snappedAtSec, rightLinkId);
+  if (!primary) return null;
+  const partner =
+    clip.linkId != null
+      ? (() => {
+          for (const t of timeline.tracks) {
+            const c = t.clips.find((x) => x.id !== clip.id && x.linkId === clip.linkId);
+            if (c) return c;
+          }
+          return null;
+        })()
+      : null;
+  const partnerSplit = partner ? splitOne(partner, snappedAtSec, rightLinkId) : null;
+  const replaceIn = (
+    clips: TimelineClip[],
+    target: TimelineClip,
+    halves: { left: TimelineClip; right: TimelineClip },
+  ): TimelineClip[] => {
+    const index = clips.findIndex((c) => c.id === target.id);
+    return [...clips.slice(0, index), halves.left, halves.right, ...clips.slice(index + 1)];
+  };
+  return {
+    trackId: found.track.id,
+    left: primary.left,
+    right: primary.right,
+    timeline: {
+      ...timeline,
+      tracks: timeline.tracks.map((t) => {
+        let clips = t.clips;
+        if (t.id === found.track.id) clips = replaceIn(clips, clip, primary);
+        if (partner && partnerSplit && t.clips.some((c) => c.id === partner.id))
+          clips = replaceIn(clips, partner, partnerSplit);
+        return clips === t.clips ? t : { ...t, clips };
+      }),
+    },
+  };
 }
 
 /** Remove every clip referencing the given asset (asset deleted from the bin). */
