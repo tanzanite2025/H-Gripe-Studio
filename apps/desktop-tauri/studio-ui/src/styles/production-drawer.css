@@ -755,16 +755,6 @@
   font-size: 10px;
   white-space: nowrap;
 }
-.production-timeline-playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  transform: translateX(-1px);
-  background: #5b8cff;
-  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.28);
-  pointer-events: none;
-}
 /* Green sequence marker chip on the ruler bottom edge. */
 .production-timeline-marker {
   position: absolute;
@@ -776,7 +766,9 @@
   border-radius: 2px 2px 0 0;
   box-shadow: 0 0 0 1px rgba(76, 175, 125, 0.35);
 }
-/* Blue triangle playhead head, sitting in the ruler like Premiere's. */
+/* Blue triangle playhead head, sitting above the ruler like Premiere's.
+   Rendered in the overlay (not inside the clipped ruler) so it is never cut
+   by the ruler's rounded corner, even at time 0. */
 .production-timeline-playhead-head {
   position: absolute;
   top: 0;
@@ -810,12 +802,12 @@
   flex-direction: column;
   gap: 8px;
 }
-/* Playhead line extended from the ruler down across every track lane.
-   left mirrors the header column (128px + 6px gap); top starts at the ruler's
-   bottom edge so the line meets the ruler's own playhead without a seam. */
+/* Single continuous playhead: one line spanning the ruler and every track
+   lane (no ruler-internal segment, so there is no seam where they meet).
+   left mirrors the header column (128px + 6px gap). */
 .production-timeline-playhead-overlay {
   position: absolute;
-  top: 34px;
+  top: 0;
   bottom: 0;
   left: 134px;
   right: 0;
@@ -829,7 +821,7 @@
   width: 2px;
   transform: translateX(-1px);
   background: #5b8cff;
-  opacity: 0.85;
+  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.28);
 }
 .production-monitor {
   flex: 1;
