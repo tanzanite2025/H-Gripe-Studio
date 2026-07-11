@@ -1221,19 +1221,13 @@ export const messages = {
     zh: "全部预填好且都可修改（BASE_URL 也可改，方便对接中转 API）——只需填 API key 引用并保存",
   },
   "models.addModel": { en: "Add local model", zh: "新增本地模型" },
-  "models.importLegacy": { en: "Import H-Gripe profiles", zh: "导入 H-Gripe 配置" },
-  "models.importLegacyTitle": {
-    en: "seed the manager from the existing H-Gripe provider profiles",
-    zh: "从现有的 H-Gripe provider 配置初始化管理器",
-  },
-  "models.imported": { en: "profiles imported", zh: "配置已导入" },
   "models.emptyApi": {
-    en: "No API profiles yet — add one, or import the existing H-Gripe profiles.",
-    zh: "还没有 API 配置——新增一个，或导入现有的 H-Gripe 配置。",
+    en: "No API profiles yet — add one, or pick a template.",
+    zh: "还没有 API 配置——新增一个，或从模板中选择。",
   },
   "models.emptyLocal": {
-    en: "No local models yet — add an entry and bind its weights path.",
-    zh: "还没有本地模型——新增条目并绑定权重路径。",
+    en: "No local models yet.",
+    zh: "还没有本地模型。",
   },
   "models.test": { en: "Test", zh: "测试" },
   "models.edit": { en: "Edit", zh: "编辑" },
