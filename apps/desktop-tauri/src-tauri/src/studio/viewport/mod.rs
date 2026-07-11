@@ -1257,6 +1257,10 @@ mod tests {
                 document_key: "copy-rect".to_string(),
                 document_width: 64,
                 document_height: 64,
+                frame_x: 0.0,
+                frame_y: 0.0,
+                frame_width: None,
+                frame_height: None,
                 document: serde_json::json!({
                     "version": 3,
                     "layers": [
@@ -1308,6 +1312,10 @@ mod tests {
                 document_key: "copy-rect-moved".to_string(),
                 document_width: 64,
                 document_height: 64,
+                frame_x: 0.0,
+                frame_y: 0.0,
+                frame_width: None,
+                frame_height: None,
                 document: serde_json::json!({
                     "version": 3,
                     "layers": [

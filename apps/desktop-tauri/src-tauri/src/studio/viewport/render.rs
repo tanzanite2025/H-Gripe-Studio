@@ -112,6 +112,10 @@ pub(super) fn viewport_render_rgba_with_overlay(
             document_key,
             document_width,
             document_height,
+            frame_x,
+            frame_y,
+            frame_width,
+            frame_height,
         } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
@@ -122,6 +126,10 @@ pub(super) fn viewport_render_rgba_with_overlay(
                 &document_key,
                 document_width,
                 document_height,
+                frame_x,
+                frame_y,
+                frame_width.unwrap_or(document_width),
+                frame_height.unwrap_or(document_height),
                 width,
                 height,
                 grade_doc,

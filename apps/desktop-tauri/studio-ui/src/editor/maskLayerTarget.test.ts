@@ -17,11 +17,11 @@ import {
   toggleLayerMaskLink,
   layerOpStacks,
   undo,
-} from "./maskEdit";
-import { fromMaskDocument, toMaskDocument } from "./imageDocument";
+} from "./imageEditorState";
+import { fromImageEditorDocument, toImageEditorDocument } from "./imageDocument";
 import { resolveActiveTarget } from "./studioTarget";
-import { type BrushStroke } from "../contracts/maskOps";
-import { activeTargetKind, emptyAdjustmentLayer } from "../contracts/maskDocument";
+import { type BrushStroke } from "../contracts/imageEditOps";
+import { activeTargetKind, emptyAdjustmentLayer } from "../contracts/imageEditorDocument";
 
 const stroke = (id: string): BrushStroke => ({
   id,
@@ -140,7 +140,7 @@ describe("normalization round-trips the mask contract", () => {
 describe("image-document bridge carries the mask contract", () => {
   it("round-trips mask attachments and the active target", () => {
     const state = addBrushStroke(addLayerMask(initEditState(), 0), stroke("m"));
-    const bridged = toMaskDocument(fromMaskDocument(state.current));
+    const bridged = toImageEditorDocument(fromImageEditorDocument(state.current));
     expect(bridged).toEqual(state.current);
   });
 });

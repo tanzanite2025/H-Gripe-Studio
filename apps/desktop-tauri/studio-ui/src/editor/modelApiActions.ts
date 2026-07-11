@@ -272,7 +272,7 @@ export const showDeviceReportAction: ModelApiStudioAction<void> = {
   },
 };
 
-// --- agent boundary (same gates as the mask-document / canvas chains) -------------
+// --- agent boundary (same gates as the image editor document / canvas chains) -----
 
 /** The dry-run report the preview gate shows before the user confirms. */
 export interface ModelApiProposalReview {

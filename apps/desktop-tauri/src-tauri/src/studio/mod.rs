@@ -143,6 +143,7 @@ pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;
 pub(crate) use history::*;
+pub(crate) use image_document::*;
 pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
 pub(crate) use persist::*;

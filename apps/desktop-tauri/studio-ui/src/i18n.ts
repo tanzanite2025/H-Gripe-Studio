@@ -264,10 +264,10 @@ export const messages = {
   "menu.runToHere": { en: "Run to here", zh: "运行到此处" },
   "menu.runCard": { en: "Run card", zh: "运行卡片" },
   "menu.runDownstream": { en: "Run downstream", zh: "运行下游" },
-  "node.editMask": { en: "Edit Mask", zh: "编辑蒙版" },
+  "node.editMask": { en: "Image editor", zh: "图片编辑器" },
   "node.editMaskTitle": {
-    en: "Open the mask editor (brush / wand / morphology)",
-    zh: "打开蒙版编辑器（画笔 / 魔棒 / 形态学）",
+    en: "Open the image editor",
+    zh: "打开图片编辑器",
   },
   "node.preview": { en: "Preview", zh: "预览" },
   "node.previewTitle": {
@@ -299,7 +299,7 @@ export const messages = {
     en: "Click to pick an image, or drop local images here",
     zh: "点击选择图片，或把本地图片拖到这里",
   },
-  "mediaEdit.editor": { en: "image editor", zh: "图片编辑器" },
+  "imageSourceEditor.editor": { en: "image editor", zh: "图片编辑器" },
   "preview.imageTitle": { en: "Image preview", zh: "图片预览" },
   "node.thumbPreviewTitle": { en: "Double-click to preview", zh: "双击打开预览" },
   "preview.openImageEditor": { en: "Image editor", zh: "图片编辑器" },
@@ -307,22 +307,22 @@ export const messages = {
     en: "open this node's result in the standalone image editor",
     zh: "在独立的图片编辑器中打开该节点的结果",
   },
-  "mediaEdit.title": { en: "Image editor", zh: "图片编辑器" },
-  "mediaEdit.openTitle": {
+  "imageSourceEditor.title": { en: "Image editor", zh: "图片编辑器" },
+  "imageSourceEditor.openTitle": {
     en: "pick an image file to edit (it lands on a new image card)",
     zh: "选择要编辑的图片文件（会生成一个新的图片卡片）",
   },
-  "mediaEdit.unsaved": {
+  "imageSourceEditor.unsaved": {
     en: "Unsaved edits — click to save",
     zh: "编辑未保存——点击保存",
   },
-  "mediaEdit.saved": { en: "Edits saved", zh: "编辑已保存" },
-  "mediaEdit.collapse": {
+  "imageSourceEditor.saved": { en: "Edits saved", zh: "编辑已保存" },
+  "imageSourceEditor.collapse": {
     en: "Close the editor and free its memory (saved edits restore on reopen)",
     zh: "关闭编辑器并释放内存（已保存的编辑下次打开恢复）",
   },
-  "mediaEdit.mask": { en: "Mask", zh: "蒙版" },
-  "mediaEdit.crop": { en: "Crop", zh: "裁剪" },
+  "imageSourceEditor.mask": { en: "Mask", zh: "蒙版" },
+  "imageSourceEditor.crop": { en: "Crop", zh: "裁剪" },
   "node.maskAuto": { en: "Subject mask [Auto]", zh: "主体蒙版【自动】" },
   "node.enhanceAuto": { en: "Enhance quality [Auto]", zh: "画质增强【自动】" },
   "node.watchdogAuto": { en: "Detect defects [Auto]", zh: "瑕疵检测【自动】" },
@@ -488,10 +488,10 @@ export const messages = {
   "canvas.lock": { en: "Lock canvas interaction", zh: "锁定画布交互" },
   "canvas.unlock": { en: "Unlock canvas interaction", zh: "解锁画布交互" },
 
-  // ---- Mask-Edit modal (MaskEditModal) — tool labels/hints live in maskToolsI18n.ts ----
+  // ---- Image Editor modal (ImageEditorModal) — tool labels/hints live in imageEditorToolsI18n.ts ----
   "mask.titleSubject": { en: "Subject Mask / Matte", zh: "主体蒙版 / 抠像" },
-  "mask.titleDefault": { en: "Mask editor", zh: "蒙版编辑器" },
-  "mask.editor": { en: "mask editor", zh: "蒙版编辑器" },
+  "mask.titleDefault": { en: "Image editor", zh: "图片编辑器" },
+  "mask.editor": { en: "image editor", zh: "图片编辑器" },
   "mask.undo": { en: "Undo", zh: "撤销" },
   "mask.undoTitle": { en: "Undo (Ctrl+Z)", zh: "撤销（Ctrl+Z）" },
   "mask.redo": { en: "Redo", zh: "重做" },
@@ -619,7 +619,7 @@ export const messages = {
   "mask.channelMask": { en: "Mask", zh: "蒙版" },
   "mask.channelQuick": { en: "Quick mask", zh: "快速蒙版" },
   "mask.channelsHint": {
-    en: "The mask document is grayscale: its alpha is the only colour channel. Toggle the quick-mask overlay's eye to preview it in red.",
+    en: "The active mask is grayscale: its alpha is the only colour channel. Toggle the quick-mask overlay's eye to preview it in red.",
     zh: "蒙版文档为灰度图：Alpha 即唯一的颜色通道。点击快速蒙版的眼睛可用红色叠加预览。",
   },
   "mask.pathsEmpty": {

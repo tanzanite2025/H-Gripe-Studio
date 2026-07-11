@@ -15,7 +15,7 @@ pub(super) fn parse_edit_paths(value: Option<&Value>) -> Option<Value> {
     }
 }
 
-/// Trimap unknown-band strokes painted by the Mask-Edit "Matting" tool, read
+/// Trimap unknown-band strokes painted by the Image Editor "Matting" tool, read
 /// from `edit_paths.matte_strokes` (same shape as `brush_strokes`: a polyline +
 /// radius). Each becomes a disc-stamped band the matter resolves into soft
 /// alpha. Empty ⇒ matting only runs when the `alpha_matting` flag is set.
@@ -314,7 +314,7 @@ fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Option<Value> 
     if let Some(ops) = layer.get("ops").and_then(Value::as_array) {
         out["ops"] = json!(ops);
     }
-    if let Some(kind @ ("mask" | "adjustment")) = layer.get("kind").and_then(Value::as_str) {
+    if let Some(kind @ ("pixel" | "adjustment")) = layer.get("kind").and_then(Value::as_str) {
         out["kind"] = json!(kind);
     }
     if let Some(adjustment) = layer.get("adjustment") {

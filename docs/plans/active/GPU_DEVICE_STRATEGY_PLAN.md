@@ -52,6 +52,37 @@ CPU/software paths may remain for correctness, tests, export parity, unsupported
 machines, and explicit user fallback, but they must not be described as the
 final interactive presentation path.
 
+### Surface Holes Must Stay Inside The Owning Editor
+
+Zero-copy presentation must not be implemented by making shared ancestors
+transparent. The native surface may be a child window under the WebView, but the
+transparent region that reveals it is a product-surface concern, not an app-shell
+concern.
+
+Hard rules:
+
+- `body` may stay transparent for the desktop WebView requirement, but the app
+  root, shared toolbar, shared modal backdrop, and shared modal shell must keep
+  an opaque background.
+- Do not add selectors such as `.app:has(...presented)`,
+  `.media-viewer-backdrop:has(...presented)`, or
+  `.media-viewer:has(...presented)` to reveal a viewport. Those selectors turn a
+  local surface decision into a whole-application alpha leak.
+- Image editor, crop editor, grade preview, program monitor, and production
+  drawer monitor each own their own viewport slot / surface hole / matte layer.
+  The hole must be clipped to that slot only.
+- Shared shells such as `.media-viewer` may provide primitive layout chrome
+  only. They must not own WGPU presentation, alpha, crop, selection, or editor
+  behavior.
+- If the current implementation cannot reveal a native surface without making
+  shared ancestors transparent, that presenter must keep native presentation
+  disabled and report the transport/backend honestly until a scoped matte/hole
+  layer exists.
+
+This is not a retreat from zero-copy. It is the condition for zero-copy to be
+product-safe: a broken zero-copy path that makes an independent editor modal
+transparent is not considered landed.
+
 ### Required Surface Adapter Strategy
 
 The surface path must stop selecting a generic high-performance adapter first

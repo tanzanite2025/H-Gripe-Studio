@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlowProvider,
   withHgripeDataEdge,
@@ -121,7 +121,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const [exportOpen, setExportOpen] = useState(false);
   // System "Models / APIs" manager (system model manager surface plan): one
   // application-level surface, opened from the global toolbar entry or a
-  // card's "Manage…" entry (which preselects that card's capability).
+  // card's "Manage鈥? entry (which preselects that card's capability).
   const [modelsRequest, setModelsRequest] = useState<{ capability: ModelCapability | null } | null>(null);
   // Standalone image preview popup: any thumbnail double-click opens the
   // file here, off the canvas layer (no in-canvas preview cards).
@@ -145,7 +145,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const pendingRunNode = useRef<string | null>(null);
   // Per-image in-progress edit documents for the unified image editor's
   // document tabs: switching tabs remounts the editor, so drafts live here.
-  const mediaEditDrafts = useRef(new Map<string, ImageDocument>());
+  const imageSourceEditorDrafts = useRef(new Map<string, ImageDocument>());
   const [mediaDraftRevision, setMediaDraftRevision] = useState(0);
 
   // Deleting a canvas node cascades: its in-progress image-editor draft and
@@ -157,7 +157,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     if (knownNodeIds.current) {
       for (const id of knownNodeIds.current) {
         if (ids.has(id)) continue;
-        draftsChanged = mediaEditDrafts.current.delete(id) || draftsChanged;
+        draftsChanged = imageSourceEditorDrafts.current.delete(id) || draftsChanged;
         unregisterNodeOutput(id).catch(() => {});
       }
     }
@@ -206,7 +206,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   // the run HUD preview so each edit converts once.
   const workflowGraph = useMemo(() => toWorkflowGraph(nodes, edges), [nodes, edges]);
 
-  // Static validation surfaced in the toolbar (type mismatches, cycles, …).
+  // Static validation surfaced in the toolbar (type mismatches, cycles, 鈥?.
   const issues = useMemo(() => validateGraph(workflowGraph), [workflowGraph]);
 
   // File/persistence layer: workspace autosave, explicit save/open into a
@@ -296,7 +296,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     currentFile,
     fileDirty,
     isDesktop,
-    mediaEditDrafts,
+    imageSourceEditorDrafts,
     mediaDraftRevision,
     setMediaDraftRevision,
     suppressNextDirty,
@@ -358,19 +358,19 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     [canvas.documentId, canvas.tabs, fileDirty, closeCanvas, t],
   );
 
-  // Modal-open state (Preview / Mask-Edit / Crop-Edit / media manual editor)
+  // Modal-open state (Preview / Image Editor / Crop-Edit / image-source editor)
   // and the connected-image lookup the modals underlay with.
   const modals = useModals({ nodes, edges });
   const {
     previewNode,
     setPreviewNodeId,
-    setMaskEditNodeId,
+    setImageEditorNodeId,
     setCropEditNodeId,
     openPreview,
-    openMaskEdit,
+    openImageEditorForNode,
     openCropEdit,
     openGradeEdit,
-    openMediaEdit,
+    openImageSourceEditor,
     connectedImagePath,
   } = modals;
 
@@ -403,7 +403,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     fitView,
     suppressNextDirty,
     pendingRunNode,
-    openMaskEditorFor: setMaskEditNodeId,
+    openImageEditorForNode: setImageEditorNodeId,
     openCropEditorFor: setCropEditNodeId,
   });
 
@@ -621,10 +621,10 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       },
       openPreview,
       openImagePreview: setImagePreviewPath,
-      openMaskEdit,
+      openImageEditorForNode,
       openCropEdit,
       openGradeEdit,
-      openMediaEdit,
+      openImageSourceEditor,
       openModels: (capability?: ModelCapability | null) =>
         setModelsRequest({ capability: capability ?? null }),
       openAssistant: (nodeId: string) => {
@@ -638,7 +638,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
       runCard,
       runNodeDownstream,
     }),
-    [onParamChange, appendImageSourcePaths, openPreview, openMaskEdit, openCropEdit, openGradeEdit, openMediaEdit, handleCanvasSelect, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
+    [onParamChange, appendImageSourcePaths, openPreview, openImageEditorForNode, openCropEdit, openGradeEdit, openImageSourceEditor, handleCanvasSelect, addBoundEdit, runUpToNode, runCardRow, runCard, runNodeDownstream],
   );
 
   const {
@@ -669,7 +669,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
     nodeEditing: { addBoundEdit, newNodeId, onParamChange, patchNode },
     selectedNodeIds,
     pendingRunNode,
-    mediaEditDrafts,
+    imageSourceEditorDrafts,
     setMediaDraftRevision,
     takeSnapshot,
     screenToFlowPosition,
@@ -918,7 +918,7 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
 
       {previewNode && (
         <PreviewModal
-          title={(previewNode.data as HgripeNodeData).maskPath ? "Subject Mask · preview" : "Preview"}
+          title={(previewNode.data as HgripeNodeData).maskPath ? "Subject Mask 路 preview" : "Preview"}
           layers={[
             { label: "Image", path: connectedImagePath(previewNode.id) },
             { label: "Mask", path: (previewNode.data as HgripeNodeData).maskPath },
@@ -927,12 +927,12 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
           onEdit={() => {
             const id = previewNode.id;
             setPreviewNodeId(null);
-            setMaskEditNodeId(id);
+            setImageEditorNodeId(id);
           }}
           onOpenImageEditor={() => {
             const id = previewNode.id;
             setPreviewNodeId(null);
-            openMediaEdit(id);
+            openImageSourceEditor(id);
           }}
           onClose={() => setPreviewNodeId(null)}
         />

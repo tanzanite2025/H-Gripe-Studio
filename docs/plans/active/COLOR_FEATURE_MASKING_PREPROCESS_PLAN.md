@@ -305,7 +305,7 @@ Do first:
 
 - finish heavy viewport migration boundaries
 - stabilize native surface presentation
-- keep image editor, grade preview, video preview, and mask editor preview on
+- keep image editor, grade preview, video preview, and image editor preview on
   the shared viewport path
 
 Then this preprocess can move from CPU/reference implementation to WGPU kernels:
@@ -406,7 +406,7 @@ Required order:
 
 - Do not create a standalone Colour Gap / RGB Split / Lab Distance palette node.
 - Do not bypass the Image Processing card.
-- Do not add a second mask editor.
+- Do not add a second mask-only editor.
 - Do not make the graph expose every intermediate math map by default.
 - Do not start WGPU compute kernels before the product card contract is stable.
 - Do not use this to reintroduce Python as a default runtime.

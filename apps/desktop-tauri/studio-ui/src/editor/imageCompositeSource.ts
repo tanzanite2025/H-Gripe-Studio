@@ -1,7 +1,7 @@
-import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
-import { isMaskOperation, type EditOpBase, type MaskOperation } from "../contracts/maskOps";
+import { type ImageEditorDocument, type ImageEditorLayer } from "../contracts/imageEditorDocument";
+import { isImageEditOperation, type EditOpBase, type ImageEditOperation } from "../contracts/imageEditOps";
 import type { ViewportTarget } from "../bridge/viewport";
-import { composeTransforms, hasSourceImageContent, SOURCE_IMAGE_OP_TYPE, type TransformParams } from "./maskEdit";
+import { composeTransforms, hasSourceImageContent, SOURCE_IMAGE_OP_TYPE, type TransformParams } from "./imageEditorState";
 import { layerAlphaBounds, type AlphaBounds, type LayerAlphaBoundsOptions } from "./maskMorphology";
 
 export interface ImageCompositeDims {
@@ -9,28 +9,62 @@ export interface ImageCompositeDims {
   h: number;
 }
 
+export interface ImageCompositeFrame {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function finiteRound(value: number, fallback = 0): number {
+  return Number.isFinite(value) ? Math.round(value) : fallback;
+}
+
+function identityFrame(dims: ImageCompositeDims): ImageCompositeFrame {
+  return { x: 0, y: 0, w: Math.max(1, finiteRound(dims.w, 1)), h: Math.max(1, finiteRound(dims.h, 1)) };
+}
+
+function sanitizeCompositeFrame(frame: ImageCompositeFrame, dims: ImageCompositeDims): ImageCompositeFrame {
+  const fallback = identityFrame(dims);
+  return {
+    x: finiteRound(frame.x, fallback.x),
+    y: finiteRound(frame.y, fallback.y),
+    w: Math.max(1, finiteRound(frame.w, fallback.w)),
+    h: Math.max(1, finiteRound(frame.h, fallback.h)),
+  };
+}
+
 /** The layer's `source_image` op when it carries its own image resource or a
  * placement rect — the placed-layer model the compositor must resolve. */
-export function layerSourceImageOp(layer: MaskLayer): (MaskOperation & EditOpBase) | null {
+export function layerSourceImageOp(layer: ImageEditorLayer): (ImageEditOperation & EditOpBase) | null {
   if (layer.kind === "adjustment") return null;
   for (const op of layer.ops) {
-    if (op.type !== SOURCE_IMAGE_OP_TYPE || op.disabled || !isMaskOperation(op)) continue;
+    if (op.type !== SOURCE_IMAGE_OP_TYPE || op.disabled || !isImageEditOperation(op)) continue;
     if (op.source || op.placement) return op;
   }
   return null;
 }
 
 
-export function imageLayerDrawsSource(layer: MaskLayer, index: number): boolean {
+export function imageLayerDrawsSource(layer: ImageEditorLayer, index: number): boolean {
   return layer.visible !== false && (layer.opacity ?? 1) > 0 && imageLayerHasSourceContent(layer, index);
 }
 
-export function imageLayerHasSourceContent(layer: MaskLayer, index: number): boolean {
+export function imageLayerHasSourceContent(layer: ImageEditorLayer, index: number): boolean {
   return layer.kind !== "adjustment" && (index === 0 || hasSourceImageContent(layer));
 }
 
+export function imageCompositeBackingPath(doc: ImageEditorDocument, imagePath?: string | null): string | null {
+  if (imagePath) return imagePath;
+  for (const layer of doc.layers) {
+    const source = layerSourceImageOp(layer)?.source?.path;
+    if (source) return source;
+  }
+  return null;
+}
+
 export function imageLayerContentBounds(
-  layer: MaskLayer,
+  layer: ImageEditorLayer,
   index: number,
   dims: ImageCompositeDims,
   options: Pick<LayerAlphaBoundsOptions, "proxyWidth" | "alphaThreshold"> = {},
@@ -39,10 +73,18 @@ export function imageLayerContentBounds(
   return layerAlphaBounds(layer, dims, { ...options, implicitSource: index === 0, ignoreTransforms: true });
 }
 
-export function imageCompositeDocumentKey(doc: MaskDocument, dims: ImageCompositeDims): string {
+export function imageCompositeDocumentKey(
+  doc: ImageEditorDocument,
+  dims: ImageCompositeDims,
+  frame: ImageCompositeFrame = identityFrame(dims),
+): string {
+  const safeDims = identityFrame(dims);
   return JSON.stringify({
-    w: Math.max(1, Math.round(dims.w)),
-    h: Math.max(1, Math.round(dims.h)),
+    w: safeDims.w,
+    h: safeDims.h,
+    frame: {
+      ...sanitizeCompositeFrame(frame, dims),
+    },
     layers: doc.layers.map((layer) => ({
       id: layer.id,
       kind: layer.kind,
@@ -58,32 +100,23 @@ export function imageCompositeDocumentKey(doc: MaskDocument, dims: ImageComposit
 
 export function imageCompositeTarget(
   resourceId: string,
-  doc: MaskDocument,
+  doc: ImageEditorDocument,
   dims: ImageCompositeDims,
+  frame: ImageCompositeFrame = identityFrame(dims),
 ): ViewportTarget {
+  const safeDims = identityFrame(dims);
+  const resolvedFrame = sanitizeCompositeFrame(frame, dims);
   return {
     kind: "image_composite",
     resourceId,
     document: doc,
-    documentKey: imageCompositeDocumentKey(doc, dims),
-    documentWidth: Math.max(1, Math.round(dims.w)),
-    documentHeight: Math.max(1, Math.round(dims.h)),
-  };
-}
-
-export function withActiveLayerDraftTransform(
-  doc: MaskDocument,
-  draft: readonly [number, number] | null,
-): MaskDocument {
-  if (!draft || (Math.abs(draft[0]) < 0.01 && Math.abs(draft[1]) < 0.01)) return doc;
-  const active = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
-  return {
-    ...doc,
-    layers: doc.layers.map((layer, index) => (
-      index === active && layer.kind !== "adjustment"
-        ? { ...layer, ops: [...layer.ops, { type: "transform", dx: draft[0], dy: draft[1] }] }
-        : layer
-    )),
+    documentKey: imageCompositeDocumentKey(doc, dims, resolvedFrame),
+    documentWidth: safeDims.w,
+    documentHeight: safeDims.h,
+    frameX: resolvedFrame.x,
+    frameY: resolvedFrame.y,
+    frameWidth: resolvedFrame.w,
+    frameHeight: resolvedFrame.h,
   };
 }
 
@@ -92,8 +125,7 @@ function isIdentityTransform(transform: TransformParams): boolean {
 }
 
 export function layerCompositeTransform(
-  layer: MaskLayer | null | undefined,
-  draft: readonly [number, number] | null = null,
+  layer: ImageEditorLayer | null | undefined,
 ): TransformParams | null {
   if (!layer || layer.kind === "adjustment") return null;
   let transform: TransformParams | null = null;
@@ -105,10 +137,6 @@ export function layerCompositeTransform(
       scale: op.scale ?? 1,
       rotate: op.rotate ?? 0,
     };
-    transform = transform ? composeTransforms(transform, next) : next;
-  }
-  if (draft && (Math.abs(draft[0]) >= 0.01 || Math.abs(draft[1]) >= 0.01)) {
-    const next = { dx: draft[0], dy: draft[1], scale: 1, rotate: 0 };
     transform = transform ? composeTransforms(transform, next) : next;
   }
   return transform && !isIdentityTransform(transform) ? transform : null;

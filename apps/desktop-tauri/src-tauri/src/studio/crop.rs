@@ -1,11 +1,11 @@
 //! The `crop` node executor (the `Compute` lane, in-process native Rust).
 //!
-//! Crop is the first non-mask edit and validates the unified auto / manual +
+//! Crop is the first non-masking image edit and validates the unified auto / manual +
 //! binding model end-to-end (see `docs/cards/generic-media-card.md`):
 //!
-//! * **manual** — crop to the editor-drawn box (`crop_box` = `[x, y, w, h]` in
+//! * **manual**: crop to the editor-drawn box (`crop_box` = `[x, y, w, h]` in
 //!   image pixels), the human-spatial-intent lane.
-//! * **auto_subject** — *crop to subject*: segment a base matte from the image
+//! * **auto_subject**: *crop to subject*: segment a base matte from the image
 //!   with the same `subjectMask` `Compute`-lane segmenter, take its bounding
 //!   box and pad it by `margin_pct`, the algorithm-derived lane.
 //!

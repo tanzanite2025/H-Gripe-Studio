@@ -639,7 +639,7 @@ export function GradePanel({
   };
 
   return (
-    <div className="mask-edit-body grade-panel">
+    <div className="image-editor-body grade-panel">
       <div className="crop-edit-stage-wrap">
         <div className={`crop-edit-stage${presented ? " presented" : ""}`} {...stageProps}>
           <div ref={underlayAnchorRef} className="crop-edit-underlay-anchor" />
@@ -674,7 +674,7 @@ export function GradePanel({
         {scopesOpen && scopes ? <GradeScopes scopes={scopes} /> : null}
       </div>
 
-      <div className="mask-edit-controls grade-edit-controls">
+      <div className="image-editor-controls grade-edit-controls">
         {videoPath
           ? slider(t("grade.temporalDenoise"), temporalDenoise, 0, 1, 0.05, setTemporalDenoise)
           : null}

@@ -4,13 +4,14 @@ import { tauriInvoke } from "./core";
 // Wraps the Rust `sam2_prompt_mask` command: the in-process segmenter stack
 // (SAM 2 when a positive point exists and its ONNX weights resolve, else the
 // salient / builtin CPU fallback) run directly for the Studio Action layer's
-// `mask.subject.point_prompt` compute block — image + prompts -> mask
-// artifact, outside a workflow graph run. Outside Tauri (browser dev) it
-// returns a plausible mock so the action chain stays testable.
+// `mask.subject.point_prompt` compute block. The backend writes a matte PNG;
+// the Studio Action layer maps it to a selection-alpha artifact, outside a
+// workflow graph run. Outside Tauri (browser dev) it returns a plausible mock
+// so the action chain stays testable.
 
 /** What `sam2_prompt_mask` produced; snake_case to match the bridge JSON. */
 export interface Sam2PromptMaskBridgeResult {
-  /** The written grayscale matte PNG — the action's `maskArtifactRef`. */
+  /** The written grayscale matte PNG; mapped to `selectionAlphaArtifactRef` above the bridge. */
   mask_path: string;
   /** Segmenter that actually ran (`sam2`, a salient model id, `builtin-cpu`). */
   provider: string;
@@ -42,8 +43,8 @@ export interface Sam2PromptMaskBridgeRequest {
 
 /**
  * Run SAM 2 point-prompt segmentation via the backend (`sam2_prompt_mask`)
- * and get the written mask artifact. Never touches the mask document — the
- * calling Studio Action commits the artifact onto its layer-mask target.
+ * and get the written selection-alpha artifact. Never touches the image editor document;
+ * the calling Studio Action commits the artifact onto its layer-mask target.
  */
 export async function sam2PromptMask(
   req: Sam2PromptMaskBridgeRequest,

@@ -4,7 +4,7 @@
 // adjustments, groups. Rendering (K2+) compiles this tree down to the grade
 // kernel's layer stack; nothing here composites.
 //
-// K1 ships the model plus a lossless bridge to/from `MaskDocument`, so the
+// K1 ships the model plus a lossless bridge to/from `ImageEditorDocument`, so the
 // image workspace can move onto `ImageDocument` while today's stored drafts
 // keep loading and committing byte-identically. The bridge is asserted to
 // round-trip in `imageDocument.test.ts`.
@@ -17,17 +17,17 @@ import {
   type LayerGroup,
   type LayerMask,
   type LayerTargetKind,
-  type MaskDocument,
-  type MaskLayer,
-} from "../contracts/maskDocument";
-import { type EditOp } from "../contracts/maskOps";
+  type ImageEditorDocument,
+  type ImageEditorLayer,
+} from "../contracts/imageEditorDocument";
+import { type EditOp } from "../contracts/imageEditOps";
 import type { GradeBlendMode, GradeOp } from "./gradeKernel";
-import type { PersistedMaskEditState } from "./maskEdit";
+import type { PersistedImageEditorState } from "./imageEditorState";
 
-// Every mask-document blend is a grade-kernel blend (checked at compile
+// Every image-editor blend is a grade-kernel blend (checked at compile
 // time): the bridge can carry `blend` across unchanged.
-const _maskBlendIsGradeBlend: GradeBlendMode = null as unknown as LayerBlend;
-void _maskBlendIsGradeBlend;
+const _imageEditorBlendIsGradeBlend: GradeBlendMode = null as unknown as LayerBlend;
+void _imageEditorBlendIsGradeBlend;
 
 /** Where a pixel layer's backing image comes from. */
 export interface SourceRef {
@@ -53,7 +53,7 @@ export type ImageLayerKind =
    */
   | { kind: "pixel"; source?: SourceRef; edits: EditOp[] }
   /**
-   * Parameter-only layer applied to the composite below. A mask-bridged
+   * Parameter-only layer applied to the composite below. An image-editor-bridged
    * layer carries the u8 `adjustment` tone map; K2 re-targets these onto
    * the grade kernel's f32 `ops` (levels → levels, curve → curves, …).
    * Exactly one of the two is populated.
@@ -77,16 +77,16 @@ export interface ImageLayer {
   /** Layer mask gating the layer's effect (mask results land here). */
   mask?: ImageLayerMask;
   /** Editable layer-mask attachment: the mask's own edit stack (bridged
-   * from the mask document's `LayerMask`; `mask` above is a baked image). */
+   * from the image editor document's `LayerMask`; `mask` above is a baked image). */
   layerMask?: LayerMask;
   /** Clipping mask (Alt+Ctrl+G): composite only inside the layer below. */
   clipped?: boolean;
 }
 
 /**
- * The image editor's document. Layers are bottom-up, like `MaskDocument`.
+ * The image editor's document. Layers are bottom-up, like `ImageEditorDocument`.
  * Mask-feature inputs (`matte_strokes` / `points`) stay document-level so a
- * bridged mask draft loses nothing.
+ * bridged image editor draft loses nothing.
  */
 export interface ImageDocument {
   version: 1;
@@ -95,16 +95,16 @@ export interface ImageDocument {
   active: number;
   /** Requested output size (PS Image Size); absent ⇒ keep the source size. */
   canvas?: ImageCanvasSize;
-  /** Carried through from a bridged mask document (matting band strokes). */
-  matte_strokes: MaskDocument["matte_strokes"];
-  /** Carried through from a bridged mask document (SAM 2 point prompts). */
-  points: MaskDocument["points"];
-  /** Visual layer tags carried through the mask/document bridge. */
+  /** Carried through from a bridged image editor document (matting band strokes). */
+  matte_strokes: ImageEditorDocument["matte_strokes"];
+  /** Carried through from a bridged image editor document (SAM 2 point prompts). */
+  points: ImageEditorDocument["points"];
+  /** Visual layer tags carried through the image editor document bridge. */
   layerGroups: LayerGroup[];
   /** Which attachment of the active layer receives new edits; absent ⇒ pixel. */
   activeTarget?: LayerTargetKind;
   /** Full editor snapshot timeline for reopening the image editor later. */
-  editHistory?: PersistedMaskEditState;
+  editHistory?: PersistedImageEditorState;
 }
 
 export function emptyImageLayer(name = "Background"): ImageLayer {
@@ -123,12 +123,12 @@ export function emptyImageDocument(): ImageDocument {
 }
 
 // ---------------------------------------------------------------------------
-// MaskDocument bridge (K1) — lossless in both directions for documents that
-// originated as mask drafts. `fromMaskDocument(toMaskDocument(d)) ≡ d` for
+// ImageEditorDocument bridge (K1) — lossless in both directions for documents that
+// originated as image editor drafts. `fromImageEditorDocument(toImageEditorDocument(d)) ≡ d` for
 // any bridgeable document (asserted by tests).
 // ---------------------------------------------------------------------------
 
-function fromMaskLayer(l: MaskLayer): ImageLayer {
+function fromImageEditorLayer(l: ImageEditorLayer): ImageLayer {
   const layer: ImageLayerKind =
     l.kind === "adjustment"
       ? { kind: "adjustment", adjustment: l.adjustment }
@@ -147,11 +147,11 @@ function fromMaskLayer(l: MaskLayer): ImageLayer {
   };
 }
 
-/** Lift a stored mask draft into the image-document model (always succeeds). */
-export function fromMaskDocument(doc: MaskDocument, editHistory?: PersistedMaskEditState): ImageDocument {
+/** Lift a stored image editor draft into the image-document model (always succeeds). */
+export function fromImageEditorDocument(doc: ImageEditorDocument, editHistory?: PersistedImageEditorState): ImageDocument {
   return {
     version: 1,
-    layers: doc.layers.map(fromMaskLayer),
+    layers: doc.layers.map(fromImageEditorLayer),
     active: doc.active,
     ...(doc.canvas !== undefined ? { canvas: doc.canvas } : null),
     matte_strokes: doc.matte_strokes,
@@ -162,9 +162,9 @@ export function fromMaskDocument(doc: MaskDocument, editHistory?: PersistedMaskE
   };
 }
 
-/** Why one layer cannot lower to a `MaskLayer`, or `null` when it can. */
+/** Why one layer cannot lower to a `ImageEditorLayer`, or `null` when it can. */
 function layerBridgeGap(l: ImageLayer): string | null {
-  // Features MaskDocument cannot express make the layer unbridgeable.
+  // Features ImageEditorDocument cannot express make the layer unbridgeable.
   if (l.mask) return "baked layer mask";
   if (l.clipped) return "clipping mask";
   if (l.layer.kind === "group") return "layer group";
@@ -176,11 +176,11 @@ function layerBridgeGap(l: ImageLayer): string | null {
 }
 
 /**
- * Why a document cannot lower to `MaskDocument` (the first offending layer
- * and feature), or `null` when `toMaskDocument` will succeed. Callers that
+ * Why a document cannot lower to `ImageEditorDocument` (the first offending layer
+ * and feature), or `null` when `toImageEditorDocument` will succeed. Callers that
  * drop a failed lowering should surface this so edits never vanish silently.
  */
-export function maskBridgeGap(doc: ImageDocument): string | null {
+export function imageEditorBridgeGap(doc: ImageDocument): string | null {
   for (const l of doc.layers) {
     const gap = layerBridgeGap(l);
     if (gap) return `layer "${l.name}": ${gap}`;
@@ -188,7 +188,7 @@ export function maskBridgeGap(doc: ImageDocument): string | null {
   return null;
 }
 
-function toMaskLayer(l: ImageLayer): MaskLayer | null {
+function toImageEditorLayer(l: ImageLayer): ImageEditorLayer | null {
   if (layerBridgeGap(l)) return null;
   if (l.layer.kind === "group") return null; // covered by the gap check; narrows the union
   const blend = l.blend as LayerBlend;
@@ -204,20 +204,20 @@ function toMaskLayer(l: ImageLayer): MaskLayer | null {
   };
   return l.layer.kind === "adjustment"
     ? { ...base, kind: "adjustment", ops: [], ...(l.layer.adjustment !== undefined ? { adjustment: l.layer.adjustment } : null) }
-    : { ...base, kind: "mask", ops: l.layer.edits, ...(l.layerMask !== undefined ? { mask: l.layerMask } : null) };
+    : { ...base, kind: "pixel", ops: l.layer.edits, ...(l.layerMask !== undefined ? { mask: l.layerMask } : null) };
 }
 
 /**
  * Lower an image document back to the `edit_paths` v3 envelope, or `null`
- * when the document uses features `MaskDocument` cannot express (groups,
- * layer masks, clipping, grade ops, non-mask blends). While the mask kernel
+ * when the document uses features `ImageEditorDocument` cannot express (groups,
+ * layer masks, clipping, grade ops, non-image-editor blends). While the mask kernel
  * remains the executor (pre-K2), the image workspace only produces
  * bridgeable documents.
  */
-export function toMaskDocument(doc: ImageDocument): MaskDocument | null {
-  const layers: MaskLayer[] = [];
+export function toImageEditorDocument(doc: ImageDocument): ImageEditorDocument | null {
+  const layers: ImageEditorLayer[] = [];
   for (const l of doc.layers) {
-    const m = toMaskLayer(l);
+    const m = toImageEditorLayer(l);
     if (!m) return null;
     layers.push(m);
   }

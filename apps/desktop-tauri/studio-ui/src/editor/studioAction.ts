@@ -11,12 +11,12 @@
 // tools write.
 
 import type { ComputeCapabilityId, ComputeCostClass } from "./computeBlocks";
-import type { EditState } from "./maskEdit";
-import { addLayerMask, addOperation, cloneMaskDocument, setActiveLayer, setActiveTarget } from "./maskEdit";
+import type { EditState } from "./imageEditorState";
+import { addLayerMask, addOperation, cloneImageEditorDocument, setActiveLayer, setActiveTarget } from "./imageEditorState";
 import type { SelectionTarget, StudioTarget } from "./studioTarget";
 import { describeTarget } from "./studioTarget";
-import { type MaskDocument } from "../contracts/maskDocument";
-import { type PointPrompt } from "../contracts/maskOps";
+import { type ImageEditorDocument } from "../contracts/imageEditorDocument";
+import { type PointPrompt } from "../contracts/imageEditOps";
 
 /** What an action gets to work with: the document history plus its resolved target. */
 export interface ActionContext {
@@ -41,7 +41,7 @@ export interface ActionPlan {
 /** A cheap deterministic preview: the document as it would look after commit. */
 export interface PreviewArtifact {
   kind: "document";
-  doc: MaskDocument;
+  doc: ImageEditorDocument;
 }
 
 export interface CommitResult {
@@ -124,7 +124,7 @@ export function createStudioActionRegistry(): StudioActionRegistry {
 
 // --- first non-agent actions (plan step 7) -----------------------------------
 
-const layerIndexOf = (doc: MaskDocument, layerId: string): number =>
+const layerIndexOf = (doc: ImageEditorDocument, layerId: string): number =>
   doc.layers.findIndex((l) => l.id === layerId);
 
 /** The mask attachment of a `layer_mask` target activated as the edit target. */
@@ -188,7 +188,7 @@ export const selectionToLayerMaskAction: StudioAction<SelectionToMaskParams> = {
       action: this.id,
       target: describeTarget(ctx.target),
       costClass: "free",
-      creates: "mask edit op",
+      creates: "layer mask operation",
       summary: `record selection ${params.selection.id} (${params.selection.source}) onto ${describeTarget(ctx.target)}`,
     };
   },
@@ -233,7 +233,7 @@ export const sam2PromptMaskAction: StudioAction<Sam2PromptMaskParams> = {
       target: describeTarget(ctx.target),
       costClass: "local_compute",
       capability: "mask.subject.point_prompt",
-      creates: "mask artifact",
+      creates: "selection-alpha artifact",
       summary: `SAM 2 point-prompt (${params.points.length} points${params.variant ? `, ${params.variant}` : ""}) onto ${describeTarget(ctx.target)}`,
     };
   },
@@ -245,10 +245,10 @@ export const sam2PromptMaskAction: StudioAction<Sam2PromptMaskParams> = {
     const targeted = withMaskTargetActive(ctx.state, ctx.target);
     if (!targeted) return { ok: false, state: ctx.state, summary: "mask target not found" };
     const doc = targeted.current;
-    const current = cloneMaskDocument({ ...doc, points: params.points.map((p) => ({ ...p })) });
+    const current = cloneImageEditorDocument({ ...doc, points: params.points.map((p) => ({ ...p })) });
     const next: EditState = {
       current,
-      past: [...targeted.past, cloneMaskDocument(doc)],
+      past: [...targeted.past, cloneImageEditorDocument(doc)],
       future: [],
     };
     return { ok: true, state: next, summary: `SAM 2 prompts recorded for ${describeTarget(ctx.target)}` };
@@ -274,7 +274,7 @@ export const featherLayerMaskAction: StudioAction<FeatherMaskParams> = {
       action: this.id,
       target: describeTarget(ctx.target),
       costClass: "free",
-      creates: "mask edit op",
+      creates: "layer mask operation",
       summary: `feather ${describeTarget(ctx.target)} by ${params.radiusPx}px`,
     };
   },

@@ -8,11 +8,11 @@
 //
 // Exhaustiveness is enforced by the type system where the op union is a
 // closed type (`GradeOp`, `AdjustmentType`) — adding an op without a registry
-// row fails `tsc`. Mask op kinds are an open `string` on `MaskOperation`, so
+// row fails `tsc`. Mask op kinds are an open `string` on `ImageEditOperation`, so
 // they are pinned by the const list below plus the registry unit test.
 
-import { type AdjustmentType } from "../contracts/maskDocument";
-import { type EditOp } from "../contracts/maskOps";
+import { type AdjustmentType } from "../contracts/imageEditorDocument";
+import { type EditOp } from "../contracts/imageEditOps";
 import type { GradeOp } from "./gradeKernel";
 
 /** Which execution core replays an op (image-kernel.md §1). */
@@ -35,12 +35,12 @@ export interface OpMeta {
 }
 
 // ---------------------------------------------------------------------------
-// Mask kernel ops — today's `EditPaths.ops` vocabulary. `MaskOperation.type`
+// Image edit ops currently executed by the mask/raster kernels. ImageEditOperation.type`
 // is an open string in the wire format; this list is the closed set the
-// studio actually records (see the doc comment on `MaskOperation`).
+// studio actually records (see the doc comment on `ImageEditOperation`).
 // ---------------------------------------------------------------------------
 
-export const MASK_OP_TYPES = [
+export const IMAGE_EDIT_OP_TYPES = [
   "path",
   "brush",
   "wand",
@@ -75,21 +75,21 @@ export const MASK_OP_TYPES = [
   "art_history_brush",
   "source_image",
 ] as const;
-export type MaskOpType = (typeof MASK_OP_TYPES)[number];
+export type ImageEditOpType = (typeof IMAGE_EDIT_OP_TYPES)[number];
 
-const MASK_OP_META: OpMeta = { kernel: "mask", adjustment: false };
+const IMAGE_EDIT_OP_META: OpMeta = { kernel: "mask", adjustment: false };
 
-export const MASK_OPS: Record<MaskOpType, OpMeta> = Object.fromEntries(
-  MASK_OP_TYPES.map((type) => [type, type === "source_image" ? { kernel: "raster", adjustment: false } : MASK_OP_META]),
-) as Record<MaskOpType, OpMeta>;
+export const IMAGE_EDIT_OPS: Record<ImageEditOpType, OpMeta> = Object.fromEntries(
+  IMAGE_EDIT_OP_TYPES.map((type) => [type, type === "source_image" ? { kernel: "raster", adjustment: false } : IMAGE_EDIT_OP_META]),
+) as Record<ImageEditOpType, OpMeta>;
 
 // ---------------------------------------------------------------------------
-// Mask-document adjustment layers (M6). These execute in the u8 mask kernel
+// Image editor adjustment layers (M6). These execute in the u8 mask kernel
 // today; at image-kernel K2 the image workspace re-targets them onto the
 // grade kernel's f32 ops (levels → levels, curve → curves, …).
 // ---------------------------------------------------------------------------
 
-export const MASK_ADJUSTMENTS: Record<AdjustmentType, OpMeta> = {
+export const IMAGE_EDITOR_ADJUSTMENTS: Record<AdjustmentType, OpMeta> = {
   levels: { kernel: "mask", adjustment: true },
   curve: { kernel: "mask", adjustment: true },
   brightness_contrast: { kernel: "mask", adjustment: true },
@@ -141,9 +141,9 @@ export const GRADE_OPS: Record<GradeOp["type"], OpMeta> = {
 // Lookup
 // ---------------------------------------------------------------------------
 
-/** Registry row for a recorded mask-document edit op, if declared. */
-export function maskOpMeta(op: EditOp): OpMeta | null {
-  return (MASK_OPS as Record<string, OpMeta>)[op.type] ?? null;
+/** Registry row for a recorded image edit op, if declared. */
+export function imageEditOpMeta(op: EditOp): OpMeta | null {
+  return (IMAGE_EDIT_OPS as Record<string, OpMeta>)[op.type] ?? null;
 }
 
 /** Registry row for a grade op (always declared — the union is closed). */

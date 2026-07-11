@@ -11,7 +11,7 @@ import {
   reviewProposal,
   type AgentProposal,
 } from "./studioAgent";
-import { addLayerMask, initEditState, undo } from "./maskEdit";
+import { addLayerMask, initEditState, undo } from "./imageEditorState";
 import type { StudioDocumentRef } from "./studioTarget";
 
 const ref: StudioDocumentRef = { canvasId: "canvas-1", documentId: "node-1/edit_paths" };

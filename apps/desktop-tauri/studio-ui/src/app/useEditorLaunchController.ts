@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useRef,
@@ -14,11 +14,11 @@ import type { CropCommit } from "../editor/CropEditModal";
 import type { HgripeNodeData } from "../editor/HgripeNode";
 import type { EditorRequest } from "../editor/host/EditorHost";
 import {
-  maskBridgeGap,
-  toMaskDocument,
+  imageEditorBridgeGap,
+  toImageEditorDocument,
   type ImageDocument,
 } from "../editor/imageDocument";
-import { normalizeEditPaths, serializeEditState } from "../editor/maskEdit";
+import { normalizeEditPaths, serializeEditState } from "../editor/imageEditorState";
 import { makeNode, useNodeEditing } from "../editor/useNodeEditing";
 import { useModals } from "../editor/useModals";
 import type { UseCanvasDocument } from "../editor/useCanvasDocument";
@@ -61,7 +61,7 @@ interface UseEditorLaunchControllerArgs {
   nodeEditing: NodeEditingActions;
   selectedNodeIds: string[];
   pendingRunNode: MutableRefObject<string | null>;
-  mediaEditDrafts: MutableRefObject<Map<string, ImageDocument>>;
+  imageSourceEditorDrafts: MutableRefObject<Map<string, ImageDocument>>;
   setMediaDraftRevision: Dispatch<SetStateAction<number>>;
   takeSnapshot: () => void;
   screenToFlowPosition: (position: { x: number; y: number }) => {
@@ -87,7 +87,7 @@ export function useEditorLaunchController({
   nodeEditing,
   selectedNodeIds,
   pendingRunNode,
-  mediaEditDrafts,
+  imageSourceEditorDrafts,
   setMediaDraftRevision,
   takeSnapshot,
   screenToFlowPosition,
@@ -97,21 +97,21 @@ export function useEditorLaunchController({
   t,
 }: UseEditorLaunchControllerArgs) {
   const {
-    maskEditNode,
+    imageEditorNode,
     cropEditNode,
     gradeEditNode,
-    mediaEditSource,
-    setMaskEditNodeId,
+    imageSourceEditorSource,
+    setImageEditorNodeId,
     setCropEditNodeId,
     setGradeEditNodeId,
-    setMediaEditSourceId,
-    openMediaEdit,
+    setImageSourceEditorSourceId,
+    openImageSourceEditor,
     connectedImagePath,
   } = modals;
   const { addBoundEdit, newNodeId, onParamChange, patchNode } = nodeEditing;
   const [gradeClipId, setGradeClipId] = useState<string | null>(null);
   const [audioEditClipId, setAudioEditClipId] = useState<string | null>(null);
-  const [mediaEditBlank, setMediaEditBlank] = useState(false);
+  const [imageSourceEditorBlank, setImageSourceEditorBlank] = useState(false);
 
   const handleOpenImageEdit = useCallback(
     (assetId: string) => {
@@ -121,12 +121,12 @@ export function useEditorLaunchController({
         asset.sourceNodeId &&
         nodes.some((node) => node.id === asset.sourceNodeId)
       ) {
-        openMediaEdit(asset.sourceNodeId);
+        openImageSourceEditor(asset.sourceNodeId);
       } else {
         setMessage(t("drawer.imageEditNoSource"));
       }
     },
-    [binAssets, nodes, openMediaEdit, setMessage, t],
+    [binAssets, nodes, openImageSourceEditor, setMessage, t],
   );
 
   const handleOpenAudioEdit = useCallback(
@@ -216,8 +216,8 @@ export function useEditorLaunchController({
     ]);
     setSelectedId(node.id);
     void primeIngest([path], IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
-    setMediaEditBlank(false);
-    openMediaEdit(node.id);
+    setImageSourceEditorBlank(false);
+    openImageSourceEditor(node.id);
   };
 
   const editorRequest: EditorRequest | null = gradeClip
@@ -239,31 +239,31 @@ export function useEditorLaunchController({
           setClipGradeDoc(productionStore, gradeClip.clip.id, commit.gradeDoc);
         },
       }
-    : maskEditNode
+    : imageEditorNode
       ? {
           editor: "mask",
           target: {
             title: t(
-              (maskEditNode.data as HgripeNodeData).kind === "subjectMask"
+              (imageEditorNode.data as HgripeNodeData).kind === "subjectMask"
                 ? "mask.titleSubject"
                 : "mask.titleDefault",
             ),
-            imagePath: connectedImagePath(maskEditNode.id) ?? null,
-            nodeId: maskEditNode.id,
+            imagePath: connectedImagePath(imageEditorNode.id) ?? null,
+            nodeId: imageEditorNode.id,
           },
           initial:
-            (maskEditNode.data as HgripeNodeData).params.edit_history ??
+            (imageEditorNode.data as HgripeNodeData).params.edit_history ??
             normalizeEditPaths(
-              (maskEditNode.data as HgripeNodeData).params.edit_paths,
+              (imageEditorNode.data as HgripeNodeData).params.edit_paths,
             ),
           wandTolerance: Number(
-            (maskEditNode.data as HgripeNodeData).params.wand_tolerance ?? 24,
+            (imageEditorNode.data as HgripeNodeData).params.wand_tolerance ?? 24,
           ),
           onCommit: (edits, editState) => {
-            const data = maskEditNode.data as HgripeNodeData;
-            pendingRunNode.current = maskEditNode.id;
+            const data = imageEditorNode.data as HgripeNodeData;
+            pendingRunNode.current = imageEditorNode.id;
             takeSnapshot();
-            patchNode(maskEditNode.id, {
+            patchNode(imageEditorNode.id, {
               params: {
                 ...data.params,
                 edit_paths: edits,
@@ -354,10 +354,10 @@ export function useEditorLaunchController({
                 );
               },
             }
-          : mediaEditSource || mediaEditBlank
+          : imageSourceEditorSource || imageSourceEditorBlank
             ? (() => {
-                const data = mediaEditSource
-                  ? (mediaEditSource.data as HgripeNodeData)
+                const data = imageSourceEditorSource
+                  ? (imageSourceEditorSource.data as HgripeNodeData)
                   : null;
                 const imagePath = data
                   ? (data.cutoutImagePath ??
@@ -380,7 +380,7 @@ export function useEditorLaunchController({
                     return {
                       id: node.id,
                       label: path?.split(/[\\/]/).pop() || null,
-                      active: node.id === mediaEditSource?.id,
+                      active: node.id === imageSourceEditorSource?.id,
                     };
                   })
                   .filter(
@@ -393,34 +393,34 @@ export function useEditorLaunchController({
                     } => tab.label != null,
                   );
                 return {
-                  editor: "media" as const,
+                  editor: "imageSource" as const,
                   target: {
-                    title: base || t("mediaEdit.title"),
+                    title: base || t("imageSourceEditor.title"),
                     imagePath,
-                    nodeId: mediaEditSource?.id ?? null,
+                    nodeId: imageSourceEditorSource?.id ?? null,
                   },
                   onPickFile: () => void pickIntoImageEditor(),
                   tabs,
                   onSelectTab: (id: string) => {
-                    setMediaEditBlank(false);
-                    setMediaEditSourceId(id);
+                    setImageSourceEditorBlank(false);
+                    setImageSourceEditorSourceId(id);
                   },
-                  initial: mediaEditSource
-                    ? (mediaEditDrafts.current.get(mediaEditSource.id) ?? null)
+                  initial: imageSourceEditorSource
+                    ? (imageSourceEditorDrafts.current.get(imageSourceEditorSource.id) ?? null)
                     : null,
                   onDocChange: (doc: ImageDocument) => {
-                    if (mediaEditSource) {
-                      mediaEditDrafts.current.set(mediaEditSource.id, doc);
+                    if (imageSourceEditorSource) {
+                      imageSourceEditorDrafts.current.set(imageSourceEditorSource.id, doc);
                       setMediaDraftRevision((value) => value + 1);
                     }
                   },
                   onCommitMask: (edits: ImageDocument) => {
-                    const lowered = toMaskDocument(edits);
-                    if (mediaEditSource && lowered) {
-                      if (mediaEditDrafts.current.delete(mediaEditSource.id)) {
+                    const lowered = toImageEditorDocument(edits);
+                    if (imageSourceEditorSource && lowered) {
+                      if (imageSourceEditorDrafts.current.delete(imageSourceEditorSource.id)) {
                         setMediaDraftRevision((value) => value + 1);
                       }
-                      addBoundEdit(mediaEditSource.id, "subjectMask", {
+                      addBoundEdit(imageSourceEditorSource.id, "subjectMask", {
                         params: {
                           edit_paths: lowered,
                           ...(edits.editHistory
@@ -430,17 +430,17 @@ export function useEditorLaunchController({
                         openEditor: false,
                         run: true,
                       });
-                    } else if (mediaEditSource && !lowered) {
+                    } else if (imageSourceEditorSource && !lowered) {
                       console.warn(
-                        `image edit apply skipped — document cannot lower to edit_paths (${maskBridgeGap(edits)})`,
+                        `image edit apply skipped 鈥?document cannot lower to edit_paths (${imageEditorBridgeGap(edits)})`,
                       );
                     }
-                    setMediaEditSourceId(null);
-                    setMediaEditBlank(false);
+                    setImageSourceEditorSourceId(null);
+                    setImageSourceEditorBlank(false);
                   },
                   onCommitCrop: (commit: CropCommit) => {
-                    if (mediaEditSource) {
-                      addBoundEdit(mediaEditSource.id, "crop", {
+                    if (imageSourceEditorSource) {
+                      addBoundEdit(imageSourceEditorSource.id, "crop", {
                         params: {
                           mode: commit.mode,
                           aspect: commit.aspect,
@@ -451,17 +451,17 @@ export function useEditorLaunchController({
                         run: true,
                       });
                     }
-                    setMediaEditSourceId(null);
-                    setMediaEditBlank(false);
+                    setImageSourceEditorSourceId(null);
+                    setImageSourceEditorBlank(false);
                   },
                 };
               })()
             : null;
 
-  const lastMediaEditId = useRef<string | null>(null);
+  const lastImageSourceEditorId = useRef<string | null>(null);
   useEffect(() => {
-    if (mediaEditSource) lastMediaEditId.current = mediaEditSource.id;
-  }, [mediaEditSource]);
+    if (imageSourceEditorSource) lastImageSourceEditorId.current = imageSourceEditorSource.id;
+  }, [imageSourceEditorSource]);
 
   const openImageEditor = () => {
     const isImage = (node: Node) =>
@@ -470,20 +470,20 @@ export function useEditorLaunchController({
       (node) => selectedNodeIds.includes(node.id) && isImage(node),
     );
     if (selected) {
-      openMediaEdit(selected.id);
+      openImageSourceEditor(selected.id);
       return;
     }
-    const last = lastMediaEditId.current;
+    const last = lastImageSourceEditorId.current;
     if (last && nodes.some((node) => node.id === last && isImage(node))) {
-      openMediaEdit(last);
+      openImageSourceEditor(last);
       return;
     }
     const cards = nodes.filter(isImage);
     if (cards.length > 0) {
-      openMediaEdit(cards[cards.length - 1].id);
+      openImageSourceEditor(cards[cards.length - 1].id);
       return;
     }
-    setMediaEditBlank(true);
+    setImageSourceEditorBlank(true);
   };
 
   const openImageEditorOnPath = (path: string) => {
@@ -495,7 +495,7 @@ export function useEditorLaunchController({
         ),
     );
     if (owner) {
-      openMediaEdit(owner.id);
+      openImageSourceEditor(owner.id);
       return;
     }
     takeSnapshot();
@@ -515,16 +515,16 @@ export function useEditorLaunchController({
     ]);
     setSelectedId(node.id);
     void primeIngest([path], IMAGE_SOURCE_THUMB_SIZE, undefined, IMAGE_SOURCE_THUMB_MODE);
-    openMediaEdit(node.id);
+    openImageSourceEditor(node.id);
   };
 
   const closeEditor = () => {
     setGradeClipId(null);
-    setMaskEditNodeId(null);
+    setImageEditorNodeId(null);
     setCropEditNodeId(null);
     setGradeEditNodeId(null);
-    setMediaEditSourceId(null);
-    setMediaEditBlank(false);
+    setImageSourceEditorSourceId(null);
+    setImageSourceEditorBlank(false);
   };
 
   return {

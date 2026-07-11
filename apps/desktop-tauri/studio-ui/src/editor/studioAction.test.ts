@@ -9,16 +9,16 @@ import {
   builtinComputeBlocks,
   createComputeBlockRegistry,
   sam2PointPromptBlock,
-  type Sam2MaskRequest,
-  type Sam2MaskResult,
+  type Sam2SelectionAlphaRequest,
+  type Sam2SelectionAlphaResult,
 } from "./computeBlocks";
 import {
   builtinStudioActions,
   type ActionContext,
 } from "./studioAction";
-import { addLayerMask, initEditState, undo, type EditState } from "./maskEdit";
+import { addLayerMask, initEditState, undo, type EditState } from "./imageEditorState";
 import { resolveActiveTarget, type StudioDocumentRef, type StudioTarget } from "./studioTarget";
-import { activeTargetKind } from "../contracts/maskDocument";
+import { activeTargetKind } from "../contracts/imageEditorDocument";
 
 const ref: StudioDocumentRef = { canvasId: "canvas-1", documentId: "node-1/edit_paths" };
 
@@ -38,10 +38,10 @@ const maskCtx = (state: EditState): ActionContext => {
 describe("compute block registry", () => {
   it("registers SAM 2 under mask.subject.point_prompt and runs the injected transport", async () => {
     const registry = createComputeBlockRegistry();
-    const calls: Sam2MaskRequest[] = [];
-    const fake = async (request: Sam2MaskRequest): Promise<Sam2MaskResult> => {
+    const calls: Sam2SelectionAlphaRequest[] = [];
+    const fake = async (request: Sam2SelectionAlphaRequest): Promise<Sam2SelectionAlphaResult> => {
       calls.push(request);
-      return { maskArtifactRef: "artifact-1", provider: "sam2" };
+      return { selectionAlphaArtifactRef: "artifact-1", provider: "sam2" };
     };
     registry.register(sam2PointPromptBlock(fake));
 
@@ -51,8 +51,8 @@ describe("compute block registry", () => {
     const result = (await block.run(
       { imageRef: "img", targetSpace: "document", points: [{ x: 1, y: 2, label: 1 }] },
       { backend: null },
-    )) as Sam2MaskResult;
-    expect(result.maskArtifactRef).toBe("artifact-1");
+    )) as Sam2SelectionAlphaResult;
+    expect(result.selectionAlphaArtifactRef).toBe("artifact-1");
     expect(calls).toHaveLength(1);
   });
 
@@ -61,12 +61,12 @@ describe("compute block registry", () => {
     const [block] = registry.forCapability("mask.subject.point_prompt");
     expect(block.id).toBe("sam2.point_prompt");
     // Outside Tauri the bridge answers with its browser-dev mock; the
-    // contract mapping (mask_path -> maskArtifactRef, etc.) still applies.
+    // contract mapping (mask_path -> selectionAlphaArtifactRef, etc.) still applies.
     const result = (await block.run(
       { imageRef: "img.png", targetSpace: "document", points: [{ x: 1, y: 2, label: 1 }] },
       { backend: null },
-    )) as Sam2MaskResult;
-    expect(result.maskArtifactRef).toMatch(/\.png$/);
+    )) as Sam2SelectionAlphaResult;
+    expect(result.selectionAlphaArtifactRef).toMatch(/\.png$/);
     expect(result.provider).toBeTruthy();
     expect(result.variantUsed).toBe("tiny");
   });
@@ -82,7 +82,7 @@ describe("compute block registry", () => {
 
   it("rejects duplicate block ids", () => {
     const registry = createComputeBlockRegistry();
-    const block = sam2PointPromptBlock(async () => ({ maskArtifactRef: "a", provider: "sam2" }));
+    const block = sam2PointPromptBlock(async () => ({ selectionAlphaArtifactRef: "a", provider: "sam2" }));
     registry.register(block);
     expect(() => registry.register(block)).toThrow(/already registered/);
   });

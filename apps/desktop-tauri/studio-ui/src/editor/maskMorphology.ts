@@ -1,8 +1,8 @@
 // Front-end, best-effort mask morphology on a downscaled proxy buffer.
 //
-// The Mask-Edit modal records morphology as *intent* (`MaskOperation` entries)
+// The Image Editor modal records morphology as *intent* (`ImageEditOperation` entries)
 // and the Rust backend rasterises the authoritative result on run — see the
-// note on `MaskOperation` in `contracts.ts` about not re-implementing the
+// note on `ImageEditOperation` in `contracts.ts` about not re-implementing the
 // exact Rust morphology so stored state can't drift. This module is deliberately
 // the OTHER thing: a cheap, approximate **preview** of grow / shrink / feather /
 // smooth on a small proxy alpha buffer, so a slider drag can show roughly what
@@ -18,11 +18,11 @@ import {
   type BrushStroke,
   type EditOp,
   type EditPath,
-  type MaskOperation,
-} from "../contracts/maskOps";
-import { type LayerAdjustment, type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
-import { isBrushOp, isPathOp } from "../contracts/maskOps";
-import { SOURCE_IMAGE_OP_TYPE } from "./maskEdit";
+  type ImageEditOperation,
+} from "../contracts/imageEditOps";
+import { type LayerAdjustment, type ImageEditorDocument, type ImageEditorLayer } from "../contracts/imageEditorDocument";
+import { isBrushOp, isPathOp } from "../contracts/imageEditOps";
+import { SOURCE_IMAGE_OP_TYPE } from "./imageEditorState";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
 export interface ProxyMask {
@@ -144,7 +144,7 @@ function stampStroke(mask: ProxyMask, stroke: BrushStroke, scale: number): void 
 }
 
 /** Fill a marquee `rect` / `ellipse` region (image-space `[x1,y1,x2,y2]`). */
-function fillMarquee(mask: ProxyMask, op: MaskOperation, scale: number): void {
+function fillMarquee(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const region = op.region;
   if (!region || region.length < 4) return;
   const x1 = Math.min(region[0], region[2]) * scale;
@@ -178,7 +178,7 @@ function fillMarquee(mask: ProxyMask, op: MaskOperation, scale: number): void {
  * unions the ramp into the mask; `subtract` cuts it away. Mirrors the Rust
  * `fill_gradient`.
  */
-function fillGradient(mask: ProxyMask, op: MaskOperation, scale: number): void {
+function fillGradient(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const region = op.region;
   if (!region || region.length < 4) return;
   const ax = region[0] * scale;
@@ -204,7 +204,7 @@ function fillGradient(mask: ProxyMask, op: MaskOperation, scale: number): void {
  * same coverage. At 100% these are select-all / delete, but recorded as a
  * revisable `fill` step. Mirrors the Rust `fill_coverage`.
  */
-function fillCoverage(mask: ProxyMask, op: MaskOperation): void {
+function fillCoverage(mask: ProxyMask, op: ImageEditOperation): void {
   const a = clamp((op.amount ?? 100) / 100, 0, 1);
   const subtract = op.mode === "subtract";
   for (let i = 0; i < mask.data.length; i++) {
@@ -221,7 +221,7 @@ function fillCoverage(mask: ProxyMask, op: MaskOperation): void {
  * over the coverage bounding box; iterations scale with the region size under
  * a fixed work budget. Mirrors the Rust `heal_region`.
  */
-export function healStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function healStroke(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -282,7 +282,7 @@ function diffuseCoverage(mask: ProxyMask, coverage: ProxyMask): void {
  * `p + [dx, dy]` (out-of-bounds reads as empty). Mirrors the Rust
  * `clone_region`.
  */
-export function cloneStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function cloneStroke(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -307,7 +307,7 @@ export function cloneStroke(mask: ProxyMask, op: MaskOperation, scale: number): 
  * initial state — `base` is the mask as it was before any edit steps of the
  * stack replayed. Mirrors the Rust `history_region`.
  */
-export function historyStroke(mask: ProxyMask, base: Uint8Array, op: MaskOperation, scale: number): void {
+export function historyStroke(mask: ProxyMask, base: Uint8Array, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -328,7 +328,7 @@ const DODGE_BURN_EXPOSURE = 0.5;
  * lerped toward 255 / 0 by the fixed exposure. Mirrors the Rust
  * `dodge_burn_region`.
  */
-export function dodgeBurnStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function dodgeBurnStroke(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -351,7 +351,7 @@ const SPONGE_EXPOSURE = 0.5;
  * hard on/off (`mode: "saturate"`) or toward mid-grey (`mode: "desaturate"`)
  * under a painted stroke. Mirrors the Rust `sponge_region`.
  */
-export function spongeStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function spongeStroke(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -377,7 +377,7 @@ export function spongeStroke(mask: ProxyMask, op: MaskOperation, scale: number):
  * feathered coverage so the patch's edges melt into the surroundings.
  * Mirrors the Rust `healing_brush_region`.
  */
-export function healingBrushStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function healingBrushStroke(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -401,7 +401,7 @@ export function healingBrushStroke(mask: ProxyMask, op: MaskOperation, scale: nu
 }
 
 /** Clear the mask outside a `crop` region (image-space `[x1,y1,x2,y2]`). */
-function cropMask(mask: ProxyMask, op: MaskOperation, scale: number): void {
+function cropMask(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const region = op.region;
   if (!region || region.length < 4) return;
   const x1 = Math.min(region[0], region[2]) * scale;
@@ -645,7 +645,7 @@ const PATCH_FEATHER = 4;
  * `dx`/`dy` drop offset, blended through a feathered coverage like the
  * healing brush. Mirrors the Rust `patch_region`.
  */
-export function patchRegion(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function patchRegion(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length < 3) return;
   const dx = Math.round((op.dx ?? 0) * scale);
@@ -678,7 +678,7 @@ export function patchRegion(mask: ProxyMask, op: MaskOperation, scale: number): 
  * same diffusion the heal tool uses. Mirrors the Rust
  * `content_aware_move_region`.
  */
-export function contentAwareMove(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function contentAwareMove(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length < 3) return;
   const dx = Math.round((op.dx ?? 0) * scale);
@@ -714,7 +714,7 @@ const PATTERN_CELL = 8;
  * pattern into the stroke coverage — covered pixels read the pattern value
  * at their image-space cell. Mirrors the Rust `pattern_stamp_region`.
  */
-export function patternStampStroke(mask: ProxyMask, op: MaskOperation, scale: number): void {
+export function patternStampStroke(mask: ProxyMask, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -737,7 +737,7 @@ export function patternStampStroke(mask: ProxyMask, op: MaskOperation, scale: nu
  * radius, giving the stylised smeared look. Mirrors the Rust
  * `art_history_region`.
  */
-export function artHistoryStroke(mask: ProxyMask, base: Uint8Array, op: MaskOperation, scale: number): void {
+export function artHistoryStroke(mask: ProxyMask, base: Uint8Array, op: ImageEditOperation, scale: number): void {
   const points = op.points;
   if (!points || points.length === 0) return;
   const radius = Math.max(1, op.amount ?? 8);
@@ -1012,7 +1012,7 @@ function blendInto(dst: ProxyMask, src: ProxyMask, blend: string, opacity: numbe
  * the layer's own content, not the composite. `wand` ops are skipped as in
  * the proxy build.
  */
-export function buildLayerThumb(layer: MaskLayer, dims: { w: number; h: number }, thumbWidth = 48): ProxyMask {
+export function buildLayerThumb(layer: ImageEditorLayer, dims: { w: number; h: number }, thumbWidth = 48): ProxyMask {
   const w = Math.max(1, Math.min(thumbWidth, dims.w || thumbWidth));
   const scale = w / Math.max(1, dims.w || w);
   const h = Math.max(1, Math.round((dims.h || w) * scale));
@@ -1032,9 +1032,9 @@ export interface LayerAlphaBoundsOptions {
 }
 
 function layerForAlphaSurface(
-  layer: MaskLayer,
+  layer: ImageEditorLayer,
   options: Pick<LayerAlphaBoundsOptions, "implicitSource" | "ignoreTransforms">,
-): MaskLayer {
+): ImageEditorLayer {
   let ops = options.ignoreTransforms === true ? layer.ops.filter((op) => op.type !== "transform") : layer.ops;
   if (options.implicitSource === true && !ops.some((op) => op.type === SOURCE_IMAGE_OP_TYPE)) {
     ops = [{ type: SOURCE_IMAGE_OP_TYPE }, ...ops];
@@ -1043,7 +1043,7 @@ function layerForAlphaSurface(
 }
 
 export function layerAlphaBounds(
-  layer: MaskLayer,
+  layer: ImageEditorLayer,
   dims: { w: number; h: number },
   options: LayerAlphaBoundsOptions = {},
 ): AlphaBounds | null {
@@ -1085,7 +1085,7 @@ export function opsAlphaBounds(
   return layerAlphaBounds({
     id: "__bounds__",
     name: "Bounds",
-    kind: "mask",
+    kind: "pixel",
     blend: "normal",
     opacity: 1,
     visible: true,
@@ -1093,7 +1093,7 @@ export function opsAlphaBounds(
   }, dims, options);
 }
 
-function applyLayerMask(surface: ProxyMask, layer: MaskLayer, scale: number): ProxyMask {
+function applyLayerMask(surface: ProxyMask, layer: ImageEditorLayer, scale: number): ProxyMask {
   if (!layer.mask || layer.mask.disabled || layer.mask.ops.length === 0) return surface;
   const gate = replayOps(createProxyMask(surface.w, surface.h), layer.mask.ops, scale);
   for (let i = 0; i < surface.data.length; i++) {
@@ -1102,7 +1102,7 @@ function applyLayerMask(surface: ProxyMask, layer: MaskLayer, scale: number): Pr
   return surface;
 }
 
-function renderLayerSurface(layer: MaskLayer, w: number, h: number, scale: number): ProxyMask {
+function renderLayerSurface(layer: ImageEditorLayer, w: number, h: number, scale: number): ProxyMask {
   return applyLayerMask(replayOps(createProxyMask(w, h), layer.ops, scale), layer, scale);
 }
 
@@ -1116,7 +1116,7 @@ function renderLayerSurface(layer: MaskLayer, w: number, h: number, scale: numbe
  * of.
  */
 export function buildProxyMask(
-  doc: MaskDocument,
+  doc: ImageEditorDocument,
   dims: { w: number; h: number },
   options: ProxyBuildOptions = {},
 ): { mask: ProxyMask; scale: number } {
@@ -1199,7 +1199,7 @@ interface CompositeCacheEntry {
 }
 
 // Longest count of leading ops shared (by reference) between the cached replay
-// and the layer's current stack. maskEdit state is immutable — an edited op is
+// and the layer's current stack. imageEditorState is immutable — an edited op is
 // a fresh object — so reference equality is an exact "unchanged" test.
 function sharedOpsPrefix(cached: EditOp[], ops: EditOp[]): number {
   const n = Math.min(cached.length, ops.length);
@@ -1238,7 +1238,7 @@ export class ProxyLayerCache {
     this.composite = null;
   }
 
-  build(doc: MaskDocument, w: number, h: number, scale: number): ProxyMask {
+  build(doc: ImageEditorDocument, w: number, h: number, scale: number): ProxyMask {
     if (w !== this.w || h !== this.h) {
       this.reset();
       this.w = w;
@@ -1298,7 +1298,7 @@ export class ProxyLayerCache {
     return cloneMask(mask);
   }
 
-  private layerSurface(layer: MaskLayer, w: number, h: number, scale: number): ProxyMask {
+  private layerSurface(layer: ImageEditorLayer, w: number, h: number, scale: number): ProxyMask {
     const maskDisabled = layer.mask?.disabled === true;
     const maskOps = layer.mask && !maskDisabled && layer.mask.ops.length > 0 ? layer.mask.ops : null;
     const entry = this.layers.get(layer.id);
@@ -1324,7 +1324,7 @@ export class ProxyLayerCache {
   // the same per-pixel math as the uncached path, restricted to `rect`.
   private compositeTile(
     mask: ProxyMask,
-    doc: MaskDocument,
+    doc: ImageEditorDocument,
     surfaces: (ProxyMask | null)[],
     luts: (Uint8Array | null)[],
     rect: TileRect,

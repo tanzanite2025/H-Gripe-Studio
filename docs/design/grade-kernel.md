@@ -11,7 +11,7 @@ point for future kernel work.
 This is the design for the colour-grading kernel that the image grading
 dialog and the future **video grading dialog** will share. It builds *on top
 of* the locked colour pipeline (`docs/design/colour-pipeline.md`) and does
-**not** change the mask editor's u8 proxy compositor
+**not** change the image editor's true-mask u8 proxy compositor
 (`docs/design/ps-editor-architecture.md`).
 
 ## Goals and non-goals
@@ -24,8 +24,8 @@ grading (many stacked corrections per frame, no cumulative banding).
   that both the image dialog and the video dialog call. Same numbers, every
   frame, both dialogs.
 - **Goal:** isolation — a bug fix or new blend mode touches only the kernel
-  crate, never the app shell, the mask editor, or the colour pipeline.
-- **Non-goal:** replacing the mask editor's u8 grayscale compositor. Mask
+  crate, never the app shell, the image editor, or the colour pipeline.
+- **Non-goal:** replacing the image editor's true-mask u8 grayscale compositor. Mask
   surfaces are alpha coverage; 8-bit is semantically correct there and PS
   does the same. That kernel stays as-is.
 - **Non-goal (first landing):** GPU. First landing is CPU (scanline,
@@ -105,7 +105,7 @@ pub struct GradeSurface {
 
 ### Op graph (serialisable, revisable)
 
-Mirrors the mask editor's proven document model — plain data, replayed in
+Mirrors the image editor's proven document model — plain data, replayed in
 order, every step revisable — so the dialogs get undo/redo and non-destructive
 editing for free:
 
@@ -202,7 +202,7 @@ The video grading dialog feeds frames from the existing media-engine seam
 
 - `docs/design/colour-pipeline.md` — the locked pipeline this kernel sits on;
   owns ICC, working space, and egress.
-- `docs/design/ps-editor-architecture.md` — the mask editor document model the
+- `docs/design/ps-editor-architecture.md` — the image editor document model the
   op graph mirrors; its u8 compositor is unaffected.
 - `docs/design/rust-dependency-vendoring.md` — dependency policy the kernel
   crate follows.

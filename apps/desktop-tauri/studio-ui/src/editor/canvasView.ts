@@ -1,4 +1,4 @@
-// Canvas navigation for the Mask-Edit modal (M8 view layer): zoom / pan state
+// Canvas navigation for the Image Editor modal (M8 view layer): zoom / pan state
 // and its pure math, PS-aligned (H hand pan, Space-hold pan, Ctrl+= /
 // Ctrl+- / Ctrl+0 / Ctrl+1).
 //

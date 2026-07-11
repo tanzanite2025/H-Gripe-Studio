@@ -1,4 +1,4 @@
-// M8 canvas navigation: pure zoom / pan math for the Mask-Edit view layer.
+// M8 canvas navigation: pure zoom / pan math for the Image Editor view layer.
 
 import { describe, expect, it } from "vitest";
 import {

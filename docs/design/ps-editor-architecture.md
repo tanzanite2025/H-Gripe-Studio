@@ -1,6 +1,6 @@
-# Mask-Edit modal → PS-grade image editor: architecture plan
+# Image Editor modal → PS-grade image editor: architecture plan
 
-Goal: the mask-edit modal (`MaskEditModal`) gradually grows into a
+Goal: the image-editor modal (`ImageEditorModal`) gradually grows into a
 Photoshop-grade integrated image editor. This is not a one-shot re-implementation
 — the point of this document is to **freeze the underlying architecture first**,
 so every PS feature lands as an increment on the same skeleton and nothing has
@@ -13,7 +13,7 @@ to be rebuilt from scratch.
 | Non-destructive edit record (`EditPaths` JSON) | frontend records (paths / strokes / operations / point prompts); backend Rust rasterises + executes | Structurally the same model as PS's "history + adjustable parameters" — the single most important piece |
 | `Compute` executor lane | in-process Rust image/model work, no network | The execution home for every PS filter / transform |
 | 16-bit `WorkingImage` + ICC colour pipeline | ProPhoto wide-gamut canvas, CMYK/ICC management, linear-light maths | PS-grade colour correctness is already here |
-| Tool registry (`maskTools`) + scoped shortcuts (full PS key table reserved) | `ready`/`planned` declarative registration; i18n + collisions guarded by CI | A new tool = one registry row + an implementation; UI / shortcuts / translations follow automatically |
+| Tool registry (`imageEditorTools`) + scoped shortcuts (full PS key table reserved) | `ready`/`planned` declarative registration; i18n + collisions guarded by CI | A new tool = one registry row + an implementation; UI / shortcuts / translations follow automatically |
 | Undo/redo, boolean combine, morphology, feather, proxy preview | shipped | The core of the selection system exists |
 | Model foundation (`ort`: SAM 2 / BiRefNet / ViTMatte …) | shipped | PS's "Select Subject / Remove Background"-class AI features are already ahead |
 
@@ -37,7 +37,7 @@ to be rebuilt from scratch.
 ```
 ┌─ UI layer (React)
 │   toolbox / options bar / layers panel / history panel  ← all registry-driven
-│   shortcuts: mask-edit scope (full PS key table already reserved)
+│   shortcuts: image-editor scope (full PS key table already reserved)
 ├─ Document model (TS + Rust isomorphic, serde/JSON)
 │   Document { canvas, layers: [Layer], selection, history }
 │   Layer = PixelLayer | AdjustmentLayer | …  each: blend_mode, opacity, mask?, edits: EditStack
@@ -63,6 +63,39 @@ always "replay the EditStack + composite".** This guarantees:
   by construction;
 - anchor re-editing = selecting a path Op in the EditStack and moving its
   anchors (gap 2 solved directly).
+
+### Modal Shell Boundary
+
+The image editor is a software-level editor, not a graph node and not a generic
+preview surface. It may be opened from node cards, preview gates, or project
+assets, but once open it owns an independent editor shell:
+
+```text
+app shell
+  -> editor host decides which software editor is open
+  -> image-editor shell owns image-editor chrome, stage, right rail, history
+  -> image-editor viewport slot owns any native/GPU presentation hole
+```
+
+The following must stay true:
+
+- The image editor may reuse primitive button/input tokens, but it must not
+  depend on shared modal classes for editor-specific behavior.
+- Shared shells such as `.media-viewer` are layout primitives only. They must
+  not contain image-editor selection behavior, layer behavior, WGPU surface
+  policy, alpha policy, or stage transparency policy.
+- A bug inside the image editor must not change the clip editor, grade editor,
+  model manager, export dialog, or any other modal's background/layout.
+- Image alpha belongs inside the document/stage frame. It must never be wired
+  to the modal shell, backdrop, app root, or WebView root.
+- Native WGPU presentation for the image editor requires a scoped surface hole
+  inside the image-editor viewport slot. Until that scoped matte/hole exists,
+  native presentation must stay off for this editor rather than making shared
+  ancestors transparent.
+
+This boundary is architectural, not styling preference. If a future change needs
+to touch `App`, `body`, `.media-viewer-backdrop`, or `.media-viewer` to make the
+image editor display pixels, the change is at the wrong layer.
 
 ## 4. Roadmap (each milestone independently shippable; the current mask flow never breaks)
 
@@ -119,9 +152,11 @@ history steps, replayed identically by the proxy and the Rust run, unlike
 `Ctrl+D` clear which wipes the stack itself); `Ctrl+Shift+D` reselect
 (restores the last snapshot a clear dropped, itself undoable); `Ctrl+J`
 duplicates via copy from the active editable pixel layer, clipped by the active
-marching-ants selection when one exists. `Ctrl+J` must never consume a solid
-selection draft or branch on whether the selection came from pen, marquee,
-lasso, wand, or model assist.
+marching-ants selection when one exists. `Ctrl+J` reads the layer's
+`LayerPixelReadSource` at command time, including its current placement, scale,
+transform, and compositor/materializer interpretation. It must never consume a
+solid selection draft, read from toolbar/overlay/preview pixels, or branch on
+whether the selection came from pen, marquee, lasso, wand, or model assist.
 
 **M10 — Gradient tool.** `G` gradient as a recorded `gradient` op: dragging a
 start → end vector composites a linear selection ramp (full at the start,

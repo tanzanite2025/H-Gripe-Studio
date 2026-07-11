@@ -10,6 +10,10 @@ export type ViewportTarget =
       documentKey: string;
       documentWidth: number;
       documentHeight: number;
+      frameX?: number;
+      frameY?: number;
+      frameWidth?: number;
+      frameHeight?: number;
     }
   | { kind: "video_clip"; timelineId: string; clipId: string; timeSec: number }
   | { kind: "video_frame"; resourceId: string; timeSec: number }

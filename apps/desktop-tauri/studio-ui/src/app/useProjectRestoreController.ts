@@ -1,4 +1,4 @@
-import {
+﻿import {
   useEffect,
   useRef,
   useState,
@@ -29,7 +29,7 @@ interface UseProjectRestoreControllerArgs {
   currentFile: string | null;
   fileDirty: boolean;
   isDesktop: boolean;
-  mediaEditDrafts: MutableRefObject<Map<string, ImageDocument>>;
+  imageSourceEditorDrafts: MutableRefObject<Map<string, ImageDocument>>;
   mediaDraftRevision: number;
   setMediaDraftRevision: Dispatch<SetStateAction<number>>;
   suppressNextDirty: () => void;
@@ -42,7 +42,7 @@ export function useProjectRestoreController({
   currentFile,
   fileDirty,
   isDesktop,
-  mediaEditDrafts,
+  imageSourceEditorDrafts,
   mediaDraftRevision,
   setMediaDraftRevision,
   suppressNextDirty,
@@ -73,7 +73,7 @@ export function useProjectRestoreController({
         manifest.activeCanvasId,
         manifest.canvases.map((entry) => {
           const graph = fromWorkflowGraph(entry.graph);
-          for (const [nodeId, draft] of Object.entries(entry.mediaEditDrafts)) {
+          for (const [nodeId, draft] of Object.entries(entry.imageSourceEditorDrafts)) {
             restoredDrafts.set(nodeId, draft);
           }
           return {
@@ -88,7 +88,7 @@ export function useProjectRestoreController({
           };
         }),
       );
-      mediaEditDrafts.current = restoredDrafts;
+      imageSourceEditorDrafts.current = restoredDrafts;
       setMediaDraftRevision((value) => value + 1);
       setMessage(restoredMessage);
       return true;
@@ -114,7 +114,7 @@ export function useProjectRestoreController({
     }
   }, [
     isDesktop,
-    mediaEditDrafts,
+    imageSourceEditorDrafts,
     restoreCanvases,
     restoredMessage,
     setEdges,
@@ -134,7 +134,7 @@ export function useProjectRestoreController({
         dirty: fileDirty,
       });
       const manifest: ProjectManifest = {
-        version: 1,
+        version: 2,
         activeCanvasId,
         canvases: canvases.map((entry) => ({
           id: entry.id,
@@ -144,9 +144,9 @@ export function useProjectRestoreController({
           selectedNodeId: entry.selectedNodeId,
           viewport: entry.viewport,
           graph: toWorkflowGraph(entry.nodes, entry.edges),
-          mediaEditDrafts: Object.fromEntries(
+          imageSourceEditorDrafts: Object.fromEntries(
             entry.nodes
-              .map((node) => [node.id, mediaEditDrafts.current.get(node.id)] as const)
+              .map((node) => [node.id, imageSourceEditorDrafts.current.get(node.id)] as const)
               .filter(
                 (draft): draft is readonly [string, ImageDocument] => draft[1] != null,
               ),
@@ -176,7 +176,7 @@ export function useProjectRestoreController({
     isDesktop,
     manifestReady,
     mediaDraftRevision,
-    mediaEditDrafts,
+    imageSourceEditorDrafts,
     nodes,
     setMessage,
     tabs,

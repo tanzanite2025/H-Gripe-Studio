@@ -9,7 +9,7 @@
   z-index: 1000;
   padding: 24px;
 }
-.media-viewer-backdrop:has(> .mask-edit),
+.media-viewer-backdrop:has(> .image-editor),
 .media-viewer-backdrop:has(> .crop-edit) {
   inset: var(--app-window-control-row-h) 0 0 0;
   padding: 0;
@@ -53,8 +53,8 @@
   inset: 0;
   pointer-events: none;
 }
-/* Frame on the native surface window below the webview: drop the stage
-   background so the hole stays see-through. */
+/* Frame on a presented viewport may be transparent; the modal shell and app
+   root stay opaque so a viewport alpha channel cannot punch through the UI. */
 .media-viewer-stage.presented { background: transparent; }
 /* Shared viewport backend badge (shared DeviceReport vocabulary): pinned to
    the presenting stage's bottom-right corner, like the program monitor's. */
@@ -92,7 +92,7 @@
 
 /* ===================================================================
    Subject Mask card: node body actions, shared Preview modal,
-   on-demand Mask-Edit modal + tool registry palette.
+   on-demand Image Editor modal + tool registry palette.
    =================================================================== */
 
 /* node body */
@@ -305,17 +305,17 @@
 }
 .media-edit-tab-add:hover { background: #2a2f3d; color: var(--text); }
 
-/* Mask-Edit modal styles live in src/editor/maskEditModal/maskEditModal.css
-   (imported by MaskEditModal.tsx). The crop editor below reuses that shell. */
+/* Image Editor modal styles live in src/editor/imageEditorModal/imageEditorModal.css.
+   The crop editor below reuses that shell. */
 
-/* Crop-Edit modal â€” reuses the mask-edit shell with a 2-column body. */
+/* Crop-Edit modal reuses the image-editor shell with a 2-column body. */
 .media-viewer.crop-edit {
   width: 100%;
   max-width: 100%;
   height: min(95vh, var(--app-editor-workarea-h));
   max-height: var(--app-editor-workarea-h);
 }
-.media-viewer.crop-edit .mask-edit-body { grid-template-columns: 1fr 240px; }
+.media-viewer.crop-edit .image-editor-body { grid-template-columns: 1fr 240px; }
 .crop-edit-stage-wrap {
   min-width: 0;
   display: flex;
@@ -354,8 +354,8 @@
   inset: 0;
   pointer-events: none;
 }
-/* Frame on the native surface window below the webview: drop the stage
-   background so the hole stays see-through. */
+/* Frame on a presented viewport may be transparent; the modal shell and app
+   root stay opaque so a viewport alpha channel cannot punch through the UI. */
 .crop-edit-stage.presented { background: transparent; }
 .crop-box {
   position: absolute;
@@ -390,10 +390,10 @@
 }
 .crop-mode-row button.active { border-color: var(--accent); color: var(--accent); }
 
-/* Grade-Edit modal â€” reuses the mask-edit shell; the controls column is the
+/* Grade-Edit modal â€” reuses the image-editor shell; the controls column is the
    scrollable op stack. */
 .media-viewer.grade-edit { width: min(1180px, 94vw); height: 88vh; }
-.media-viewer.grade-edit .mask-edit-body { grid-template-columns: 1fr 300px; }
+.media-viewer.grade-edit .image-editor-body { grid-template-columns: 1fr 300px; }
 .grade-edit-controls { overflow-y: auto; }
 .grade-op {
   display: flex;

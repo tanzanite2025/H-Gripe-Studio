@@ -38,8 +38,8 @@ export interface UseNodeEditingArgs {
   suppressNextDirty: () => void;
   /** Node id queued for a "run up to this node" once pending edits land in `nodes`. */
   pendingRunNode: MutableRefObject<string | null>;
-  /** Open the mask editor for a freshly spawned bound edit node. */
-  openMaskEditorFor: (nodeId: string) => void;
+  /** Open the image editor for a freshly spawned bound edit node. */
+  openImageEditorForNode: (nodeId: string) => void;
   /** Open the crop editor for a freshly spawned bound edit node. */
   openCropEditorFor: (nodeId: string) => void;
 }
@@ -55,7 +55,7 @@ export function useNodeEditing({
   fitView,
   suppressNextDirty,
   pendingRunNode,
-  openMaskEditorFor,
+  openImageEditorForNode,
   openCropEditorFor,
 }: UseNodeEditingArgs) {
   const idSeq = useRef(0);
@@ -283,7 +283,7 @@ export function useNodeEditing({
       );
       setSelectedId(editId);
       if (opts?.openEditor !== false) {
-        if (editKind === "subjectMask") openMaskEditorFor(editId);
+        if (editKind === "subjectMask") openImageEditorForNode(editId);
         if (editKind === "crop") openCropEditorFor(editId);
       }
       // Defer the partial run to the effect that fires once the new node has
@@ -297,7 +297,7 @@ export function useNodeEditing({
       setSelectedId,
       takeSnapshot,
       newNodeId,
-      openMaskEditorFor,
+      openImageEditorForNode,
       openCropEditorFor,
       pendingRunNode,
     ],

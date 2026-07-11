@@ -10,7 +10,7 @@
 
 ## Hard Gate
 
-Do not build the Studio Action agent chain until the mask editor's layer/mask
+Do not build the Studio Action agent chain until the image editor layer and layer-mask
 semantics are aligned with the Photoshop-style model.
 
 The current risk is that "mask" actions can be interpreted as "create a new
@@ -127,13 +127,13 @@ operationContext
 
 If a preview operation needs manual correction, the preview opens the image
 editor with the same resolved target and draft artifact. If the editor commits,
-the result returns as a traceable image/layer/mask artifact, not as an invisible
-mutation of the canvas node.
+the result returns as a traceable image/layer/selection-alpha artifact, not as
+an invisible mutation of the canvas node.
 
 Non-negotiable rules:
 
 - do not put the full image editor inside a node card;
-- do not make preview into a second image editor with duplicated state;
+- do not make preview into a second mask-only editor with duplicated state;
 - do not create crop/mask/grade tab stacks inside preview when the image editor
   already owns detailed editing;
 - do not run expensive compute merely because the preview modal opens;
@@ -168,8 +168,8 @@ Examples:
 - a pen path can create a selection only after an explicit Make Selection /
   commit step;
 - a selection can become a layer mask;
-- SAM 2 can produce a mask artifact from points/box/path hints;
-- a mask artifact can be attached to a layer mask target;
+- SAM 2 can produce a selection-alpha artifact from points/box/path hints;
+- a selection-alpha artifact can be converted or attached to a layer mask target;
 - a node output can open in the image editor, then be edited into a document.
 
 Important distinction: a solid pen/lasso/marquee draft is not a `selection`
@@ -344,6 +344,14 @@ that the scene model is independent of the rendering backend.
 The floating bar near the active object should be a command view, not a feature
 owner.
 
+For a closed selection draft, the compact Make Selection / Cancel / Edit
+Anchors surface is the draft affordance defined in
+[`IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+It is not a Studio Action target and must not become a second selection
+implementation. It renders commands from the draft command model, then
+disappears when Make Selection commits the draft into an addressable
+`ActiveSelection`.
+
 It should receive:
 
 ```ts
@@ -424,7 +432,7 @@ Capability examples:
 | Add mask | active target is editable pixel layer and no mask exists. |
 | Delete mask | active target is layer mask and layer is not locked. |
 | Remove background | target can resolve to image pixels and model/compute backend is available. |
-| Refine edge | target is selection or mask artifact. |
+| Refine edge | target is selection or selection-alpha artifact. |
 | Transform | target has transformable bounds and is not locked. |
 | Delete | target is not document, not locked, and deletion is target-safe. |
 
@@ -510,6 +518,8 @@ Phase 5: Studio Action bridge.
 - Do not implement layer target outlines as a one-off DOM element.
 - Do not let the layer panel own canvas overlays.
 - Do not let floating toolbars decide command availability.
+- Do not let the selection-draft affordance read pixels, mutate layers, or
+  become a Studio Action target before Make Selection commits it.
 - Do not duplicate command logic between right rail, context menu, shortcuts,
   and future Studio Action.
 - Do not collapse pixel layer, layer mask, selection, and path into one
@@ -531,7 +541,7 @@ It should be exposed as a structured compute action, not as a hidden UI click.
 ### Inputs
 
 ```ts
-interface Sam2MaskRequest {
+interface Sam2SelectionAlphaRequest {
   imageRef: string;
   targetSpace: "document" | "layer" | "viewport";
   points?: Array<{ x: number; y: number; label: 0 | 1 }>;
@@ -546,8 +556,8 @@ interface Sam2MaskRequest {
 ### Outputs
 
 ```ts
-interface Sam2MaskResult {
-  maskArtifactRef: string;
+interface Sam2SelectionAlphaResult {
+  selectionAlphaArtifactRef: string;
   confidence?: number;
   bbox?: [number, number, number, number];
   provider: "sam2" | "builtin-cpu" | string;
@@ -596,7 +606,7 @@ Examples:
 | --- | --- | --- |
 | Pen roughly around object | SAM 2 constrained by path/box | Clean object mask preview. |
 | Click positive and negative points | SAM 2 point-prompt mask | Interactive subject selection. |
-| Existing selection too rough | SAM 2 refine from selection bbox/points | Better mask artifact. |
+| Existing selection too rough | SAM 2 refine from selection bbox/points | Better selection-alpha artifact. |
 | Hair/glass edge uncertain | ViTMatte/guided matte after trimap | Continuous alpha edge. |
 
 ## Studio Action Chain
@@ -638,11 +648,11 @@ interface StudioAction<TParams = unknown> {
 create_layer_mask(layer_target)
 set_active_target(layer_mask)
 run_sam2_prompt_mask(layer_mask, points, variant)
-commit_mask_artifact_to_layer_mask(layer_mask, maskArtifactRef)
+commit_selection_alpha_artifact_to_layer_mask(layer_mask, selectionAlphaArtifactRef)
 feather_layer_mask(layer_mask, radiusPx)
 generate_selection_from_path(pathId)
 commit_selection_to_layer_mask(selectionId, layerMaskTarget)
-open_mask_preview(maskArtifactRef)
+open_selection_alpha_preview(selectionAlphaArtifactRef)
 undo_last_action()
 ```
 
@@ -726,7 +736,7 @@ interface SelectionTarget {
   id: string;
   source: "pen" | "lasso" | "marquee" | "sam2" | "wand" | "mask";
   bounds: [number, number, number, number];
-  maskArtifactRef?: string;
+  selectionAlphaArtifactRef?: string;
   pathId?: string;
 }
 ```
@@ -811,7 +821,7 @@ The design is ready for implementation when:
    pixel or mask target.
 2. Creating a mask no longer looks like creating a new ordinary layer.
 3. A pen path, SAM 2 point prompt, or selection can be referenced by id.
-4. SAM 2 can run as a compute block and return a previewable mask artifact.
+4. SAM 2 can run as a compute block and return a previewable selection-alpha artifact.
 5. Studio Action can say exactly what it will touch before it commits.
 6. The assistant can call only approved actions, never raw UI operations.
 

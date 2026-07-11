@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { WorkflowGraph } from "../graph/model";
@@ -25,7 +25,7 @@ function graph(): WorkflowGraph {
 
 function manifest(): ProjectManifest {
   return {
-    version: 1,
+    version: 2,
     activeCanvasId: "c2",
     canvases: [
       {
@@ -36,7 +36,7 @@ function manifest(): ProjectManifest {
         selectedNodeId: null,
         viewport: { x: 10, y: -5, zoom: 1.5 },
         graph: graph(),
-        mediaEditDrafts: {},
+        imageSourceEditorDrafts: {},
       },
       {
         id: "c2",
@@ -46,7 +46,7 @@ function manifest(): ProjectManifest {
         selectedNodeId: "n1",
         viewport: DEFAULT_CANVAS_VIEWPORT,
         graph: graph(),
-        mediaEditDrafts: {},
+        imageSourceEditorDrafts: {},
       },
     ],
   };
@@ -87,9 +87,9 @@ describe("project manifest", () => {
 
   it("round-trips image editor drafts in the manifest", () => {
     const m = manifest();
-    m.canvases[1].mediaEditDrafts = { n1: imageDraft() };
+    m.canvases[1].imageSourceEditorDrafts = { n1: imageDraft() };
     const parsed = parseProjectManifest(serializeProjectManifest(m));
-    expect(parsed?.canvases[1].mediaEditDrafts.n1).toEqual(imageDraft());
+    expect(parsed?.canvases[1].imageSourceEditorDrafts.n1).toEqual(imageDraft());
   });
 
   it("returns null for absent, corrupt, or wrong-version payloads", () => {
@@ -103,7 +103,7 @@ describe("project manifest", () => {
   it("drops malformed canvases and falls back to the first for the active id", () => {
     const m = manifest();
     const raw = JSON.stringify({
-      version: 1,
+      version: 2,
       activeCanvasId: "missing",
       canvases: [{ id: "", graph: graph() }, m.canvases[0], { id: "bad" }],
     });
@@ -114,7 +114,7 @@ describe("project manifest", () => {
 
   it("defaults missing viewport/selection/dirty fields per canvas", () => {
     const raw = JSON.stringify({
-      version: 1,
+      version: 2,
       activeCanvasId: "c1",
       canvases: [{ id: "c1", graph: graph() }],
     });
@@ -125,7 +125,7 @@ describe("project manifest", () => {
       name: null,
       selectedNodeId: null,
       viewport: DEFAULT_CANVAS_VIEWPORT,
-      mediaEditDrafts: {},
+      imageSourceEditorDrafts: {},
     });
   });
 });

@@ -39,6 +39,14 @@ pub(crate) enum ViewportTarget {
         document_width: u32,
         #[serde(rename = "documentHeight")]
         document_height: u32,
+        #[serde(rename = "frameX", default)]
+        frame_x: f32,
+        #[serde(rename = "frameY", default)]
+        frame_y: f32,
+        #[serde(rename = "frameWidth", default)]
+        frame_width: Option<u32>,
+        #[serde(rename = "frameHeight", default)]
+        frame_height: Option<u32>,
     },
     VideoClip {
         #[serde(rename = "timelineId")]
@@ -132,7 +140,7 @@ impl ViewportBackend {
 /// frame instead presents on the native surface the caller replaces this with
 /// [`surface_backend_report`], so the reason here describes only the fallback
 /// leg of the transport.
-pub(super) fn cpu_backend() -> ViewportBackend {
+pub(crate) fn cpu_backend() -> ViewportBackend {
     ViewportBackend {
         requested: "auto".to_string(),
         actual: "cpu".to_string(),
@@ -193,14 +201,14 @@ pub(super) struct ViewportState {
     pub(super) width: u32,
     pub(super) height: u32,
     /// Grade document applied at render time (grade_preview viewports); the
-    /// doc is parameters only — pixels are resolved through the target.
+    /// doc is parameters only, pixels are resolved through the target.
     pub(super) grade_doc: Option<Value>,
     /// Mask overlay composited over rendered frames (image_edit viewports):
-    /// the mask editor's proxy-resolution selection tint, presented by the
+    /// the image editor's proxy-resolution selection tint, presented by the
     /// host at the view window's detail instead of a document-size canvas.
     pub(super) mask_overlay: Option<Arc<MaskOverlay>>,
     /// Vector overlay stroked over rendered frames (image_edit viewports):
-    /// the mask editor's marquee marching ants, drawn at the view window's
+    /// the image editor's marquee marching ants, drawn at the view window's
     /// detail instead of on a document-size canvas.
     pub(super) overlay_scene: Option<Arc<OverlayScene>>,
     pub(super) view: ViewportView,

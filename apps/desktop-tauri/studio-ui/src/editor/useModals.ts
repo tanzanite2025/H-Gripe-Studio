@@ -1,5 +1,5 @@
-// Modal-open state for the shared editor modals (Preview, Mask-Edit, Crop-Edit
-// and the media source's unified manual editor), plus the connected-image
+﻿// Modal-open state for the shared editor modals (Preview, Image Editor, Crop-Edit
+// and the image source's standalone image editor), plus the connected-image
 // lookup those modals use as their canvas underlay. Owns which node each modal
 // targets; the modal components themselves stay in App's JSX.
 
@@ -9,23 +9,23 @@ import type { Edge, Node } from "@hgripe/flow";
 import type { HgripeNodeData } from "./HgripeNode";
 
 export function useModals({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
-  // Which node (if any) has the shared Preview / Mask-Edit modal open.
+  // Which node (if any) has the shared Preview / Image Editor modal open.
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
-  const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
+  const [imageEditorNodeId, setImageEditorNodeId] = useState<string | null>(null);
   const [cropEditNodeId, setCropEditNodeId] = useState<string | null>(null);
   const [gradeEditNodeId, setGradeEditNodeId] = useState<string | null>(null);
-  // Image source whose unified manual editor (mask + crop) is open, if any.
-  const [mediaEditSourceId, setMediaEditSourceId] = useState<string | null>(null);
+  // Image source whose standalone image editor is open, if any.
+  const [imageSourceEditorSourceId, setImageSourceEditorSourceId] = useState<string | null>(null);
 
   const openPreview = useCallback((nodeId: string) => setPreviewNodeId(nodeId), []);
-  const openMaskEdit = useCallback((nodeId: string) => setMaskEditNodeId(nodeId), []);
+  const openImageEditorForNode = useCallback((nodeId: string) => setImageEditorNodeId(nodeId), []);
   const openCropEdit = useCallback((nodeId: string) => setCropEditNodeId(nodeId), []);
   const openGradeEdit = useCallback((nodeId: string) => setGradeEditNodeId(nodeId), []);
-  const openMediaEdit = useCallback((sourceId: string) => setMediaEditSourceId(sourceId), []);
+  const openImageSourceEditor = useCallback((sourceId: string) => setImageSourceEditorSourceId(sourceId), []);
 
   // Resolve the image path feeding a node's `image` input port: follow the
   // incoming edge to its source node and read that node's last-run image / path
-  // param. Used as the best-effort underlay for the Mask-Edit canvas and the
+  // param. Used as the best-effort underlay for the Image Editor canvas and the
   // layers of the Preview modal (often empty in browser preview).
   const connectedImagePath = useCallback(
     (nodeId: string): string | null => {
@@ -43,9 +43,9 @@ export function useModals({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
     () => nodes.find((n) => n.id === previewNodeId) ?? null,
     [nodes, previewNodeId],
   );
-  const maskEditNode = useMemo(
-    () => nodes.find((n) => n.id === maskEditNodeId) ?? null,
-    [nodes, maskEditNodeId],
+  const imageEditorNode = useMemo(
+    () => nodes.find((n) => n.id === imageEditorNodeId) ?? null,
+    [nodes, imageEditorNodeId],
   );
   const cropEditNode = useMemo(
     () => nodes.find((n) => n.id === cropEditNodeId) ?? null,
@@ -55,27 +55,27 @@ export function useModals({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
     () => nodes.find((n) => n.id === gradeEditNodeId) ?? null,
     [nodes, gradeEditNodeId],
   );
-  const mediaEditSource = useMemo(
-    () => nodes.find((n) => n.id === mediaEditSourceId) ?? null,
-    [nodes, mediaEditSourceId],
+  const imageSourceEditorSource = useMemo(
+    () => nodes.find((n) => n.id === imageSourceEditorSourceId) ?? null,
+    [nodes, imageSourceEditorSourceId],
   );
 
   return {
     previewNode,
-    maskEditNode,
+    imageEditorNode,
     cropEditNode,
     gradeEditNode,
-    mediaEditSource,
+    imageSourceEditorSource,
     setPreviewNodeId,
-    setMaskEditNodeId,
+    setImageEditorNodeId,
     setCropEditNodeId,
     setGradeEditNodeId,
-    setMediaEditSourceId,
+    setImageSourceEditorSourceId,
     openPreview,
-    openMaskEdit,
+    openImageEditorForNode,
     openCropEdit,
     openGradeEdit,
-    openMediaEdit,
+    openImageSourceEditor,
     connectedImagePath,
   };
 }

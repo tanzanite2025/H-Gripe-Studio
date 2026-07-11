@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { emptyMaskDocument } from "../contracts/maskDocument";
+import { emptyImageEditorDocument } from "../contracts/imageEditorDocument";
 import {
   imageCompositeTarget,
+  imageCompositeBackingPath,
   imageLayerContentBounds,
   imageLayerDrawsSource,
   imageLayerHasSourceContent,
   layerCompositeTransform,
   layerSourceImageOp,
-  withActiveLayerDraftTransform,
 } from "./imageCompositeSource";
-import { addImageLayer, fitPlacement, initEditState } from "./maskEdit";
+import { addImageLayer, fitPlacement, initEditState } from "./imageEditorState";
 
 describe("image composite viewport source", () => {
   it("keeps the image frame visible when the base is hidden but a source copy is visible", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers[0].visible = false;
     doc.layers.push({
-      ...emptyMaskDocument().layers[0],
+      ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
       ops: [{ type: "source_image" }],
@@ -26,9 +26,9 @@ describe("image composite viewport source", () => {
   });
 
   it("keeps hidden source layers identifiable for thumbnails without drawing them", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers.push({
-      ...emptyMaskDocument().layers[0],
+      ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
       visible: false,
@@ -39,10 +39,10 @@ describe("image composite viewport source", () => {
   });
 
   it("does not treat fully transparent source layers as visible frame content", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers[0].visible = false;
     doc.layers.push({
-      ...emptyMaskDocument().layers[0],
+      ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
       opacity: 0,
@@ -53,10 +53,10 @@ describe("image composite viewport source", () => {
   });
 
   it("resolves image-layer content bounds for implicit background and source copies", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers[0].mask = { id: "mask-base", ops: [{ type: "rect", region: [2, 3, 12, 14] }] };
     doc.layers.push({
-      ...emptyMaskDocument().layers[0],
+      ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
       ops: [{ type: "source_image" }],
@@ -67,9 +67,9 @@ describe("image composite viewport source", () => {
   });
 
   it("keeps image-layer content bounds in pre-transform space", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers.push({
-      ...emptyMaskDocument().layers[0],
+      ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
       ops: [{ type: "source_image" }, { type: "transform", dx: 8, dy: 0, scale: 1, rotate: 0 }],
@@ -80,7 +80,7 @@ describe("image composite viewport source", () => {
   });
 
   it("builds a stable image_composite viewport target", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers[0].visible = false;
     const target = imageCompositeTarget("res-image", doc, { w: 320, h: 200 });
     expect(target).toMatchObject({
@@ -88,24 +88,52 @@ describe("image composite viewport source", () => {
       resourceId: "res-image",
       documentWidth: 320,
       documentHeight: 200,
+      frameX: 0,
+      frameY: 0,
+      frameWidth: 320,
+      frameHeight: 200,
     });
     if (target.kind !== "image_composite") throw new Error("expected image_composite target");
     expect(target.documentKey).toContain("\"visible\":false");
   });
 
-  it("adds live move draft transforms only to the active pixel layer", () => {
-    const doc = emptyMaskDocument();
-    doc.layers.push({
-      ...emptyMaskDocument().layers[0],
-      id: "copy",
-      name: "Background copy",
-      ops: [{ type: "source_image" }],
+  it("keeps document dimensions separate from the rendered scene frame", () => {
+    const doc = emptyImageEditorDocument();
+    const target = imageCompositeTarget("res-image", doc, { w: 320, h: 200 }, { x: -40, y: 0, w: 420, h: 260 });
+
+    expect(target).toMatchObject({
+      kind: "image_composite",
+      documentWidth: 320,
+      documentHeight: 200,
+      frameX: -40,
+      frameY: 0,
+      frameWidth: 420,
+      frameHeight: 260,
     });
-    doc.active = 1;
-    const preview = withActiveLayerDraftTransform(doc, [8, -3]);
-    expect(doc.layers[1].ops).toEqual([{ type: "source_image" }]);
-    expect(preview.layers[0].ops).toEqual([]);
-    expect(preview.layers[1].ops).toEqual([{ type: "source_image" }, { type: "transform", dx: 8, dy: -3 }]);
+    if (target.kind !== "image_composite") throw new Error("expected image_composite target");
+    expect(target.documentKey).toContain("\"frame\":{\"x\":-40,\"y\":0,\"w\":420,\"h\":260}");
+  });
+
+  it("sanitizes non-finite composite dimensions and frame fields", () => {
+    const doc = emptyImageEditorDocument();
+    const target = imageCompositeTarget(
+      "res-image",
+      doc,
+      { w: Number.NaN, h: Number.POSITIVE_INFINITY },
+      { x: Number.NaN, y: Number.NEGATIVE_INFINITY, w: 0, h: Number.NaN },
+    );
+
+    expect(target).toMatchObject({
+      kind: "image_composite",
+      documentWidth: 1,
+      documentHeight: 1,
+      frameX: 0,
+      frameY: 0,
+      frameWidth: 1,
+      frameHeight: 1,
+    });
+    if (target.kind !== "image_composite") throw new Error("expected image_composite target");
+    expect(JSON.parse(target.documentKey).frame).toEqual({ x: 0, y: 0, w: 1, h: 1 });
   });
 
   it("contain-fits placements: small images centre 1:1, large images scale down", () => {
@@ -115,7 +143,7 @@ describe("image composite viewport source", () => {
 
   it("adds a placed image layer that composites within its own bounds", () => {
     const state = addImageLayer(
-      initEditState(emptyMaskDocument()),
+      initEditState(emptyImageEditorDocument()),
       { path: "C:/imgs/photo.png", width: 800, height: 600 },
       { w: 1600, h: 1200 },
     );
@@ -130,12 +158,24 @@ describe("image composite viewport source", () => {
     expect(layerSourceImageOp({ ...doc.layers[1], ops: [{ type: "source_image" }] })).toBeNull();
   });
 
-  it("resolves the layer display transform from committed ops plus live draft", () => {
-    const doc = emptyMaskDocument();
+  it("uses layer source images as the composite backing path when the opener path is absent", () => {
+    const doc = emptyImageEditorDocument();
+    doc.layers[0].ops = [{
+      type: "source_image",
+      source: { path: "C:/imgs/base.png", width: 800, height: 600 },
+      placement: [0, 0, 800, 600],
+    }];
+
+    expect(imageCompositeBackingPath(doc, null)).toBe("C:/imgs/base.png");
+    expect(imageCompositeBackingPath(doc, "C:/imgs/opened.png")).toBe("C:/imgs/opened.png");
+  });
+
+  it("resolves the layer display transform from committed ops", () => {
+    const doc = emptyImageEditorDocument();
     doc.layers[0].ops.push({ type: "transform", dx: 4, dy: 6, scale: 1, rotate: 0 });
-    expect(layerCompositeTransform(doc.layers[0], [3, -2])).toEqual({
-      dx: 7,
-      dy: 4,
+    expect(layerCompositeTransform(doc.layers[0])).toEqual({
+      dx: 4,
+      dy: 6,
       scale: 1,
       rotate: 0,
     });

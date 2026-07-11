@@ -34,7 +34,7 @@ export interface PrepareRepaintResult {
   image_size: [number, number];
   selected_count: number;
   /** When true the mask's transparent pixels mark the edit area (OpenAI style). */
-  mask_edit_is_transparent: boolean;
+  inpaint_mask_is_transparent: boolean;
 }
 
 export interface PrepareRepaintRequest {
@@ -149,7 +149,7 @@ export async function prepareRepaintRegions(
       skipped,
       image_size: size,
       selected_count: regions.length,
-      mask_edit_is_transparent: !invert,
+      inpaint_mask_is_transparent: !invert,
     };
   }
   return (await invoke("prepare_repaint_regions", {

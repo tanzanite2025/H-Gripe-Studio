@@ -5,7 +5,7 @@ use serde::Deserialize;
 use super::{parse_id, viewports, ViewportView};
 
 /// A single-channel mask the host tints over rendered frames. The buffer is
-/// proxy resolution (the mask editor's working scale) and covers the full
+/// proxy resolution (the image editor's working scale) and covers the full
 /// document; compositing samples it bilinearly at the view window, so the
 /// tint follows zoom instead of upscaling a document-size canvas.
 pub(super) struct MaskOverlay {
@@ -536,7 +536,7 @@ pub(crate) struct MaskOverlayArg {
 const MAX_MASK_OVERLAY_PIXELS: u64 = 4096 * 4096;
 
 /// Set (or clear) the mask overlay an image-edit viewport composites over
-/// rendered frames — the mask editor's selection tint (morphology preview,
+/// rendered frames: the image editor's selection tint (morphology preview,
 /// quick mask), presented by the host at the view window's detail instead of
 /// an upscaled document-size canvas overlay.
 #[tauri::command]
@@ -606,8 +606,8 @@ const MAX_OVERLAY_SCENE_ITEMS: usize = 256;
 const MAX_OVERLAY_POLYGON_POINTS: usize = 16384;
 
 /// Set (or clear) the vector overlay an image-edit or video-preview viewport
-/// strokes over rendered frames — the mask editor's marquee marching ants,
-/// the program monitor's safe-area guides — presented by the host at the
+/// strokes over rendered frames: the image editor's marquee marching ants,
+/// the program monitor's safe-area guides, presented by the host at the
 /// view window's detail instead of a document-size canvas overlay (WGPU
 /// migration: overlays on the live surface).
 #[tauri::command]

@@ -54,7 +54,7 @@ pub(crate) struct Sam2PromptMaskResult {
 
 /// Run SAM 2 point-prompt segmentation on an image and write the matte PNG.
 /// The Studio Action layer calls this through the `sam2.point_prompt`
-/// compute block; it never touches the mask document itself.
+/// compute block; it never touches the image editor document itself.
 #[tauri::command]
 pub(crate) fn sam2_prompt_mask(
     image: String,

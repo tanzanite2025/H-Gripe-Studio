@@ -16,6 +16,10 @@ pub(super) fn render_image_composite_path(
     _document_key: &str,
     document_width: u32,
     document_height: u32,
+    frame_x: f32,
+    frame_y: f32,
+    frame_width: u32,
+    frame_height: u32,
     width: u32,
     height: u32,
     grade_doc: Option<Value>,
@@ -52,11 +56,15 @@ pub(super) fn render_image_composite_path(
         })
         .map(|proxy| (*proxy).clone())
     };
-    let mut image = crate::studio::image_document::composite_image_document_with_sources(
+    let mut image = crate::studio::image_document::composite_image_document_with_sources_in_frame(
         &proxy,
         document,
         document_width.max(1),
         document_height.max(1),
+        frame_x,
+        frame_y,
+        frame_width.max(1),
+        frame_height.max(1),
         detail,
         &mut load_source,
     )?;

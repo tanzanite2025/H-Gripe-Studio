@@ -10,7 +10,7 @@
 
 1. 前端 proxy、Subject Mask 执行器和 viewport 各自实现图层回放、蒙版、混合或变换；
 2. `subject_mask.rs` 与 `viewport.rs` 同时承担命令入口、状态、缓存、解析、算法和合成；
-3. `App.tsx` 与 `MaskEditModal.tsx` 仍是高扇入、高变更冲突的总控组件；
+3. `App.tsx` 与 `ImageEditorModal.tsx` 仍是高扇入、高变更冲突的总控组件；
 4. 跨层合同和纯领域模型位于 `types/production.ts`、`production/layeredImage.ts` 等 feature 目录，导致 runtime、editor、viewport 反向依赖 UI feature；
 5. API provider 重复实现 profile、credentials 和任务参数合并规则。
 
@@ -71,9 +71,9 @@
 | 文件 | 规模/特征 | 主要问题 |
 | --- | ---: | --- |
 | `studio-ui/src/App.tsx` | 约 2027 行、60 个 import | 应用总控混入多个业务 controller |
-| `editor/MaskEditModal.tsx` | 约 1693 行、54 个 import | 违反项目规定的 orchestrator-only 边界 |
+| `editor/ImageEditorModal.tsx` | 约 1693 行、54 个 import | 违反项目规定的 orchestrator-only 边界 |
 | `editor/maskMorphology.ts` | 约 1414 行、41 个 export | proxy 算法、工具、回放、合成、缓存混合 |
-| `editor/maskEdit.ts` | 约 922 行、61 个 export | 状态、迁移、命令和查询 API 过于集中 |
+| `editor/imageEditorState.ts` | 约 922 行、61 个 export | 状态、迁移、命令和查询 API 过于集中 |
 | `production/ProductionDrawer.tsx` | 约 1054 行 | props 面过宽，素材、时间线、检查器混合 |
 | `runtime/executors.ts` | 约 745 行 | 多类 executor 注册与协议转换集中 |
 | `graph/nodeSpecs.ts` | 约 1985 行 | 声明型 registry 过大，但内聚性尚可 |
@@ -292,17 +292,17 @@ app/
 
 ---
 
-### A05 / P1：`MaskEditModal.tsx` 未达到项目自己的 orchestrator-only 目标
+### A05 / P1：`ImageEditorModal.tsx` 未达到项目自己的 orchestrator-only 目标
 
 #### 证据
 
-`docs/design/mask-editor-ui-structure.md` 明确规定：
+`docs/design/image-editor-ui-structure.md` 明确规定：
 
-- `MaskEditModal.tsx` 为 “orchestrator ONLY”；
+- `ImageEditorModal.tsx` 为 “orchestrator ONLY”；
 - “must not grow logic”；
 - painter、pointer branch、panel 应进入对应模块。
 
-当前 `MaskEditModal.tsx` 仍约 1693 行、54 个 import，仍负责大量：
+当前 `ImageEditorModal.tsx` 仍约 1693 行、54 个 import，仍负责大量：
 
 - 工具选择和 slot 轮换；
 - brush 参数和快捷调整；
@@ -328,12 +328,12 @@ active marching-ants selection, and it must not own `Ctrl+J` capability logic.
 优先按状态簇拆 hook，而不是继续拆纯 UI：
 
 ```text
-maskEditModal/
+imageEditorModal/
   useBrushParams.ts
   useToolSlots.ts
   useMaskPreviewController.ts
   useUnderlayController.ts
-  useMaskEditorShortcuts.ts
+  useImageEditorShortcuts.ts
 ```
 
 `LayersPanel.tsx` 约 793 行，可拆：
@@ -347,13 +347,13 @@ layers/
   LayerActions.tsx
 ```
 
-所有文档 mutation 继续通过 `actions.ts` + `maskEdit.ts`，不得在 panel 内直接修改 `MaskDocument`。
+所有文档 mutation 继续通过 `actions.ts` + `imageEditorState.ts`，不得在 panel 内直接修改 `ImageEditorDocument`。
 
 ---
 
 ### A06 / P1：`types/production.ts` 是多个合同域的聚合桶
 
-状态（2026-07-10）：已完成。合同已按 artifacts、context、quality、mask operations、mask document 与 subject mask 拆分到 `contracts/`；内部调用方已迁移到对应的聚焦模块，`types/production.ts` 仅保留兼容 re-export。
+状态（2026-07-10）：已完成。合同已按 artifacts、context、quality、mask operations、image editor document 与 subject mask 拆分到 `contracts/`；内部调用方已迁移到对应的聚焦模块，`types/production.ts` 仅保留兼容 re-export。
 
 #### 证据
 
@@ -364,7 +364,7 @@ layers/
 - edit paths、brush、mask operations；
 - layer group、adjustment、mask layer、layer mask；
 - image canvas；
-- mask document；
+- image editor document；
 - detected subject、matte report、subject mask result。
 
 #### 风险
@@ -380,8 +380,8 @@ layers/
 contracts/
   context.ts
   quality.ts
-  maskOps.ts
-  maskDocument.ts
+  imageEditOps.ts
+  imageEditorDocument.ts
   subjectMask.ts
   index.ts
 ```
@@ -674,7 +674,7 @@ TS proxy 不要求逐像素等于 Rust，但应验证：
 
 1. `App.tsx` 先抽 production workspace；
 2. 再抽 editor launch 与 canvas workspace；
-3. `MaskEditModal` 抽 brush/tool slots、preview、underlay 和 shortcuts；
+3. `ImageEditorModal` 抽 brush/tool slots、preview、underlay 和 shortcuts；
 4. `ProductionDrawer` 改为 store selector + capability ports。
 
 预计：4–7 天。风险：中。
@@ -708,7 +708,7 @@ TS proxy 不要求逐像素等于 Rust，但应验证：
 | 5 | viewport 使用共享内核 | 无 |
 | 6 | 仅拆 `subject_mask.rs` 文件职责 | 无 |
 | 7 | 仅拆 `viewport.rs` 文件职责 | 无 |
-| 8 | 抽 `MaskEditModal` 状态簇 | 无 |
+| 8 | 抽 `ImageEditorModal` 状态簇 | 无 |
 | 9 | 抽 `App.tsx` production/editor controller | 无 |
 | 10 | contracts/domain/bridge 边界整理 | 无 |
 | 11 | provider common | 无 |
@@ -757,4 +757,4 @@ TS proxy 不要求逐像素等于 Rust，但应验证：
 2. Phase 1 Rust image-document 内核；
 3. Phase 2 的两个 Rust 单体拆分。
 
-这一组直接降低编辑器预览、Subject Mask、viewport 和最终输出不一致的概率。`App.tsx` 与 `MaskEditModal.tsx` 的 UI 瘦身应紧随其后，但不应抢在渲染语义统一之前。
+这一组直接降低编辑器预览、Subject Mask、viewport 和最终输出不一致的概率。`App.tsx` 与 `ImageEditorModal.tsx` 的 UI 瘦身应紧随其后，但不应抢在渲染语义统一之前。

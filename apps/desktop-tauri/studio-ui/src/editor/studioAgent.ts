@@ -11,7 +11,7 @@
 //     -> reviewProposal       (target resolver + per-step dry run, no mutation)
 //     -> commitProposal       (user-confirmed; each step one undo record)
 
-import type { EditState } from "./maskEdit";
+import type { EditState } from "./imageEditorState";
 import type { ActionPlan, StudioActionRegistry } from "./studioAction";
 import type { StudioDocumentRef } from "./studioTarget";
 import { resolveActiveTarget } from "./studioTarget";

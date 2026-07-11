@@ -59,14 +59,14 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Manual brush / eraser / wand / marquee / morphology | ✅ Landed | Phase 1 Mask-Edit tool set. |
+| Manual brush / eraser / wand / marquee / morphology | ✅ Landed | Phase 1 Image Editor tool set. |
 | Auto modes via in-process model cascade | ✅ Landed | BiRefNet lite / U²-Netp salient cascade + point-prompt **SAM 2**, `builtin-cpu` fallback. |
 | SAM 2 point prompts (positive **and** negative) | ✅ Landed | Left-click include (green), right-click exclude (red) → `point_labels`; builtin fallback excludes connected components. |
 | Alpha matting (continuous alpha) | ✅ Landed | `alpha_matting` → trimap → **ViTMatte** (`ort`) when the weight resolves, else deterministic image-guided **guided-filter** `builtin-cpu-matte`. |
 | Matting paint tool (hand-painted unknown band) | ✅ Landed | `matte_strokes` stamped onto the trimap before matting. |
 | Trimap hand-off to Refine Mask Edge | ✅ Landed | `trimap` output → Refine `trimap` input protects the soft-alpha band. |
 | **`auto_person` portrait-matting net** | 🟡 Partial | The **`u2net_human_seg`** human-segmentation net (Apache-2.0, ~168 MB, env `HGRIPE_PERSON_MODEL` / `scripts/fetch-person-model.*`) slots into `segmenter_for_mode` behind the same trait: `auto_person` leads with it (so the matte tracks people, not generic saliency), then falls through to BiRefNet → U²-Netp → `builtin-cpu`; other modes keep the generic priority. Still ⛔: bundling the weight in the installer (downloadable big tier today). |
-| **Pen / Lasso (bezier paths)** | ✅ Landed | Pen (click anchors, bezier-capable) / lasso (freehand) tools in the Mask-Edit modal; the backend flattens each closed path (cubic bezier where handles are present), rasterises it (even-odd scanline fill) and boolean-combines it with the mask (`add` / `subtract` / `intersect`). The proxy preview folds paths in too. |
+| **Pen / Lasso (bezier paths)** | ✅ Landed | Pen (click anchors, bezier-capable) / lasso (freehand) tools in the Image Editor modal; the backend flattens each closed path (cubic bezier where handles are present), rasterises it (even-odd scanline fill) and boolean-combines it with the mask (`add` / `subtract` / `intersect`). The proxy preview folds paths in too. |
 | **SAM 2 multi-variant XY compare (T/S/B/L)** | ✅ Landed | The node's `sam2_variant` param selects **tiny / small / base_plus / large**; `scripts/fetch-sam2.*` take a variant list (`all` fetches every one, sha256-checked). A missing weight falls back to tiny, and `detected_subjects` records the `variant` actually used, so two nodes on the same prompts compare variants side by side (XY). |
 
 ## 4. Executor-split / management surfaces — [`design/executor-split-and-psd-chain-hardening.md`](design/executor-split-and-psd-chain-hardening.md)
@@ -101,7 +101,7 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Node-card / Inspector / Palette / search / Mask-Edit i18n (中/英) | ✅ Landed | English `NODE_SPECS` source + `nodeSpecsI18n` / `maskToolsI18n` zh overlays + `localizeSpec` resolver. A coverage test fails CI if any node/param/port/tool ships without a zh entry. |
+| Node-card / Inspector / Palette / search / Image Editor i18n (中/英) | ✅ Landed | English `NODE_SPECS` source + `nodeSpecsI18n` / `imageEditorToolsI18n` zh overlays + `localizeSpec` resolver. A coverage test fails CI if any node/param/port/tool ships without a zh entry. |
 
 ## 8. Editor resource & threading model — [`design/editor-resource-model.md`](design/editor-resource-model.md)
 

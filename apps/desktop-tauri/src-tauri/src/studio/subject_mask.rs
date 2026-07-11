@@ -228,7 +228,7 @@ pub(super) fn execute_studio_subject_mask(
 
     // Continuous alpha matting: resolve the binary edge into soft alpha (hair /
     // glass / translucency) via a trimap. Off by default so Phase 1 stays
-    // binary + deterministic; behind the flag (or whenever the Mask-Edit
+    // binary + deterministic; behind the flag (or whenever the Image Editor
     // "Matting" brush painted an unknown band) it runs ViTMatte when its weight
     // resolves, else the deterministic builtin guided-filter fallback.
     // The trimap that drove matting, kept so the downstream Refine node can
@@ -1018,8 +1018,34 @@ fn replay_ops(
     }
 }
 
-/// Apply one queued `operations` entry recorded by the Mask-Edit modal
-/// (`MaskOperation`: `type` + optional `amount` scalar + optional `region`).
+pub(crate) fn selection_alpha_from_operation(
+    image: &RgbaImage,
+    op: &Value,
+    default_tolerance: i32,
+) -> Result<GrayImage, String> {
+    let op_type = op
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "selection alpha operation requires a type".to_string())?;
+    if op_type == "wand" && op.get("mode").and_then(Value::as_str) == Some("subtract") {
+        return Err("selection alpha wand cannot use subtract mode".to_string());
+    }
+    match op_type {
+        "wand" | "quick_select" | "object_select" => {
+            let (width, height) = image.dimensions();
+            let mut alpha = GrayImage::from_pixel(width, height, Luma([MASK_OFF]));
+            let mut operations = Vec::new();
+            apply_queued_operation(image, &mut alpha, op, default_tolerance, &mut operations);
+            Ok(alpha)
+        }
+        other => Err(format!(
+            "selection alpha operation is not supported for {other}"
+        )),
+    }
+}
+
+/// Apply one queued `operations` entry recorded by the Image Editor modal
+/// (`ImageEditOperation`: `type` + optional `amount` scalar + optional `region`).
 fn apply_queued_operation(
     image: &RgbaImage,
     mask: &mut GrayImage,
@@ -2227,7 +2253,7 @@ mod tests {
 
     #[test]
     fn queued_operations_apply_marquee_and_morphology() {
-        // The Mask-Edit modal records `operations` (type/amount/region): a rect
+        // The Image Editor modal records `operations` (type/amount/region): a rect
         // marquee fill, then a whole-mask invert.
         let value = json!({
             "operations": [

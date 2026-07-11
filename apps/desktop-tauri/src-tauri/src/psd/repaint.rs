@@ -58,7 +58,7 @@ pub(crate) struct PrepareRepaintResult {
     /// `true` when the inpaint mask marks the edit area transparent (OpenAI
     /// convention); `false` when inverted (opaque/white = edit).
     #[serde(default)]
-    pub(crate) mask_edit_is_transparent: bool,
+    pub(crate) inpaint_mask_is_transparent: bool,
     /// Pillow mode of the decoded candidate before normalising to 8-bit RGBA.
     #[serde(default)]
     pub(crate) source_mode: String,

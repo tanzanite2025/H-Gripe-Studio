@@ -1,4 +1,4 @@
-import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
+import { type ImageEditorDocument, type ImageEditorLayer } from "../contracts/imageEditorDocument";
 import type { MsgKey } from "../i18n";
 import type { StudioTarget } from "./studioTarget";
 
@@ -34,7 +34,7 @@ export interface CommandCapability {
 }
 
 export interface CommandContext {
-  doc: MaskDocument;
+  doc: ImageEditorDocument;
   target: StudioTarget;
   backendAvailable?: boolean;
 }
@@ -63,24 +63,24 @@ function enabled(command: StudioCommand): CommandCapability {
   return { enabled: true, danger: command.danger, requiresPreview: command.requiresPreview };
 }
 
-function layerById(doc: MaskDocument, layerId: string): { layer: MaskLayer; index: number } | null {
+function layerById(doc: ImageEditorDocument, layerId: string): { layer: ImageEditorLayer; index: number } | null {
   const index = doc.layers.findIndex((layer) => layer.id === layerId);
   return index >= 0 ? { layer: doc.layers[index], index } : null;
 }
 
-function targetLayer(doc: MaskDocument, target: StudioTarget): { layer: MaskLayer; index: number } | null {
+function targetLayer(doc: ImageEditorDocument, target: StudioTarget): { layer: ImageEditorLayer; index: number } | null {
   if (target.kind !== "pixel_layer" && target.kind !== "layer_mask") return null;
   return layerById(doc, target.layerId);
 }
 
-function editablePixelLayer(doc: MaskDocument, target: StudioTarget): { layer: MaskLayer; index: number } | null {
+function editablePixelLayer(doc: ImageEditorDocument, target: StudioTarget): { layer: ImageEditorLayer; index: number } | null {
   if (target.kind !== "pixel_layer") return null;
   const found = layerById(doc, target.layerId);
   if (!found || found.layer.kind === "adjustment" || found.layer.locked) return null;
   return found;
 }
 
-function editableMaskTarget(doc: MaskDocument, target: StudioTarget): { layer: MaskLayer; index: number } | null {
+function editableMaskTarget(doc: ImageEditorDocument, target: StudioTarget): { layer: ImageEditorLayer; index: number } | null {
   if (target.kind !== "layer_mask") return null;
   const found = layerById(doc, target.layerId);
   if (!found || found.layer.locked || !found.layer.mask || found.layer.mask.id !== target.maskId) return null;

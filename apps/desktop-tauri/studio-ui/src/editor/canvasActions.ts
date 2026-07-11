@@ -284,7 +284,7 @@ export const openNodeResultPreviewAction: CanvasStudioAction<NodePreviewParams> 
   },
 };
 
-// --- agent boundary (same gates as the mask-document chain) ---------------------
+// --- agent boundary (same gates as the image editor document chain) --------------
 
 /** The dry-run report the preview gate shows before the user confirms. */
 export interface CanvasProposalReview {

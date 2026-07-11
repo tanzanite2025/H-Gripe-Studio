@@ -1,0 +1,1560 @@
+/* Image Editor modal chrome lives here, imported by
+   ImageEditorModal.tsx. Keep new image-editor styles in this file (not the global
+   styles.css) and express PS design-language values through the tokens below. */
+
+:root {
+  /* PS design tokens: the dark dock language shared by the toolbar rail and
+     the right-rail panel groups. */
+  --ps-dock-border: #0c0e13; /* hairline borders / row dividers */
+  --ps-tab-strip: #11131a; /* inactive tab strip / input wells */
+  --ps-hover: #2a2f3d; /* hover wash on flat icon buttons */
+  --ps-active-overlay: rgba(255, 255, 255, 0.14); /* neutral grey active-row highlight */
+  --ps-row-h: 34px; /* layer-row height */
+}
+
+.media-viewer.image-editor {
+  width: 100%;
+  max-width: 100%;
+  height: var(--app-editor-workarea-h);
+  max-height: var(--app-editor-workarea-h);
+  border-radius: 0;
+  position: relative; /* anchors the in-editor dialog backdrop */
+  background: var(--panel);
+  isolation: isolate;
+}
+/* The image-editor shells span the full viewport width, so the backdrop's
+   framing padding goes. */
+.media-viewer-backdrop:has(> .image-editor),
+.media-viewer-backdrop:has(> .crop-edit) {
+  padding: 0;
+}
+/* The editor shell slides up from the bottom on open and back down on close
+   (a document-tab switch remounts the shell without replaying the entrance). */
+@keyframes image-editor-slide-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes image-editor-slide-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+.media-viewer.image-editor.image-editor-entering {
+  animation: image-editor-slide-in 0.28s ease-out;
+}
+.media-viewer.image-editor.image-editor-leaving {
+  animation: image-editor-slide-out 0.24s ease-in forwards;
+}
+.media-viewer-backdrop.image-editor-backdrop-leaving {
+  background: transparent;
+  transition: background 0.24s ease-in;
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-viewer.image-editor.image-editor-entering,
+  .media-viewer.image-editor.image-editor-leaving {
+    animation-duration: 0.01s;
+  }
+}
+.image-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto var(--image-editor-rail-w, 240px);
+  gap: 0 6px;
+  padding: 10px;
+  background: var(--panel);
+}
+.image-editor-tools {
+  grid-column: 1;
+  grid-row: 1;
+}
+.image-editor-stage {
+  grid-column: 2;
+  grid-row: 1;
+}
+.mask-selection-top-strip {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: center;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 5px;
+  border: 1px solid rgba(130, 146, 176, 0.28);
+  border-radius: 999px;
+  background: rgba(25, 29, 40, 0.88);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+.mask-selection-tool-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mask-selection-tool-segment.assist {
+  position: relative;
+  padding-left: 9px;
+}
+.mask-selection-tool-segment.assist::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: rgba(162, 174, 204, 0.34);
+}
+.mask-selection-tool {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: rgba(238, 244, 255, 0.78);
+  background: rgba(255, 255, 255, 0.05);
+  line-height: 1;
+  cursor: pointer;
+}
+.mask-selection-tool-key {
+  position: absolute;
+  right: 4px;
+  top: 2px;
+  min-width: 8px;
+  padding: 0;
+  border: 0;
+  color: rgba(216, 225, 245, 0.72);
+  background: transparent;
+  font: 600 8px/1 var(--font-ui, system-ui, sans-serif);
+  text-align: center;
+  pointer-events: none;
+}
+.mask-selection-tool svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.mask-selection-tool:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.11);
+}
+.mask-selection-tool.active {
+  color: #ffffff;
+  border-color: rgba(99, 143, 255, 0.7);
+  background: rgba(71, 116, 255, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.mask-selection-tool.active .mask-selection-tool-key {
+  color: rgba(255, 255, 255, 0.92);
+}
+.mask-rail-resize {
+  grid-column: 3;
+  grid-row: 1;
+}
+.image-editor-controls {
+  grid-column: 4;
+  grid-row: 1;
+}
+/* PS toolbar rail: a flat dark column of borderless icon buttons. It never
+   scrolls — when the modal is too short for one column, groups wrap into a
+   second column (PS's double-column mode). */
+.image-editor-tools {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0 4px;
+  min-height: 0;
+  max-height: 100%;
+  overflow: visible;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 3px;
+}
+/* PS-style toolbar sections: selection / paint / vector / ops / navigation,
+   separated by a rule so tools sit where a PS user expects them. */
+.mask-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mask-tool-group:first-child { padding-top: 0; }
+.mask-tool-group:last-child { border-bottom: none; padding-bottom: 0; }
+/* One PS toolbar slot: an icon button; multi-variant slots anchor a flyout. */
+.mask-tool-slot { position: relative; }
+.mask-tool {
+  position: relative;
+  width: 28px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+}
+.mask-tool:hover:not(:disabled) { background: var(--ps-hover); }
+.mask-tool.active { background: #1f2c44; color: var(--accent); }
+.mask-tool-icon { display: block; }
+/* PS shortcut-letter badge in the button's top-right corner ("B" on the
+   brush). The flyout triangle keeps the bottom-right corner. */
+.mask-tool .mask-tool-key {
+  position: absolute;
+  right: 1px;
+  top: 0;
+  font-family: inherit;
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.mask-tool.active .mask-tool-key { opacity: 0.85; }
+/* Planned (coming-soon) variants keep their PS slot shape but render greyed
+   and inert. */
+.mask-tool.planned,
+.mask-flyout-item.planned {
+  opacity: 0.35;
+  cursor: default;
+}
+.mask-tool.planned:hover:not(:disabled) { background: transparent; }
+/* PS's tiny corner triangle marking a slot that hides more variants. */
+.mask-tool .flyout-corner {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-bottom: 4px solid currentColor;
+  opacity: 0.7;
+}
+/* Flyout card of a slot's tool variants (long-press / right-click). */
+.mask-flyout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+}
+.mask-flyout {
+  position: fixed;
+  z-index: 40;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.mask-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.mask-flyout-item:hover:not(:disabled) { background: var(--ps-hover); }
+.mask-flyout-item:disabled { opacity: 0.4; cursor: default; }
+.mask-flyout-item.active { border-color: var(--accent); color: var(--accent); }
+.mask-flyout-item .label { flex: 1; }
+.mask-flyout-item .combo {
+  font-style: normal;
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.8;
+}
+/* PS-style modal dialog inside the editor (Image Size, Ctrl+Alt+I). */
+.mask-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.mask-dialog {
+  min-width: 300px;
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.mask-dialog-title {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--ps-dock-border);
+  background: var(--ps-tab-strip);
+}
+.mask-dialog-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.mask-dialog-check { flex-direction: row; align-items: center; gap: 6px; }
+.mask-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--ps-dock-border);
+}
+.image-editor-stage {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+/* The document-space frame: sized to fit the stage at the document's aspect
+   ratio (the max-height constraint transfers through `aspect-ratio`), holding
+   the underlay window and the edit canvas in one transformed unit. */
+.image-editor-frame {
+  position: relative;
+  width: 100%;
+}
+.image-editor-frame.cropped {
+  overflow: hidden;
+}
+.image-editor-document-layer {
+  position: absolute;
+  inset: 0;
+}
+.image-editor-pixel-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.image-editor-viewport-frame-img {
+  position: absolute;
+  opacity: 0.85;
+  pointer-events: none;
+  user-select: none;
+}
+/* Placement anchor for the native surface window (surface swap): the underlay
+   window's rect, painted by nothing — the surface below shows through. */
+.image-editor-native-surface-anchor {
+  position: absolute;
+  pointer-events: none;
+}
+/* Image pixels may have alpha; that alpha belongs inside the document frame,
+   never on the modal shell/body. */
+.image-editor-stage.presented .image-editor-frame,
+.image-editor-stage.presented .image-editor-document-layer,
+.image-editor-stage.presented .image-editor-canvas {
+  background: transparent;
+}
+/* PS-style brush cursor: a ring of the brush tip's true diameter, centred on
+   the pointer (left/top set imperatively). The dark outline keeps the white
+   ring readable over light imagery. */
+.mask-brush-cursor {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  outline: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 3;
+}
+.image-editor-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+  display: block;
+  z-index: 2;
+}
+.mask-interaction-result-layer {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+}
+.selected-layer-move-surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.mask-selection-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.selected-layer-frame-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.selected-layer-frame-halo,
+.selected-layer-frame-line {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+.selected-layer-frame-halo {
+  stroke: rgba(0, 0, 0, 0.78);
+  stroke-width: 4.2;
+}
+.selected-layer-frame-line {
+  stroke: #ffd84d;
+  stroke-width: 2.2;
+  stroke-linejoin: miter;
+}
+.mask-selection-draft-path,
+.mask-selection-ants-light,
+.mask-selection-ants-dark {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+.mask-selection-draft-path {
+  stroke: #2f7cf6;
+  stroke-width: 1.8;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+.mask-selection-ants-light,
+.mask-selection-ants-dark {
+  stroke-width: 1.45;
+  stroke-dasharray: 5 5;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+.mask-selection-ants-light { stroke: rgba(255, 255, 255, 0.96); }
+.mask-selection-ants-dark { stroke: rgba(0, 0, 0, 0.94); }
+/* PS dock resize: the draggable gutter between the stage and the right rail. */
+.mask-rail-resize {
+  width: 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  border-radius: 3px;
+  touch-action: none;
+}
+.mask-rail-resize:hover { background: var(--ps-hover); }
+.image-editor-controls {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+.image-editor-controls .field { margin-top: 6px; }
+/* Screen-mode cycle (PS `F`): 1 hides the right panels, 2 leaves canvas only. */
+.image-editor.image-editor-screen-1 .image-editor-controls,
+.image-editor.image-editor-screen-1 .mask-rail-resize { display: none; }
+.image-editor.image-editor-screen-2 .image-editor-controls,
+.image-editor.image-editor-screen-2 .mask-rail-resize,
+.image-editor.image-editor-screen-2 .image-editor-tools { display: none; }
+/* PS-style right rail: two stacked tabbed panel groups, like PS's 属性 (top)
+   and 图层 (bottom) docks — a dark tab strip on top of each group, one panel
+   visible at a time. Rendered by imageEditorModal/PanelDock.tsx. */
+.mask-panel-group {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Percentage-based dock heights: the top group holds 45% of the rail and
+     the growing (Layers) group takes the rest, so tab switches and window
+     resizes never reflow the split. */
+  flex: 0 0 45%;
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 0;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.mask-panel-group.grow { flex: 1 1 55%; }
+.mask-panel-group.image-adjustments-dock {
+  flex: 0 0 32%;
+}
+.mask-panel-group.image-layers-dock.grow {
+  flex: 1 1 68%;
+}
+.mask-panel-tabs {
+  display: flex;
+  background: var(--ps-tab-strip);
+}
+.mask-panel-tabs button {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 400;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-right: 1px solid var(--ps-dock-border);
+  border-radius: 0;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.mask-panel-tabs button:hover { color: var(--text); }
+/* Active tab sits flush with the panel body, PS-style: same colour, no seam. */
+.mask-panel-tabs button.active { background: var(--panel-2); color: var(--text); }
+.mask-panel-group-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* A panel's tab-page body: headerless (the group's tab strip is the only
+   chrome); full-bleed lists inside offset the padding with -8px margins. */
+.mask-panel-body { padding: 0 8px 8px; }
+.mask-op-list { display: flex; flex-wrap: wrap; gap: 4px; }
+/* PS-style colour wells at the toolbar's foot: overlapping front/back
+   swatches show the paint polarity (white = add, black = erase); the tiny
+   reset pair and the swap arrow mirror PS's D / X affordances. */
+.mask-color-wells {
+  position: relative;
+  width: 34px;
+  height: 40px;
+  margin: 6px auto 2px;
+  flex: none;
+}
+.mask-color-wells .well {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 2px;
+}
+.mask-color-wells .well.light { background: #fff; }
+.mask-color-wells .well.dark { background: #1a1a1a; }
+.mask-color-main {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 12px;
+  bottom: 0;
+}
+.mask-color-main .well.back { right: 2px; bottom: 0; }
+.mask-color-main .well.front { left: 2px; top: 0; }
+.mask-color-reset {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.mask-color-reset .well {
+  width: 7px;
+  height: 7px;
+}
+.mask-color-reset .well.back { right: 0; bottom: 0; }
+.mask-color-reset .well.front { left: 0; top: 0; }
+.mask-color-swap {
+  position: absolute;
+  right: 0;
+  top: -2px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mask-color-swap:hover { color: var(--text); }
+.mask-color-main .well { padding: 0; cursor: pointer; }
+/* Floating selection-size panel: centred below the committed marquee. */
+.mask-marquee-float {
+  position: fixed;
+  z-index: 40;
+  transform: translateX(-50%);
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--ps-dock-bg, #23262d);
+  border: 1px solid var(--ps-dock-border, #444);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.mask-marquee-float .muted { color: var(--text-muted, #999); }
+.mask-marquee-float-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mask-marquee-float-row input[type="number"] { width: 56px; }
+.mask-crop-lock {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* PS 拾色器 dialog: SV field + hue strip + linked HSB / RGB / hex fields. */
+.mask-color-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mask-color-picker {
+  background: var(--ps-dock-bg, #2b2b2b);
+  border: 1px solid var(--ps-dock-border, #444);
+  border-radius: 8px;
+  min-width: 460px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.mask-color-picker-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ps-dock-border, #444);
+  font-size: 13px;
+}
+.mask-color-picker-close {
+  background: none;
+  border: none;
+  color: var(--text-muted, #999);
+  font-size: 16px;
+  cursor: pointer;
+}
+.mask-color-picker-close:hover { color: var(--text, #eee); }
+.mask-color-picker-body {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+}
+/* Value ramp (top→black) over a saturation ramp (left→white) on the pure
+   hue: the classic PS SV field. */
+.mask-color-picker-sv {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  border-radius: 4px;
+  background-image: linear-gradient(to top, #000, rgba(0, 0, 0, 0)), linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+  cursor: crosshair;
+  touch-action: none;
+}
+.mask-color-picker-sv-thumb {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.mask-color-picker-hue {
+  position: relative;
+  width: 16px;
+  height: 220px;
+  border-radius: 4px;
+  background: linear-gradient(to top, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  cursor: pointer;
+  touch-action: none;
+}
+.mask-color-picker-hue-thumb {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 4px;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.mask-color-picker-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 170px;
+}
+.mask-color-picker-preview {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 12px;
+}
+.mask-color-picker-preview .muted { color: var(--text-muted, #999); }
+.mask-color-picker-swatch {
+  display: block;
+  width: 56px;
+  height: 24px;
+  border: 1px solid var(--ps-dock-border, #444);
+}
+.mask-color-picker-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  font-size: 12px;
+}
+.mask-color-picker-fields label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mask-color-picker-fields input[type="number"] {
+  width: 52px;
+}
+.mask-color-picker-fields .muted { color: var(--text-muted, #999); }
+.mask-color-picker-hex { grid-column: 1 / -1; }
+.mask-color-picker-hex input { width: 90px; }
+.mask-color-picker-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+/* Adjustments panel (PS 调整): a full-width list; the clicked adjustment's
+   controls open in the floating popup (`.adjustment-popup`). */
+.mask-adjustments-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 8px;
+}
+.mask-adjustment-add-btn {
+  width: 100%;
+  justify-content: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+.mask-adjustment-add-btn:hover { filter: brightness(1.08); }
+.mask-adjustment-row.active {
+  background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1));
+}
+.mask-adjustment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.mask-adjustment-row:hover { background: var(--ps-dock-hover, rgba(255, 255, 255, 0.06)); }
+.mask-adjustment-row .glyph {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.mask-adjustment-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-adjustment-row.planned {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Adjustment controls: a floating popover without a backdrop, so the live
+   canvas below stays visible and clickable (the eyedropper samples from it). */
+.adjustment-popup {
+  position: fixed;
+  top: 96px;
+  right: 348px;
+  width: 264px;
+  /* Above the editor shell (.media-viewer-backdrop is z-index 1000). */
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel, #181a21);
+  border: 1px solid var(--border, #2a2d37);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.adjustment-popup .slider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+.adjustment-popup .slider-row > span { grid-column: 1 / -1; }
+.adjustment-popup .slider-row input[type="range"] {
+  grid-column: 1;
+  min-width: 0;
+  width: 100%;
+}
+.adjustment-popup .slider-row output {
+  grid-column: 2;
+  min-width: 40px;
+}
+.adjustment-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.adjustment-popup-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.adjustment-popup-close:hover {
+  background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1));
+  color: var(--text);
+}
+/* Dashed colour-coded frames: red = the colour being replaced, green = the
+   requested replacement. */
+.replace-color-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1.5px dashed transparent;
+}
+.replace-color-slot.from { border-color: #e5534b; }
+.replace-color-slot.to { border-color: #46a758; }
+.replace-color-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.replace-color-slot-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.replace-color-slot-body small { white-space: nowrap; }
+.replace-color-swatch {
+  width: 46px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.2));
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  flex: none;
+}
+.replace-color-pick {
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ps-dock-border, rgba(255, 255, 255, 0.2));
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.replace-color-pick:hover { background: var(--ps-dock-hover, rgba(255, 255, 255, 0.1)); }
+.replace-color-pick.picking {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mask-channel-quick,
+.mask-path-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+/* Mask ops panel: whole-mask operations as a two-column button grid. */
+.mask-ops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 8px;
+}
+.mask-op-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--ps-dock-border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  min-width: 0;
+}
+.mask-op-button svg { flex: none; }
+.mask-op-button .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-op-button:hover { background: var(--ps-hover); }
+.mask-op-button.active {
+  background: var(--ps-active-overlay);
+  border-color: var(--accent);
+}
+.mask-op-chip {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(91, 140, 255, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(91, 140, 255, 0.35);
+}
+.mask-op-chip.negative {
+  background: rgba(244, 98, 98, 0.15);
+  color: #f46262;
+  border-color: rgba(244, 98, 98, 0.4);
+}
+/* History panel: one row per global document snapshot. */
+.mask-history-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+.mask-history-list.snapshot-list {
+  gap: 1px;
+}
+.mask-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ps-dock-border);
+  color: var(--text);
+}
+.mask-history-row.mask-history-snapshot {
+  width: 100%;
+  min-height: 34px;
+  text-align: left;
+  cursor: pointer;
+}
+.mask-history-row.mask-history-snapshot:hover {
+  background: var(--ps-hover);
+}
+.mask-history-row.mask-history-snapshot.current {
+  background: var(--ps-active-overlay);
+}
+.mask-history-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1px solid rgba(220, 228, 245, 0.7);
+  border-radius: 999px;
+}
+.mask-history-snapshot.current .mask-history-dot {
+  border-color: #59c98f;
+  background: #59c98f;
+}
+.mask-history-row.disabled { opacity: 0.45; }
+.mask-history-row.editing { background: var(--ps-active-overlay); }
+.mask-history-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-history-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mask-history-row button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.mask-history-row button:hover { color: #fff; }
+.mask-history-amount {
+  width: 44px;
+  font-size: 11px;
+  padding: 0 4px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+}
+.history-snapshot-dialog {
+  width: min(520px, calc(100vw - 48px));
+}
+.history-snapshot-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.history-snapshot-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-current-pill {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(89, 201, 143, 0.16);
+  color: #a9f0c9;
+  font-size: 11px;
+}
+.history-snapshot-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  color: var(--muted);
+}
+.history-snapshot-grid b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.history-layer-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--ps-dock-border);
+  background: var(--panel);
+}
+.history-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.history-layer-row:last-child {
+  border-bottom: 0;
+}
+.history-layer-row.active {
+  background: var(--ps-active-overlay);
+}
+.history-layer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-layer-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Layers panel — PS-style: a blend/opacity head row, then full-bleed layer
+   rows (eye cell | thumbnail | name), grey highlight for the active row. */
+.mask-layer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ps-dock-border);
+}
+.mask-layer-head .mask-layer-blend { flex: 1; min-width: 0; padding: 3px 4px; }
+.mask-layer-opacity-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mask-layer-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ps-dock-border);
+}
+.mask-layer-groups-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  min-width: 0;
+}
+.mask-layer-groups-label > span {
+  flex: none;
+}
+.mask-layer-groups-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ps-dock-border);
+  background: #181a20;
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+.mask-layer-groups-input:focus {
+  border-color: rgba(123, 164, 255, 0.75);
+}
+.mask-layer-group-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  height: 26px;
+  align-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.mask-layer-group-chip {
+  --mask-layer-group-color: #5aa7ff;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  flex: none;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--mask-layer-group-color) 70%, transparent);
+  background: color-mix(in srgb, var(--mask-layer-group-color) 18%, transparent);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 22px;
+}
+.mask-layer-group-swatch {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--mask-layer-group-color);
+}
+.mask-layer-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-layer-group-delete {
+  width: 16px;
+  height: 16px;
+  margin: 0 -3px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.mask-layer-group-delete:hover {
+  color: #fff;
+  background: color-mix(in srgb, var(--mask-layer-group-color) 30%, transparent);
+}
+.mask-layer-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+.mask-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-size: 12px;
+  padding: 0 6px 0 0;
+  min-height: var(--ps-row-h);
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ps-dock-border);
+  color: var(--text);
+  cursor: pointer;
+}
+.mask-layer-row.active { background: var(--ps-active-overlay); }
+/* Multi-selected (but not active) rows: a lighter wash of the same highlight. */
+.mask-layer-row.selected { background: rgba(255, 255, 255, 0.07); }
+.mask-layer-row.hidden .mask-layer-name,
+.mask-layer-row.hidden .mask-layer-thumb { opacity: 0.45; }
+.mask-layer-visible {
+  width: 26px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--ps-dock-border) !important;
+  border-radius: 0 !important;
+}
+.mask-layer-group-cell {
+  width: 90px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mask-layer-group-select {
+  width: 82px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ps-dock-border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 22px;
+  outline: none;
+  cursor: pointer;
+}
+.mask-layer-group-select.has-group {
+  --mask-layer-group-color: #5aa7ff;
+  border-color: var(--mask-layer-group-color);
+  box-shadow: inset 4px 0 0 var(--mask-layer-group-color);
+  color: #fff;
+}
+.mask-layer-group-select:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.mask-layer-row.hidden .mask-layer-group-select {
+  opacity: 0.45;
+}
+/* The real mask preview inside the thumb slot (nearest-neighbour scaled). */
+.mask-layer-thumb-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.mask-layer-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.mask-layer-thumb-fallback {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+.mask-layer-thumb {
+  width: 26px;
+  height: 26px;
+  margin: 4px 8px 4px 6px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+  background: #23252d;
+  border: 1px solid #4a4d57;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  cursor: pointer;
+  overflow: hidden;
+}
+/* PS active-target ring: the thumbnail (content or mask) receiving edits. */
+.mask-layer-thumb.target {
+  border-color: var(--accent, #5aa7ff);
+  box-shadow: 0 0 0 1px var(--accent, #5aa7ff);
+}
+/* The mask slot sits right of the chain; the content thumb keeps its inset. */
+.mask-layer-thumb.mask-thumb { margin-left: 0; }
+/* Reserved empty mask slot: an add-mask affordance so rows do not jump. */
+.mask-layer-thumb.mask-thumb.empty {
+  border-style: dashed;
+  background: transparent;
+  color: transparent;
+}
+.mask-layer-row:hover .mask-layer-thumb.mask-thumb.empty:not(:disabled) { color: var(--muted); }
+.mask-layer-thumb.mask-thumb.empty:disabled { cursor: default; }
+/* Disabled mask (PS red X: data kept, gating bypassed). */
+.mask-layer-thumb.mask-thumb.off { opacity: 0.4; border-color: #c05050; }
+/* Pixel↔mask chain toggle between the two thumbnails. */
+.mask-layer-mask-link {
+  flex: none;
+  font-size: 9px !important;
+  padding: 0 2px !important;
+  margin-right: 2px;
+  color: var(--muted);
+  opacity: 0.4;
+}
+.mask-layer-mask-link.on { opacity: 1; }
+.mask-layer-name {
+  flex: 0 1 clamp(92px, 36%, 150px);
+  min-width: 0;
+  max-width: clamp(92px, 36%, 150px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-layer-row button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mask-layer-row button:hover:not(:disabled) { color: #fff; }
+.mask-layer-row button:disabled { opacity: 0.4; cursor: default; }
+/* The Layers tab body is a full-height column so the action bar can pin to
+   the panel's bottom edge; the list scrolls in between. */
+.mask-layers-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.mask-layers-body .mask-layer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* PS bottom action bar: right-aligned icon buttons pinned under the list. */
+.mask-layer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin: auto -8px 0;
+  padding: 2px 4px;
+  background: var(--ps-tab-strip);
+  border-top: 1px solid var(--ps-dock-border);
+}
+.mask-layer-action {
+  width: 26px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+}
+.mask-layer-action:hover:not(:disabled) { background: var(--ps-hover); color: var(--text); }
+.mask-layer-action:disabled { opacity: 0.4; cursor: default; }
+.mask-layer-action.on { background: var(--ps-active-overlay); color: var(--text); }
+.mask-layer-action svg { width: 16px; height: 16px; display: block; }
+.mask-context-action-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px;
+  background: rgba(42,44,49,0.92);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.28);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+.mask-context-action {
+  width: 28px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mask-context-action:hover:not(:disabled) { background: var(--ps-hover); color: var(--text); }
+.mask-context-action:disabled { opacity: 0.38; cursor: default; }
+.mask-context-action.danger:hover:not(:disabled) { color: #ff8b8b; }
+.mask-context-action svg { width: 16px; height: 16px; display: block; }
+/* The ◐ adjustment picker rendered as one more icon slot. */
+.mask-layer-adjustment-add {
+  width: 30px;
+  height: 22px;
+  font-size: 12px;
+  text-align: center;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.mask-layer-adjustment-add:hover { background: var(--ps-hover); color: var(--text); }
+.mask-layer-adjustment-add option { background: var(--panel-2); color: var(--text); }
+/* Inline rename editor (double-click a layer name). */
+.mask-layer-rename {
+  flex: 0 1 clamp(92px, 36%, 150px);
+  min-width: 0;
+  max-width: clamp(92px, 36%, 150px);
+  font-size: 12px;
+  padding: 1px 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+}
+.mask-layer-blend {
+  font-size: 11px;
+  padding: 0 2px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: inherit;
+}
+/* PS "lock all" toggle in the panel head; lit when the active layer is locked. */
+.mask-layer-lock {
+  width: 24px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.mask-layer-lock:hover:not(:disabled) { background: var(--ps-hover); opacity: 1; }
+.mask-layer-lock.locked {
+  opacity: 1;
+  color: var(--text);
+  background: var(--ps-active-overlay);
+  border-color: var(--ps-dock-border);
+}
+/* Row-edge lock / link badges (PS shows a padlock / chain on the row). */
+.mask-layer-locked,
+.mask-layer-linked {
+  font-size: 10px;
+  padding: 0 4px;
+  color: var(--muted);
+}
+.mask-layer-opacity {
+  width: 44px;
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: inherit;
+}
+
+.mask-preview-actions {
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(86, 168, 255, 0.08);
+  border: 1px solid rgba(86, 168, 255, 0.28);
+}
+.mask-preview-actions .slider-row { gap: 6px; }
+
+/* PS-style tone-curve editor (curve adjustment layer). */
+.mask-curve { margin-top: 6px; }
+.mask-curve-grid {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--ps-tab-strip);
+  border: 1px solid var(--ps-dock-border);
+  cursor: crosshair;
+  touch-action: none;
+}
+.mask-curve-gridline line {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-identity {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-line {
+  fill: none;
+  stroke: #d8dbe2;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-point {
+  fill: #d8dbe2;
+  stroke: var(--ps-dock-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.mask-curve-point.active { fill: #56a8ff; }
+.mask-curve-readout {
+  min-height: 1.2em;
+  margin-top: 4px;
+  font-size: 11px;
+  text-align: right;
+}
+.mask-preview-actions small { display: block; margin-top: 6px; line-height: 1.4; }
+.image-editor-note { line-height: 1.5; }
+.image-editor-note code {
+  background: var(--ps-tab-strip);
+  padding: 0 4px;
+  border-radius: 4px;
+}

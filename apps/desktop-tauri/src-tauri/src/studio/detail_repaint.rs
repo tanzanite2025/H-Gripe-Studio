@@ -280,7 +280,7 @@ mod tests {
             "skipped": [],
             "image_size": [128, 96],
             "selected_count": 0,
-            "mask_edit_is_transparent": true,
+            "inpaint_mask_is_transparent": true,
             "source_mode": "CMYK",
             "exif_transposed": true,
             "max_decode_pixels": 96_000_000

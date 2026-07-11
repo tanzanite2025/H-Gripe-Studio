@@ -2,22 +2,22 @@ import { describe, expect, it } from "vitest";
 import {
   emptyImageDocument,
   emptyImageLayer,
-  fromMaskDocument,
-  maskBridgeGap,
-  toMaskDocument,
+  fromImageEditorDocument,
+  imageEditorBridgeGap,
+  toImageEditorDocument,
   type ImageDocument,
 } from "./imageDocument";
 import {
   emptyAdjustmentLayer,
-  emptyMaskDocument,
-  emptyMaskLayer,
-  type MaskDocument,
-} from "../contracts/maskDocument";
-import { type EditOp } from "../contracts/maskOps";
-import { addBrushStroke, historySnapshots, initEditState, serializeEditState } from "./maskEdit";
+  emptyImageEditorDocument,
+  emptyPixelLayer,
+  type ImageEditorDocument,
+} from "../contracts/imageEditorDocument";
+import { type EditOp } from "../contracts/imageEditOps";
+import { addBrushStroke, historySnapshots, initEditState, serializeEditState } from "./imageEditorState";
 
-function sampleMaskDocument(): MaskDocument {
-  const doc = emptyMaskDocument();
+function sampleImageEditorDocument(): ImageEditorDocument {
+  const doc = emptyImageEditorDocument();
   doc.layerGroups = [
     { id: "g1", name: "Subject", color: "#5aa7ff" },
     { id: "g2", name: "Light", color: "#59c98f" },
@@ -27,7 +27,7 @@ function sampleMaskDocument(): MaskDocument {
     { type: "brush", points: [[1, 2]], size: 12, mode: "add" } as unknown as EditOp,
     { type: "feather", amount: 3 } as EditOp,
   ];
-  const top = emptyMaskLayer("Layer 1");
+  const top = emptyPixelLayer("Layer 1");
   top.blend = "multiply";
   top.opacity = 0.5;
   top.locked = true;
@@ -43,14 +43,14 @@ function sampleMaskDocument(): MaskDocument {
 }
 
 describe("imageDocument bridge", () => {
-  it("round-trips a mask draft losslessly", () => {
-    const mask = sampleMaskDocument();
-    const image = fromMaskDocument(mask);
-    expect(toMaskDocument(image)).toEqual(mask);
+  it("round-trips an image editor draft losslessly", () => {
+    const document = sampleImageEditorDocument();
+    const image = fromImageEditorDocument(document);
+    expect(toImageEditorDocument(image)).toEqual(document);
   });
 
   it("maps layer kinds across the bridge", () => {
-    const image = fromMaskDocument(sampleMaskDocument());
+    const image = fromImageEditorDocument(sampleImageEditorDocument());
     expect(image.layers.map((l) => l.layer.kind)).toEqual(["pixel", "pixel", "adjustment"]);
     expect(image.layers.map((l) => l.groupId)).toEqual(["g1", "g2", undefined]);
     expect(image.layerGroups.map((group) => group.name)).toEqual(["Subject", "Light"]);
@@ -60,45 +60,45 @@ describe("imageDocument bridge", () => {
     expect(adj.kind === "adjustment" && adj.adjustment?.type).toBe("levels");
   });
 
-  it("refuses to lower documents MaskDocument cannot express", () => {
+  it("refuses to lower documents ImageEditorDocument cannot express", () => {
     const grouped: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), layer: { kind: "group", children: [] } }],
     };
-    expect(toMaskDocument(grouped)).toBeNull();
-    expect(maskBridgeGap(grouped)).toContain("layer group");
+    expect(toImageEditorDocument(grouped)).toBeNull();
+    expect(imageEditorBridgeGap(grouped)).toContain("layer group");
 
     const clipped: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), clipped: true }],
     };
-    expect(toMaskDocument(clipped)).toBeNull();
-    expect(maskBridgeGap(clipped)).toContain("clipping mask");
+    expect(toImageEditorDocument(clipped)).toBeNull();
+    expect(imageEditorBridgeGap(clipped)).toContain("clipping mask");
 
     const masked: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), mask: { path: "m.png" } }],
     };
-    expect(toMaskDocument(masked)).toBeNull();
-    expect(maskBridgeGap(masked)).toContain("baked layer mask");
+    expect(toImageEditorDocument(masked)).toBeNull();
+    expect(imageEditorBridgeGap(masked)).toContain("baked layer mask");
 
     const gradeAdj: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), layer: { kind: "adjustment", ops: [{ type: "exposure", ev: 1 }] } }],
     };
-    expect(toMaskDocument(gradeAdj)).toBeNull();
-    expect(maskBridgeGap(gradeAdj)).toContain("grade ops");
+    expect(toImageEditorDocument(gradeAdj)).toBeNull();
+    expect(imageEditorBridgeGap(gradeAdj)).toContain("grade ops");
 
     const overlayBlend: ImageDocument = {
       ...emptyImageDocument(),
       layers: [{ ...emptyImageLayer(), blend: "overlay" }],
     };
-    expect(toMaskDocument(overlayBlend)).toBeNull();
-    expect(maskBridgeGap(overlayBlend)).toContain('blend "overlay"');
+    expect(toImageEditorDocument(overlayBlend)).toBeNull();
+    expect(imageEditorBridgeGap(overlayBlend)).toContain('blend "overlay"');
   });
 
   it("reports no bridge gap for bridgeable documents", () => {
-    expect(maskBridgeGap(fromMaskDocument(sampleMaskDocument()))).toBeNull();
+    expect(imageEditorBridgeGap(fromImageEditorDocument(sampleImageEditorDocument()))).toBeNull();
   });
 
   it("carries the persistent editor history envelope", () => {
@@ -110,7 +110,7 @@ describe("imageDocument bridge", () => {
       points: [[1, 2]],
     });
 
-    const image = fromMaskDocument(state.current, serializeEditState(state));
+    const image = fromImageEditorDocument(state.current, serializeEditState(state));
     const restored = initEditState(image.editHistory);
 
     expect(image.editHistory?.past).toHaveLength(1);
@@ -120,10 +120,10 @@ describe("imageDocument bridge", () => {
   });
 
   it("empty documents bridge to empty documents", () => {
-    const image = fromMaskDocument(emptyMaskDocument());
+    const image = fromImageEditorDocument(emptyImageEditorDocument());
     expect(image.layers).toHaveLength(1);
     expect(image.layers[0].layer).toEqual({ kind: "pixel", edits: [] });
-    const back = toMaskDocument(image);
-    expect(back?.layers[0].kind).toBe("mask");
+    const back = toImageEditorDocument(image);
+    expect(back?.layers[0].kind).toBe("pixel");
   });
 });

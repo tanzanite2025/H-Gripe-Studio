@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { NODE_SPECS } from "./nodeSpecs";
 import { NODE_ZH, localizeSpec } from "./nodeSpecsI18n";
-import { MASK_TOOLS } from "../editor/maskTools";
-import { MASK_TOOL_ZH } from "../editor/maskToolsI18n";
+import { IMAGE_EDITOR_TOOLS } from "../editor/imageEditorTools";
+import { IMAGE_EDITOR_TOOL_ZH } from "../editor/imageEditorToolsI18n";
 
 // Long-term guard: every human-readable string in the node catalogue (and the
-// Mask-Edit tool registry) must have a Simplified-Chinese translation. A new
+// Image Editor tool registry) must have a Simplified-Chinese translation. A new
 // node, param, port, or tool that ships English-only fails CI here rather than
 // silently leaking English when the UI is switched to 中文.
 
@@ -59,17 +59,17 @@ describe("nodeSpecs zh coverage", () => {
 });
 
 describe("mask tool zh coverage", () => {
-  for (const tool of MASK_TOOLS) {
+  for (const tool of IMAGE_EDITOR_TOOLS) {
     it(`translates the "${tool.id}" tool`, () => {
-      expect(MASK_TOOL_ZH[tool.id]?.label, `${tool.id}.label`).toBeTruthy();
-      expect(MASK_TOOL_ZH[tool.id]?.hint, `${tool.id}.hint`).toBeTruthy();
+      expect(IMAGE_EDITOR_TOOL_ZH[tool.id]?.label, `${tool.id}.label`).toBeTruthy();
+      expect(IMAGE_EDITOR_TOOL_ZH[tool.id]?.hint, `${tool.id}.hint`).toBeTruthy();
     });
   }
 
-  it("has no stale MASK_TOOL_ZH entries", () => {
-    const ids = new Set(MASK_TOOLS.map((t) => t.id));
-    for (const id of Object.keys(MASK_TOOL_ZH)) {
-      expect(ids.has(id), `MASK_TOOL_ZH["${id}"] has no matching tool`).toBe(true);
+  it("has no stale IMAGE_EDITOR_TOOL_ZH entries", () => {
+    const ids = new Set(IMAGE_EDITOR_TOOLS.map((t) => t.id));
+    for (const id of Object.keys(IMAGE_EDITOR_TOOL_ZH)) {
+      expect(ids.has(id), `IMAGE_EDITOR_TOOL_ZH["${id}"] has no matching tool`).toBe(true);
     }
   });
 });

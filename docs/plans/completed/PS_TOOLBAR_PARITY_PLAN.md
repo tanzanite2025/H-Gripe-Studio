@@ -92,7 +92,7 @@ The current implementation has a good toolbar shell:
 - `MaskToolbar.tsx`: renders a single icon column with long-press / right-click
   flyouts.
 - `toolIcons.tsx`: inline icons per tool id.
-- `maskTools.ts`: tool registry and current slots.
+- `imageEditorTools.ts`: tool registry and current slots.
 - `ToolOptionsPanel.tsx`: contextual options panel.
 - `PanelDock.tsx`: right-side tabbed dock groups.
 
@@ -258,7 +258,7 @@ Selection-To-Mask commands can consume them.
 5. Update shortcut metadata so each slot owns its Photoshop key.
 6. Update flyout labels to show the slot shortcut like Photoshop.
 7. Make tool options conditional per selected tool kind/slot.
-8. Fix Simplified Chinese text encoding in `maskToolsI18n.ts`.
+8. Fix Simplified Chinese text encoding in `imageEditorToolsI18n.ts`.
 9. Add tests that every ready/planned tool appears in exactly one Photoshop slot.
 10. Add tests that common Photoshop shortcuts map to the expected slots.
 

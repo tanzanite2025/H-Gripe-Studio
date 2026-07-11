@@ -337,7 +337,7 @@ export const IMAGE_NODE_SPECS = {
     palette: "internal",
     title: "Crop",
     description:
-      "Crop an image — the first non-mask edit, validating the unified auto/manual + binding model. Runs in-process in native Rust on the Compute lane. Manual mode crops to the editor-drawn box (recorded as crop_box in image pixels, the human-spatial-intent lane); auto_subject mode crops to the subject — it segments a base matte with the same Subject Mask Compute-lane segmenter, takes its bounding box and pads it by the subject margin (the algorithm-derived lane). An optional aspect ratio adjusts the box (centred, clamped to the image) after either lane. Emits the cropped image and a crop report.",
+      "Crop an image: the first non-masking image edit, validating the unified auto/manual + binding model. Runs in-process in native Rust on the Compute lane. Manual mode crops to the editor-drawn box (recorded as crop_box in image pixels, the human-spatial-intent lane); auto_subject mode crops to the subject: it segments a base matte with the same Subject Mask Compute-lane segmenter, takes its bounding box and pads it by the subject margin (the algorithm-derived lane). An optional aspect ratio adjusts the box (centred, clamped to the image) after either lane. Emits the cropped image and a crop report.",
     category: "process",
     inputs: [port("image", "image", "image")],
     outputs: [port("image", "image", "image"), port("crop_report", "crop report", "any")],

@@ -311,7 +311,7 @@ export function CropEditModal({
           </div>
         </div>
 
-        <div className="mask-edit-body">
+        <div className="image-editor-body">
           <div className="crop-edit-stage-wrap">
             <div
               ref={stageRef}
@@ -348,7 +348,7 @@ export function CropEditModal({
             </small>
           </div>
 
-          <div className="mask-edit-controls">
+          <div className="image-editor-controls">
             <div className="field">
               <span>{t("crop.title")}</span>
               <div className="crop-mode-row">

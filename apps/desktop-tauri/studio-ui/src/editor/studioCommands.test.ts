@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   emptyLayerMask,
-  emptyMaskDocument,
-  emptyMaskLayer,
-  type MaskDocument,
-} from "../contracts/maskDocument";
+  emptyImageEditorDocument,
+  emptyPixelLayer,
+  type ImageEditorDocument,
+} from "../contracts/imageEditorDocument";
 import { availableCommands, getCommandCapability } from "./studioCommands";
 import type { StudioTarget } from "./studioTarget";
 
-function docWithTwoLayers(): MaskDocument {
-  const doc = emptyMaskDocument();
+function docWithTwoLayers(): ImageEditorDocument {
+  const doc = emptyImageEditorDocument();
   doc.layers[0] = { ...doc.layers[0], id: "layer-base" };
-  doc.layers.push({ ...emptyMaskLayer("Layer 1"), id: "layer-1" });
+  doc.layers.push({ ...emptyPixelLayer("Layer 1"), id: "layer-1" });
   doc.active = 1;
   return doc;
 }
@@ -56,7 +56,7 @@ describe("studio command capabilities", () => {
   });
 
   it("allows deleting the final unlocked layer and adding from an empty document", () => {
-    const doc = emptyMaskDocument();
+    const doc = emptyImageEditorDocument();
     doc.layers[0] = { ...doc.layers[0], id: "layer-base" };
     const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-base" };
     expect(getCommandCapability("target.delete", { doc, target }).enabled).toBe(true);

@@ -10,7 +10,7 @@ import { useT } from "../i18n";
 // Deliberately NOT Subject-Mask-specific: it is a generic, reusable surface you
 // can drop after ANY stage to eyeball the current image / mask / result and
 // decide whether to proceed. It exposes an optional `Edit` action that the
-// caller wires to a heavier editor (e.g. the Mask-Edit modal) — the preview
+// caller wires to a heavier editor (e.g. the Image Editor modal) — the preview
 // itself stays read-only and cheap. See docs/cards/subject-mask-matte.md
 // (§ "Responsibility split").
 //
@@ -138,7 +138,7 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
               </button>
             ) : null}
             {onEdit ? (
-              <button className="primary" onClick={onEdit} title="Open the mask editor">
+              <button className="primary" onClick={onEdit} title="Open the image editor">
                 Edit
               </button>
             ) : null}

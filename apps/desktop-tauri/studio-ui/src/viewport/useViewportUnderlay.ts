@@ -35,7 +35,14 @@ function sourceTargetKey(source: ViewportUnderlaySource | undefined): string {
     case "image_layer":
       return `image_layer:${source.assetId}:${source.layerId}`;
     case "image_composite":
-      return `image_composite:${source.resourceId}:${source.documentKey}:${source.documentWidth}x${source.documentHeight}`;
+      return [
+        "image_composite",
+        source.resourceId,
+        source.documentKey,
+        `${source.documentWidth}x${source.documentHeight}`,
+        `${source.frameX ?? 0},${source.frameY ?? 0}`,
+        `${source.frameWidth ?? source.documentWidth}x${source.frameHeight ?? source.documentHeight}`,
+      ].join(":");
     case "video_clip":
       return `video_clip:${source.timelineId}:${source.clipId}:${source.timeSec}`;
     case "video_frame":
@@ -87,6 +94,10 @@ export interface ViewportUnderlay {
   /** True once the attempt finished — with a frame, or without one (browser
    * preview / render error), letting callers stop showing a loading state. */
   settled: boolean;
+  /** True only when the displayed frame was rendered for the current target. */
+  targetSettled: boolean;
+  /** Stable identity of the source target that produced the displayed frame. */
+  renderedTargetKey: string | null;
   /** The open viewport host, for explicit host calls that the presented
    * frame cannot answer — pixel readback (`readPixels`, surface swap Phase
    * S4). Null until open and after close. */
@@ -157,6 +168,8 @@ export function useViewportUnderlay(
     frameView: IDENTITY_VIEW,
     backend: null,
     settled: false,
+    targetSettled: false,
+    renderedTargetKey: null,
   });
   const hostRef = useRef<WgpuViewportHost | null>(null);
   const [openHost, setOpenHost] = useState<WgpuViewportHost | null>(null);
@@ -196,7 +209,7 @@ export function useViewportUnderlay(
         try {
           await next();
         } catch {
-          /* keep the previous frame */
+          /* leave the current presentation untouched */
         }
         next = queuedRenderRef.current;
         queuedRenderRef.current = null;
@@ -258,6 +271,8 @@ export function useViewportUnderlay(
       frameView: IDENTITY_VIEW,
       backend: null,
       settled: false,
+      targetSettled: false,
+      renderedTargetKey: null,
     });
     const src = sourceRef.current;
     if (src === undefined) return;
@@ -328,6 +343,8 @@ export function useViewportUnderlay(
         frameView: initialView,
         backend: frame.backend,
         settled: true,
+        targetSettled: true,
+        renderedTargetKey: sourceTargetKey(src),
       });
     })().catch(() => {
       // Keep nulls; editors fall back to their checkerboard.
@@ -342,10 +359,7 @@ export function useViewportUnderlay(
     };
   }, [kind, hostKey, size]);
 
-  // Retarget an open host without clearing the current frame. This is
-  // critical for image editing: a live layer move changes an image-composite
-  // documentKey at pointer-move rate, but that should not destroy/recreate
-  // the viewport or blank the stage between frames.
+  // Retarget an open host without destroying the host.
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !host.isOpen) return;
@@ -354,6 +368,11 @@ export function useViewportUnderlay(
     if (src === undefined) return;
     let cancelled = false;
     sentTargetKeyRef.current = targetKey;
+    setState((s) => ({
+      ...s,
+      settled: false,
+      targetSettled: false,
+    }));
     runCoalesced(host, async () => {
       let target: ViewportTarget;
       if (typeof src === "string") {
@@ -377,6 +396,8 @@ export function useViewportUnderlay(
         frameView: sentViewRef.current,
         backend: frame.backend,
         settled: true,
+        targetSettled: true,
+        renderedTargetKey: targetKey,
       }));
     });
     return () => {
@@ -516,5 +537,9 @@ export function useViewportUnderlay(
     };
   }, [overlayScene]);
 
-  return { ...state, host: openHost };
+  return {
+    ...state,
+    targetSettled: state.targetSettled && state.renderedTargetKey === targetKey,
+    host: openHost,
+  };
 }

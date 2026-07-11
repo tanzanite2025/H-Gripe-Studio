@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+﻿import { createContext, useContext } from "react";
 
 import type { ModelCapability } from "../models/backendRegistry";
 
@@ -15,8 +15,8 @@ export interface NodeEditing {
   /** Open the standalone image preview popup over a file path (double-click
    * on any image thumbnail). */
   openImagePreview?: (path: string) => void;
-  /** Open the on-demand Mask-Edit modal for a node (brush/wand/morphology). */
-  openMaskEdit?: (nodeId: string) => void;
+  /** Open the node-bound image editor for a graph node. */
+  openImageEditorForNode?: (nodeId: string) => void;
   /** Open the on-demand Crop-Edit modal for a crop node (manual box / auto). */
   openCropEdit?: (nodeId: string) => void;
   /** Open the on-demand Grade-Edit modal for an imageGrade node (op stack + preview). */
@@ -26,9 +26,9 @@ export interface NodeEditing {
    * crop editors behind one tool-group switcher; applying spawns a single bound
    * edit node of the chosen kind (see docs/cards/generic-media-card.md, Phase 4).
    */
-  openMediaEdit?: (sourceId: string) => void;
+  openImageSourceEditor?: (sourceId: string) => void;
   /** Open the application-level system "Models / APIs" manager, optionally
-   * preselecting entries for one capability (card "Manage…" entry point).
+   * preselecting entries for one capability (card "Manage鈥? entry point).
    * A single app-level surface: card and toolbar share the same modal. */
   openModels?: (capability?: ModelCapability | null) => void;
   /** Open the software-level Prompt Assistant panel with this Prompt card
@@ -41,7 +41,7 @@ export interface NodeEditing {
    *
    * `opts` tunes the manual/auto split (see docs/cards/generic-media-card.md):
    * - `params` seeds the new node's params (e.g. `{ mode: "auto_subject" }`).
-   * - `openEditor` (default true) opens the node's editor modal — set false for
+   * - `openEditor` (default true) opens the node's editor modal 鈥?set false for
    *   purely computed (auto) edits that need no human input.
    * - `run` runs the node's ancestor subgraph immediately (run-up-to-node) so an
    *   auto edit surfaces its result without opening an editor.
@@ -53,7 +53,7 @@ export interface NodeEditing {
   ) => void;
   /**
    * Run only the target node and its transitive inputs (ancestor subgraph),
-   * then surface the result onto its card — so confirming an edit shows a
+   * then surface the result onto its card 鈥?so confirming an edit shows a
    * result without a full-graph run.
    */
   runUpToNode?: (nodeId: string) => void;
@@ -69,7 +69,7 @@ export interface NodeEditing {
   runCard?: (nodeId: string) => void;
   /**
    * Run a node and everything downstream of it (RunScope `node_downstream`).
-   * Downstream never runs implicitly — this is the explicit entry point.
+   * Downstream never runs implicitly 鈥?this is the explicit entry point.
    */
   runNodeDownstream?: (nodeId: string) => void;
 }

@@ -1,4 +1,4 @@
-import {
+﻿import {
   memo,
   useContext,
   useEffect,
@@ -89,7 +89,7 @@ export function fmtDuration(ms?: number): string {
 // Thumbnail tile that only asks the backend for a thumbnail once the node
 // actually scrolls into view (IntersectionObserver). This keeps the graph data
 // light (it stores only the original path) and avoids decoding images for nodes
-// parked off-screen — the real perf/quality discipline for large media.
+// parked off-screen 鈥?the real perf/quality discipline for large media.
 function LazyThumb({ path }: { path: string }) {
   const t = useT();
   const editing = useNodeEditing();
@@ -142,10 +142,10 @@ function LazyThumb({ path }: { path: string }) {
   );
 }
 
-// Generic image media card body: a thumbnail + `name · W×H` info row + an
+// Generic image media card body: a thumbnail + `name 路 W脳H` info row + an
 // action row whose buttons spawn a *bound* edit node (the source card is never
 // mutated). Ingestion is two-phase and pushed from the backend: on a drop the
-// `prime_ingest` pipeline probes header dims (info row renders `W×H` at once,
+// `prime_ingest` pipeline probes header dims (info row renders `W脳H` at once,
 // even for a 4K/8K source) then decodes the thumbnail off-thread, both arriving
 // over `ingest://progress`. A header probe + IntersectionObserver-gated
 // thumbnail fetch remain as fallbacks for cards not created by a drop (manual
@@ -182,7 +182,7 @@ function ImageSourceTile({ nodeId, slot }: { nodeId: string; slot: ImageSourceSl
   }, [path]);
 
   // Resolve the lightweight ResourceId handle for this path. Registration also
-  // returns header dims, so the info row renders `W×H` from the same round-trip
+  // returns header dims, so the info row renders `W脳H` from the same round-trip
   // (no separate probe needed on the fast path).
   useEffect(() => {
     setDims(null);
@@ -298,7 +298,7 @@ function ImageSourceTile({ nodeId, slot }: { nodeId: string; slot: ImageSourceSl
         </span>
         {dims ? (
           <span className="media-dims">
-            {dims.w}×{dims.h}
+            {dims.w}脳{dims.h}
           </span>
         ) : null}
       </div>
@@ -314,7 +314,7 @@ function ImageSourceTile({ nodeId, slot }: { nodeId: string; slot: ImageSourceSl
           type="button"
           className="primary"
           title={t("node.importImageEditorTitle")}
-          onClick={() => editing?.openMediaEdit?.(nodeId)}
+          onClick={() => editing?.openImageSourceEditor?.(nodeId)}
         >
           {t("node.importImageEditor")}
         </button>
@@ -399,7 +399,7 @@ function formatDuration(sec: number): string {
   return `${h > 0 ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
 }
 
-// Generic video media card body: a poster frame + `name · W×H · m:ss · fps` info
+// Generic video media card body: a poster frame + `name 路 W脳H 路 m:ss 路 fps` info
 // row. Rust has no video decoder, so a backend probe (PyAV) decodes one frame to
 // a PNG; the poster is then shown through the same image-thumbnail pipeline. The
 // original `path` carries downstream unchanged. See docs/cards/generic-media-card.md.
@@ -463,9 +463,9 @@ function VideoSourceCard({ path, posterTimestamp }: { path: string; posterTimest
         </span>
         {meta ? (
           <span className="media-dims">
-            {meta.w}×{meta.h}
-            {meta.duration != null ? ` · ${formatDuration(meta.duration)}` : ""}
-            {meta.fps != null ? ` · ${Math.round(meta.fps)}fps` : ""}
+            {meta.w}脳{meta.h}
+            {meta.duration != null ? ` 路 ${formatDuration(meta.duration)}` : ""}
+            {meta.fps != null ? ` 路 ${Math.round(meta.fps)}fps` : ""}
           </span>
         ) : null}
       </div>
@@ -514,7 +514,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const spec = localizeSpec(nodeSpec(d.kind), lang);
   const status = d.status ?? "idle";
   const editing = useNodeEditing();
-  // Card detail drops with zoom: full → mid (interior hidden) → collapsed
+  // Card detail drops with zoom: full 鈫?mid (interior hidden) 鈫?collapsed
   // (title-only). A discrete-level selector means nodes only re-render when
   // crossing a threshold, not on every zoom tick.
   const viewportLodTier = useStore((s) => lodLevel(s.transform[2]));
@@ -523,7 +523,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   const lod = lodTier === "collapsed";
   const slim = lodTier !== "full";
   // LOD hides the card's body for cheap rendering, but the card must keep its
-  // expanded footprint — a shrunken card reads as "truncated" when zoomed out
+  // expanded footprint 鈥?a shrunken card reads as "truncated" when zoomed out
   // and shifts the edge/handle geometry. Measure the expanded height (local,
   // pre-zoom coordinates) and pin it as min-height while LOD is active.
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -531,7 +531,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
   useEffect(() => {
     if (!slim && cardRef.current) expandedHeight.current = cardRef.current.offsetHeight;
   });
-  // Which input ports of this node currently have an incoming edge — used to
+  // Which input ports of this node currently have an incoming edge 鈥?used to
   // surface "image/template connected" hints on the PSD sink cards.
   const connectedPorts = useStore((s) => connectedInputPorts(s.edges, id));
   const isConnected = (port: string) => connectedPorts.split(",").includes(port);
@@ -669,7 +669,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
                 type="button"
                 className="primary"
                 title={t("node.editMaskTitle")}
-                onClick={() => editing?.openMaskEdit?.(id)}
+                onClick={() => editing?.openImageEditorForNode?.(id)}
               >
                 {t("node.editMask")}
               </button>
@@ -777,7 +777,7 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
             {d.placeholderKind || d.smartObjectMode ? (
               <small className="psd-meta">
                 {d.placeholderKind ? `${t("node.metaPlaceholder")}: ${d.placeholderKind}` : ""}
-                {d.placeholderKind && d.smartObjectMode ? " · " : ""}
+                {d.placeholderKind && d.smartObjectMode ? " 路 " : ""}
                 {d.smartObjectMode ? `${t("node.metaSmart")}: ${d.smartObjectMode}` : ""}
               </small>
             ) : null}

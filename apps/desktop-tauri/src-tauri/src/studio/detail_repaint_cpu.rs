@@ -296,7 +296,7 @@ pub(crate) fn try_prepare(p: &CpuPrepareParams) -> Result<Option<PrepareRepaintR
         skipped,
         image_size: [width as i64, height as i64],
         selected_count,
-        mask_edit_is_transparent: !p.invert_mask,
+        inpaint_mask_is_transparent: !p.invert_mask,
         source_mode: candidate.source_mode,
         exif_transposed: candidate.exif_transposed,
         max_decode_pixels: DEFAULT_MAX_DECODE_PIXELS as i64,
@@ -857,7 +857,7 @@ mod tests {
         let result = try_prepare(&p).unwrap().expect("cpu fast path");
         assert_eq!(result.selected_count, 1);
         assert_eq!(result.image_size, [128, 96]);
-        assert!(result.mask_edit_is_transparent);
+        assert!(result.inpaint_mask_is_transparent);
         // The whole-image enhance issue is skipped as not repaintable.
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.skipped[0]["reason"], "action_not_repaintable");

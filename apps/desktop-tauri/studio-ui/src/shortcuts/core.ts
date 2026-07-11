@@ -1,7 +1,7 @@
 // Central keyboard-shortcut system: a scope stack with declarative binding
 // tables.
 //
-// Shortcuts are registered per *scope* (e.g. the Mask-Edit modal, later the
+// Shortcuts are registered per *scope* (e.g. the Image Editor modal, later the
 // node canvas or a clip timeline). A component pushes its scope while mounted
 // (`useShortcutScope`); a single window listener dispatches each keydown to
 // the topmost scope that binds the pressed combo, so modal shortcuts shadow

@@ -222,7 +222,7 @@ Current pieces this design should reuse:
 
 - `imageSource` and `videoSource` media cards as graph-side asset origins.
 - Bound edit nodes for non-destructive image edits.
-- Existing mask editor as the first left-dock candidate.
+- Existing image editor as the first left-dock candidate.
 - Future timeline/trim/assembly UI as the first right-dock candidate.
 - Existing thumbnail/resource cache instead of passing pixels through React state.
 

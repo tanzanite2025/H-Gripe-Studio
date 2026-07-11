@@ -8,7 +8,7 @@
 // compiles today is the adjustment stack sitting above the pixel
 // composite.
 //
-// `GradeDoc` semantics match the mask editor's adjustment layers: a layer
+// `GradeDoc` semantics match the image editor's adjustment layers: a layer
 // grades a copy of the accumulated composite and composites it back per
 // blend + opacity, so an adjustment layer at opacity `o` is a grade layer
 // with `blend:"normal", opacity:o` (the same lerp `apply_adjustment`

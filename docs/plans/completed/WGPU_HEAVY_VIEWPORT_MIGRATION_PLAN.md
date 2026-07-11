@@ -14,14 +14,20 @@
 > constraint, the device registry exposes a zero-copy profile, and video decode
 > has a hardware-frame path that does not round-trip through CPU RGBA for
 > interactive playback.
+>
+> 2026-07 modal-boundary correction: native surface presentation must not make
+> app roots or shared modal shells transparent. Each editor/monitor owns its own
+> scoped viewport slot and surface hole. If that scoped hole is not implemented,
+> the presenter must stay on the non-presented transport rather than leaking the
+> graph/canvas behind an independent editor modal.
 
 ## Status Snapshot (2026-07)
 
 **Checkpoint (PRs #329–400): the reference-based host presentation stage is
 complete.** Every heavy surface (image edit, grade preview, video preview,
-program monitor, layer review, mask editor) presents through the viewport
+program monitor, layer review, image editor) presents through the viewport
 host by reference; all target kinds resolve Rust-side; frames cross the IPC
-boundary as binary payloads; and the mask editor's selection tint composites
+boundary as binary payloads; and the image editor's selection tint composites
 host-side at the view window's detail. The presentation-layer endgame (the
 WGPU surface swap) and the overlay surfaces have since landed too — see the
 checked-off "remaining work" list below.
@@ -39,7 +45,7 @@ Implemented (PRs #329-400):
   presentation flows through `image_edit` viewports by resource reference;
   zoom/pan is viewport state with shared view math (`viewport/view.ts`) and
   a shared interaction hook (`viewport/useViewControls.ts`); zoomed views
-  decode the source proxy at higher detail. The mask editor's underlay
+  decode the source proxy at higher detail. The image editor's underlay
   presents as the viewport's rendered view window placed at its rect in the
   document frame, so its detail follows the canvas zoom too (the recorded
   pixel space is unchanged), and the selection tint (morphology preview /
@@ -94,7 +100,7 @@ Implemented (PRs #329-400):
   while `nodeId` remains only opening/commit context. This prevents editor
   underlays from going blank when a node artifact target is stale, pending
   registration, or being recomputed.
-- Mask editor presentation: the underlay detail follows canvas zoom (the
+- Image editor presentation: the underlay detail follows canvas zoom (the
   modal requests the visible window from the host and places the rendered
   frame at the window's rect under the edit canvas), and the selection tint
   composites host-side via `viewport_set_mask_overlay` — a working-scale
@@ -107,7 +113,7 @@ Remaining work (next stage), roughly in priority order:
    renders into a native surface window positioned at the viewport's rect
    (`set_placement` / `presented` frames), and readback happens only when
    needed (export, scopes, colour picking). All viewport consumers present
-   natively on desktop — the mask editor underlay, the crop editor underlay,
+   natively on desktop — the image editor underlay, the crop editor underlay,
    the program monitor, the grade preview (grade panel slider ticks
    re-run only the grade pass + blit, zero pixel IPC), the media viewer
    (fit mode; actual-size scrolling stays on the PNG transport), and the
@@ -117,7 +123,7 @@ Remaining work (next stage), roughly in priority order:
    browser-preview and no-adapter fallback path; the layer-review panel
    stays on it deliberately — its checkerboard stage conveys layer
    transparency, which the opaque surface clear cannot represent.
-2. ✅ Interactive overlays on the live surface: the mask editor's committed
+2. ✅ Interactive overlays on the live surface: the image editor's committed
    overlays render host-side through `viewport_set_overlay_scene` — marquee
    marching ants, vector paths, brush/matte stroke bands, the ruler line,
    colour-sampler pins, and SAM point markers all stroke over the presented

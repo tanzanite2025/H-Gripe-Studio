@@ -34,19 +34,19 @@ import {
   transformMask,
   type ProxyMask,
 } from "./maskMorphology";
-import { normalizeEditPaths } from "./maskEdit";
+import { normalizeEditPaths } from "./imageEditorState";
 import {
-  emptyMaskDocument,
+  emptyImageEditorDocument,
   type LayerBlend,
-  type MaskDocument,
-  type MaskLayer,
-} from "../contracts/maskDocument";
-import { type EditOp } from "../contracts/maskOps";
+  type ImageEditorDocument,
+  type ImageEditorLayer,
+} from "../contracts/imageEditorDocument";
+import { type EditOp } from "../contracts/imageEditOps";
 import fixtures from "./imageDocumentContractFixtures.json";
 
 /** A single-layer v3 document whose background layer holds `ops`. */
-function doc(ops: EditOp[], layerPatch: Partial<MaskLayer> = {}): MaskDocument {
-  const d = emptyMaskDocument();
+function doc(ops: EditOp[], layerPatch: Partial<ImageEditorLayer> = {}): ImageEditorDocument {
+  const d = emptyImageEditorDocument();
   d.layers[0] = { ...d.layers[0], ...layerPatch, ops };
   return d;
 }
@@ -441,7 +441,7 @@ describe("adjustmentLut", () => {
   it("buildProxyMask applies visible adjustment layers to the composite below", () => {
     const d = doc([{ type: "brush", id: "s1", mode: "add", radius: 40, points: [[480, 320]] }]);
     d.layers.push({
-      ...emptyMaskDocument().layers[0],
+      ...emptyImageEditorDocument().layers[0],
       id: "adj",
       kind: "adjustment",
       adjustment: { type: "brightness_contrast", brightness: -100 },
@@ -481,7 +481,7 @@ describe("buildProxyMask", () => {
     // A duplicated / freshly added layer with no edits (PS: a fully
     // transparent layer) must not wipe the composite via a normal blend.
     const d = doc([{ type: "invert" }]);
-    d.layers.push({ ...emptyMaskDocument().layers[0], id: "copy", name: "Background copy" });
+    d.layers.push({ ...emptyImageEditorDocument().layers[0], id: "copy", name: "Background copy" });
     const { mask } = buildProxyMask(d, { w: 32, h: 32 }, { proxyWidth: 32 });
     expect(area(mask)).toBe(32 * 32);
   });
@@ -491,7 +491,7 @@ describe("buildProxyMask", () => {
     d.layers.push({
       id: "copy",
       name: "Background copy",
-      kind: "mask",
+      kind: "pixel",
       blend: "normal",
       opacity: 1,
       visible: true,
@@ -508,7 +508,7 @@ describe("buildProxyMask", () => {
     const layer = {
       id: "copy",
       name: "Background copy",
-      kind: "mask" as const,
+      kind: "pixel" as const,
       blend: "normal" as const,
       opacity: 1,
       visible: true,
@@ -524,7 +524,7 @@ describe("buildProxyMask", () => {
     const layer = {
       id: "copy",
       name: "Background copy",
-      kind: "mask" as const,
+      kind: "pixel" as const,
       blend: "normal" as const,
       opacity: 1,
       visible: true,
@@ -538,7 +538,7 @@ describe("buildProxyMask", () => {
     const layer = {
       id: "background",
       name: "Background",
-      kind: "mask" as const,
+      kind: "pixel" as const,
       blend: "normal" as const,
       opacity: 1,
       visible: true,
@@ -553,7 +553,7 @@ describe("buildProxyMask", () => {
     const layer = {
       id: "copy",
       name: "Background copy",
-      kind: "mask" as const,
+      kind: "pixel" as const,
       blend: "normal" as const,
       opacity: 1,
       visible: true,
@@ -667,10 +667,10 @@ describe("buildProxyMask", () => {
   it("matches the shared image-document blend contract", () => {
     expect(fixtures.blendCases.length).toBeGreaterThan(0);
     for (const testCase of fixtures.blendCases) {
-      const d = emptyMaskDocument();
+      const d = emptyImageEditorDocument();
       d.layers[0].ops = [{ type: "fill", amount: (testCase.backdrop / 255) * 100 }];
       d.layers.push({
-        ...emptyMaskDocument().layers[0],
+        ...emptyImageEditorDocument().layers[0],
         id: `source-${testCase.mode}`,
         blend: testCase.mode as LayerBlend,
         opacity: testCase.opacity,
@@ -683,12 +683,12 @@ describe("buildProxyMask", () => {
 
   it("composites upper layers per blend mode and opacity", () => {
     const dims = { w: 320, h: 240 };
-    const layered = (top: Partial<MaskLayer>): MaskDocument => {
+    const layered = (top: Partial<ImageEditorLayer>): ImageEditorDocument => {
       const d = doc([{ type: "invert" }]); // background: everything on
       d.layers.push({
         id: "l2",
         name: "Layer 2",
-        kind: "mask",
+        kind: "pixel",
         blend: "normal",
         opacity: 1,
         visible: true,
@@ -747,12 +747,12 @@ describe("ProxyLayerCache (M7)", () => {
   });
 
   /** An 8K-canvas document: background strokes + an upper multiply layer + an adjustment. */
-  const bigDoc = (): MaskDocument => {
+  const bigDoc = (): ImageEditorDocument => {
     const d = doc([brush("s1", 1200, 1200), { type: "grow", amount: 64 }]);
     d.layers.push({
       id: "l2",
       name: "Layer 2",
-      kind: "mask",
+      kind: "pixel",
       blend: "screen",
       opacity: 0.75,
       visible: true,
@@ -799,8 +799,8 @@ describe("ProxyLayerCache (M7)", () => {
     const d = bigDoc();
     buildProxyMask(d, dims, { ...options, cache });
     // Append a stroke near the top-left corner of the upper layer (immutably,
-    // as maskEdit's commit() does).
-    const edited: MaskDocument = {
+    // as imageEditorState's commit() does).
+    const edited: ImageEditorDocument = {
       ...d,
       layers: d.layers.map((l) => (l.id === "l2" ? { ...l, ops: [...l.ops, brush("s3", 400, 400)] } : l)),
     };
@@ -818,7 +818,7 @@ describe("ProxyLayerCache (M7)", () => {
     const cache = new ProxyLayerCache();
     const d = bigDoc();
     buildProxyMask(d, dims, { ...options, cache });
-    const edited: MaskDocument = {
+    const edited: ImageEditorDocument = {
       ...d,
       layers: d.layers.map((l) =>
         l.id === "adj" ? { ...l, adjustment: { type: "levels" as const, gamma: 0.6 } } : l,
@@ -835,7 +835,7 @@ describe("ProxyLayerCache (M7)", () => {
     const cache = new ProxyLayerCache();
     const d = bigDoc();
     buildProxyMask(d, dims, { ...options, cache });
-    const edited: MaskDocument = {
+    const edited: ImageEditorDocument = {
       ...d,
       layers: d.layers.map((l, i) =>
         i === 0 ? { ...l, ops: [l.ops[0], { type: "grow", amount: 96 }] } : l,

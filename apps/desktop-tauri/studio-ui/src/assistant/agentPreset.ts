@@ -141,7 +141,7 @@ const imageEditorPreset: AgentPreset = {
     "set_active_target",
     "create_layer_mask",
     "run_sam2_prompt_mask",
-    "commit_mask_artifact_to_layer_mask",
+    "commit_selection_alpha_artifact_to_layer_mask",
     "generate_selection_from_path",
     "commit_selection_to_layer_mask",
     "feather_layer_mask",

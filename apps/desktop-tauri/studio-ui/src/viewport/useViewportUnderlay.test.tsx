@@ -136,7 +136,7 @@ describe("useViewportUnderlay view state", () => {
     await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));
   });
 
-  it("retargets image composites without reopening or blanking the current frame", async () => {
+  it("retargets image composites without reopening and settles the new target", async () => {
     const commands: unknown[] = [];
     const originalCommand = WgpuViewportHost.prototype.command;
     vi.spyOn(WgpuViewportHost.prototype, "command").mockImplementation(async function (
@@ -160,13 +160,15 @@ describe("useViewportUnderlay view state", () => {
     await act(async () => {
       rerender({ documentKey: "doc-b" });
     });
-    expect(result.current.underlay).toBe(previousUnderlay);
     await waitFor(() =>
       expect(commands).toContainEqual({
         kind: "set_target",
         target: expect.objectContaining({ kind: "image_composite", documentKey: "doc-b" }),
       }),
     );
+    await waitFor(() => expect(result.current.targetSettled).toBe(true));
+    expect(result.current.underlay).toMatch(/^data:image\//);
+    expect(previousUnderlay).toMatch(/^data:image\//);
     expect(viewportClient.openViewportCount()).toBe(1);
     unmount();
     await waitFor(() => expect(viewportClient.openViewportCount()).toBe(0));

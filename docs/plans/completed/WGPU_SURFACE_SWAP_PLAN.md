@@ -3,11 +3,18 @@
 > Status: implemented. This is item 1 of the "remaining work" list in
 > `WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`: replace the PNG hop with a real
 > WGPU surface/texture swap on desktop. All viewport consumers now present
-> natively — the mask editor underlay (S5), the crop editor underlay, the
+> natively — the image editor underlay (S5), the crop editor underlay, the
 > program monitor, and the grade panel preview — with PNG/blob staying as
 > the browser-preview and no-adapter fallback. The host command protocol is
 > the stable boundary, so this plan changes the presentation transport only —
 > no product-layer rework.
+
+> 2026-07 correction: this is implemented as a transport capability, not a
+> license to make editor chrome transparent. A native surface is product-safe
+> only when the transparent hole is scoped to the owning viewport slot. If an
+> editor would need transparent app roots, shared modal backdrops, or shared
+> modal shells to reveal the surface, that editor must keep native presentation
+> disabled until it owns a scoped matte/hole layer.
 
 ## Current State (What We Replace)
 
@@ -57,6 +64,12 @@ Consequences:
 - The main window webview must be created transparent
   (`transparent: true` + transparent HTML/body background); opaque app
   chrome is painted by the app's own root container instead of the window.
+- The transparent WebView requirement does not permit transparent app chrome.
+  The app root, shared modal backdrop, and shared modal shell must stay opaque.
+  A viewport may reveal a native surface only through its own local slot/hole.
+  Do not use `.app:has(...presented)`,
+  `.media-viewer-backdrop:has(...presented)`, or
+  `.media-viewer:has(...presented)` to reveal a surface.
 - Input: the surface window never takes input; events fall through to the
   webview above it, so zoom/pan/brush interactions keep their current DOM
   handlers unchanged.
@@ -120,8 +133,11 @@ pub(crate) struct ViewportFrame {
 `WgpuViewportHost.renderFrame()` returns the frame as today; presenting
 components (`useViewportUnderlay`, `useVideoPreview`, program monitor, mask
 editor) treat `presented: true` as "clear the `<img>`, keep the transparent
-hole". The mocked browser transport and the CPU fallback keep returning
-blob/data URLs, so every caller works on both paths with one small branch.
+hole" only when the owning surface already has a scoped hole. If the only way
+to show the surface is to make the app root, shared modal backdrop, or shared
+modal shell transparent, the presenter must not request native presentation.
+The mocked browser transport and the CPU fallback keep returning blob/data URLs,
+so every caller works on both paths with one small branch.
 
 ### D5. Readback only when needed
 
@@ -170,6 +186,8 @@ report visible in logs.
   `set_placement`/`set_presented` host commands + `useViewportPlacement` hook.
 - Make the main window/webview transparent; app root paints the chrome
   background. Verify DOM still composites above a test-cleared surface.
+  This means the WebView can support local holes; it does not mean the app root
+  or shared modal shells may become transparent when a viewport presents.
 
 Exit: a viewport can show a solid clear colour exactly under its element,
 tracks resize/scroll/DPI, and disappears on close — behind the feature flag.
@@ -185,7 +203,7 @@ tracks resize/scroll/DPI, and disappears on close — behind the feature flag.
 - Mask overlay: composite the coverage buffer in the blit shader
   (`set_mask_overlay` uploads it as an R8 texture).
 
-Exit: image edit underlay, grade preview, and the mask editor underlay render
+Exit: image edit underlay, grade preview, and the image editor underlay render
 on the live surface; slider drag does no decode/encode; CPU/browser fallback
 still renders identically via PNG.
 
@@ -208,14 +226,17 @@ Exit: program monitor playback/scrub presents natively; no PNG per frame.
 Exit: parity green in CI (CPU fallback asserted on CI runners without GPU);
 badges truthful on both paths.
 
-### Phase S5: Mask editor on the live surface (follow-up, done)
+### Phase S5: Image editor on the live surface (follow-up, done)
 
-- The mask editor's underlay presents on the native surface: the stage keeps
+- The image editor's underlay presents on the native surface: the stage keeps
   a placement anchor at the underlay window's rect, `useViewportUnderlay`
   tracks it (`useViewportPlacement` gains an `enabled` flag), and the
   brush/path/marquee canvas — DOM, above the webview hole — keeps compositing
   over the surface unchanged. The selection tint stays host-side
-  (`set_mask_overlay`), so it is composited into the presented frame.
+  (`set_mask_overlay`), so it is composited into the presented frame. After the
+  2026-07 modal-boundary correction, this is valid only when the webview hole is
+  scoped inside the editor stage and does not require transparent app roots or
+  shared modal shells.
 - Selection semantics are not owned by the surface path. DOM canvas fallback
   and WGPU overlays both consume the same state model from
   [`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md):

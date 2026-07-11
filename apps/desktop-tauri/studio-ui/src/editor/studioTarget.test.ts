@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { emptyLayerMask, emptyMaskDocument, type MaskDocument } from "../contracts/maskDocument";
-import { type EditPath } from "../contracts/maskOps";
+import { emptyLayerMask, emptyImageEditorDocument, type ImageEditorDocument } from "../contracts/imageEditorDocument";
+import { type EditPath } from "../contracts/imageEditOps";
 import {
   pathBounds,
   resolveActiveTarget,
@@ -14,8 +14,8 @@ import {
 const ref: StudioDocumentRef = { canvasId: "canvas-1", documentId: "doc-1" };
 const dims = { w: 100, h: 80 };
 
-function docWithLayer(): MaskDocument {
-  const doc = emptyMaskDocument();
+function docWithLayer(): ImageEditorDocument {
+  const doc = emptyImageEditorDocument();
   doc.layers[0] = { ...doc.layers[0], id: "layer-base", name: "Base" };
   return doc;
 }

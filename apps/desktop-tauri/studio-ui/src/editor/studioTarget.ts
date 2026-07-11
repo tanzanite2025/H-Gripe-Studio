@@ -9,9 +9,9 @@
 // `StudioTarget` before they run, so "make a mask" can never silently mean
 // "create a new layer."
 
-import { type EditPath } from "../contracts/maskOps";
-import { type MaskDocument, type MaskLayer } from "../contracts/maskDocument";
-import { activeLayer, activeTargetKind } from "../contracts/maskDocument";
+import { type EditPath } from "../contracts/imageEditOps";
+import { type ImageEditorDocument, type ImageEditorLayer } from "../contracts/imageEditorDocument";
+import { activeLayer, activeTargetKind } from "../contracts/imageEditorDocument";
 
 export type StudioTarget =
   | { kind: "document"; canvasId: string; documentId: string }
@@ -32,7 +32,7 @@ export interface StudioDocumentRef {
  * or the layer mask of the active layer. The target is read from document
  * state, never inferred from the last clicked tool.
  */
-export function resolveActiveTarget(doc: MaskDocument, ref: StudioDocumentRef): StudioTarget {
+export function resolveActiveTarget(doc: ImageEditorDocument, ref: StudioDocumentRef): StudioTarget {
   const layer = activeLayer(doc);
   if (!layer) return { kind: "document", ...ref };
   if (activeTargetKind(doc) === "mask" && layer.mask) {
@@ -48,10 +48,10 @@ export function resolveActiveTarget(doc: MaskDocument, ref: StudioDocumentRef): 
  */
 export interface SelectionTarget {
   id: string;
-  source: "pen" | "magnetic_lasso" | "polygon_lasso" | "marquee" | "sam2" | "wand" | "mask";
+  source: "pen" | "magnetic_lasso" | "polygon_lasso" | "marquee" | "sam2" | "wand" | "selection_alpha";
   /** Image-space `[x1, y1, x2, y2]`. */
   bounds: [number, number, number, number];
-  maskArtifactRef?: string;
+  selectionAlphaArtifactRef?: string;
   pathId?: string;
 }
 
@@ -61,7 +61,7 @@ export type TargetBounds =
   | { kind: "none" }
   | { kind: "document"; rect: Rect }
   | { kind: "layer_frame"; rect: Rect; layerId: string }
-  | { kind: "content"; rect: Rect; layerId: string; source: "alpha" | "ops" | "asset" | "override" }
+  | { kind: "content"; rect: Rect; layerId: string; source: "alpha" | "ops" | "asset" | "text_layout" | "vector_path" | "override" }
   | { kind: "mask"; rect: Rect; layerId: string; maskId: string }
   | { kind: "selection"; rect: Rect; selectionId: string }
   | { kind: "path"; rect: Rect; pathId: string }
@@ -135,7 +135,7 @@ function normalizeRect(rect: Rect, dims: { w: number; h: number }): Rect | null 
   return x2 > x1 && y2 > y1 ? [x1, y1, x2, y2] : null;
 }
 
-function findLayer(doc: MaskDocument, layerId: string): MaskLayer | null {
+function findLayer(doc: ImageEditorDocument, layerId: string): ImageEditorLayer | null {
   return doc.layers.find((layer) => layer.id === layerId) ?? null;
 }
 
@@ -158,7 +158,7 @@ export function pathBounds(path: EditPath, dims: { w: number; h: number }): Rect
   return normalizeRect([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], dims);
 }
 
-export function resolveTargetBounds(doc: MaskDocument, target: StudioTarget, ctx: TargetBoundsContext): TargetBounds {
+export function resolveTargetBounds(doc: ImageEditorDocument, target: StudioTarget, ctx: TargetBoundsContext): TargetBounds {
   const { dims } = ctx;
   const documentRect = fullDocumentRect(dims);
   switch (target.kind) {

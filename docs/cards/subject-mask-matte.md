@@ -63,15 +63,15 @@ Rust cards need the same guarantees, so this card introduced `studio_image`
 The `image` crate decodes most of this; CMYK-ICC and EXIF are added here,
 matching the behaviour of the legacy Python loaders.
 
-## Responsibility split (node / preview modal / mask-edit modal)
+## Responsibility split (node / preview modal / image-editor modal)
 
 Two separate modals, deliberately not one:
 
 | Layer | Owns | Notes |
 | --- | --- | --- |
 | **Node body** | thumbnail, `Auto Detect` / `Edit Mask` / `Apply`, lightweight **click-to-select** | Heavy canvas stays out of the body (it would fight the graph's LOD rendering + lazy-thumbnail media discipline). The node holds only the **result** (`mask` / `cutout` / `edit_paths`). |
-| **Preview modal** (shared) | read-only review of the current image / mask / result at a stage | A **generic, reusable** component, not Subject-Mask-specific: it is a *review gate* you can drop after **any** stage to eyeball the output and decide whether to proceed. It exposes an `Edit` button that opens the mask-edit modal. |
-| **Mask-Edit modal** (on-demand) | full canvas: brush / eraser / wand / feather, undo/redo, overlay + transparency preview | A separate heavier editor, opened **from** the preview's `Edit` button. The edit tool set is driven by a registry (below). It reads/writes the node's result and closes back to the preview. |
+| **Preview modal** (shared) | read-only review of the current image / mask / result at a stage | A **generic, reusable** component, not Subject-Mask-specific: it is a *review gate* you can drop after **any** stage to eyeball the output and decide whether to proceed. It exposes an `Edit` button that opens the image-editor modal. |
+| **Image Editor modal** (on-demand) | full canvas: brush / eraser / wand / feather, undo/redo, overlay + transparency preview | A separate heavier editor, opened **from** the preview's `Edit` button. The edit tool set is driven by a registry (below). It reads/writes the node's result and closes back to the preview. |
 
 Keeping the preview generic (so it can sit at every stage) and isolating the
 heavy pen/brush work in a separate on-demand editor is the key structural choice:
@@ -99,7 +99,7 @@ both lanes.
 The UI ships "click → get a region" once; the backend is hot-swapped Phase 1 → 2
 without a frontend rewrite.
 
-### Mask-Edit tool registry (Phase 1)
+### Image Editor tool registry (Phase 1)
 
 | Tool | Status | Phase 1 behaviour |
 | --- | --- | --- |
@@ -119,14 +119,14 @@ without a frontend rewrite.
 `planned` tools render greyed ("coming soon"); the registry lets a future tool
 ship stubbed before its backend lands.
 
-#### Keyboard shortcuts (mask-edit scope)
+#### Keyboard shortcuts (image-editor scope)
 
 The modal registers a Photoshop-aligned shortcut table into the central scoped
 shortcut system (`src/shortcuts/core.ts` — a scope stack: bindings are declarative,
 per-scope, and only the topmost scope receives keys, so PS-style keys here can
 never collide with the node canvas or a future clip-timeline scope's
-Premiere-style keys). `src/shortcuts/scopes/maskEdit.ts` is the frozen table for the
-`mask-edit` scope: `B` brush, `E` eraser, `W` wand, `P` pen, `L` lasso, `M` /
+Premiere-style keys). `src/shortcuts/scopes/imageEditorState.ts` is the frozen table for the
+`image-editor` scope: `B` brush, `E` eraser, `W` wand, `P` pen, `L` lasso, `M` /
 `Shift+M` marquees, `[` / `]` brush size, `X` swap add/subtract, `Ctrl+Z` /
 `Ctrl+Shift+Z` / `Ctrl+Y` undo/redo, `Ctrl+D` clear, `Ctrl+Shift+I` invert,
 `Ctrl+H` mask-only view, `Enter` close pen path, `Esc` cancel path / close.
@@ -359,7 +359,7 @@ model id in `matte_report`.
      (`u2net_human_seg`) slots into `segmenter_for_mode` behind the same trait,
      preferred only for that mode.
 3. **Pen paths** — bezier rasterise, path add/subtract/intersect, re-editable.
-   - *Landed:* pen / lasso tools in the Mask-Edit modal record closed `paths`;
+   - *Landed:* pen / lasso tools in the Image Editor modal record closed `paths`;
      the backend rasterises them (bezier flatten → even-odd scanline fill) and
      boolean-combines per `mode`, and the proxy preview folds them in.
      Re-editing committed anchors remains open.
@@ -379,7 +379,7 @@ model id in `matte_report`.
      that skips when no blob resolves; the opt-in `tauri (vitmatte e2e)` CI job
      (`workflow_dispatch`) fetches the weight and runs it. See
      `resources/models/README.md` → *Verify ViTMatte end-to-end*.
-   - *Landed (cascade 4, UI):* a dedicated `matting` paint tool in the Mask-Edit
+   - *Landed (cascade 4, UI):* a dedicated `matting` paint tool in the Image Editor
      modal records `matte_strokes` (per-region trimap-unknown painting); the
      backend stamps them onto the trimap before matting (`parse_matte_strokes`).
    - *Landed (cascade 5, hand-off):* when matting runs the node persists its
@@ -393,7 +393,7 @@ model id in `matte_report`.
 ## Backend boundary
 
 ```
-React UI         -> node preview + shared Preview modal + on-demand Mask-Edit modal (brush/pen/undo/redo)
+React UI         -> node preview + shared Preview modal + on-demand Image Editor modal (brush/pen/undo/redo)
 Rust / Tauri     -> studio_image (decode guard + colour-space), morphology / wand / feather,
                     Phase 2 model inference (ort/candle), file IO, path validation
 Refine Mask Edge -> receives mask / cutout, owns edge fusion
@@ -415,7 +415,7 @@ Refine Mask Edge -> receives mask / cutout, owns edge fusion
   test (skipped when the blob is absent).
 - `exec.rs` — `subjectMask` maps to `Compute`; the `Compute` handler rejects
   foreign kinds (mirrors the existing `class_handlers_reject_foreign_kinds`).
-- studio-ui — the shared Preview modal as a stage gate, the Mask-Edit tool
+- studio-ui — the shared Preview modal as a stage gate, the Image Editor tool
   registry (`ready` vs `planned`, incl. the `point` SAM 2 tool), the edit-state
-  model (`maskEdit` brush / op / **point** record + undo/redo), and
+  model (`imageEditorState` brush / op / **point** record + undo/redo), and
   click-to-select (E2E).

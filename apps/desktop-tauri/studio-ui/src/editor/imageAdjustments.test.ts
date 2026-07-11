@@ -3,7 +3,7 @@ import { adjustmentToGradeOps } from "./imageAdjustments";
 import { applyOp } from "./gradeKernel";
 import type { GradeSurface } from "./gradeKernel";
 import { adjustmentLut } from "./maskMorphology";
-import { type LayerAdjustment } from "../contracts/maskDocument";
+import { type LayerAdjustment } from "../contracts/imageEditorDocument";
 
 // A 256×1 grayscale ramp surface: pixel i holds level i/255 on all channels.
 function rampSurface(): GradeSurface {
@@ -18,7 +18,7 @@ function rampSurface(): GradeSurface {
   return { w: 256, h: 1, data, space: "srgb" };
 }
 
-// The lowering must agree with the mask editor's u8 LUT at every level,
+// The lowering must agree with the image editor's u8 LUT at every level,
 // within the LUT's own rounding (±0.5 of a u8 step).
 function expectMatchesMaskLut(adj: LayerAdjustment) {
   const surface = rampSurface();

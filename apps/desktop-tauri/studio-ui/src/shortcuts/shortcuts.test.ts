@@ -12,9 +12,9 @@ import {
   useShortcutScope,
   type ShortcutBinding,
 } from "./core";
-import { MASK_EDIT_SHORTCUTS, TOOL_COMBO } from "./scopes/maskEdit";
-import { MASK_SHORTCUT_ZH } from "./scopes/maskEditI18n";
-import { MASK_TOOLS } from "../editor/maskTools";
+import { IMAGE_EDITOR_SHORTCUTS, TOOL_COMBO } from "./scopes/imageEditor";
+import { IMAGE_EDITOR_SHORTCUT_ZH } from "./scopes/imageEditorI18n";
+import { IMAGE_EDITOR_TOOLS } from "../editor/imageEditorTools";
 
 const key = (init: KeyboardEventInit) => new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
 
@@ -56,37 +56,37 @@ describe("conflict detection", () => {
     expect(findConflicts(bindings)).toHaveLength(1);
   });
 
-  // The CI guard: any new mask-edit binding reusing a taken combo fails here.
-  it("mask-edit scope has no conflicts", () => {
-    expect(findConflicts(MASK_EDIT_SHORTCUTS)).toEqual([]);
+  // The CI guard: any new image-editor binding reusing a taken combo fails here.
+  it("image-editor scope has no conflicts", () => {
+    expect(findConflicts(IMAGE_EDITOR_SHORTCUTS)).toEqual([]);
   });
 });
 
-describe("mask-edit shortcut table", () => {
+describe("image-editor shortcut table", () => {
   it("has a zh translation for every binding (and no stale entries)", () => {
-    for (const b of MASK_EDIT_SHORTCUTS) {
-      expect(MASK_SHORTCUT_ZH[b.id]?.hint, `zh hint for "${b.id}"`).toBeTruthy();
+    for (const b of IMAGE_EDITOR_SHORTCUTS) {
+      expect(IMAGE_EDITOR_SHORTCUT_ZH[b.id]?.hint, `zh hint for "${b.id}"`).toBeTruthy();
     }
-    const ids = new Set(MASK_EDIT_SHORTCUTS.map((b) => b.id));
-    for (const id of Object.keys(MASK_SHORTCUT_ZH)) {
-      expect(ids.has(id), `MASK_SHORTCUT_ZH["${id}"] has no matching binding`).toBe(true);
+    const ids = new Set(IMAGE_EDITOR_SHORTCUTS.map((b) => b.id));
+    for (const id of Object.keys(IMAGE_EDITOR_SHORTCUT_ZH)) {
+      expect(ids.has(id), `IMAGE_EDITOR_SHORTCUT_ZH["${id}"] has no matching binding`).toBe(true);
     }
   });
 });
 
 describe("toolbar shortcut badges (TOOL_COMBO)", () => {
   it("every entry names a registered tool", () => {
-    const toolIds = new Set(MASK_TOOLS.map((t) => t.id));
+    const toolIds = new Set(IMAGE_EDITOR_TOOLS.map((t) => t.id));
     for (const id of Object.keys(TOOL_COMBO)) {
       expect(toolIds.has(id), `TOOL_COMBO["${id}"] has no matching mask tool`).toBe(true);
     }
   });
 
   it("every combo matches a ready binding in the scope table", () => {
-    const byCombo = new Map(MASK_EDIT_SHORTCUTS.map((b) => [canonicalCombo(b.combo), b]));
+    const byCombo = new Map(IMAGE_EDITOR_SHORTCUTS.map((b) => [canonicalCombo(b.combo), b]));
     for (const [id, combo] of Object.entries(TOOL_COMBO)) {
       const binding = byCombo.get(canonicalCombo(combo));
-      expect(binding, `TOOL_COMBO["${id}"] = "${combo}" is not in MASK_EDIT_SHORTCUTS`).toBeTruthy();
+      expect(binding, `TOOL_COMBO["${id}"] = "${combo}" is not in IMAGE_EDITOR_SHORTCUTS`).toBeTruthy();
       expect(binding?.status, `binding for TOOL_COMBO["${id}"]`).toBe("ready");
     }
   });
@@ -96,60 +96,60 @@ describe("toolbar shortcut badges (TOOL_COMBO)", () => {
     // that intentionally have no toolbar badge are commands, not tools.
     const nonToolIds = new Set(["tool_path_select"]);
     const badgeCombos = new Set(Object.values(TOOL_COMBO).map(canonicalCombo));
-    for (const b of MASK_EDIT_SHORTCUTS) {
+    for (const b of IMAGE_EDITOR_SHORTCUTS) {
       if (!b.id.startsWith("tool_") || b.status !== "ready" || nonToolIds.has(b.id)) continue;
       expect(badgeCombos.has(canonicalCombo(b.combo)), `no TOOL_COMBO entry for "${b.id}" ("${b.combo}")`).toBe(true);
     }
   });
 });
 
-describe("mask-edit M4 bindings", () => {
+describe("image-editor M4 bindings", () => {
   it("flips the brush / quick-mask / default-colours combos to ready", () => {
     for (const id of ["brush_softer", "brush_harder", "quick_mask", "default_colors", "swap_mode"]) {
-      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === id);
       expect(b?.status, id).toBe("ready");
     }
   });
 });
 
-describe("mask-edit M5 bindings", () => {
+describe("image-editor M5 bindings", () => {
   it("flips the move / crop / free-transform combos to ready", () => {
     for (const id of ["tool_move", "tool_crop", "free_transform"]) {
-      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === id);
       expect(b?.status, id).toBe("ready");
     }
   });
 });
 
-describe("mask-edit M8 bindings", () => {
+describe("image-editor M8 bindings", () => {
   it("keeps hand / rotate-view / navigation combos ready", () => {
     for (const id of ["tool_hand", "tool_rotate_view", "pan_space", "zoom_in", "zoom_out", "zoom_fit", "zoom_100"]) {
-      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === id);
       expect(b?.status, id).toBe("ready");
     }
   });
 });
 
-describe("mask-edit M9 bindings", () => {
+describe("image-editor M9 bindings", () => {
   it("flips the selection-command combos to ready", () => {
     for (const id of ["select_all", "delete_selection", "reselect", "duplicate"]) {
-      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === id);
       expect(b?.status, id).toBe("ready");
     }
   });
 });
 
-describe("mask-edit M10 bindings", () => {
+describe("image-editor M10 bindings", () => {
   it("flips the gradient tool combo to ready", () => {
-    const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === "tool_gradient");
+    const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === "tool_gradient");
     expect(b?.status).toBe("ready");
   });
 });
 
-describe("mask-edit M11 bindings", () => {
+describe("image-editor M11 bindings", () => {
   it("flips the fill / feather dialog combos to ready", () => {
     for (const id of ["fill_dialog", "feather_dialog"]) {
-      const b = MASK_EDIT_SHORTCUTS.find((x) => x.id === id);
+      const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === id);
       expect(b?.status, id).toBe("ready");
     }
   });

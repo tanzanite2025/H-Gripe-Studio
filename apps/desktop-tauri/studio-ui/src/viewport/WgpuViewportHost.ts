@@ -45,7 +45,7 @@ export type ViewportCommand =
    * clip-local `timeSec`. */
   | { kind: "set_clip_props"; doc: string | null; timeSec?: number }
   /** Mask overlay composited over rendered frames (image_edit viewports):
-   * the mask editor's selection tint, presented by the host at the view
+   * the image editor's selection tint, presented by the host at the view
    * window's detail. */
   | { kind: "set_mask_overlay"; overlay: ViewportMaskOverlay | null }
   /** Vector overlay stroked over rendered frames (image_edit and

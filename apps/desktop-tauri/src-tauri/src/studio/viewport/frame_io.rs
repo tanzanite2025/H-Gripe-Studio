@@ -218,7 +218,7 @@ pub(crate) fn viewport_read_pixels(viewport_id: String) -> Result<tauri::ipc::Re
     )?))
 }
 
-pub(super) fn pixels_bin_payload(
+pub(crate) fn pixels_bin_payload(
     width: u32,
     height: u32,
     backend: &ViewportBackend,

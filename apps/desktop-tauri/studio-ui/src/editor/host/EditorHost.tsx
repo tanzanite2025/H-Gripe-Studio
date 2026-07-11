@@ -1,12 +1,12 @@
 import { Suspense, lazy } from "react";
-import { type MaskDocument } from "../../contracts/maskDocument";
-import type { EditState } from "../maskEdit";
+import { type ImageEditorDocument } from "../../contracts/imageEditorDocument";
+import type { EditState } from "../imageEditorState";
 import type { ImageDocument } from "../imageDocument";
 import type { CropCommit } from "../CropEditModal";
 import type { GradeCommit } from "../GradePanel";
 
 // Editor Host: the application-level surface for the heavyweight editors
-// (mask / crop / grade / unified media edit). Editors here are software
+// (mask / crop / grade / image-source editor). Editors here are software
 // features, not canvas features: a request carries only the edit target
 // (an image path + display title) and initial edit data, and commits hand a
 // result back to whoever opened the editor — the host knows nothing about
@@ -18,8 +18,8 @@ import type { GradeCommit } from "../GradePanel";
 //
 // Editors are code-split: nothing loads until a request opens one.
 
-const MaskEditModal = lazy(() =>
-  import("../MaskEditModal").then((m) => ({ default: m.MaskEditModal })),
+const ImageEditorModal = lazy(() =>
+  import("../ImageEditorModal").then((m) => ({ default: m.ImageEditorModal })),
 );
 const CropEditModal = lazy(() =>
   import("../CropEditModal").then((m) => ({ default: m.CropEditModal })),
@@ -27,8 +27,8 @@ const CropEditModal = lazy(() =>
 const GradeEditModal = lazy(() =>
   import("../GradeEditModal").then((m) => ({ default: m.GradeEditModal })),
 );
-const MediaEditModal = lazy(() =>
-  import("../MediaEditModal").then((m) => ({ default: m.MediaEditModal })),
+const ImageSourceEditorModal = lazy(() =>
+  import("../ImageSourceEditorModal").then((m) => ({ default: m.ImageSourceEditorModal })),
 );
 
 /** What an editor edits: an asset/output reference, never node state. */
@@ -60,7 +60,7 @@ export type EditorRequest =
       target: EditorTarget;
       initial: unknown;
       wandTolerance: number;
-      onCommit: (edits: MaskDocument, state: EditState) => void;
+      onCommit: (edits: ImageEditorDocument, state: EditState) => void;
     }
   | {
       editor: "crop";
@@ -78,7 +78,7 @@ export type EditorRequest =
       onCommit: (commit: GradeCommit) => void;
     }
   | {
-      editor: "media";
+      editor: "imageSource";
       target: EditorTarget;
       /** "Open image" entry: lands the picked file on a new image card / tab. */
       onPickFile?: () => void;
@@ -103,7 +103,7 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
   return (
     <Suspense fallback={null}>
       {request.editor === "mask" && (
-        <MaskEditModal
+        <ImageEditorModal
           title={request.target.title}
           imagePath={request.target.imagePath}
           nodeId={request.target.nodeId}
@@ -137,11 +137,11 @@ export function EditorHost({ request, onClose }: EditorHostProps) {
           onClose={onClose}
         />
       )}
-      {request.editor === "media" && (
-        <MediaEditModal
+      {request.editor === "imageSource" && (
+        <ImageSourceEditorModal
           title={request.target.title}
           imagePath={request.target.imagePath}
-          documentId={request.target.nodeId}
+          imageSourceDocumentKey={request.target.nodeId}
           onPickFile={request.onPickFile}
           tabs={request.tabs}
           onSelectTab={request.onSelectTab}

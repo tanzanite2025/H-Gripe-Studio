@@ -1,12 +1,14 @@
-// Project manifest (multi-canvas workspace plan, Phase 4): the persisted list
-// of open canvas documents — per-canvas graph, file binding, selection, and
-// viewport — so the tab set survives a reload. The manifest lives next to the
+﻿// Project manifest (multi-canvas workspace plan, Phase 4): the persisted list
+// of open canvas documents: per-canvas graph, file binding, selection, and
+// viewport, so the tab set survives a reload. The manifest lives next to the
 // legacy single-graph autosave (which keeps being written for backward
 // compatibility); when a manifest exists it wins on restore.
 
 import { type WorkflowGraph } from "../graph/model";
 import { DEFAULT_CANVAS_VIEWPORT, type CanvasViewport } from "./canvasDocument";
 import type { ImageDocument } from "./imageDocument";
+
+const PROJECT_MANIFEST_VERSION = 2 as const;
 
 /** One canvas document's persisted state inside the manifest. */
 export interface ProjectCanvasState {
@@ -19,11 +21,11 @@ export interface ProjectCanvasState {
   viewport: CanvasViewport;
   graph: WorkflowGraph;
   /** In-progress image editor documents, keyed by image-source node id. */
-  mediaEditDrafts: Record<string, ImageDocument>;
+  imageSourceEditorDrafts: Record<string, ImageDocument>;
 }
 
 export interface ProjectManifest {
-  version: 1;
+  version: 2;
   activeCanvasId: string;
   canvases: ProjectCanvasState[];
 }
@@ -31,7 +33,7 @@ export interface ProjectManifest {
 // Browser-preview manifest key. Desktop builds persist through the Rust
 // backend (`read/write_studio_project_manifest`); localStorage is the
 // vite-dev/tests fallback. Bump the suffix on incompatible shape changes.
-const STORAGE_KEY = "hgripe.studio.project.v1";
+const STORAGE_KEY = "hgripe.studio.project.v2";
 
 export function serializeProjectManifest(manifest: ProjectManifest): string {
   return JSON.stringify(manifest);
@@ -58,11 +60,11 @@ function parseCanvas(raw: unknown): ProjectCanvasState | null {
     selectedNodeId: typeof o.selectedNodeId === "string" ? o.selectedNodeId : null,
     viewport: isViewport(o.viewport) ? o.viewport : DEFAULT_CANVAS_VIEWPORT,
     graph,
-    mediaEditDrafts: parseMediaEditDrafts(o.mediaEditDrafts),
+    imageSourceEditorDrafts: parseImageSourceEditorDrafts(o.imageSourceEditorDrafts),
   };
 }
 
-function parseMediaEditDrafts(raw: unknown): Record<string, ImageDocument> {
+function parseImageSourceEditorDrafts(raw: unknown): Record<string, ImageDocument> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: Record<string, ImageDocument> = {};
   for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -78,7 +80,7 @@ export function parseProjectManifest(text: string | null): ProjectManifest | nul
   if (!text) return null;
   try {
     const raw = JSON.parse(text) as Record<string, unknown>;
-    if (typeof raw !== "object" || raw === null || raw.version !== 1) return null;
+    if (typeof raw !== "object" || raw === null || raw.version !== PROJECT_MANIFEST_VERSION) return null;
     if (!Array.isArray(raw.canvases)) return null;
     const canvases = raw.canvases
       .map(parseCanvas)
@@ -89,7 +91,7 @@ export function parseProjectManifest(text: string | null): ProjectManifest | nul
       canvases.some((c) => c.id === raw.activeCanvasId)
         ? raw.activeCanvasId
         : canvases[0].id;
-    return { version: 1, activeCanvasId, canvases };
+    return { version: PROJECT_MANIFEST_VERSION, activeCanvasId, canvases };
   } catch {
     return null;
   }
@@ -109,7 +111,7 @@ export function saveLocalProjectManifest(manifest: ProjectManifest): void {
   try {
     localStorage.setItem(STORAGE_KEY, serializeProjectManifest(manifest));
   } catch {
-    // Quota exceeded / storage disabled — persistence is best-effort.
+    // Quota exceeded / storage disabled; persistence is best-effort.
   }
 }
 
