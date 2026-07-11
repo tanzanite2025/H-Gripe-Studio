@@ -837,9 +837,7 @@ export const messages = {
     zh: "时间线为空——选中素材后用「加入时间线」放置为 clip。",
   },
   "drawer.monitorTitle": { en: "Program Monitor", zh: "节目监视器" },
-  "drawer.detailTabs": { en: "Production properties tabs", zh: "制作属性标签" },
   "drawer.detailsTab": { en: "Properties", zh: "属性" },
-  "drawer.gradeTab": { en: "Grade", zh: "调色" },
   "drawer.detailClip": { en: "Clip", zh: "片段" },
   "drawer.detailAsset": { en: "Asset", zh: "素材" },
   "drawer.detailKind": { en: "Kind", zh: "类型" },
@@ -867,7 +865,6 @@ export const messages = {
   "drawer.propsCropTop": { en: "Top", zh: "顶" },
   "drawer.propsCropRight": { en: "Right", zh: "右" },
   "drawer.propsCropBottom": { en: "Bottom", zh: "底" },
-  "drawer.gradePlaceholder": { en: "Grade controls will live here; clip grade still opens from the clip context menu for now.", zh: "调色控制会放在这里；当前仍先从片段右键菜单打开调色。" },
   "drawer.monitorEmpty": {
     en: "no clip under the playhead",
     zh: "播放头下没有 clip",

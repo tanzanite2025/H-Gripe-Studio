@@ -316,6 +316,11 @@ export function ProductionTimeline({
                           onAddActiveToTrack(track.id);
                           onDragAssetChange(null);
                         }}
+                        onPointerUp={() => {
+                          if (!dragAssetId || !acceptsActive) return;
+                          onAddActiveToTrack(track.id);
+                          onDragAssetChange(null);
+                        }}
                       >
                         {track.clips.map((clip) => {
                           const selected = clip.id === selectedClipId;

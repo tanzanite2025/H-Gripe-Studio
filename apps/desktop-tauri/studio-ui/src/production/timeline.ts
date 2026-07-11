@@ -186,6 +186,75 @@ export function appendClip(
   };
 }
 
+export interface AppendVideoWithAudioResult {
+  timeline: TimelineModel;
+  video: TimelineClip;
+  audio: TimelineClip;
+  videoTrackId: string;
+  audioTrackId: string;
+}
+
+/**
+ * Premiere / Resolve-style video placement: a video asset lands as a video
+ * clip on a video track plus a linked audio clip on an audio track, both at
+ * the same start (past the end of either track so neither overlaps).
+ */
+export function appendVideoWithAudio(
+  timeline: TimelineModel,
+  asset: { id: string; kind: MediaAssetKind },
+  opts: { trackId?: string; duration?: number } = {},
+): AppendVideoWithAudioResult {
+  let base = timeline;
+  const requested = opts.trackId ? base.tracks.find((t) => t.id === opts.trackId) : undefined;
+  let videoTrack =
+    requested && requested.kind === "video" && !requested.locked
+      ? requested
+      : base.tracks.find((t) => t.kind === "video" && !t.locked);
+  if (!videoTrack) {
+    base = addTrack(base, "video");
+    videoTrack = base.tracks[base.tracks.length - 1];
+  }
+  let audioTrack = base.tracks.find((t) => t.kind === "audio" && !t.locked);
+  if (!audioTrack) {
+    base = addTrack(base, "audio");
+    audioTrack = base.tracks[base.tracks.length - 1];
+  }
+  const start = Math.max(trackEnd(videoTrack), trackEnd(audioTrack));
+  const duration = Math.max(MIN_CLIP_SECONDS, opts.duration ?? defaultClipDuration("video"));
+  const video: TimelineClip = {
+    id: freshId("clip"),
+    kind: "video",
+    assetId: asset.id,
+    start,
+    duration,
+    sourceStartSec: 0,
+  };
+  const audio: TimelineClip = {
+    id: freshId("clip"),
+    kind: "audio",
+    assetId: asset.id,
+    start,
+    duration,
+    sourceStartSec: 0,
+  };
+  return {
+    timeline: {
+      ...base,
+      tracks: base.tracks.map((t) =>
+        t.id === videoTrack.id
+          ? { ...t, clips: [...t.clips, video] }
+          : t.id === audioTrack.id
+            ? { ...t, clips: [...t.clips, audio] }
+            : t,
+      ),
+    },
+    video,
+    audio,
+    videoTrackId: videoTrack.id,
+    audioTrackId: audioTrack.id,
+  };
+}
+
 export function findClip(
   timeline: TimelineModel,
   clipId: string,
