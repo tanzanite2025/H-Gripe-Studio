@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { Edge, Node } from "@hgripe/flow";
 
-import { videoProbe } from "../bridge/files";
 import { mergeLayerMasks, pickFile, primeIngest, splitLayerMask } from "../bridge/tauri";
+import { probeMediaAssetPlaybackInfo } from "../production/mediaAssetAnalysis";
 import type { HgripeNodeData } from "../editor/HgripeNode";
 import type { UseCanvasDocument } from "../editor/useCanvasDocument";
 import type { MsgKey } from "../i18n";
@@ -101,17 +101,15 @@ export function useProductionWorkspaceController({
     return stubLayeredImageAsset({ imagePath, nodeId: selectedNode.id });
   }, [selectedNode, nodes, edges]);
 
-  // Probe a video asset's real duration in the background so timeline
-  // placements use it instead of the default clip length.
-  const probeAssetDuration = useCallback((asset: MediaAsset) => {
-    if (asset.kind !== "video" || asset.durationSec != null) return;
-    videoProbe(asset.path)
-      .then((info) => {
-        if (info.duration_sec != null) {
-          setBinAssetMediaInfo(productionStore, asset.id, { durationSec: info.duration_sec });
-        }
-      })
-      .catch(() => {});
+  // Analyze a newly added asset's playback info in the background so timeline
+  // placements use its real duration instead of the default clip length.
+  const analyzeBinAssetPlaybackInfoInBackground = useCallback((asset: MediaAsset) => {
+    if (asset.durationSec != null && asset.hasAudio != null) return;
+    void probeMediaAssetPlaybackInfo(asset.kind, asset.path).then((playbackInfo) => {
+      if (playbackInfo.durationSec != null || playbackInfo.hasAudio != null) {
+        setBinAssetMediaInfo(productionStore, asset.id, playbackInfo);
+      }
+    });
   }, []);
 
   const importMediaPathsToBin = useCallback(
@@ -124,7 +122,7 @@ export function useProductionWorkspaceController({
           skipped += 1;
           continue;
         }
-        probeAssetDuration(addAssetToBin(productionStore, { kind, path }));
+        analyzeBinAssetPlaybackInfoInBackground(addAssetToBin(productionStore, { kind, path }));
         imported.push(path);
       }
       if (imported.length === 0) {
@@ -136,7 +134,7 @@ export function useProductionWorkspaceController({
       );
       setMessage(t("drawer.importedMedia", { n: imported.length, skipped }));
     },
-    [probeAssetDuration, setMessage, t],
+    [analyzeBinAssetPlaybackInfoInBackground, setMessage, t],
   );
 
   const handleImportMediaToBin = useCallback(async () => {
@@ -187,8 +185,8 @@ export function useProductionWorkspaceController({
   }, [selectedNode, layeredAsset]);
 
   const handleAddSelectedToBin = useCallback(() => {
-    if (addableAsset) probeAssetDuration(addAssetToBin(productionStore, addableAsset));
-  }, [addableAsset, probeAssetDuration]);
+    if (addableAsset) analyzeBinAssetPlaybackInfoInBackground(addAssetToBin(productionStore, addableAsset));
+  }, [addableAsset, analyzeBinAssetPlaybackInfoInBackground]);
 
   const productionTarget = useMemo<ProductionTarget | null>(() => {
     if (selectedClipId) {
