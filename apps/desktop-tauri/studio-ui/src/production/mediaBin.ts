@@ -17,6 +17,10 @@ export interface MediaAsset {
   /** Canvas node this asset came from, when added from a node. */
   sourceNodeId?: string;
   addedAt: number;
+  /** Probed media duration, seconds. Absent until (or unless) probed. */
+  durationSec?: number;
+  /** Whether the file has a decodable audio stream. Absent until probed. */
+  hasAudio?: boolean;
 }
 
 export const IMAGE_MEDIA_EXTS = [
@@ -104,4 +108,18 @@ export function addAsset(
 
 export function removeAsset(assets: MediaAsset[], id: string): MediaAsset[] {
   return assets.filter((a) => a.id !== id);
+}
+
+/** Attach probed media info to an asset (no-op for unknown ids). */
+export function setAssetMediaInfo(
+  assets: MediaAsset[],
+  id: string,
+  info: { durationSec?: number | null; hasAudio?: boolean | null },
+): MediaAsset[] {
+  const asset = assets.find((a) => a.id === id);
+  if (!asset) return assets;
+  const durationSec = info.durationSec ?? asset.durationSec;
+  const hasAudio = info.hasAudio ?? asset.hasAudio;
+  if (durationSec === asset.durationSec && hasAudio === asset.hasAudio) return assets;
+  return assets.map((a) => (a.id === id ? { ...a, durationSec, hasAudio } : a));
 }

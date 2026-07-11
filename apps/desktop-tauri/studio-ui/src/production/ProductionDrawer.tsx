@@ -80,7 +80,7 @@ export interface ProductionDrawerViewProps {
   timeline: TimelineModel;
   selectedClipId: string | null;
   onSelectClip: (clipId: string | null) => void;
-  onAddActiveToTrack: (trackId: string) => void;
+  onAddActiveToTrack: (trackId: string, atSec?: number) => void;
   onAddTrack: (kind: TrackKind) => void;
   onRemoveTrack: (trackId: string) => void;
   onRemoveClip: (clipId: string) => void;
@@ -147,9 +147,9 @@ export function ProductionDrawer({
       timeline={timeline}
       selectedClipId={selectedClipId}
       onSelectClip={(clipId) => selectClip(productionStore, clipId)}
-      onAddActiveToTrack={(trackId) => {
+      onAddActiveToTrack={(trackId, atSec) => {
         const assetId = productionStore.getState().activeAssetId;
-        if (assetId) addAssetClip(productionStore, assetId, { trackId });
+        if (assetId) addAssetClip(productionStore, assetId, { trackId, atSec });
       }}
       onAddTrack={(kind) => addTimelineTrack(productionStore, kind)}
       onRemoveTrack={(trackId) => removeTimelineTrack(productionStore, trackId)}

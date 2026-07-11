@@ -14,6 +14,7 @@ import {
   clipKindForAsset,
   DEFAULT_TIMELINE_FPS,
   MIN_CLIP_SECONDS,
+  snapTimeToFrame,
   snapTimeToPoints,
   timelineDuration,
   timelineSnapPoints,
@@ -35,7 +36,7 @@ interface ProductionTimelineProps {
   onPlayheadSecChange: (sec: number) => void;
   onDragAssetChange: (assetId: string | null) => void;
   onSelectClip: (clipId: string | null) => void;
-  onAddActiveToTrack: (trackId: string) => void;
+  onAddActiveToTrack: (trackId: string, atSec?: number) => void;
   onAddTrack: (kind: TrackKind) => void;
   onRemoveTrack: (trackId: string) => void;
   onRemoveClip: (clipId: string) => void;
@@ -157,6 +158,12 @@ export function ProductionTimeline({
     ...entry,
     groupBoundary: i > 0 && all[i - 1].track.kind !== entry.track.kind,
   }));
+
+  const laneDropSec = (lane: HTMLElement, clientX: number): number => {
+    const rect = lane.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+    return snapTimeToFrame(Math.min(1, Math.max(0, ratio)) * rulerDuration, timelineFps);
+  };
 
   const trackKindLabel = (kind: TrackKind): string =>
     t(kind === "video" ? "drawer.trackVideo" : kind === "audio" ? "drawer.trackAudio" : "drawer.trackImage");
@@ -313,12 +320,12 @@ export function ProductionTimeline({
                         onDrop={(event) => {
                           if (!acceptsActive) return;
                           event.preventDefault();
-                          onAddActiveToTrack(track.id);
+                          onAddActiveToTrack(track.id, laneDropSec(event.currentTarget, event.clientX));
                           onDragAssetChange(null);
                         }}
-                        onPointerUp={() => {
+                        onPointerUp={(event) => {
                           if (!dragAssetId || !acceptsActive) return;
-                          onAddActiveToTrack(track.id);
+                          onAddActiveToTrack(track.id, laneDropSec(event.currentTarget, event.clientX));
                           onDragAssetChange(null);
                         }}
                       >

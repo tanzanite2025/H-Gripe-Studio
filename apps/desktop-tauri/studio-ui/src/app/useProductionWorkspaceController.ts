@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { Edge, Node } from "@hgripe/flow";
 
+import { videoProbe } from "../bridge/files";
 import { mergeLayerMasks, pickFile, primeIngest, splitLayerMask } from "../bridge/tauri";
 import type { HgripeNodeData } from "../editor/HgripeNode";
 import type { UseCanvasDocument } from "../editor/useCanvasDocument";
@@ -23,6 +24,7 @@ import {
   assetKindForNodeKind,
   assetKindForPath,
   MEDIA_IMPORT_EXTS,
+  type MediaAsset,
 } from "../production/mediaBin";
 import {
   assetTarget,
@@ -35,6 +37,7 @@ import {
   addAssetToBin,
   clearProductionSelection,
   productionStore,
+  setBinAssetMediaInfo,
   useProductionState,
 } from "../production/productionStore";
 import { findClip } from "../production/timeline";
@@ -98,6 +101,19 @@ export function useProductionWorkspaceController({
     return stubLayeredImageAsset({ imagePath, nodeId: selectedNode.id });
   }, [selectedNode, nodes, edges]);
 
+  // Probe a video asset's real duration in the background so timeline
+  // placements use it instead of the default clip length.
+  const probeAssetDuration = useCallback((asset: MediaAsset) => {
+    if (asset.kind !== "video" || asset.durationSec != null) return;
+    videoProbe(asset.path)
+      .then((info) => {
+        if (info.duration_sec != null) {
+          setBinAssetMediaInfo(productionStore, asset.id, { durationSec: info.duration_sec });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const importMediaPathsToBin = useCallback(
     (paths: string[]) => {
       const imported: string[] = [];
@@ -108,7 +124,7 @@ export function useProductionWorkspaceController({
           skipped += 1;
           continue;
         }
-        addAssetToBin(productionStore, { kind, path });
+        probeAssetDuration(addAssetToBin(productionStore, { kind, path }));
         imported.push(path);
       }
       if (imported.length === 0) {
@@ -120,7 +136,7 @@ export function useProductionWorkspaceController({
       );
       setMessage(t("drawer.importedMedia", { n: imported.length, skipped }));
     },
-    [setMessage, t],
+    [probeAssetDuration, setMessage, t],
   );
 
   const handleImportMediaToBin = useCallback(async () => {
@@ -171,8 +187,8 @@ export function useProductionWorkspaceController({
   }, [selectedNode, layeredAsset]);
 
   const handleAddSelectedToBin = useCallback(() => {
-    if (addableAsset) addAssetToBin(productionStore, addableAsset);
-  }, [addableAsset]);
+    if (addableAsset) probeAssetDuration(addAssetToBin(productionStore, addableAsset));
+  }, [addableAsset, probeAssetDuration]);
 
   const productionTarget = useMemo<ProductionTarget | null>(() => {
     if (selectedClipId) {
