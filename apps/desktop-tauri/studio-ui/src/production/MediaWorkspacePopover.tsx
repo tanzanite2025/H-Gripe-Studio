@@ -1,10 +1,66 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { generateThumbnail, videoProbe } from "../bridge/files";
 import { useT, type MsgKey } from "../i18n";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
 
 /** Pixels of pointer travel before an armed press becomes an asset drag. */
 const DRAG_START_THRESHOLD_PX = 4;
+
+/** Thumbnail display size (CSS px, longest edge). */
+const THUMB_SIZE = 64;
+const MAX_THUMB_CACHE = 200;
+
+const binThumbCache = new Map<string, Promise<string | null>>();
+
+function loadBinThumbnail(kind: MediaAssetKind, path: string): Promise<string | null> {
+  const key = `${kind}:${path}`;
+  let cached = binThumbCache.get(key);
+  if (!cached) {
+    const source =
+      kind === "video"
+        ? videoProbe(path).then((probe) => probe.poster_path || null)
+        : Promise.resolve(path);
+    cached = source
+      .then((thumbPath) =>
+        thumbPath
+          ? generateThumbnail({ path: thumbPath, size: THUMB_SIZE }).then((t) => t.data_url || null)
+          : null,
+      )
+      .catch(() => {
+        binThumbCache.delete(key);
+        return null;
+      });
+    binThumbCache.set(key, cached);
+    while (binThumbCache.size > MAX_THUMB_CACHE) {
+      const oldest = binThumbCache.keys().next().value;
+      if (!oldest) break;
+      binThumbCache.delete(oldest);
+    }
+  }
+  return cached;
+}
+
+function BinThumb({ asset }: { asset: MediaAsset }) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (asset.kind === "audio") return;
+    let cancelled = false;
+    loadBinThumbnail(asset.kind, asset.path).then((url) => {
+      if (!cancelled) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.kind, asset.path]);
+
+  return (
+    <span className={`production-bin-thumb kind-${asset.kind}`} aria-hidden="true">
+      {src ? <img src={src} alt="" draggable={false} /> : <span className="production-bin-thumb-glyph">{asset.kind === "audio" ? "\u266a" : asset.kind === "video" ? "\u25b6" : "\u25a3"}</span>}
+    </span>
+  );
+}
 
 export interface AddableAsset {
   kind: MediaAssetKind;
@@ -138,8 +194,11 @@ export function MediaWorkspacePopover({
                 }}
                 title={a.kind === "image" ? `${a.path} · ${t("drawer.imageEditHint")}` : a.path}
               >
-                <span className={`production-bin-kind kind-${a.kind}`}>{mediaAssetKindLabel(a.kind, t)}</span>
-                <span className="production-bin-name">{a.name}</span>
+                <BinThumb asset={a} />
+                <span className="production-bin-meta">
+                  <span className="production-bin-name">{a.name}</span>
+                  <span className={`production-bin-kind kind-${a.kind}`}>{mediaAssetKindLabel(a.kind, t)}</span>
+                </span>
               </button>
               <button
                 className="production-bin-remove"
