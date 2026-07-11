@@ -240,7 +240,9 @@ export function ProductionTimeline({
                 <span
                   className="production-timeline-playhead-line"
                   style={{ left: `${playheadRatio * 100}%` }}
-                />
+                >
+                  <span className="production-timeline-playhead-head" />
+                </span>
               </div>
               <div className="production-timeline-tracks" ref={tracksScrollRef}>
                 {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {

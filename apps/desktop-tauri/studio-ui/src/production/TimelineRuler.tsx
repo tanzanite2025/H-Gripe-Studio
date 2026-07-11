@@ -125,7 +125,6 @@ export function TimelineRuler({
   const minorStepSec = majorStepSec / 10;
   const majorTicks = Array.from({ length: Math.floor(rulerDuration / majorStepSec) + 1 }, (_, i) => i * majorStepSec);
   const minorTicks = Array.from({ length: Math.floor(rulerDuration / minorStepSec) + 1 }, (_, i) => i * minorStepSec);
-  const playheadRatio = rulerDuration > 0 ? Math.min(1, Math.max(0, playheadSec / rulerDuration)) : 0;
 
   const scrub = (clientX: number, ruler: HTMLElement, shiftKey: boolean) => {
     const rect = ruler.getBoundingClientRect();
@@ -219,9 +218,6 @@ export function TimelineRuler({
           }}
         />
       ))}
-      <span className="production-timeline-playhead" style={{ left: `${playheadRatio * 100}%` }}>
-        <span className="production-timeline-playhead-head" />
-      </span>
     </div>
   );
 }
