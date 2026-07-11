@@ -1,25 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { useT } from "../i18n";
 import type { TimelineTool } from "./DrawerToolbar";
-import {
-  moveKeyframesAtTime,
-  removeKeyframesAtTime,
-  timelineKeyframeGroups,
-} from "./keyframes";
 import type { ClipProperties } from "./clipProps";
 import type { MediaAsset } from "./mediaBin";
+import {
+  TimelineClipContextMenu,
+  type TimelineClipMenuState,
+} from "./TimelineClipContextMenu";
+import { TimelineClipView } from "./TimelineClipView";
 import { TimelineRuler, timelineRulerDuration } from "./TimelineRuler";
 import {
   clipKindForAsset,
   DEFAULT_TIMELINE_FPS,
-  MIN_CLIP_SECONDS,
   snapTimeToFrame,
-  snapTimeToPoints,
   timelineDuration,
   timelineSnapPoints,
   trackKindForClip,
-  type ClipKind,
   type TimelineModel,
   type TrackKind,
 } from "./timeline";
@@ -108,39 +105,14 @@ export function ProductionTimeline({
   onSplitClipToLayers,
 }: ProductionTimelineProps) {
   const t = useT();
-  const [clipMenu, setClipMenu] = useState<{
-    x: number;
-    y: number;
-    clipId: string;
-    assetId: string;
-    kind: ClipKind;
-  } | null>(null);
-  const [razorPreview, setRazorPreview] = useState<{
-    clipId: string;
-    ratio: number;
-    valid: boolean;
-  } | null>(null);
+  const [clipMenu, setClipMenu] = useState<TimelineClipMenuState | null>(null);
   const [timelineZoom, setTimelineZoom] = useState(1);
   const trackRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const tracksScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const handPan = useRef<{ pointerId: number; startX: number; startLeft: number } | null>(null);
-  const keyframeDrag = useRef<{
-    pointerId: number;
-    clipId: string;
-    fromT: number;
-    clipStart: number;
-    clipDuration: number;
-    clipLeft: number;
-    clipWidth: number;
-    props: ClipProperties;
-  } | null>(null);
   const navFlashTimer = useRef<number | null>(null);
   const [navFlashTrackId, setNavFlashTrackId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (timelineTool !== "razor") setRazorPreview(null);
-  }, [timelineTool]);
 
   const timelineFps = timeline.fps ?? DEFAULT_TIMELINE_FPS;
   const timelineLen = timelineDuration(timeline);
@@ -329,228 +301,25 @@ export function ProductionTimeline({
                           onDragAssetChange(null);
                         }}
                       >
-                        {track.clips.map((clip) => {
-                          const selected = clip.id === selectedClipId;
-                          const preview = razorPreview?.clipId === clip.id ? razorPreview : null;
-                          const keyframeEps = 0.5 / timelineFps;
-                          const keyframes =
-                            selected && clipProperties
-                              ? timelineKeyframeGroups(clipProperties, keyframeEps).filter(
-                                  (group) => group.t >= 0 && group.t <= clip.duration,
-                                )
-                              : [];
-                          return (
-                            <div
-                              key={clip.id}
-                              role="button"
-                              tabIndex={0}
-                              aria-pressed={selected}
-                              className={`production-clip clip-${clip.kind}${selected ? " active" : ""}${timelineTool === "razor" ? " razor-ready" : ""}`}
-                              style={{
-                                left: `${(clip.start / rulerDuration) * 100}%`,
-                                width: `${(clip.duration / rulerDuration) * 100}%`,
-                              }}
-                              onClick={(event) => {
-                                if (track.locked) return;
-                                if (timelineTool === "razor") {
-                                  const rect = event.currentTarget.getBoundingClientRect();
-                                  const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-                                  const clampedRatio = Math.min(1, Math.max(0, ratio));
-                                  const offset = clip.duration * clampedRatio;
-                                  if (
-                                    offset >= MIN_CLIP_SECONDS &&
-                                    clip.duration - offset >= MIN_CLIP_SECONDS
-                                  ) {
-                                    onSplitClipAt(clip.id, clip.start + offset);
-                                  }
-                                  return;
-                                }
-                                onSelectClip(selected ? null : clip.id);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key !== "Enter" && event.key !== " ") return;
-                                if (track.locked || timelineTool !== "select") return;
-                                event.preventDefault();
-                                onSelectClip(selected ? null : clip.id);
-                              }}
-                              onMouseMove={(event) => {
-                                if (timelineTool !== "razor") return;
-                                const rect = event.currentTarget.getBoundingClientRect();
-                                const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-                                const clampedRatio = Math.min(1, Math.max(0, ratio));
-                                const offset = clip.duration * clampedRatio;
-                                setRazorPreview({
-                                  clipId: clip.id,
-                                  ratio: clampedRatio,
-                                  valid:
-                                    offset >= MIN_CLIP_SECONDS &&
-                                    clip.duration - offset >= MIN_CLIP_SECONDS,
-                                });
-                              }}
-                              onMouseLeave={() => {
-                                if (timelineTool === "razor") setRazorPreview(null);
-                              }}
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                onSelectClip(clip.id);
-                                setClipMenu({
-                                  x: event.clientX,
-                                  y: event.clientY,
-                                  clipId: clip.id,
-                                  assetId: clip.assetId,
-                                  kind: clip.kind,
-                                });
-                              }}
-                              title={`${clipAssetName(clip.id)} · ${clip.start.toFixed(1)}s → ${(clip.start + clip.duration).toFixed(1)}s · ${t("drawer.clipMenuHint")}`}
-                            >
-                              {preview ? (
-                                <span
-                                  className={`production-clip-razor-preview${preview.valid ? "" : " invalid"}`}
-                                  style={{ left: `${preview.ratio * 100}%` }}
-                                />
-                              ) : null}
-                              <span className="production-clip-name">{clipAssetName(clip.id)}</span>
-                              {keyframes.map((group, groupIndex) => (
-                                <button
-                                  key={groupIndex}
-                                  type="button"
-                                  className="production-clip-keyframe"
-                                  style={{ left: `${(group.t / clip.duration) * 100}%` }}
-                                  aria-label={t("drawer.timelineKeyframeTitle", {
-                                    t: group.t.toFixed(2),
-                                    n: group.count,
-                                  })}
-                                  title={t("drawer.timelineKeyframeTitle", {
-                                    t: group.t.toFixed(2),
-                                    n: group.count,
-                                  })}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onDoubleClick={(event) => {
-                                    event.stopPropagation();
-                                    if (!clipProperties || !onSetClipProperties || track.locked) return;
-                                    onSetClipProperties(
-                                      clip.id,
-                                      removeKeyframesAtTime(clipProperties, group.t, keyframeEps),
-                                    );
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (
-                                      (event.key !== "Delete" && event.key !== "Backspace") ||
-                                      !clipProperties ||
-                                      !onSetClipProperties ||
-                                      track.locked
-                                    ) {
-                                      return;
-                                    }
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    onSetClipProperties(
-                                      clip.id,
-                                      removeKeyframesAtTime(clipProperties, group.t, keyframeEps),
-                                    );
-                                  }}
-                                  onPointerDown={(event) => {
-                                    if (
-                                      event.button > 0 ||
-                                      timelineTool !== "select" ||
-                                      !clipProperties ||
-                                      !onSetClipProperties ||
-                                      track.locked
-                                    ) {
-                                      return;
-                                    }
-                                    const clipRect = event.currentTarget.parentElement?.getBoundingClientRect();
-                                    if (!clipRect || clipRect.width <= 0) return;
-                                    keyframeDrag.current = {
-                                      pointerId: event.pointerId,
-                                      clipId: clip.id,
-                                      fromT: group.t,
-                                      clipStart: clip.start,
-                                      clipDuration: clip.duration,
-                                      clipLeft: clipRect.left,
-                                      clipWidth: clipRect.width,
-                                      props: clipProperties,
-                                    };
-                                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                                    event.stopPropagation();
-                                    event.preventDefault();
-                                  }}
-                                  onPointerMove={(event) => {
-                                    const drag = keyframeDrag.current;
-                                    if (
-                                      !drag ||
-                                      drag.pointerId !== event.pointerId ||
-                                      drag.clipId !== clip.id ||
-                                      !onSetClipProperties
-                                    ) {
-                                      return;
-                                    }
-                                    let localTime = Math.min(
-                                      drag.clipDuration,
-                                      Math.max(
-                                        0,
-                                        ((event.clientX - drag.clipLeft) / drag.clipWidth) *
-                                          drag.clipDuration,
-                                      ),
-                                    );
-                                    if (event.shiftKey) {
-                                      const absoluteCandidates = [
-                                        ...snapPoints,
-                                        ...keyframes
-                                          .filter((candidate) => candidate.t !== drag.fromT)
-                                          .map((candidate) => drag.clipStart + candidate.t),
-                                      ];
-                                      const toleranceSec = (8 / drag.clipWidth) * drag.clipDuration;
-                                      localTime =
-                                        snapTimeToPoints(
-                                          drag.clipStart + localTime,
-                                          absoluteCandidates,
-                                          toleranceSec,
-                                        ) - drag.clipStart;
-                                      localTime = Math.min(
-                                        drag.clipDuration,
-                                        Math.max(0, localTime),
-                                      );
-                                    }
-                                    onSetClipProperties(
-                                      clip.id,
-                                      moveKeyframesAtTime(
-                                        drag.props,
-                                        drag.fromT,
-                                        localTime,
-                                        keyframeEps,
-                                      ),
-                                    );
-                                  }}
-                                  onPointerUp={(event) => {
-                                    if (keyframeDrag.current?.pointerId === event.pointerId) {
-                                      keyframeDrag.current = null;
-                                    }
-                                    event.stopPropagation();
-                                  }}
-                                  onPointerCancel={(event) => {
-                                    if (keyframeDrag.current?.pointerId === event.pointerId) {
-                                      keyframeDrag.current = null;
-                                    }
-                                  }}
-                                />
-                              ))}
-                              {selected ? (
-                                <span
-                                  className="production-clip-remove"
-                                  role="button"
-                                  title={t("drawer.removeClipTitle")}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onRemoveClip(clip.id);
-                                  }}
-                                >
-                                  ×
-                                </span>
-                              ) : null}
-                            </div>
-                          );
-                        })}
+                        {track.clips.map((clip) => (
+                          <TimelineClipView
+                            key={clip.id}
+                            clip={clip}
+                            clipDisplayName={clipAssetName(clip.id)}
+                            selected={clip.id === selectedClipId}
+                            trackLocked={!!track.locked}
+                            rulerDurationSec={rulerDuration}
+                            timelineFps={timelineFps}
+                            timelineTool={timelineTool}
+                            snapPoints={snapPoints}
+                            clipProperties={clipProperties}
+                            onSelectClip={onSelectClip}
+                            onSplitClipAt={onSplitClipAt}
+                            onRemoveClip={onRemoveClip}
+                            onSetClipProperties={onSetClipProperties}
+                            onOpenContextMenu={setClipMenu}
+                          />
+                        ))}
                       </div>
                     </div>
                   );
@@ -577,69 +346,15 @@ export function ProductionTimeline({
         </div>
       </div>
       {clipMenu ? (
-        <div
-          className="production-clip-menu-backdrop"
-          onClick={() => setClipMenu(null)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setClipMenu(null);
-          }}
-        >
-          <div
-            className="production-clip-menu"
-            style={{ left: clipMenu.x, top: clipMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {clipMenu.kind !== "audio" ? (
-              <button
-                onClick={() => {
-                  onOpenClipGrade(clipMenu.clipId);
-                  setClipMenu(null);
-                }}
-              >
-                {t("drawer.menuGrade")}
-              </button>
-            ) : null}
-            {clipMenu.kind === "still" ? (
-              <button
-                onClick={() => {
-                  onOpenImageEdit(clipMenu.assetId);
-                  setClipMenu(null);
-                }}
-              >
-                {t("drawer.menuEditImage")}
-              </button>
-            ) : null}
-            {clipMenu.kind !== "audio" ? (
-              <button
-                onClick={() => {
-                  onSplitClipToLayers(clipMenu.clipId);
-                  setClipMenu(null);
-                }}
-              >
-                {t("drawer.menuSplitLayers")}
-              </button>
-            ) : null}
-            {clipMenu.kind === "audio" ? (
-              <button
-                onClick={() => {
-                  onOpenAudioEdit(clipMenu.clipId);
-                  setClipMenu(null);
-                }}
-              >
-                {t("drawer.menuEditAudio")}
-              </button>
-            ) : null}
-            <button
-              onClick={() => {
-                onRemoveClip(clipMenu.clipId);
-                setClipMenu(null);
-              }}
-            >
-              {t("drawer.menuRemoveClip")}
-            </button>
-          </div>
-        </div>
+        <TimelineClipContextMenu
+          menu={clipMenu}
+          onClose={() => setClipMenu(null)}
+          onRemoveClip={onRemoveClip}
+          onOpenImageEdit={onOpenImageEdit}
+          onOpenAudioEdit={onOpenAudioEdit}
+          onOpenClipGrade={onOpenClipGrade}
+          onSplitClipToLayers={onSplitClipToLayers}
+        />
       ) : null}
     </>
   );
