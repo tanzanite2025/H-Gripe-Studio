@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   formatTimelineTimecode,
+  majorTickStepSeconds,
+  minorTickStepFrames,
   playheadTimeForKey,
   playheadTimeForWheel,
   rulerClientXToTime,
@@ -14,6 +16,7 @@ import {
   timelineRulerDuration,
   timelineZoomStep,
 } from "./TimelineRuler";
+import { frameToSeconds, secondsToFrame } from "./timeline";
 
 describe("TimelineRuler", () => {
   it("formats SMPTE-style timecode using the timeline fps", () => {
@@ -24,6 +27,25 @@ describe("TimelineRuler", () => {
   it("keeps a minimum visible ruler duration", () => {
     expect(timelineRulerDuration(0, 0)).toBe(8);
     expect(timelineRulerDuration(3, 10.2)).toBe(11);
+  });
+
+  it("spaces minor ticks on the whole-frame grid the playhead scrubs on", () => {
+    // Regression: minor ticks were majorStepSec/10 s (0.1s = 2.4 frames at
+    // 24fps), off the frame grid, so a wheel notch (1 frame) reached a tick in
+    // 2 notches sometimes and overshot at 3. Each minor step must be a whole
+    // number of frames, so N wheel notches land exactly on a tick.
+    for (const fps of [24, 25, 30, 60]) {
+      for (const rulerDuration of [8, 30, 120]) {
+        const majorStepSec = majorTickStepSeconds(rulerDuration);
+        const stepFrames = minorTickStepFrames(majorStepSec, fps);
+        expect(Number.isInteger(stepFrames)).toBe(true);
+        expect(stepFrames).toBeGreaterThanOrEqual(1);
+        // A tick's time is an exact multiple of the frame duration, so
+        // secondsToFrame lands on it without rounding drift.
+        const tickSec = frameToSeconds(stepFrames * 3, fps);
+        expect(secondsToFrame(tickSec, fps)).toBe(stepFrames * 3);
+      }
+    }
   });
 
   it("converts pointer x positions to frame-snapped times", () => {
