@@ -1,3 +1,4 @@
+import { formatTimecode } from "./timecode";
 import {
   DEFAULT_TIMELINE_FPS,
   frameToSeconds,
@@ -6,18 +7,6 @@ import {
   snapTimeToPoints,
   type TimelineMarker,
 } from "./timeline";
-
-export function formatTimelineTimecode(sec: number, fps: number): string {
-  const safeFps = Math.max(1, Math.round(fps));
-  const totalFrames = Math.max(0, Math.round(sec * safeFps));
-  const frames = totalFrames % safeFps;
-  const totalSeconds = Math.floor(totalFrames / safeFps);
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60) % 60;
-  const hours = Math.floor(totalSeconds / 3600);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
-}
 
 export function timelineRulerDuration(durationSec: number, playheadSec: number): number {
   return Math.max(8, Math.ceil(Math.max(durationSec, playheadSec)));
@@ -159,7 +148,7 @@ export function TimelineRuler({
       aria-valuemin={0}
       aria-valuemax={rulerDuration}
       aria-valuenow={playheadSec}
-      title={formatTimelineTimecode(playheadSec, timelineFps)}
+      title={formatTimecode(playheadSec, timelineFps)}
       tabIndex={0}
       onKeyDown={(e) => {
         if ((e.key === "m" || e.key === "M") && onToggleMarker) {
@@ -220,7 +209,7 @@ export function TimelineRuler({
           className="production-timeline-ruler-tick major"
           style={{ left: `${(sec / rulerDuration) * 100}%` }}
         >
-          <span>{formatTimelineTimecode(sec, timelineFps)}</span>
+          <span>{formatTimecode(sec, timelineFps)}</span>
         </span>
       ))}
       {(markers ?? []).map((marker) => (
@@ -228,7 +217,7 @@ export function TimelineRuler({
           key={marker.id}
           className="production-timeline-marker"
           style={{ left: `${(marker.sec / rulerDuration) * 100}%` }}
-          title={formatTimelineTimecode(marker.sec, timelineFps)}
+          title={formatTimecode(marker.sec, timelineFps)}
           onContextMenu={(e) => {
             if (!onRemoveMarker) return;
             e.preventDefault();

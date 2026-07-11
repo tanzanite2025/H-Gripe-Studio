@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   registerTimeline,
@@ -17,7 +17,22 @@ import {
   type ExportFrameResult,
 } from "./ExportFrameDialog";
 import type { MediaAsset } from "./mediaBin";
+import {
+  ExportFrameIcon,
+  FastForwardIcon,
+  LoopPlaybackIcon,
+  MarkerIcon,
+  MarkInIcon,
+  MarkOutIcon,
+  PauseIcon,
+  PlayIcon,
+  RewindIcon,
+  SafeAreaIcon,
+  StepBackIcon,
+  StepForwardIcon,
+} from "./monitorIcons";
 import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
+import { formatTimecode } from "./timecode";
 import { findClip, timelineDuration, type TimelineModel } from "./timeline";
 import { useSourceFps } from "./useSourceFps";
 
@@ -69,139 +84,8 @@ export const SAFE_AREA_SCENE: ViewportOverlayScene = {
   ],
 };
 
-function MonitorIcon({ children }: { children: ReactNode }) {
-  return (
-    <svg className="production-monitor-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      {children}
-    </svg>
-  );
-}
-
-function MarkerIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M7 4h10v10l-5 4-5-4z" />
-    </MonitorIcon>
-  );
-}
-
-function MarkInIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M8 5v14" />
-      <path d="M16 7 11 12l5 5" />
-    </MonitorIcon>
-  );
-}
-
-function MarkOutIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M16 5v14" />
-      <path d="m8 7 5 5-5 5" />
-    </MonitorIcon>
-  );
-}
-
-function StepBackIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M8 6v12" />
-      <path d="m17 7-7 5 7 5z" />
-    </MonitorIcon>
-  );
-}
-
-function StepForwardIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M16 6v12" />
-      <path d="m7 7 7 5-7 5z" />
-    </MonitorIcon>
-  );
-}
-
-function RewindIcon() {
-  return (
-    <MonitorIcon>
-      <path d="m11 7-7 5 7 5z" />
-      <path d="m20 7-7 5 7 5z" />
-    </MonitorIcon>
-  );
-}
-
-function FastForwardIcon() {
-  return (
-    <MonitorIcon>
-      <path d="m4 7 7 5-7 5z" />
-      <path d="m13 7 7 5-7 5z" />
-    </MonitorIcon>
-  );
-}
-
-function LoopPlaybackIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M7 7h9.5a3.5 3.5 0 0 1 0 7H8" />
-      <path d="m13 4 3 3-3 3" />
-      <path d="M17 17H7.5a3.5 3.5 0 0 1 0-7H16" />
-      <path d="m11 20-3-3 3-3" />
-    </MonitorIcon>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <MonitorIcon>
-      <path d="m8 5 11 7-11 7z" />
-    </MonitorIcon>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <MonitorIcon>
-      <path d="M8 5v14" />
-      <path d="M16 5v14" />
-    </MonitorIcon>
-  );
-}
-
-function SafeAreaIcon() {
-  return (
-    <MonitorIcon>
-      <rect x="5" y="6" width="14" height="12" rx="1.5" />
-      <rect x="8" y="8.5" width="8" height="7" rx="1" />
-    </MonitorIcon>
-  );
-}
-
-function ExportFrameIcon() {
-  return (
-    <MonitorIcon>
-      <rect x="4" y="5" width="16" height="11" rx="1.5" />
-      <path d="M8 19h8" />
-      <path d="M12 16v3" />
-      <path d="M12 8v5" />
-      <path d="m9.5 10.5 2.5 2.5 2.5-2.5" />
-    </MonitorIcon>
-  );
-}
-
 function clampTime(sec: number, duration: number) {
   return Math.max(0, Math.min(duration, sec));
-}
-
-function formatTimecode(sec: number, fps: number) {
-  const safeFps = Math.max(1, Math.round(fps));
-  const totalFrames = Math.max(0, Math.round(sec * safeFps));
-  const frames = totalFrames % safeFps;
-  const totalSeconds = Math.floor(totalFrames / safeFps);
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60) % 60;
-  const hours = Math.floor(totalSeconds / 3600);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
 }
 
 export function resolveLoopPlaybackRange(

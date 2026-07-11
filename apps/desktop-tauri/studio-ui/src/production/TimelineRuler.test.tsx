@@ -3,7 +3,6 @@ import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  formatTimelineTimecode,
   majorTickStepSeconds,
   minorTickStepFrames,
   playheadTimeForKey,
@@ -16,12 +15,13 @@ import {
   timelineRulerDuration,
   timelineZoomStep,
 } from "./TimelineRuler";
+import { formatTimecode } from "./timecode";
 import { frameToSeconds, secondsToFrame } from "./timeline";
 
 describe("TimelineRuler", () => {
   it("formats SMPTE-style timecode using the timeline fps", () => {
-    expect(formatTimelineTimecode(1.5, 24)).toBe("00:00:01:12");
-    expect(formatTimelineTimecode(61, 30)).toBe("00:01:01:00");
+    expect(formatTimecode(1.5, 24)).toBe("00:00:01:12");
+    expect(formatTimecode(61, 30)).toBe("00:01:01:00");
   });
 
   it("keeps a minimum visible ruler duration", () => {
