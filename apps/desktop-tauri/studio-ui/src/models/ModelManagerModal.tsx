@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { deviceRegistrySnapshot, type DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
 import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
-import { listProfiles } from "../bridge/tauri";
 import { useT, type MsgKey } from "../i18n";
 import { summarizeCapabilities, summarizeDeviceRegistry } from "../runtime/capabilitySummary";
 import { getGpuMaxJobs, setGpuMaxJobs, MAX_GPU_JOBS } from "../bridge/scheduler";
@@ -22,7 +21,6 @@ import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
   duplicateLocalModel,
-  importLegacyProfiles,
   loadRegistry,
   removeApiProfile,
   removeLocalModel,
@@ -165,16 +163,6 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
     saveRegistry(next);
   }, []);
 
-  // Manual seed from the legacy H-Gripe provider profiles (never automatic).
-  const handleImportLegacy = useCallback(() => {
-    void listProfiles()
-      .then((profiles) => {
-        commit(importLegacyProfiles(loadRegistry(), profiles));
-        setMessage(t("models.imported"));
-      })
-      .catch((err) => setMessage(String(err)));
-  }, [commit, t]);
-
   // Manual connection test (shared with the Model/API agent actions): the
   // check itself lives in `backendHealth.ts`.
   const handleTestApi = useCallback(
@@ -299,9 +287,6 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   onClick={() => setEditingApi(emptyApiProfile(registry))}
                 >
                   {t("models.addProfile")}
-                </button>
-                <button onClick={handleImportLegacy} title={t("models.importLegacyTitle")}>
-                  {t("models.importLegacy")}
                 </button>
                 <span className="muted">{message}</span>
               </div>
