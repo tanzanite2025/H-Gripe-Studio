@@ -1226,8 +1226,8 @@ export const messages = {
     zh: "还没有 API 配置——新增一个，或从模板中选择。",
   },
   "models.emptyLocal": {
-    en: "No local models yet — add an entry and bind its weights path.",
-    zh: "还没有本地模型——新增条目并绑定权重路径。",
+    en: "No local models yet.",
+    zh: "还没有本地模型。",
   },
   "models.test": { en: "Test", zh: "测试" },
   "models.edit": { en: "Edit", zh: "编辑" },

@@ -1,26 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { deviceRegistrySnapshot, type DeviceRegistrySnapshot } from "../bridge/deviceRegistry";
-import { lastEngineProbe, probeEnginesCached, type EngineProbeReport } from "../bridge/engineProbe";
 import { useT, type MsgKey } from "../i18n";
-import { summarizeCapabilities, summarizeDeviceRegistry } from "../runtime/capabilitySummary";
-import { getGpuMaxJobs, setGpuMaxJobs, MAX_GPU_JOBS } from "../bridge/scheduler";
-import {
-  DEVICE_PREFERENCES,
-  getDevicePreference,
-  setDevicePreference,
-  type DevicePreference,
-} from "../runtime/devicePreference";
-import {
-  PREVIEW_QUALITIES,
-  getPreviewQuality,
-  setPreviewQuality,
-  type PreviewQuality,
-} from "../runtime/previewQuality";
 import {
   MODEL_CAPABILITIES,
   duplicateApiProfile,
-  duplicateLocalModel,
   loadRegistry,
   removeApiProfile,
   removeLocalModel,
@@ -68,21 +51,6 @@ function emptyApiProfile(registry: BackendRegistry): ApiProfileEntry {
   };
 }
 
-function emptyLocalModel(registry: BackendRegistry): LocalModelEntry {
-  return {
-    ref: uniqueRef("local-model", registry.localModels),
-    display_name: "",
-    capabilities: [],
-    engine: "onnx",
-    weights_path: "",
-    device_policy: "auto",
-    precision_policy: "auto",
-    health: "untested",
-    fallback_policy: "built_in",
-    health_detail: null,
-  };
-}
-
 function CapabilityPicker({
   selected,
   onChange,
@@ -116,39 +84,7 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
   const [tab, setTab] = useState<ManagerTab>("api");
   const [apiView, setApiView] = useState<ApiView>("configured");
   const [editingApi, setEditingApi] = useState<ApiProfileEntry | null>(null);
-  const [editingLocal, setEditingLocal] = useState<LocalModelEntry | null>(null);
   const [message, setMessage] = useState<string>("");
-  // Capability probe summary (diagnostics only, manual refresh; seeded from
-  // the cached report so reopening the modal shows the last snapshot).
-  const [probe, setProbe] = useState<EngineProbeReport | null>(() => lastEngineProbe());
-  // Central device registry snapshot (GPU_DEVICE_STRATEGY_PLAN step 13),
-  // fetched alongside the engine probe on the same manual refresh.
-  const [deviceRegistry, setDeviceRegistry] = useState<DeviceRegistrySnapshot | null>(null);
-  const [probing, setProbing] = useState(false);
-  // Global default device preference (GPU plan long-term step 5): only seeds
-  // unset `device` params; explicit per-node choices always win.
-  const [devicePreference, setDevicePreferenceState] = useState<DevicePreference>(() =>
-    getDevicePreference(),
-  );
-  // Preview speed vs export fidelity (GPU plan long-term step 5): picks the
-  // grade preview proxy size only; exports always run at full fidelity.
-  const [previewQuality, setPreviewQualityState] = useState<PreviewQuality>(() =>
-    getPreviewQuality(),
-  );
-  // GPU lane width (GPU plan long-term step 5): applied to the Rust
-  // scheduler on change; running jobs are never interrupted.
-  const [gpuMaxJobs, setGpuMaxJobsState] = useState<number>(() => getGpuMaxJobs());
-
-  const handleProbe = useCallback(() => {
-    setProbing(true);
-    Promise.all([probeEnginesCached(true), deviceRegistrySnapshot()])
-      .then(([report, registrySnapshot]) => {
-        setProbe(report);
-        setDeviceRegistry(registrySnapshot);
-      })
-      .catch((err) => setMessage(String(err)))
-      .finally(() => setProbing(false));
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -425,108 +361,11 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
           ) : (
             <>
               <div className="model-manager-list-actions">
-                <button
-                  className="primary"
-                  onClick={() => setEditingLocal(emptyLocalModel(registry))}
-                >
-                  {t("models.addModel")}
-                </button>
                 <span className="muted">{message}</span>
               </div>
               {localModels.length === 0 && (
                 <p className="muted">{t("models.emptyLocal")}</p>
               )}
-              <div className="model-manager-capability">
-                <div className="model-manager-list-actions">
-                  <span className="muted">{t("models.devicePreferenceTitle")}</span>
-                  <select
-                    value={devicePreference}
-                    onChange={(e) => {
-                      const next = e.target.value as DevicePreference;
-                      setDevicePreference(next);
-                      setDevicePreferenceState(next);
-                    }}
-                  >
-                    {DEVICE_PREFERENCES.map((pref) => (
-                      <option key={pref} value={pref}>
-                        {t(`models.devicePreference.${pref}` as MsgKey)}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="muted">{t("models.devicePreferenceHint")}</span>
-                </div>
-                <div className="model-manager-list-actions">
-                  <span className="muted">{t("models.previewQualityTitle")}</span>
-                  <select
-                    value={previewQuality}
-                    onChange={(e) => {
-                      const next = e.target.value as PreviewQuality;
-                      setPreviewQuality(next);
-                      setPreviewQualityState(next);
-                    }}
-                  >
-                    {PREVIEW_QUALITIES.map((quality) => (
-                      <option key={quality} value={quality}>
-                        {t(`models.previewQuality.${quality}` as MsgKey)}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="muted">{t("models.previewQualityHint")}</span>
-                </div>
-                <div className="model-manager-list-actions">
-                  <span className="muted">{t("models.gpuMaxJobsTitle")}</span>
-                  <select
-                    value={gpuMaxJobs}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      setGpuMaxJobsState(next);
-                      setGpuMaxJobs(next)
-                        .then((applied) => {
-                          if (applied !== null) setGpuMaxJobsState(applied);
-                        })
-                        .catch((err) => setMessage(String(err)));
-                    }}
-                  >
-                    {Array.from({ length: MAX_GPU_JOBS }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="muted">{t("models.gpuMaxJobsHint")}</span>
-                </div>
-                <div className="model-manager-list-actions">
-                  <span className="muted">{t("models.capabilityTitle")}</span>
-                  <button onClick={handleProbe} disabled={probing}>
-                    {probing ? t("models.probing") : t("models.probeEngines")}
-                  </button>
-                </div>
-                {probe ? (
-                  <ul className="model-manager-capability-lines">
-                    {summarizeCapabilities(probe).map((line) => (
-                      <li key={line.label} className={line.tone === "warn" ? "warn" : ""}>
-                        <code>{line.label}</code>
-                        <span className="muted"> · {line.value}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted">{t("models.capabilityHint")}</p>
-                )}
-                {deviceRegistry && (
-                  <>
-                    <span className="muted">{t("models.deviceRegistryTitle")}</span>
-                    <ul className="model-manager-capability-lines">
-                      {summarizeDeviceRegistry(deviceRegistry).map((line, i) => (
-                        <li key={`${line.label}-${i}`} className={line.tone === "warn" ? "warn" : ""}>
-                          <code>{line.label}</code>
-                          <span className="muted"> · {line.value}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
               <ul className="model-manager-list">
                 {localModels.map((m) => (
                   <li
@@ -548,10 +387,6 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     </div>
                     <div className="model-manager-entry-actions">
                       <button onClick={() => handleTestLocal(m)}>{t("models.test")}</button>
-                      <button onClick={() => setEditingLocal(m)}>{t("models.edit")}</button>
-                      <button onClick={() => commit(duplicateLocalModel(registry, m.ref))}>
-                        {t("models.duplicate")}
-                      </button>
                       <button onClick={() => commit(removeLocalModel(registry, m.ref))}>
                         {t("models.remove")}
                       </button>
@@ -559,114 +394,6 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   </li>
                 ))}
               </ul>
-              {editingLocal && (
-                <form
-                  className="model-manager-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    commit(upsertLocalModel(registry, editingLocal));
-                    setEditingLocal(null);
-                  }}
-                >
-                  <label className="field">
-                    <span>{t("models.ref")}</span>
-                    <input
-                      value={editingLocal.ref}
-                      onChange={(e) => setEditingLocal({ ...editingLocal, ref: e.target.value })}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("models.displayName")}</span>
-                    <input
-                      value={editingLocal.display_name}
-                      onChange={(e) =>
-                        setEditingLocal({ ...editingLocal, display_name: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("models.engine")}</span>
-                    <input
-                      value={editingLocal.engine}
-                      onChange={(e) => setEditingLocal({ ...editingLocal, engine: e.target.value })}
-                      placeholder="onnx / ort / native / external"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("models.weightsPath")}</span>
-                    <input
-                      value={editingLocal.weights_path}
-                      onChange={(e) =>
-                        setEditingLocal({ ...editingLocal, weights_path: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("models.devicePolicy")}</span>
-                    <select
-                      value={editingLocal.device_policy}
-                      onChange={(e) =>
-                        setEditingLocal({
-                          ...editingLocal,
-                          device_policy: e.target.value as LocalModelEntry["device_policy"],
-                        })
-                      }
-                    >
-                      <option value="auto">auto</option>
-                      <option value="cpu">cpu</option>
-                      <option value="cuda">cuda</option>
-                      <option value="directml">directml</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>{t("models.precisionPolicy")}</span>
-                    <select
-                      value={editingLocal.precision_policy}
-                      onChange={(e) =>
-                        setEditingLocal({
-                          ...editingLocal,
-                          precision_policy: e.target.value as LocalModelEntry["precision_policy"],
-                        })
-                      }
-                    >
-                      <option value="auto">auto</option>
-                      <option value="fp32">fp32</option>
-                      <option value="fp16">fp16</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>{t("models.fallbackPolicy")}</span>
-                    <select
-                      value={editingLocal.fallback_policy}
-                      onChange={(e) =>
-                        setEditingLocal({
-                          ...editingLocal,
-                          fallback_policy: e.target.value as LocalModelEntry["fallback_policy"],
-                        })
-                      }
-                    >
-                      <option value="built_in">built-in</option>
-                      <option value="cpu">cpu</option>
-                      <option value="api">api</option>
-                      <option value="none">none</option>
-                    </select>
-                  </label>
-                  <span className="muted">{t("models.capabilities")}</span>
-                  <CapabilityPicker
-                    selected={editingLocal.capabilities}
-                    onChange={(caps) => setEditingLocal({ ...editingLocal, capabilities: caps })}
-                  />
-                  <div className="model-manager-form-actions">
-                    <button type="submit" className="primary">
-                      {t("models.save")}
-                    </button>
-                    <button type="button" onClick={() => setEditingLocal(null)}>
-                      {t("models.cancel")}
-                    </button>
-                  </div>
-                </form>
-              )}
             </>
           )}
         </div>
