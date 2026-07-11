@@ -6,6 +6,7 @@ import { defaultClipProperties, type ClipProperties } from "./clipProps";
 import {
   addAssetClip,
   addTimelineTrack,
+  moveTimelineClip,
   removeTimelineClip,
   removeTimelineMarker,
   removeTimelineTrack,
@@ -15,6 +16,7 @@ import {
   toggleTimelineMarker,
   toggleTimelineTrackHidden,
   toggleTimelineTrackLock,
+  trimTimelineClipEdge,
 } from "./productionStore";
 import {
   useProductionStateFromContext,
@@ -33,6 +35,7 @@ import {
   timelineDuration,
   timelineSnapPoints,
   trackKindForClip,
+  type ClipTrimEdge,
   type TrackKind,
 } from "./timeline";
 
@@ -111,6 +114,10 @@ export function ProductionTimeline({
   const onRemoveTrack = (trackId: string) => removeTimelineTrack(store, trackId);
   const onRemoveClip = (clipId: string) => removeTimelineClip(store, clipId);
   const onSplitClipAt = (clipId: string, atSec: number) => splitTimelineClip(store, clipId, atSec);
+  const onMoveClipTo = (clipId: string, toStartSec: number) =>
+    moveTimelineClip(store, clipId, toStartSec);
+  const onTrimClipEdge = (clipId: string, edge: ClipTrimEdge, toSec: number) =>
+    trimTimelineClipEdge(store, clipId, edge, toSec);
   const onToggleMarkerAt = (sec: number) => toggleTimelineMarker(store, sec);
   const onRemoveMarker = (markerId: string) => removeTimelineMarker(store, markerId);
   const onToggleTrackLock = (trackId: string) => toggleTimelineTrackLock(store, trackId);
@@ -328,6 +335,8 @@ export function ProductionTimeline({
                             onSelectClip={onSelectClip}
                             onSplitClipAt={onSplitClipAt}
                             onRemoveClip={onRemoveClip}
+                            onMoveClipTo={onMoveClipTo}
+                            onTrimClipEdge={onTrimClipEdge}
                             onSetClipProperties={onSetClipProperties}
                             onOpenContextMenu={setClipMenu}
                           />

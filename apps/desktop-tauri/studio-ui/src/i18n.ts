@@ -939,6 +939,14 @@ export const messages = {
     zh: "删除该轨道及其上的 clip（每类最后一条轨道不可删）",
   },
   "drawer.removeClipTitle": { en: "remove this clip from the timeline", zh: "从时间线移除该 clip" },
+  "drawer.trimClipStartHandle": {
+    en: "drag to trim the clip start (Shift snaps to edges/markers)",
+    zh: "拖动修剪 clip 起点（按住 Shift 吸附到边缘/标记）",
+  },
+  "drawer.trimClipEndHandle": {
+    en: "drag to trim the clip end (Shift snaps to edges/markers)",
+    zh: "拖动修剪 clip 终点（按住 Shift 吸附到边缘/标记）",
+  },
   "drawer.imageEditHint": { en: "right-click to open the image editor", zh: "右键打开图片编辑" },
   "drawer.imageEditNoSource": {
     en: "this asset's source node is gone — image editing needs its canvas card",

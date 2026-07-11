@@ -455,6 +455,250 @@ export function snapTimeToPoints(sec: number, points: number[], toleranceSec: nu
   return best;
 }
 
+function findLinkedPartner(timeline: TimelineModel, clip: TimelineClip): TimelineClip | null {
+  if (clip.linkId == null) return null;
+  for (const track of timeline.tracks) {
+    const partner = track.clips.find((c) => c.id !== clip.id && c.linkId === clip.linkId);
+    if (partner) return partner;
+  }
+  return null;
+}
+
+interface TimeInterval {
+  start: number;
+  end: number;
+}
+
+/** Free gaps in a track (positions not covered by clips other than the
+ * excluded ones), from time 0 to +Infinity. */
+function freeGapsInTrack(track: TimelineTrack, excludedClipIds: Set<string>): TimeInterval[] {
+  const blockers = track.clips
+    .filter((c) => !excludedClipIds.has(c.id))
+    .sort((a, b) => a.start - b.start);
+  const gaps: TimeInterval[] = [];
+  let cursor = 0;
+  for (const blocker of blockers) {
+    if (blocker.start > cursor) gaps.push({ start: cursor, end: blocker.start });
+    cursor = Math.max(cursor, blocker.start + blocker.duration);
+  }
+  gaps.push({ start: cursor, end: Number.POSITIVE_INFINITY });
+  return gaps;
+}
+
+/** Intervals of allowed move deltas so that [start+delta, start+delta+duration]
+ * stays inside a free gap. */
+function allowedMoveDeltasForClip(
+  gaps: TimeInterval[],
+  clipStart: number,
+  clipDuration: number,
+): TimeInterval[] {
+  const deltas: TimeInterval[] = [];
+  for (const gap of gaps) {
+    if (gap.end - gap.start < clipDuration) continue;
+    deltas.push({ start: gap.start - clipStart, end: gap.end - clipDuration - clipStart });
+  }
+  return deltas;
+}
+
+function intersectIntervalLists(a: TimeInterval[], b: TimeInterval[]): TimeInterval[] {
+  const result: TimeInterval[] = [];
+  for (const left of a) {
+    for (const right of b) {
+      const start = Math.max(left.start, right.start);
+      const end = Math.min(left.end, right.end);
+      if (start <= end) result.push({ start, end });
+    }
+  }
+  return result;
+}
+
+/** The value inside one of the intervals closest to `desired`. */
+function clampIntoIntervals(desired: number, intervals: TimeInterval[]): number | null {
+  let best: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const interval of intervals) {
+    const candidate = Math.min(Math.max(desired, interval.start), interval.end);
+    const distance = Math.abs(candidate - desired);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+export interface MoveClipResult {
+  timeline: TimelineModel;
+  /** Actual (clamped, frame-snapped) start the clip landed on. */
+  movedToStartSec: number;
+}
+
+/**
+ * Horizontal move of a clip within its own track without overlapping other
+ * clips: the desired start is frame-snapped, then clamped into the nearest
+ * position where the clip (and its linked A/V partner, which moves by the
+ * same delta on its own track) fits. Returns null when nothing can move.
+ */
+export function moveClipWithLinkedPartner(
+  timeline: TimelineModel,
+  clipId: string,
+  desiredStartSec: number,
+): MoveClipResult | null {
+  const found = findClip(timeline, clipId);
+  if (!found) return null;
+  const clip = found.clip;
+  const partner = findLinkedPartner(timeline, clip);
+  const partnerLocation = partner ? findClip(timeline, partner.id) : null;
+  const movingIds = new Set([clip.id, ...(partner ? [partner.id] : [])]);
+
+  const snappedStart = snapTimeToFrame(
+    Math.max(0, desiredStartSec),
+    timeline.fps ?? DEFAULT_TIMELINE_FPS,
+  );
+  const desiredDelta = snappedStart - clip.start;
+
+  let allowedDeltas = allowedMoveDeltasForClip(
+    freeGapsInTrack(found.track, movingIds),
+    clip.start,
+    clip.duration,
+  );
+  if (partner && partnerLocation) {
+    allowedDeltas = intersectIntervalLists(
+      allowedDeltas,
+      allowedMoveDeltasForClip(
+        freeGapsInTrack(partnerLocation.track, movingIds),
+        partner.start,
+        partner.duration,
+      ),
+    );
+  }
+  // Neither clip may start before 0.
+  const minDelta = -Math.min(clip.start, partner ? partner.start : Number.POSITIVE_INFINITY);
+  allowedDeltas = intersectIntervalLists(allowedDeltas, [
+    { start: minDelta, end: Number.POSITIVE_INFINITY },
+  ]);
+
+  const delta = clampIntoIntervals(desiredDelta, allowedDeltas);
+  if (delta == null) return null;
+  if (delta === 0) return { timeline, movedToStartSec: clip.start };
+
+  return {
+    movedToStartSec: clip.start + delta,
+    timeline: {
+      ...timeline,
+      tracks: timeline.tracks.map((track) =>
+        track.clips.some((c) => movingIds.has(c.id))
+          ? {
+              ...track,
+              clips: track.clips.map((c) =>
+                movingIds.has(c.id) ? { ...c, start: c.start + delta } : c,
+              ),
+            }
+          : track,
+      ),
+    },
+  };
+}
+
+export type ClipTrimEdge = "start" | "end";
+
+/** The allowed absolute time range for one clip's edge during a trim. */
+function trimEdgeRangeForClip(
+  track: TimelineTrack,
+  clip: TimelineClip,
+  edge: ClipTrimEdge,
+  excludedClipIds: Set<string>,
+): TimeInterval {
+  const clipEnd = clip.start + clip.duration;
+  if (edge === "start") {
+    let previousNeighborEnd = 0;
+    for (const other of track.clips) {
+      if (excludedClipIds.has(other.id)) continue;
+      const otherEnd = other.start + other.duration;
+      if (otherEnd <= clip.start) previousNeighborEnd = Math.max(previousNeighborEnd, otherEnd);
+    }
+    // Media clips cannot extend left past the source in-point (sourceStartSec 0).
+    const sourceInPointLimit =
+      clip.kind === "still" ? 0 : clip.start - (clip.sourceStartSec ?? 0);
+    return {
+      start: Math.max(previousNeighborEnd, sourceInPointLimit, 0),
+      end: clipEnd - MIN_CLIP_SECONDS,
+    };
+  }
+  let nextNeighborStart = Number.POSITIVE_INFINITY;
+  for (const other of track.clips) {
+    if (excludedClipIds.has(other.id)) continue;
+    if (other.start >= clipEnd) nextNeighborStart = Math.min(nextNeighborStart, other.start);
+  }
+  return { start: clip.start + MIN_CLIP_SECONDS, end: nextNeighborStart };
+}
+
+function applyTrimEdge(clip: TimelineClip, edge: ClipTrimEdge, toSec: number): TimelineClip {
+  if (edge === "start") {
+    const clipEnd = clip.start + clip.duration;
+    const shift = toSec - clip.start;
+    return {
+      ...clip,
+      start: toSec,
+      duration: clipEnd - toSec,
+      sourceStartSec: clip.kind === "still" ? clip.sourceStartSec : (clip.sourceStartSec ?? 0) + shift,
+    };
+  }
+  return { ...clip, duration: toSec - clip.start };
+}
+
+export interface TrimClipEdgeResult {
+  timeline: TimelineModel;
+  /** Actual (clamped, frame-snapped) time the edge landed on. */
+  trimmedToSec: number;
+}
+
+/**
+ * Drag-trim one edge of a clip to an absolute timeline time, preserving
+ * source continuity (left trims shift sourceStartSec). The time is
+ * frame-snapped, then clamped so neither the clip nor its linked A/V partner
+ * (whose matching edge is trimmed with it) collapses below MIN_CLIP_SECONDS,
+ * overlaps a neighbor, or extends media before its source in-point.
+ */
+export function trimClipEdgeWithLinkedPartner(
+  timeline: TimelineModel,
+  clipId: string,
+  edge: ClipTrimEdge,
+  desiredSec: number,
+): TrimClipEdgeResult | null {
+  const found = findClip(timeline, clipId);
+  if (!found) return null;
+  const clip = found.clip;
+  const partner = findLinkedPartner(timeline, clip);
+  const partnerLocation = partner ? findClip(timeline, partner.id) : null;
+  const editedIds = new Set([clip.id, ...(partner ? [partner.id] : [])]);
+
+  let range = trimEdgeRangeForClip(found.track, clip, edge, editedIds);
+  if (partner && partnerLocation) {
+    const partnerRange = trimEdgeRangeForClip(partnerLocation.track, partner, edge, editedIds);
+    range = { start: Math.max(range.start, partnerRange.start), end: Math.min(range.end, partnerRange.end) };
+  }
+  if (range.start > range.end) return null;
+
+  const snapped = snapTimeToFrame(desiredSec, timeline.fps ?? DEFAULT_TIMELINE_FPS);
+  const toSec = Math.min(Math.max(snapped, range.start), range.end);
+
+  return {
+    trimmedToSec: toSec,
+    timeline: {
+      ...timeline,
+      tracks: timeline.tracks.map((track) =>
+        track.clips.some((c) => editedIds.has(c.id))
+          ? {
+              ...track,
+              clips: track.clips.map((c) => (editedIds.has(c.id) ? applyTrimEdge(c, edge, toSec) : c)),
+            }
+          : track,
+      ),
+    },
+  };
+}
+
 /** Non-ripple trim: clamps start >= 0 and duration >= MIN_CLIP_SECONDS. */
 export function trimClip(
   timeline: TimelineModel,

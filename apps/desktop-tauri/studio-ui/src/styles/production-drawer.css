@@ -1209,6 +1209,23 @@
   background: var(--muted);
   box-shadow: none;
 }
+/* Edge trim handles (select tool): thin grab zones on both clip edges. */
+.production-clip-trim-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.production-clip-trim-handle.trim-start { left: 0; border-radius: 4px 0 0 4px; }
+.production-clip-trim-handle.trim-end { right: 0; border-radius: 0 4px 4px 0; }
+.production-clip:hover .production-clip-trim-handle,
+.production-clip.active .production-clip-trim-handle {
+  background: rgba(122, 162, 247, 0.35);
+}
+.production-clip-trim-handle:hover { background: rgba(122, 162, 247, 0.65) !important; }
 .production-clip-name {
   overflow: hidden;
   text-overflow: ellipsis;
