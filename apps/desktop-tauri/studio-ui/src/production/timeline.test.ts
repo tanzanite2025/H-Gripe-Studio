@@ -6,6 +6,7 @@ import {
   MIN_CLIP_SECONDS,
   addTrack,
   appendClip,
+  appendVideoWithAudio,
   clipKindForAsset,
   createTimeline,
   findClip,
@@ -66,6 +67,29 @@ describe("timeline model", () => {
     expect(audio.trackId).not.toBe(nextVideo.trackId);
     expect(audio.clip.start).toBe(0);
     expect(timelineDuration(audio.timeline)).toBe(2 * DEFAULT_MEDIA_SECONDS);
+  });
+
+  it("places a video asset as linked video + audio clips at the same start", () => {
+    const tl = createTimeline();
+    const first = appendVideoWithAudio(tl, videoAsset);
+    expect(findClip(first.timeline, first.video.id)!.track.kind).toBe("video");
+    expect(findClip(first.timeline, first.audio.id)!.track.kind).toBe("audio");
+    expect(first.video.start).toBe(0);
+    expect(first.audio.start).toBe(0);
+    expect(first.audio.duration).toBe(first.video.duration);
+    expect(first.audio.assetId).toBe(videoAsset.id);
+    // A second drop lands past the end of both tracks, keeping A/V in sync.
+    const second = appendVideoWithAudio(first.timeline, videoAsset);
+    expect(second.video.start).toBe(DEFAULT_MEDIA_SECONDS);
+    expect(second.audio.start).toBe(DEFAULT_MEDIA_SECONDS);
+  });
+
+  it("auto-creates the audio track for a video drop when none is available", () => {
+    const tl = { id: "t", fps: 24, tracks: [] };
+    const r = appendVideoWithAudio(tl, videoAsset);
+    expect(r.timeline.tracks.map((t) => t.kind)).toEqual(["video", "audio"]);
+    expect(findClip(r.timeline, r.video.id)!.track.id).toBe(r.videoTrackId);
+    expect(findClip(r.timeline, r.audio.id)!.track.id).toBe(r.audioTrackId);
   });
 
   it("routes an incompatible requested track to a compatible one", () => {

@@ -1,5 +1,10 @@
+import { useEffect, useRef } from "react";
+
 import { useT, type MsgKey } from "../i18n";
 import type { MediaAsset, MediaAssetKind } from "./mediaBin";
+
+/** Pixels of pointer travel before an armed press becomes an asset drag. */
+const DRAG_START_THRESHOLD_PX = 4;
 
 export interface AddableAsset {
   kind: MediaAssetKind;
@@ -41,6 +46,30 @@ export function MediaWorkspacePopover({
   onDragAssetChange,
 }: MediaWorkspacePopoverProps) {
   const t = useT();
+  // Pointer-based drag: Tauri's native drag-drop handler (needed for OS file
+  // drops) suppresses HTML5 drag events inside the WebView, so asset dragging
+  // is armed on pointerdown and starts once the pointer travels far enough.
+  const dragArm = useRef<{ assetId: string; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const arm = dragArm.current;
+      if (!arm) return;
+      if (Math.hypot(e.clientX - arm.x, e.clientY - arm.y) < DRAG_START_THRESHOLD_PX) return;
+      dragArm.current = null;
+      onSelectAsset(arm.assetId);
+      onDragAssetChange(arm.assetId);
+    };
+    const onUp = () => {
+      dragArm.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onSelectAsset, onDragAssetChange]);
 
   return (
     <aside
@@ -96,6 +125,10 @@ export function MediaWorkspacePopover({
                   onDragAssetChange(a.id);
                 }}
                 onDragEnd={() => onDragAssetChange(null)}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  dragArm.current = { assetId: a.id, x: e.clientX, y: e.clientY };
+                }}
                 onClick={() => onSelectAsset(a.id === activeAssetId ? null : a.id)}
                 onContextMenu={(e) => {
                   if (a.kind !== "image") return;

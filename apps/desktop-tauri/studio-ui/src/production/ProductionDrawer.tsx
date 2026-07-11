@@ -260,6 +260,19 @@ export function ProductionDrawerView({
     };
   }, [expanded, renderExpanded]);
 
+  // Pointer-based asset drag ends wherever the pointer is released; track
+  // lanes handle their own pointerup first, then this clears the drag state.
+  useEffect(() => {
+    if (dragAssetId == null) return;
+    const clear = () => setDragAssetId(null);
+    window.addEventListener("pointerup", clear);
+    window.addEventListener("pointercancel", clear);
+    return () => {
+      window.removeEventListener("pointerup", clear);
+      window.removeEventListener("pointercancel", clear);
+    };
+  }, [dragAssetId]);
+
   useEffect(() => {
     if (!renderExpanded) {
       setMonitorCardHeight(null);

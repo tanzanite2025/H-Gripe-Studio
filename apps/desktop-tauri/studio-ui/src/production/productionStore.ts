@@ -14,6 +14,7 @@ import { addAsset, removeAsset, type MediaAsset, type MediaAssetKind } from "./m
 import {
   addTrack,
   appendClip,
+  appendVideoWithAudio,
   createTimeline,
   findClip,
   removeClip,
@@ -225,6 +226,15 @@ export function addAssetClip(
   store.mutate((state) => {
     const asset = state.binAssets.find((a) => a.id === assetId);
     if (!asset) return state;
+    if (asset.kind === "video") {
+      const result = appendVideoWithAudio(state.timeline, asset, opts);
+      if (opts.trackId && result.videoTrackId !== opts.trackId) return state;
+      return {
+        ...state,
+        timeline: result.timeline,
+        selectedClipId: result.video.id,
+      };
+    }
     const result = appendClip(state.timeline, asset, opts);
     if (!result) return state;
     if (opts.trackId && result.trackId !== opts.trackId) return state;
