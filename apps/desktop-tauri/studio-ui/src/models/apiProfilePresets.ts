@@ -30,8 +30,8 @@ export const API_PROFILE_PRESETS: ApiProfilePreset[] = [
     provider_kind: "openai-compatible",
     base_url: "https://api.openai.com/v1",
     credentials_ref: "openai-api-key",
-    default_model: "gpt-4o",
-    known_models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-image-1"],
+    default_model: "gpt-5.6-sol",
+    known_models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-image-2"],
     capabilities: [
       "text.generate",
       "prompt.rewrite",
@@ -47,8 +47,13 @@ export const API_PROFILE_PRESETS: ApiProfilePreset[] = [
     provider_kind: "openai-compatible",
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
     credentials_ref: "gemini-api-key",
-    default_model: "gemini-2.5-flash",
-    known_models: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    default_model: "gemini-3.5-flash",
+    known_models: [
+      "gemini-3.5-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-flash-lite",
+      "gemini-3.1-flash-image",
+    ],
     capabilities: ["text.generate", "prompt.rewrite", "vision.describe", "video.describe"],
   },
   {
@@ -67,8 +72,8 @@ export const API_PROFILE_PRESETS: ApiProfilePreset[] = [
     provider_kind: "anthropic",
     base_url: "https://api.anthropic.com/v1",
     credentials_ref: "anthropic-api-key",
-    default_model: "claude-sonnet-4-5",
-    known_models: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+    default_model: "claude-sonnet-5",
+    known_models: ["claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5"],
     capabilities: ["text.generate", "prompt.rewrite", "vision.describe"],
   },
   {

@@ -572,23 +572,24 @@
 .model-manager-api-views button.active { border-color: var(--accent); color: var(--accent); }
 .model-manager-presets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .model-manager-presets > .muted { font-size: 12px; }
-.model-manager-preset-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.model-manager-preset-cards { display: grid; grid-template-columns: repeat(auto-fill, 200px); gap: 8px; }
 .model-manager-preset-cards button {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 130px;
+  align-items: center;
+  gap: 10px;
+  width: 200px;
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   cursor: pointer;
   font-size: 12px;
 }
 .model-manager-preset-cards button:hover { border-color: var(--accent); }
 .model-manager-preset-cards button .muted { font-size: 11px; }
+.model-manager-preset-icon { display: flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; color: var(--text); }
+.model-manager-preset-text { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left; }
 .model-manager-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .model-manager-list li {
   display: flex;
@@ -632,6 +633,7 @@
 .model-manager-capability { margin: 12px 0; }
 .model-manager-capability-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .model-manager-capability-lines li.warn code { color: var(--warn, #d9a441); }
+.model-manager-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .model-manager-caps { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
 .model-manager-caps .snap-toggle { font-size: 11px; }
 .model-manager-form-actions { display: flex; gap: 8px; margin-top: 12px; }
