@@ -26,6 +26,22 @@ export function timelineRulerDuration(durationSec: number, playheadSec: number):
 /** Snap capture radius around clip edges / markers, in ruler pixels. */
 export const RULER_SNAP_THRESHOLD_PX = 8;
 
+/** Ruler major-tick spacing in seconds, chosen by visible duration. */
+export function majorTickStepSeconds(rulerDurationSec: number): number {
+  return rulerDurationSec > 60 ? 10 : rulerDurationSec > 20 ? 5 : 1;
+}
+
+/**
+ * Ruler minor-tick spacing in whole frames. Minor ticks live on the frame
+ * grid — the same grid wheel / arrow-key playhead steps move on — so a tick
+ * is always an exact number of steps away. A plain `majorStepSec / 10`
+ * spacing (e.g. 0.1s at 24fps = 2.4 frames) would drift off the grid and
+ * ticks would land between playhead stops.
+ */
+export function minorTickStepFrames(majorStepSec: number, fps: number): number {
+  return Math.max(1, Math.round((majorStepSec * fps) / 10));
+}
+
 export function rulerClientXToTime(
   clientX: number,
   rect: Pick<DOMRect, "left" | "width">,
@@ -121,10 +137,13 @@ export function TimelineRuler({
 }: TimelineRulerProps) {
   const timelineFps = fps || DEFAULT_TIMELINE_FPS;
   const rulerDuration = timelineRulerDuration(durationSec, playheadSec);
-  const majorStepSec = rulerDuration > 60 ? 10 : rulerDuration > 20 ? 5 : 1;
-  const minorStepSec = majorStepSec / 10;
+  const majorStepSec = majorTickStepSeconds(rulerDuration);
+  const minorStepFrames = minorTickStepFrames(majorStepSec, timelineFps);
   const majorTicks = Array.from({ length: Math.floor(rulerDuration / majorStepSec) + 1 }, (_, i) => i * majorStepSec);
-  const minorTicks = Array.from({ length: Math.floor(rulerDuration / minorStepSec) + 1 }, (_, i) => i * minorStepSec);
+  const minorTicks = Array.from(
+    { length: Math.floor((rulerDuration * timelineFps) / minorStepFrames) + 1 },
+    (_, i) => frameToSeconds(i * minorStepFrames, timelineFps),
+  );
 
   const scrub = (clientX: number, ruler: HTMLElement, shiftKey: boolean) => {
     const rect = ruler.getBoundingClientRect();
