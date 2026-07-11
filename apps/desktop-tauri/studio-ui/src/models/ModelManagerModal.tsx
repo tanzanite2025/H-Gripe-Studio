@@ -37,6 +37,7 @@ import {
 } from "./backendRegistry";
 import { probeLocalModelHealth, testApiProfileHealth } from "./backendHealth";
 import { API_PROFILE_PRESETS, profileFromPreset } from "./apiProfilePresets";
+import { PresetProviderIcon } from "./providerIcons";
 
 // The system "Models / APIs" manager modal
 // (docs/plans/active/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md): one global surface
@@ -276,15 +277,15 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => {
-                          setEditingApi(profileFromPreset(preset, registry));
-                          setApiView("configured");
-                        }}
-                        title={preset.base_url}
+                        onClick={() => setEditingApi(profileFromPreset(preset, registry))}
                       >
-                        <strong>{preset.display_name}</strong>
-                        <span className="muted">{preset.provider_kind}</span>
-                        <span className="muted">{preset.base_url}</span>
+                        <span className="model-manager-preset-icon">
+                          <PresetProviderIcon presetId={preset.id} />
+                        </span>
+                        <span className="model-manager-preset-text">
+                          <strong>{preset.display_name}</strong>
+                          <span className="muted">{preset.provider_kind}</span>
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -338,6 +339,8 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                   </li>
                 ))}
               </ul>
+              </>
+              )}
               {editingApi && (
                 <form
                   className="model-manager-form"
@@ -345,8 +348,10 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     e.preventDefault();
                     commit(upsertApiProfile(registry, editingApi));
                     setEditingApi(null);
+                    setApiView("configured");
                   }}
                 >
+                  <div className="model-manager-form-grid">
                   <label className="field">
                     <span>{t("models.ref")}</span>
                     <input
@@ -415,6 +420,7 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                       placeholder={t("models.knownModelsHint")}
                     />
                   </label>
+                  </div>
                   <span className="muted">{t("models.capabilities")}</span>
                   <CapabilityPicker
                     selected={editingApi.capabilities}
@@ -429,8 +435,6 @@ export function ModelManagerModal({ capability, onClose }: ModelManagerModalProp
                     </button>
                   </div>
                 </form>
-              )}
-              </>
               )}
             </>
           ) : (
