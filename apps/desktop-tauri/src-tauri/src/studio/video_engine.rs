@@ -53,6 +53,10 @@ pub(crate) struct VideoMeta {
     pub(crate) fps: Option<f64>,
     #[serde(default)]
     pub(crate) codec: Option<String>,
+    /// Whether the container has a decodable audio stream; `None` when the
+    /// probing backend cannot tell.
+    #[serde(default)]
+    pub(crate) has_audio: Option<bool>,
 }
 
 /// A decoder backend: probe a clip, render one frame at a timestamp to a PNG.
@@ -508,6 +512,7 @@ mod tests {
                 duration_sec: Some(10.0),
                 fps: Some(24.0),
                 codec: Some("h264".into()),
+                has_audio: None,
             })
         }
 

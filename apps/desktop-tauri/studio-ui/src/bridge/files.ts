@@ -101,6 +101,9 @@ export interface VideoProbeResult {
   height: number;
   /** Clip length in seconds; `null` when the container reports none. */
   duration_sec: number | null;
+  /** Whether the container has a decodable audio stream; `null` when the
+   * probe cannot tell. */
+  has_audio: boolean | null;
   /** Frame rate; `null` when unknown. */
   fps: number | null;
   codec: string | null;
@@ -117,7 +120,15 @@ export interface VideoProbeResult {
 export async function videoProbe(path: string, timestamp = 0): Promise<VideoProbeResult> {
   const invoke = tauriInvoke();
   if (!invoke) {
-    return { width: 0, height: 0, duration_sec: null, fps: null, codec: null, poster_path: "" };
+    return {
+      width: 0,
+      height: 0,
+      duration_sec: null,
+      has_audio: null,
+      fps: null,
+      codec: null,
+      poster_path: "",
+    };
   }
   return (await invoke("video_probe", { path, timestamp })) as VideoProbeResult;
 }

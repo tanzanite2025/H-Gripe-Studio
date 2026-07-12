@@ -22,6 +22,9 @@ pub(crate) struct VideoProbeResult {
     /// Frame rate; `None` when unknown rather than guessed.
     pub(crate) fps: Option<f64>,
     pub(crate) codec: Option<String>,
+    /// Whether the container has a decodable audio stream; `None` when the
+    /// probe cannot tell.
+    pub(crate) has_audio: Option<bool>,
     /// On-disk PNG of the poster frame (rendered via the image thumbnail path).
     pub(crate) poster_path: String,
 }
@@ -61,6 +64,7 @@ pub(crate) fn video_probe(
         duration_sec: meta.duration_sec,
         fps: meta.fps,
         codec: meta.codec,
+        has_audio: meta.has_audio,
         poster_path: poster_path.to_string_lossy().to_string(),
     })
 }

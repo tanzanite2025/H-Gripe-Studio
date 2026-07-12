@@ -19,6 +19,7 @@ function probeResult(overrides: Partial<Awaited<ReturnType<typeof videoProbe>>> 
     width: 1920,
     height: 1080,
     duration_sec: 12.5,
+    has_audio: true,
     fps: 24,
     codec: "h264",
     poster_path: "/cache/poster.png",
@@ -42,10 +43,16 @@ beforeEach(() => {
 });
 
 describe("probeMediaAssetPlaybackInfo", () => {
-  it("returns the probed duration for a video", async () => {
+  it("returns the probed duration and audio presence for a video", async () => {
     videoProbeMock.mockResolvedValue(probeResult());
     const info = await probeMediaAssetPlaybackInfo("video", "/media/clip-a.mp4");
-    expect(info).toEqual({ durationSec: 12.5, hasAudio: null });
+    expect(info).toEqual({ durationSec: 12.5, hasAudio: true });
+  });
+
+  it("reports hasAudio false for a probed silent video", async () => {
+    videoProbeMock.mockResolvedValue(probeResult({ has_audio: false }));
+    const info = await probeMediaAssetPlaybackInfo("video", "/media/silent.mp4");
+    expect(info).toEqual({ durationSec: 12.5, hasAudio: false });
   });
 
   it("resolves all-null info for non-video kinds without touching the backend", async () => {
