@@ -480,9 +480,9 @@ export function cutSelectedTimelineClipsToClipboard(store: ProductionStore): voi
   });
 }
 
-/** Ctrl+V: paste the clipboard with its earliest clip at the given time
- * (usually the playhead) and select the pasted clips. A paste that cannot fit
- * changes nothing. */
+/** Ctrl+V: paste the clipboard with its earliest clip at the playhead and
+ * select the pasted clips. Never overwrites: clips without room on any
+ * existing compatible track land on freshly created tracks. */
 export function pasteTimelineClipboardAtTime(store: ProductionStore, atSec: number): void {
   store.mutate((state) => {
     const result = pasteCopiedTimelineClipsAtTime(state.timeline, state.clipClipboard, atSec);

@@ -395,14 +395,23 @@ describe("productionStore", () => {
     expect(findClip(store.getState().timeline, pastedId)).not.toBeNull();
   });
 
-  it("a paste that cannot fit changes nothing", () => {
+  it("a paste over an occupied position lands on a fresh track", () => {
     const store = createProductionStore();
     const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
     addAssetClip(store, asset.id, { atSec: 0 });
+    const originalTrackId = findClip(
+      store.getState().timeline,
+      store.getState().selectedClipId!,
+    )!.track.id;
     copySelectedTimelineClipsToClipboard(store);
-    const before = store.getState();
+    const trackCountBefore = store.getState().timeline.tracks.length;
     pasteTimelineClipboardAtTime(store, 0); // the original occupies 0
-    expect(store.getState()).toBe(before);
+    const state = store.getState();
+    expect(state.timeline.tracks.length).toBe(trackCountBefore + 1);
+    const pasted = findClip(state.timeline, state.selectedClipId!)!;
+    expect(pasted.track.id).not.toBe(originalTrackId);
+    expect(pasted.track.kind).toBe("audio");
+    expect(pasted.clip.start).toBe(0);
   });
 
   it("replaceTimelineClipSelection swaps the selection and drops missing ids", () => {
