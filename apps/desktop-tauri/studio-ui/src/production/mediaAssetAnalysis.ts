@@ -13,8 +13,8 @@ export interface MediaAssetPlaybackInfo {
   /** Real media duration in seconds; `null` when the backend cannot tell
    * (browser preview, probe failure, or a container without a duration). */
   durationSec: number | null;
-  /** Whether the file has a decodable audio stream; `null` while the backend
-   * probe does not report it (the current `video_probe` command does not). */
+  /** Whether the file has a decodable audio stream; `null` when the backend
+   * cannot tell (browser preview or probe failure). */
   hasAudio: boolean | null;
 }
 
@@ -65,7 +65,7 @@ export function probeMediaAssetPlaybackInfo(
     return Promise.resolve({ durationSec: null, hasAudio: null });
   }
   return probeVideoFileWithCache(path)
-    .then((probe) => ({ durationSec: probe.duration_sec, hasAudio: null }))
+    .then((probe) => ({ durationSec: probe.duration_sec, hasAudio: probe.has_audio }))
     .catch((): MediaAssetPlaybackInfo => ({ durationSec: null, hasAudio: null }));
 }
 

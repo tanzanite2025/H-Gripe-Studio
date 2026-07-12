@@ -773,12 +773,24 @@ impl Decoder {
                 }
             };
 
+            let has_audio = Some(
+                ffi::av_find_best_stream(
+                    self.fmt,
+                    ffi::AVMEDIA_TYPE_AUDIO,
+                    -1,
+                    -1,
+                    ptr::null_mut(),
+                    0,
+                ) >= 0,
+            );
+
             Ok(VideoMeta {
                 width,
                 height,
                 duration_sec,
                 fps,
                 codec,
+                has_audio,
             })
         }
     }
