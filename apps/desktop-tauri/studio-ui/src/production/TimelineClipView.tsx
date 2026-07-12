@@ -48,6 +48,7 @@ export function TimelineClipView({
   snapPoints,
   clipProperties,
   onSelectClip,
+  onToggleSelectClip,
   onSplitClipAt,
   onRemoveClip,
   onMoveClipTo,
@@ -66,6 +67,8 @@ export function TimelineClipView({
   /** The selected clip's property document (keyframe markers source). */
   clipProperties?: ClipProperties;
   onSelectClip: (clipId: string | null) => void;
+  /** Ctrl/Cmd+click: toggle the clip in the multi-selection. */
+  onToggleSelectClip: (clipId: string) => void;
   onSplitClipAt: (clipId: string, atSec: number) => void;
   onRemoveClip: (clipId: string) => void;
   onMoveClipTo: (clipId: string, toStartSec: number) => void;
@@ -154,6 +157,10 @@ export function TimelineClipView({
         if (timelineTool === "razor") {
           const { offset, valid } = razorOffsetAt(event.currentTarget, event.clientX);
           if (valid) onSplitClipAt(clip.id, clip.start + offset);
+          return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+          onToggleSelectClip(clip.id);
           return;
         }
         onSelectClip(selected ? null : clip.id);

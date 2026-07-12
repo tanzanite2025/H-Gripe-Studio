@@ -306,10 +306,21 @@ export function findClip(
 
 /** Remove a clip; a linked A/V partner (same linkId) leaves with it. */
 export function removeClip(timeline: TimelineModel, clipId: string): TimelineModel {
-  const found = findClip(timeline, clipId);
-  if (!found) return timeline;
-  const linkId = found.clip.linkId;
-  const doomed = (c: TimelineClip) => c.id === clipId || (linkId != null && c.linkId === linkId);
+  return removeClips(timeline, [clipId]);
+}
+
+/** Remove several clips at once; linked A/V partners leave with them. */
+export function removeClips(timeline: TimelineModel, clipIds: string[]): TimelineModel {
+  const ids = new Set<string>();
+  const linkIds = new Set<string>();
+  for (const clipId of clipIds) {
+    const found = findClip(timeline, clipId);
+    if (!found) continue;
+    ids.add(found.clip.id);
+    if (found.clip.linkId != null) linkIds.add(found.clip.linkId);
+  }
+  if (ids.size === 0) return timeline;
+  const doomed = (c: TimelineClip) => ids.has(c.id) || (c.linkId != null && linkIds.has(c.linkId));
   return {
     ...timeline,
     tracks: timeline.tracks.map((t) =>
@@ -544,46 +555,73 @@ export function moveClipWithLinkedPartner(
   clipId: string,
   desiredStartSec: number,
 ): MoveClipResult | null {
-  const found = findClip(timeline, clipId);
-  if (!found) return null;
-  const clip = found.clip;
-  const partner = findLinkedPartner(timeline, clip);
-  const partnerLocation = partner ? findClip(timeline, partner.id) : null;
-  const movingIds = new Set([clip.id, ...(partner ? [partner.id] : [])]);
+  return moveClipsWithLinkedPartners(timeline, [clipId], clipId, desiredStartSec);
+}
+
+/**
+ * Horizontal move of several clips by a common delta (the anchor clip is
+ * dragged toward `desiredStartSec`; the others keep their relative offsets).
+ * Each moving clip — plus every linked A/V partner, which moves with it —
+ * must land in a free gap on its own track; the delta is frame-snapped and
+ * clamped into the nearest position where all of them fit.
+ */
+export function moveClipsWithLinkedPartners(
+  timeline: TimelineModel,
+  clipIds: string[],
+  anchorClipId: string,
+  desiredStartSec: number,
+): MoveClipResult | null {
+  const anchor = findClip(timeline, anchorClipId);
+  if (!anchor) return null;
+
+  const moving: { track: TimelineTrack; clip: TimelineClip }[] = [];
+  const movingIds = new Set<string>();
+  const include = (clipId: string) => {
+    if (movingIds.has(clipId)) return;
+    const found = findClip(timeline, clipId);
+    if (!found) return;
+    movingIds.add(found.clip.id);
+    moving.push(found);
+    const partner = findLinkedPartner(timeline, found.clip);
+    if (partner && !movingIds.has(partner.id)) {
+      const partnerLocation = findClip(timeline, partner.id);
+      if (partnerLocation) {
+        movingIds.add(partner.id);
+        moving.push(partnerLocation);
+      }
+    }
+  };
+  include(anchorClipId);
+  for (const clipId of clipIds) include(clipId);
 
   const snappedStart = snapTimeToFrame(
     Math.max(0, desiredStartSec),
     timeline.fps ?? DEFAULT_TIMELINE_FPS,
   );
-  const desiredDelta = snappedStart - clip.start;
+  const desiredDelta = snappedStart - anchor.clip.start;
 
-  let allowedDeltas = allowedMoveDeltasForClip(
-    freeGapsInTrack(found.track, movingIds),
-    clip.start,
-    clip.duration,
-  );
-  if (partner && partnerLocation) {
+  let allowedDeltas: TimeInterval[] = [
+    { start: Number.NEGATIVE_INFINITY, end: Number.POSITIVE_INFINITY },
+  ];
+  let minStart = Number.POSITIVE_INFINITY;
+  for (const { track, clip } of moving) {
     allowedDeltas = intersectIntervalLists(
       allowedDeltas,
-      allowedMoveDeltasForClip(
-        freeGapsInTrack(partnerLocation.track, movingIds),
-        partner.start,
-        partner.duration,
-      ),
+      allowedMoveDeltasForClip(freeGapsInTrack(track, movingIds), clip.start, clip.duration),
     );
+    minStart = Math.min(minStart, clip.start);
   }
-  // Neither clip may start before 0.
-  const minDelta = -Math.min(clip.start, partner ? partner.start : Number.POSITIVE_INFINITY);
+  // No clip may start before 0.
   allowedDeltas = intersectIntervalLists(allowedDeltas, [
-    { start: minDelta, end: Number.POSITIVE_INFINITY },
+    { start: -minStart, end: Number.POSITIVE_INFINITY },
   ]);
 
   const delta = clampIntoIntervals(desiredDelta, allowedDeltas);
   if (delta == null) return null;
-  if (delta === 0) return { timeline, movedToStartSec: clip.start };
+  if (delta === 0) return { timeline, movedToStartSec: anchor.clip.start };
 
   return {
-    movedToStartSec: clip.start + delta,
+    movedToStartSec: anchor.clip.start + delta,
     timeline: {
       ...timeline,
       tracks: timeline.tracks.map((track) =>

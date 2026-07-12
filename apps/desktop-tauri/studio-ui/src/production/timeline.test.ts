@@ -11,7 +11,9 @@ import {
   createTimeline,
   findClip,
   moveClipWithLinkedPartner,
+  moveClipsWithLinkedPartners,
   removeClip,
+  removeClips,
   removeClipsForAsset,
   removeMarker,
   removeTrack,
@@ -318,6 +320,55 @@ describe("timeline model", () => {
     expect(past.movedToStartSec).toBe(25);
     expect(findClip(past.timeline, pair.video.id)!.clip.start).toBe(25);
     expect(findClip(past.timeline, pair.audio.id)!.clip.start).toBe(25);
+  });
+
+  it("moves several clips by a common delta, keeping their relative offsets", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 5 });
+    const second = appendClip(first.timeline, videoAsset, { atSec: 8, duration: 5 });
+    const moved = moveClipsWithLinkedPartners(
+      second.timeline,
+      [first.clip.id, second.clip.id],
+      first.clip.id,
+      2,
+    )!;
+    expect(moved.movedToStartSec).toBe(2);
+    expect(findClip(moved.timeline, first.clip.id)!.clip.start).toBe(2);
+    expect(findClip(moved.timeline, second.clip.id)!.clip.start).toBe(10);
+    // Dragging the group left of 0 clamps so the earliest clip lands at 0.
+    const clamped = moveClipsWithLinkedPartners(
+      second.timeline,
+      [first.clip.id, second.clip.id],
+      second.clip.id,
+      -5,
+    )!;
+    expect(findClip(clamped.timeline, first.clip.id)!.clip.start).toBe(0);
+    expect(findClip(clamped.timeline, second.clip.id)!.clip.start).toBe(8);
+  });
+
+  it("a multi-clip move is blocked by clips outside the moving set", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 5 });
+    const second = appendClip(first.timeline, videoAsset, { atSec: 10, duration: 5 });
+    const blocker = appendClip(second.timeline, videoAsset, { atSec: 20, duration: 5 });
+    // Moving first+second right: second stops flush against the blocker at 20.
+    const moved = moveClipsWithLinkedPartners(
+      blocker.timeline,
+      [first.clip.id, second.clip.id],
+      first.clip.id,
+      9,
+    )!;
+    expect(findClip(moved.timeline, second.clip.id)!.clip.start).toBe(15);
+    expect(findClip(moved.timeline, first.clip.id)!.clip.start).toBe(5);
+    expect(findClip(moved.timeline, blocker.clip.id)!.clip.start).toBe(20);
+  });
+
+  it("removeClips removes several clips and their linked partners at once", () => {
+    const pair = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 5 });
+    const extra = appendClip(pair.timeline, audioAsset, { atSec: 10, duration: 3 });
+    const after = removeClips(extra.timeline, [pair.video.id, extra.clip.id]);
+    expect(findClip(after, pair.video.id)).toBeNull();
+    expect(findClip(after, pair.audio.id)).toBeNull(); // linked partner leaves too
+    expect(findClip(after, extra.clip.id)).toBeNull();
+    expect(removeClips(after, ["missing"])).toBe(after);
   });
 
   it("trims the end edge, clamped to MIN_CLIP_SECONDS and the next neighbor", () => {

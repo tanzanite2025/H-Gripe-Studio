@@ -12,6 +12,7 @@ import type { ProductionTarget } from "./productionTarget";
 import {
   clipGradeDocOf,
   removeAssetFromBin,
+  removeSelectedTimelineClips,
   selectBinAsset,
   setClipProperties,
 } from "./productionStore";
@@ -139,6 +140,43 @@ export function ProductionDrawer({
       }
     };
   }, [expanded, renderExpanded]);
+
+  // Timeline keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo,
+  // Delete / Backspace removes the selected clips. Skipped while typing in
+  // form fields or editable content.
+  useEffect(() => {
+    if (!renderExpanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      )
+        return;
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) store.redo();
+        else store.undo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && key === "y") {
+        event.preventDefault();
+        store.redo();
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (store.getState().selectedClipIds.length === 0) return;
+        event.preventDefault();
+        removeSelectedTimelineClips(store);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [renderExpanded, store]);
 
   // Pointer-based asset drag ends wherever the pointer is released; track
   // lanes handle their own pointerup first, then this clears the drag state.

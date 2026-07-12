@@ -13,6 +13,7 @@ import {
   selectClip,
   setClipProperties,
   splitTimelineClip,
+  toggleClipInSelection,
   toggleTimelineMarker,
   toggleTimelineTrackHidden,
   toggleTimelineTrackLock,
@@ -99,6 +100,7 @@ export function ProductionTimeline({
   const assets = useProductionStateFromContext((state) => state.binAssets);
   const activeAssetId = useProductionStateFromContext((state) => state.activeAssetId);
   const selectedClipId = useProductionStateFromContext((state) => state.selectedClipId);
+  const selectedClipIds = useProductionStateFromContext((state) => state.selectedClipIds);
   const clipProps = useProductionStateFromContext((state) => state.clipProps);
   const activeAsset = assets.find((asset) => asset.id === activeAssetId) ?? null;
   const clipProperties: ClipProperties | undefined = selectedClipId
@@ -106,6 +108,7 @@ export function ProductionTimeline({
     : undefined;
 
   const onSelectClip = (clipId: string | null) => selectClip(store, clipId);
+  const onToggleSelectClip = (clipId: string) => toggleClipInSelection(store, clipId);
   const onAddActiveToTrack = (trackId: string, atSec?: number) => {
     const assetId = store.getState().activeAssetId;
     if (assetId) addAssetClip(store, assetId, { trackId, atSec });
@@ -325,14 +328,15 @@ export function ProductionTimeline({
                             key={clip.id}
                             clip={clip}
                             clipDisplayName={clipAssetName(clip.id)}
-                            selected={clip.id === selectedClipId}
+                            selected={selectedClipIds.includes(clip.id)}
                             trackLocked={!!track.locked}
                             rulerDurationSec={rulerDuration}
                             timelineFps={timelineFps}
                             timelineTool={timelineTool}
                             snapPoints={snapPoints}
-                            clipProperties={clipProperties}
+                            clipProperties={clip.id === selectedClipId ? clipProperties : undefined}
                             onSelectClip={onSelectClip}
+                            onToggleSelectClip={onToggleSelectClip}
                             onSplitClipAt={onSplitClipAt}
                             onRemoveClip={onRemoveClip}
                             onMoveClipTo={onMoveClipTo}
