@@ -10,6 +10,7 @@ import {
   removeTimelineClip,
   removeTimelineMarker,
   removeTimelineTrack,
+  replaceTimelineClipSelection,
   selectClip,
   setClipProperties,
   splitTimelineClip,
@@ -28,6 +29,7 @@ import {
   type TimelineClipMenuState,
 } from "./TimelineClipContextMenu";
 import { TimelineClipView } from "./TimelineClipView";
+import { clipIdsIntersectingMarqueeSelection } from "./timelineMarqueeSelection";
 import { TimelineRuler, timelineRulerDuration } from "./TimelineRuler";
 import {
   clipKindForAsset,
@@ -53,6 +55,24 @@ interface ProductionTimelineProps {
   onOpenAudioEdit: (clipId: string) => void;
   onOpenClipGrade: (clipId: string) => void;
   onSplitClipToLayers: (clipId: string) => void;
+}
+
+/** Marquee drags shorter than this (either axis) are treated as plain
+ * background clicks and do not change the selection. */
+const MARQUEE_MIN_DRAG_PX = 4;
+
+interface ActiveMarqueeDrag {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+}
+
+/** Marquee overlay rectangle in `.production-timeline-tracks` local pixels. */
+interface MarqueeOverlayRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 function TrackToggleIcon({ kind }: { kind: "visible" | "hidden" | "locked" | "unlocked" }) {
@@ -133,6 +153,8 @@ export function ProductionTimeline({
   const tracksScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const handPan = useRef<{ pointerId: number; startX: number; startLeft: number } | null>(null);
+  const marqueeDrag = useRef<ActiveMarqueeDrag | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<MarqueeOverlayRect | null>(null);
   const navFlashTimer = useRef<number | null>(null);
   const [navFlashTrackId, setNavFlashTrackId] = useState<string | null>(null);
 
@@ -168,6 +190,51 @@ export function ProductionTimeline({
       if (clip) return assets.find((asset) => asset.id === clip.assetId)?.name ?? clip.assetId;
     }
     return clipId;
+  };
+
+  const marqueeOverlayRectFromClientPoints = (
+    container: HTMLElement,
+    drag: ActiveMarqueeDrag,
+    clientX: number,
+    clientY: number,
+  ): MarqueeOverlayRect => {
+    const rect = container.getBoundingClientRect();
+    const x1 = drag.startClientX - rect.left + container.scrollLeft;
+    const y1 = drag.startClientY - rect.top + container.scrollTop;
+    const x2 = clientX - rect.left + container.scrollLeft;
+    const y2 = clientY - rect.top + container.scrollTop;
+    return {
+      left: Math.min(x1, x2),
+      top: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+    };
+  };
+
+  const commitMarqueeSelection = (drag: ActiveMarqueeDrag, clientX: number, clientY: number) => {
+    const minClientX = Math.min(drag.startClientX, clientX);
+    const maxClientX = Math.max(drag.startClientX, clientX);
+    const minClientY = Math.min(drag.startClientY, clientY);
+    const maxClientY = Math.max(drag.startClientY, clientY);
+    const referenceLane = tracksScrollRef.current?.querySelector(".production-track-lane");
+    const laneRect = referenceLane?.getBoundingClientRect();
+    if (!laneRect || laneRect.width <= 0) return;
+    const clientXToSec = (x: number) =>
+      Math.min(1, Math.max(0, (x - laneRect.left) / laneRect.width)) * rulerDuration;
+    const crossedTrackIds = Object.entries(trackRefs.current)
+      .filter(([, element]) => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.top <= maxClientY && rect.bottom >= minClientY;
+      })
+      .map(([trackId]) => trackId);
+    replaceTimelineClipSelection(
+      store,
+      clipIdsIntersectingMarqueeSelection(timeline, crossedTrackIds, {
+        startSec: clientXToSec(minClientX),
+        endSec: clientXToSec(maxClientX),
+      }),
+    );
   };
 
   const scrollTrackIntoView = (trackId: string) => {
@@ -247,7 +314,64 @@ export function ProductionTimeline({
                   <span className="production-timeline-playhead-head" />
                 </span>
               </div>
-              <div className="production-timeline-tracks" ref={tracksScrollRef}>
+              <div
+                className="production-timeline-tracks"
+                ref={tracksScrollRef}
+                onPointerDown={(event) => {
+                  if (timelineTool !== "select" || event.button !== 0) return;
+                  const target = event.target as HTMLElement;
+                  if (target.closest(".production-clip, .production-track-head, button")) return;
+                  marqueeDrag.current = {
+                    pointerId: event.pointerId,
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                  };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerMove={(event) => {
+                  const drag = marqueeDrag.current;
+                  if (!drag || drag.pointerId !== event.pointerId) return;
+                  setMarqueeRect(
+                    marqueeOverlayRectFromClientPoints(
+                      event.currentTarget,
+                      drag,
+                      event.clientX,
+                      event.clientY,
+                    ),
+                  );
+                }}
+                onPointerUp={(event) => {
+                  const drag = marqueeDrag.current;
+                  if (!drag || drag.pointerId !== event.pointerId) return;
+                  marqueeDrag.current = null;
+                  setMarqueeRect(null);
+                  if (
+                    Math.abs(event.clientX - drag.startClientX) < MARQUEE_MIN_DRAG_PX &&
+                    Math.abs(event.clientY - drag.startClientY) < MARQUEE_MIN_DRAG_PX
+                  ) {
+                    return;
+                  }
+                  commitMarqueeSelection(drag, event.clientX, event.clientY);
+                }}
+                onPointerCancel={(event) => {
+                  if (marqueeDrag.current?.pointerId === event.pointerId) {
+                    marqueeDrag.current = null;
+                    setMarqueeRect(null);
+                  }
+                }}
+              >
+                {marqueeRect ? (
+                  <span
+                    className="production-timeline-marquee"
+                    style={{
+                      left: `${marqueeRect.left}px`,
+                      top: `${marqueeRect.top}px`,
+                      width: `${marqueeRect.width}px`,
+                      height: `${marqueeRect.height}px`,
+                    }}
+                    aria-hidden="true"
+                  />
+                ) : null}
                 {orderedTracks.map(({ track, laneNumber, groupBoundary }) => {
                   const acceptsActive =
                     !!activeAsset &&

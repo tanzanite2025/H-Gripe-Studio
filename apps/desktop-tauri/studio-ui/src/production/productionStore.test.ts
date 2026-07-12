@@ -16,6 +16,7 @@ import {
   removeSelectedTimelineClips,
   removeTimelineClip,
   removeTimelineTrack,
+  replaceTimelineClipSelection,
   toggleClipInSelection,
   trimTimelineClipEdge,
   selectBinAsset,
@@ -341,6 +342,26 @@ describe("productionStore", () => {
 
     selectClip(store, firstId); // plain click collapses to a single selection
     expect(store.getState().selectedClipIds).toEqual([firstId]);
+  });
+
+  it("replaceTimelineClipSelection swaps the selection and drops missing ids", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
+    addAssetClip(store, asset.id, { atSec: 0 });
+    const firstId = store.getState().selectedClipId!;
+    addAssetClip(store, asset.id, { atSec: 10 });
+    const secondId = store.getState().selectedClipId!;
+
+    replaceTimelineClipSelection(store, [firstId, secondId, "missing"]);
+    let state = store.getState();
+    expect(state.selectedClipIds).toEqual([firstId, secondId]);
+    expect(state.selectedClipId).toBe(secondId);
+    expect(state.activeAssetId).toBeNull();
+
+    replaceTimelineClipSelection(store, []);
+    state = store.getState();
+    expect(state.selectedClipIds).toEqual([]);
+    expect(state.selectedClipId).toBeNull();
   });
 
   it("moves the whole multi-selection together and batch-deletes it", () => {
