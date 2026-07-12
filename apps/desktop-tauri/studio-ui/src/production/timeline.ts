@@ -63,7 +63,7 @@ export const DEFAULT_MEDIA_SECONDS = 10;
 export const MIN_CLIP_SECONDS = 0.1;
 
 let nextId = 0;
-function freshId(prefix: string): string {
+export function freshId(prefix: string): string {
   nextId += 1;
   return `${prefix}-${Date.now().toString(36)}-${nextId}`;
 }
