@@ -10,14 +10,10 @@ import { ProgramMonitor } from "./ProgramMonitor";
 import { ProductionInspector } from "./ProductionInspector";
 import type { ProductionTarget } from "./productionTarget";
 import {
-  clearSequencePlaybackInPointAction,
-  clearSequencePlaybackOutPointAction,
+  clearSequencePlaybackInPoint,
+  clearSequencePlaybackOutPoint,
   clipGradeDocOf,
-  copySelectedTimelineClipsToClipboard,
-  cutSelectedTimelineClipsToClipboard,
-  pasteTimelineClipboardAtTime,
   removeAssetFromBin,
-  removeSelectedTimelineClips,
   selectBinAsset,
   setClipProperties,
   setSequencePlaybackInPoint,
@@ -29,6 +25,8 @@ import {
   useProductionStoreFromContext,
 } from "./productionStoreContext";
 import { ProductionTimeline } from "./ProductionTimeline";
+import { clipAssetDisplayName } from "./timeline";
+import { useTimelineEditingKeyboardShortcuts } from "./useTimelineEditingKeyboardShortcuts";
 
 export interface ProductionDrawerPorts {
   assetBin: {
@@ -151,79 +149,7 @@ export function ProductionDrawer({
     };
   }, [expanded, renderExpanded]);
 
-  // Timeline keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo,
-  // Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste-at-playhead the selected
-  // clips, Delete / Backspace removes the selected clips, M toggles a
-  // sequence marker and I / O set the playback in/out points at the playhead.
-  // Skipped while typing in form fields or editable content.
-  useEffect(() => {
-    if (!renderExpanded) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.isContentEditable ||
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT")
-      )
-        return;
-      const key = event.key.toLowerCase();
-      if ((event.ctrlKey || event.metaKey) && key === "z") {
-        event.preventDefault();
-        if (event.shiftKey) store.redo();
-        else store.undo();
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && key === "y") {
-        event.preventDefault();
-        store.redo();
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && key === "c") {
-        if (store.getState().selectedClipIds.length === 0) return;
-        event.preventDefault();
-        copySelectedTimelineClipsToClipboard(store);
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && key === "x") {
-        if (store.getState().selectedClipIds.length === 0) return;
-        event.preventDefault();
-        cutSelectedTimelineClipsToClipboard(store);
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && key === "v") {
-        if (store.getState().clipClipboard.length === 0) return;
-        event.preventDefault();
-        pasteTimelineClipboardAtTime(store, playheadSecRef.current);
-        return;
-      }
-      if (event.key === "Delete" || event.key === "Backspace") {
-        if (store.getState().selectedClipIds.length === 0) return;
-        event.preventDefault();
-        removeSelectedTimelineClips(store);
-        return;
-      }
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (key === "m") {
-        event.preventDefault();
-        toggleTimelineMarker(store, playheadSecRef.current);
-        return;
-      }
-      if (key === "i") {
-        event.preventDefault();
-        setSequencePlaybackInPoint(store, playheadSecRef.current);
-        return;
-      }
-      if (key === "o") {
-        event.preventDefault();
-        setSequencePlaybackOutPoint(store, playheadSecRef.current);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [renderExpanded, store]);
+  useTimelineEditingKeyboardShortcuts(store, playheadSecRef, renderExpanded);
 
   // Pointer-based asset drag ends wherever the pointer is released; track
   // lanes handle their own pointerup first, then this clears the drag state.
@@ -297,13 +223,6 @@ export function ProductionDrawer({
   const selectedClipAsset = selectedClip
     ? (assets.find((asset) => asset.id === selectedClip.assetId) ?? null)
     : null;
-  const clipAssetName = (clipId: string): string => {
-    for (const track of timeline.tracks) {
-      const clip = track.clips.find((candidate) => candidate.id === clipId);
-      if (clip) return assets.find((asset) => asset.id === clip.assetId)?.name ?? clip.assetId;
-    }
-    return clipId;
-  };
   const targetLabel = !target
     ? t("drawer.targetNone")
     : target.kind === "asset"
@@ -311,9 +230,9 @@ export function ProductionDrawer({
       : target.kind === "node_output"
         ? `${t("drawer.targetNode")} · ${target.nodeId}`
         : target.kind === "video_clip"
-          ? `${t("drawer.targetVideoClip")} · ${clipAssetName(target.clipId)}`
+          ? `${t("drawer.targetVideoClip")} · ${clipAssetDisplayName(timeline, assets, target.clipId)}`
           : target.kind === "audio_clip"
-            ? `${t("drawer.targetAudioClip")} · ${clipAssetName(target.clipId)}`
+            ? `${t("drawer.targetAudioClip")} · ${clipAssetDisplayName(timeline, assets, target.clipId)}`
             : target.kind === "layered_image"
               ? `${t("drawer.targetLayeredImage")} · ${target.assetId}`
               : target.kind === "image_layer"
@@ -379,8 +298,8 @@ export function ProductionDrawer({
                 onToggleSequenceMarkerAtSec={(sec) => toggleTimelineMarker(store, sec)}
                 onSetSequencePlaybackInPointSec={(sec) => setSequencePlaybackInPoint(store, sec)}
                 onSetSequencePlaybackOutPointSec={(sec) => setSequencePlaybackOutPoint(store, sec)}
-                onClearSequencePlaybackInPoint={() => clearSequencePlaybackInPointAction(store)}
-                onClearSequencePlaybackOutPoint={() => clearSequencePlaybackOutPointAction(store)}
+                onClearSequencePlaybackInPoint={() => clearSequencePlaybackInPoint(store)}
+                onClearSequencePlaybackOutPoint={() => clearSequencePlaybackOutPoint(store)}
                 onExportedFrame={(asset) => {
                   ports.exportService.addExportedFrame?.(asset);
                   setAssetPanelOpen(true);

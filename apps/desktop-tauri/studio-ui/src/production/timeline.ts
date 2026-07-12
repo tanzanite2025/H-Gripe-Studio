@@ -308,6 +308,18 @@ export function findClip(
   return null;
 }
 
+/** Display name for a clip: its bin asset's name, falling back to the asset
+ * id for a missing asset and to the clip id for an unknown clip. */
+export function clipAssetDisplayName(
+  timeline: TimelineModel,
+  assets: readonly { id: string; name: string }[],
+  clipId: string,
+): string {
+  const clip = findClip(timeline, clipId)?.clip;
+  if (!clip) return clipId;
+  return assets.find((asset) => asset.id === clip.assetId)?.name ?? clip.assetId;
+}
+
 /** Remove a clip; a linked A/V partner (same linkId) leaves with it. */
 export function removeClip(timeline: TimelineModel, clipId: string): TimelineModel {
   return removeClips(timeline, [clipId]);

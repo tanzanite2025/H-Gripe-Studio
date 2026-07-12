@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { advancePlaybackTime, resolveLoopPlaybackRange } from "./ProgramMonitor";
+import { advancePlaybackTime, clampTimeToSequenceDuration } from "./programMonitorPlayback";
 
-describe("ProgramMonitor playback helpers", () => {
-  it("uses valid in/out points as the loop range", () => {
-    expect(resolveLoopPlaybackRange(10, 2, 8)).toEqual({ start: 2, end: 8 });
-  });
-
-  it("falls back to the full timeline for an invalid loop range", () => {
-    expect(resolveLoopPlaybackRange(10, 8, 2)).toEqual({ start: 0, end: 10 });
+describe("program monitor playback helpers", () => {
+  it("clamps the playhead into the sequence duration", () => {
+    expect(clampTimeToSequenceDuration(-1, 10)).toBe(0);
+    expect(clampTimeToSequenceDuration(4.5, 10)).toBe(4.5);
+    expect(clampTimeToSequenceDuration(12, 10)).toBe(10);
   });
 
   it("stops at the end when looping is disabled", () => {

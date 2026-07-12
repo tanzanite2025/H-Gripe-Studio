@@ -5,8 +5,8 @@ import {
   addAssetToBin,
   addTimelineTrack,
   clearProductionSelection,
-  clearSequencePlaybackInPointAction,
-  clearSequencePlaybackOutPointAction,
+  clearSequencePlaybackInPoint,
+  clearSequencePlaybackOutPoint,
   clipGradeDocOf,
   clipGradeKey,
   commitAudioEdit,
@@ -55,9 +55,9 @@ describe("productionStore", () => {
     setSequencePlaybackInPoint(store, 1);
     setSequencePlaybackOutPoint(store, 4);
     expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: 1, outPointSec: 4 });
-    clearSequencePlaybackInPointAction(store);
+    clearSequencePlaybackInPoint(store);
     expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: null, outPointSec: 4 });
-    clearSequencePlaybackOutPointAction(store);
+    clearSequencePlaybackOutPoint(store);
     expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: null, outPointSec: null });
     store.undo();
     expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: null, outPointSec: 4 });
