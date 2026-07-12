@@ -23,8 +23,8 @@ import {
   appendVideoWithAudio,
   createTimeline,
   findClip,
-  moveClipWithLinkedPartner,
-  removeClip,
+  moveClipsWithLinkedPartners,
+  removeClips,
   removeClipsForAsset,
   removeMarker,
   removeTrack,
@@ -58,8 +58,10 @@ export interface ProductionState {
   /** Active bin asset (mutually exclusive with a clip selection). */
   activeAssetId: string | null;
   timeline: TimelineModel;
-  /** Selected timeline clip (mutually exclusive with a bin selection). */
+  /** Primary selected timeline clip (mutually exclusive with a bin selection). */
   selectedClipId: string | null;
+  /** Full clip selection (Ctrl+click multi-select); contains selectedClipId. */
+  selectedClipIds: string[];
   /** Per-target grade documents (JSON strings) keyed by `targetKey`. */
   gradeDocs: Record<string, string>;
   /** Per-clip non-destructive audio edits, keyed by clip id. */
@@ -74,6 +76,7 @@ function initialState(): ProductionState {
     activeAssetId: null,
     timeline: createTimeline(),
     selectedClipId: null,
+    selectedClipIds: [],
     gradeDocs: {},
     audioEdits: {},
     clipProps: {},
@@ -82,34 +85,86 @@ function initialState(): ProductionState {
 
 type Listener = () => void;
 
-/** The store: an immutable snapshot plus subscribe/mutate. */
+/** Undo history is capped so long sessions don't grow without bound. */
+const HISTORY_LIMIT = 100;
+
+export interface MutateOptions {
+  /** Consecutive mutations sharing a coalesce key collapse into one undo
+   * step (a pointer drag emits one mutation per move event). */
+  coalesceKey?: string;
+}
+
+/** The store: an immutable snapshot plus subscribe/mutate and undo history.
+ * Timeline-changing mutations record the prior snapshot; undo/redo restore
+ * whole snapshots so cascaded documents and selection stay consistent. */
 export interface ProductionStore {
   getState(): ProductionState;
   subscribe(listener: Listener): () => void;
   /** Replace the snapshot with the reducer's result and notify (no-op when
    * the reducer returns the same reference). */
-  mutate(reduce: (state: ProductionState) => ProductionState): void;
+  mutate(reduce: (state: ProductionState) => ProductionState, opts?: MutateOptions): void;
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;
+  canRedo(): boolean;
   reset(): void;
 }
 
 export function createProductionStore(): ProductionStore {
   let state = initialState();
+  let past: ProductionState[] = [];
+  let future: ProductionState[] = [];
+  let lastCoalesceKey: string | null = null;
   const listeners = new Set<Listener>();
+  const notify = () => {
+    for (const l of [...listeners]) l();
+  };
   return {
     getState: () => state,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    mutate(reduce) {
+    mutate(reduce, opts) {
       const next = reduce(state);
       if (next === state) return;
+      if (next.timeline !== state.timeline) {
+        const coalesceKey = opts?.coalesceKey ?? null;
+        if (coalesceKey == null || coalesceKey !== lastCoalesceKey) {
+          past = [...past.slice(-(HISTORY_LIMIT - 1)), state];
+          future = [];
+        }
+        lastCoalesceKey = coalesceKey;
+      } else {
+        lastCoalesceKey = null;
+      }
       state = next;
-      for (const l of [...listeners]) l();
+      notify();
     },
+    undo() {
+      if (past.length === 0) return;
+      future = [...future, state];
+      state = past[past.length - 1];
+      past = past.slice(0, -1);
+      lastCoalesceKey = null;
+      notify();
+    },
+    redo() {
+      if (future.length === 0) return;
+      past = [...past, state];
+      state = future[future.length - 1];
+      future = future.slice(0, -1);
+      lastCoalesceKey = null;
+      notify();
+    },
+    canUndo: () => past.length > 0,
+    canRedo: () => future.length > 0,
     reset() {
       state = initialState();
-      for (const l of [...listeners]) l();
+      past = [];
+      future = [];
+      lastCoalesceKey = null;
+      notify();
     },
   };
 }
@@ -188,7 +243,10 @@ function withTimeline(state: ProductionState, after: TimelineModel): ProductionS
   }
   const selectedClipId =
     state.selectedClipId && !survivors.has(state.selectedClipId) ? null : state.selectedClipId;
-  return { ...state, timeline: after, gradeDocs, audioEdits, clipProps, selectedClipId };
+  const selectedClipIds = state.selectedClipIds.every((id) => survivors.has(id))
+    ? state.selectedClipIds
+    : state.selectedClipIds.filter((id) => survivors.has(id));
+  return { ...state, timeline: after, gradeDocs, audioEdits, clipProps, selectedClipId, selectedClipIds };
 }
 
 // --- actions -----------------------------------------------------------------
@@ -208,6 +266,7 @@ export function addAssetToBin(store: ProductionStore, draft: AssetDraft): MediaA
     binAssets: result.assets,
     activeAssetId: result.asset.id,
     selectedClipId: null,
+    selectedClipIds: [],
   }));
   return result.asset;
 }
@@ -256,6 +315,7 @@ export function addAssetClip(
         ...state,
         timeline: result.timeline,
         selectedClipId: result.video.id,
+        selectedClipIds: [result.video.id],
       };
     }
     const result = appendClip(state.timeline, asset, placement);
@@ -265,6 +325,7 @@ export function addAssetClip(
       ...state,
       timeline: result.timeline,
       selectedClipId: result.clip.id,
+      selectedClipIds: [result.clip.id],
     };
   });
 }
@@ -295,12 +356,18 @@ export function removeTimelineTrack(store: ProductionStore, trackId: string): vo
   store.mutate((state) => withTimeline(state, removeTrack(state.timeline, trackId)));
 }
 
-/** Drag-move a clip within its track; a linked A/V partner moves with it. */
+/** Drag-move a clip within its track; a linked A/V partner moves with it.
+ * When the clip is part of a multi-selection the whole selection moves by
+ * the same delta. Move events of one drag coalesce into one undo step. */
 export function moveTimelineClip(store: ProductionStore, clipId: string, toStartSec: number): void {
-  store.mutate((state) => {
-    const result = moveClipWithLinkedPartner(state.timeline, clipId, toStartSec);
-    return result ? withTimeline(state, result.timeline) : state;
-  });
+  store.mutate(
+    (state) => {
+      const moving = state.selectedClipIds.includes(clipId) ? state.selectedClipIds : [clipId];
+      const result = moveClipsWithLinkedPartners(state.timeline, moving, clipId, toStartSec);
+      return result ? withTimeline(state, result.timeline) : state;
+    },
+    { coalesceKey: `move:${clipId}` },
+  );
 }
 
 /** Drag-trim one clip edge; a linked A/V partner's matching edge trims with it. */
@@ -310,15 +377,27 @@ export function trimTimelineClipEdge(
   edge: ClipTrimEdge,
   toSec: number,
 ): void {
-  store.mutate((state) => {
-    const result = trimClipEdgeWithLinkedPartner(state.timeline, clipId, edge, toSec);
-    return result ? withTimeline(state, result.timeline) : state;
-  });
+  store.mutate(
+    (state) => {
+      const result = trimClipEdgeWithLinkedPartner(state.timeline, clipId, edge, toSec);
+      return result ? withTimeline(state, result.timeline) : state;
+    },
+    { coalesceKey: `trim:${clipId}:${edge}` },
+  );
 }
 
 /** Remove a clip; its edit documents cascade away. */
 export function removeTimelineClip(store: ProductionStore, clipId: string): void {
-  store.mutate((state) => withTimeline(state, removeClip(state.timeline, clipId)));
+  store.mutate((state) => withTimeline(state, removeClips(state.timeline, [clipId])));
+}
+
+/** Remove every clip in the current multi-selection (Delete key). */
+export function removeSelectedTimelineClips(store: ProductionStore): void {
+  store.mutate((state) =>
+    state.selectedClipIds.length === 0
+      ? state
+      : withTimeline(state, removeClips(state.timeline, state.selectedClipIds)),
+  );
 }
 
 export function splitTimelineClip(store: ProductionStore, clipId: string, atSec: number): void {
@@ -328,6 +407,7 @@ export function splitTimelineClip(store: ProductionStore, clipId: string, atSec:
     return {
       ...withTimeline(state, result.timeline),
       selectedClipId: result.right.id,
+      selectedClipIds: [result.right.id],
     };
   });
 }
@@ -336,8 +416,42 @@ export function selectClip(store: ProductionStore, clipId: string | null): void 
   store.mutate((state) => ({
     ...state,
     selectedClipId: clipId,
+    selectedClipIds: clipId ? [clipId] : [],
     activeAssetId: clipId ? null : state.activeAssetId,
   }));
+}
+
+/** Ctrl+click multi-select: toggle a clip in/out of the selection. The most
+ * recently added clip becomes the primary selection. */
+export function toggleClipInSelection(store: ProductionStore, clipId: string): void {
+  store.mutate((state) => {
+    if (!findClip(state.timeline, clipId)) return state;
+    if (state.selectedClipIds.includes(clipId)) {
+      const selectedClipIds = state.selectedClipIds.filter((id) => id !== clipId);
+      return {
+        ...state,
+        selectedClipIds,
+        selectedClipId:
+          state.selectedClipId === clipId
+            ? (selectedClipIds[selectedClipIds.length - 1] ?? null)
+            : state.selectedClipId,
+      };
+    }
+    return {
+      ...state,
+      selectedClipIds: [...state.selectedClipIds, clipId],
+      selectedClipId: clipId,
+      activeAssetId: null,
+    };
+  });
+}
+
+export function undoProduction(store: ProductionStore): void {
+  store.undo();
+}
+
+export function redoProduction(store: ProductionStore): void {
+  store.redo();
 }
 
 export function selectBinAsset(store: ProductionStore, assetId: string | null): void {
@@ -345,15 +459,16 @@ export function selectBinAsset(store: ProductionStore, assetId: string | null): 
     ...state,
     activeAssetId: assetId,
     selectedClipId: assetId ? null : state.selectedClipId,
+    selectedClipIds: assetId ? [] : state.selectedClipIds,
   }));
 }
 
 /** Clear the bin/clip selection (a canvas node was selected instead). */
 export function clearProductionSelection(store: ProductionStore): void {
   store.mutate((state) =>
-    state.activeAssetId === null && state.selectedClipId === null
+    state.activeAssetId === null && state.selectedClipId === null && state.selectedClipIds.length === 0
       ? state
-      : { ...state, activeAssetId: null, selectedClipId: null },
+      : { ...state, activeAssetId: null, selectedClipId: null, selectedClipIds: [] },
   );
 }
 

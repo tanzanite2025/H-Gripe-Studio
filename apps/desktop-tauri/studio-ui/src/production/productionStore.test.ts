@@ -9,9 +9,13 @@ import {
   clipGradeKey,
   commitAudioEdit,
   createProductionStore,
+  moveTimelineClip,
   removeAssetFromBin,
+  removeSelectedTimelineClips,
   removeTimelineClip,
   removeTimelineTrack,
+  toggleClipInSelection,
+  trimTimelineClipEdge,
   selectBinAsset,
   selectClip,
   setBinAssetMediaInfo,
@@ -240,6 +244,114 @@ describe("productionStore", () => {
     expect(after.audioEdits[audioClip.id]).toBeUndefined();
   });
 
+  it("undo/redo restore whole snapshots including cascaded documents", () => {
+    const { store, clipId } = storeWithClip("audio");
+    setClipGradeDoc(store, clipId, "{}");
+    commitAudioEdit(store, clipId, defaultAudioEdit());
+    expect(store.canUndo()).toBe(true);
+    expect(store.canRedo()).toBe(false);
+
+    removeTimelineClip(store, clipId);
+    expect(findClip(store.getState().timeline, clipId)).toBeNull();
+
+    store.undo();
+    const restored = store.getState();
+    expect(findClip(restored.timeline, clipId)).not.toBeNull();
+    expect(clipGradeDocOf(restored, clipId)).toBe("{}");
+    expect(restored.audioEdits[clipId]).toBeDefined();
+    expect(store.canRedo()).toBe(true);
+
+    store.redo();
+    expect(findClip(store.getState().timeline, clipId)).toBeNull();
+    expect(store.getState().audioEdits[clipId]).toBeUndefined();
+  });
+
+  it("coalesces a drag's move/trim events into a single undo step", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
+    addAssetClip(store, asset.id);
+    const clipId = store.getState().selectedClipId!;
+
+    moveTimelineClip(store, clipId, 2);
+    moveTimelineClip(store, clipId, 4);
+    moveTimelineClip(store, clipId, 6);
+    expect(findClip(store.getState().timeline, clipId)!.clip.start).toBe(6);
+    store.undo();
+    expect(findClip(store.getState().timeline, clipId)!.clip.start).toBe(0);
+
+    store.redo();
+    trimTimelineClipEdge(store, clipId, "end", 8);
+    trimTimelineClipEdge(store, clipId, "end", 9);
+    store.undo(); // both trim events undo together
+    const clip = findClip(store.getState().timeline, clipId)!.clip;
+    expect(clip.start).toBe(6);
+    expect(clip.duration).not.toBe(3);
+  });
+
+  it("selection changes are not undo steps", () => {
+    const { store, clipId } = storeWithClip();
+    selectClip(store, null);
+    selectClip(store, clipId);
+    store.undo(); // undoes the clip insertion, not the selection changes
+    expect(store.getState().timeline.tracks.every((t) => t.clips.length === 0)).toBe(true);
+    expect(store.canUndo()).toBe(false);
+  });
+
+  it("ctrl-click toggles clips in and out of the multi-selection", () => {
+    const store = createProductionStore();
+    const a = addAssetToBin(store, { kind: "image", path: "/media/a.png" });
+    const b = addAssetToBin(store, { kind: "image", path: "/media/b.png" });
+    addAssetClip(store, a.id);
+    const firstId = store.getState().selectedClipId!;
+    addAssetClip(store, b.id);
+    const secondId = store.getState().selectedClipId!;
+
+    toggleClipInSelection(store, firstId);
+    let state = store.getState();
+    expect(state.selectedClipIds).toEqual([secondId, firstId]);
+    expect(state.selectedClipId).toBe(firstId);
+    expect(state.activeAssetId).toBeNull();
+
+    toggleClipInSelection(store, firstId);
+    state = store.getState();
+    expect(state.selectedClipIds).toEqual([secondId]);
+    expect(state.selectedClipId).toBe(secondId);
+
+    toggleClipInSelection(store, "missing");
+    expect(store.getState().selectedClipIds).toEqual([secondId]);
+
+    selectClip(store, firstId); // plain click collapses to a single selection
+    expect(store.getState().selectedClipIds).toEqual([firstId]);
+  });
+
+  it("moves the whole multi-selection together and batch-deletes it", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
+    addAssetClip(store, asset.id, { atSec: 0 });
+    const firstId = store.getState().selectedClipId!;
+    addAssetClip(store, asset.id, { atSec: 10 });
+    const secondId = store.getState().selectedClipId!;
+    toggleClipInSelection(store, firstId);
+
+    const firstStart = findClip(store.getState().timeline, firstId)!.clip.start;
+    const secondStart = findClip(store.getState().timeline, secondId)!.clip.start;
+    moveTimelineClip(store, firstId, firstStart + 2);
+    let state = store.getState();
+    expect(findClip(state.timeline, firstId)!.clip.start).toBe(firstStart + 2);
+    expect(findClip(state.timeline, secondId)!.clip.start).toBe(secondStart + 2);
+
+    removeSelectedTimelineClips(store);
+    state = store.getState();
+    expect(findClip(state.timeline, firstId)).toBeNull();
+    expect(findClip(state.timeline, secondId)).toBeNull();
+    expect(state.selectedClipIds).toEqual([]);
+    expect(state.selectedClipId).toBeNull();
+
+    store.undo();
+    expect(findClip(store.getState().timeline, firstId)).not.toBeNull();
+    expect(findClip(store.getState().timeline, secondId)).not.toBeNull();
+  });
+
   it("reset returns to a fresh state", () => {
     const { store } = storeWithClip();
     store.reset();
@@ -249,5 +361,7 @@ describe("productionStore", () => {
     expect(state.gradeDocs).toEqual({});
     expect(state.audioEdits).toEqual({});
     expect(state.clipProps).toEqual({});
+    expect(store.canUndo()).toBe(false);
+    expect(store.canRedo()).toBe(false);
   });
 });

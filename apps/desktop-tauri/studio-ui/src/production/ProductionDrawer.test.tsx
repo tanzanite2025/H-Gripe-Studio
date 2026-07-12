@@ -57,6 +57,9 @@ function seededStore(overrides: Partial<ProductionState> = {}): ProductionStore 
     binAssets: assets,
     timeline,
     ...overrides,
+    selectedClipIds:
+      overrides.selectedClipIds ??
+      (overrides.selectedClipId ? [overrides.selectedClipId] : state.selectedClipIds),
   }));
   return store;
 }
