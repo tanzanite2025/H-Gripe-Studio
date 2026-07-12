@@ -484,6 +484,24 @@ export function toggleClipInSelection(store: ProductionStore, clipId: string): v
   });
 }
 
+/** Marquee (box) selection: replace the clip selection wholesale. Clip ids
+ * missing from the timeline are dropped; the last surviving clip becomes the
+ * primary selection. */
+export function replaceTimelineClipSelection(
+  store: ProductionStore,
+  clipIds: readonly string[],
+): void {
+  store.mutate((state) => {
+    const survivingClipIds = clipIds.filter((id) => findClip(state.timeline, id));
+    return {
+      ...state,
+      selectedClipIds: survivingClipIds,
+      selectedClipId: survivingClipIds[survivingClipIds.length - 1] ?? null,
+      activeAssetId: survivingClipIds.length > 0 ? null : state.activeAssetId,
+    };
+  });
+}
+
 export function undoProduction(store: ProductionStore): void {
   store.undo();
 }
