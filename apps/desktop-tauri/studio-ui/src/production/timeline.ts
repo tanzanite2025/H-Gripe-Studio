@@ -642,6 +642,85 @@ export function moveClipsWithLinkedPartners(
   };
 }
 
+/**
+ * Vertical drag-move of a clip onto a different track of the same kind,
+ * optionally shifting it in time as well. The clip must land in a free gap on
+ * the target track; a linked A/V partner stays on its own track but shifts by
+ * the same frame-snapped time delta (and must also fit). Returns null when
+ * the target track is missing, locked, of a different kind, or nothing fits.
+ * Dropping onto the clip's own track falls back to the horizontal move.
+ */
+export function moveClipToTrackWithLinkedPartner(
+  timeline: TimelineModel,
+  clipId: string,
+  targetTrackId: string,
+  desiredStartSec: number,
+): MoveClipResult | null {
+  const found = findClip(timeline, clipId);
+  const targetTrack = timeline.tracks.find((t) => t.id === targetTrackId);
+  if (!found || !targetTrack) return null;
+  if (targetTrack.id === found.track.id)
+    return moveClipWithLinkedPartner(timeline, clipId, desiredStartSec);
+  if (targetTrack.kind !== found.track.kind || targetTrack.locked || found.track.locked)
+    return null;
+
+  const clip = found.clip;
+  const partner = findLinkedPartner(timeline, clip);
+  const partnerLocation = partner ? findClip(timeline, partner.id) : null;
+
+  const snappedStart = snapTimeToFrame(
+    Math.max(0, desiredStartSec),
+    timeline.fps ?? DEFAULT_TIMELINE_FPS,
+  );
+  const desiredDelta = snappedStart - clip.start;
+
+  const movingIds = new Set([clip.id]);
+  if (partnerLocation) movingIds.add(partnerLocation.clip.id);
+  let allowedDeltas = allowedMoveDeltasForClip(
+    freeGapsInTrack(targetTrack, movingIds),
+    clip.start,
+    clip.duration,
+  );
+  let minStart = clip.start;
+  if (partnerLocation) {
+    allowedDeltas = intersectIntervalLists(
+      allowedDeltas,
+      allowedMoveDeltasForClip(
+        freeGapsInTrack(partnerLocation.track, movingIds),
+        partnerLocation.clip.start,
+        partnerLocation.clip.duration,
+      ),
+    );
+    minStart = Math.min(minStart, partnerLocation.clip.start);
+  }
+  // No clip may start before 0.
+  allowedDeltas = intersectIntervalLists(allowedDeltas, [
+    { start: -minStart, end: Number.POSITIVE_INFINITY },
+  ]);
+
+  const delta = clampIntoIntervals(desiredDelta, allowedDeltas);
+  if (delta == null) return null;
+
+  const movedClip: TimelineClip = { ...clip, start: clip.start + delta };
+  return {
+    movedToStartSec: movedClip.start,
+    timeline: {
+      ...timeline,
+      tracks: timeline.tracks.map((track) => {
+        let clips = track.clips;
+        if (track.id === found.track.id) clips = clips.filter((c) => c.id !== clip.id);
+        if (track.id === targetTrack.id)
+          clips = [...clips, movedClip].sort((a, b) => a.start - b.start);
+        if (partnerLocation && delta !== 0 && track.id === partnerLocation.track.id)
+          clips = clips.map((c) =>
+            c.id === partnerLocation.clip.id ? { ...c, start: c.start + delta } : c,
+          );
+        return clips === track.clips ? track : { ...track, clips };
+      }),
+    },
+  };
+}
+
 export type ClipTrimEdge = "start" | "end";
 
 /** The allowed absolute time range for one clip's edge during a trim. */
