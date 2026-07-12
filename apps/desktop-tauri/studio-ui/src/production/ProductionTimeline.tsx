@@ -7,6 +7,7 @@ import {
   addAssetClip,
   addTimelineTrack,
   moveTimelineClip,
+  moveTimelineClipToTrack,
   removeTimelineClip,
   removeTimelineMarker,
   removeTimelineTrack,
@@ -139,6 +140,8 @@ export function ProductionTimeline({
   const onSplitClipAt = (clipId: string, atSec: number) => splitTimelineClip(store, clipId, atSec);
   const onMoveClipTo = (clipId: string, toStartSec: number) =>
     moveTimelineClip(store, clipId, toStartSec);
+  const onMoveClipToTrack = (clipId: string, targetTrackId: string, toStartSec: number) =>
+    moveTimelineClipToTrack(store, clipId, targetTrackId, toStartSec);
   const onTrimClipEdge = (clipId: string, edge: ClipTrimEdge, toSec: number) =>
     trimTimelineClipEdge(store, clipId, edge, toSec);
   const onToggleMarkerAt = (sec: number) => toggleTimelineMarker(store, sec);
@@ -432,6 +435,7 @@ export function ProductionTimeline({
                       </span>
                       <div
                         className={`production-track-lane${dragAssetId && acceptsActive ? " drop-ready" : ""}${track.locked ? " track-locked" : ""}${track.hidden ? " track-hidden" : ""}`}
+                        data-track-id={track.id}
                         onDragOver={(event) => {
                           if (!acceptsActive) return;
                           event.preventDefault();
@@ -466,6 +470,7 @@ export function ProductionTimeline({
                             onSplitClipAt={onSplitClipAt}
                             onRemoveClip={onRemoveClip}
                             onMoveClipTo={onMoveClipTo}
+                            onMoveClipToTrack={onMoveClipToTrack}
                             onTrimClipEdge={onTrimClipEdge}
                             onSetClipProperties={onSetClipProperties}
                             onOpenContextMenu={setClipMenu}
