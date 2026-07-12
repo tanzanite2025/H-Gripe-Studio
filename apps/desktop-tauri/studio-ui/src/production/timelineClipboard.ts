@@ -1,13 +1,15 @@
 // Pure clip clipboard operations (copy / paste) over the immutable timeline
 // model. Copies are asset references plus placement, detached from the source
 // timeline, so they survive later edits and even deletion of the originals.
-// Paste is atomic: either every copied clip fits, or nothing changes.
+// Paste never overwrites: clips that have no room on any existing compatible
+// track land on freshly created tracks.
 
 import {
   DEFAULT_TIMELINE_FPS,
   findClip,
   freshId,
   snapTimeToFrame,
+  trackKindForClip,
   type ClipKind,
   type TimelineClip,
   type TimelineModel,
@@ -75,14 +77,22 @@ function intervalOverlapsAnyClip(
   );
 }
 
+function freshTrackForClipKind(kind: ClipKind): TimelineTrack {
+  const trackKind = trackKindForClip(kind);
+  const prefix =
+    trackKind === "video" ? "track-v" : trackKind === "audio" ? "track-a" : "track-i";
+  return { id: freshId(prefix), kind: trackKind, clips: [] };
+}
+
 /**
  * Paste previously copied clips with their earliest clip at the (frame
- * snapped) given time. Each clip goes back onto its source track when that
- * track still exists, is unlocked and kind-compatible; otherwise onto the
- * first unlocked compatible track. The paste is atomic: when any clip has no
- * eligible track or would overlap existing (or co-pasted) clips, null is
- * returned and the timeline is unchanged. Linked A/V pairs stay paired under
- * fresh link ids.
+ * snapped) given time — the playhead in the UI. Each clip goes back onto its
+ * source track when that track still exists, is unlocked, kind-compatible and
+ * free at the paste position; otherwise onto the first unlocked compatible
+ * track with room; otherwise onto a freshly created track of the right kind,
+ * so a paste never overwrites existing clips and never fails for lack of
+ * room. Linked A/V pairs stay paired under fresh link ids. Null only when the
+ * clipboard is empty.
  */
 export function pasteCopiedTimelineClipsAtTime(
   timeline: TimelineModel,
@@ -94,18 +104,19 @@ export function pasteCopiedTimelineClipsAtTime(
   const baseStartSec = snapTimeToFrame(Math.max(0, pasteEarliestAtSec), fps);
 
   const clipsToInsertByTrackId = new Map<string, TimelineClip[]>();
+  const createdTracks: TimelineTrack[] = [];
   const freshLinkIdBySourceLinkId = new Map<string, string>();
   const pastedClipIds: string[] = [];
 
   for (const copied of copiedClips) {
     const startSec = snapTimeToFrame(baseStartSec + copied.offsetSecFromEarliestCopiedClip, fps);
-    const eligibleTracks = timeline.tracks.filter(
+    const eligibleTracks = [...timeline.tracks, ...createdTracks].filter(
       (track) => trackAcceptsClipKind(track, copied.kind) && !track.locked,
     );
     const candidateTracks = [...eligibleTracks].sort((a, b) =>
       a.id === copied.sourceTrackId ? -1 : b.id === copied.sourceTrackId ? 1 : 0,
     );
-    const targetTrack = candidateTracks.find(
+    let targetTrack = candidateTracks.find(
       (track) =>
         !intervalOverlapsAnyClip(track.clips, startSec, copied.duration) &&
         !intervalOverlapsAnyClip(
@@ -114,7 +125,10 @@ export function pasteCopiedTimelineClipsAtTime(
           copied.duration,
         ),
     );
-    if (!targetTrack) return null;
+    if (!targetTrack) {
+      targetTrack = freshTrackForClipKind(copied.kind);
+      createdTracks.push(targetTrack);
+    }
 
     let linkId: string | undefined;
     if (copied.sourceLinkId != null) {
@@ -138,15 +152,16 @@ export function pasteCopiedTimelineClipsAtTime(
     clipsToInsertByTrackId.set(targetTrack.id, [...pending, pastedClip]);
   }
 
+  const withInsertedClips = (track: TimelineTrack): TimelineTrack => {
+    const inserted = clipsToInsertByTrackId.get(track.id);
+    if (!inserted) return track;
+    return { ...track, clips: [...track.clips, ...inserted].sort((a, b) => a.start - b.start) };
+  };
   return {
     pastedClipIds,
     timeline: {
       ...timeline,
-      tracks: timeline.tracks.map((track) => {
-        const inserted = clipsToInsertByTrackId.get(track.id);
-        if (!inserted) return track;
-        return { ...track, clips: [...track.clips, ...inserted].sort((a, b) => a.start - b.start) };
-      }),
+      tracks: [...timeline.tracks.map(withInsertedClips), ...createdTracks.map(withInsertedClips)],
     },
   };
 }

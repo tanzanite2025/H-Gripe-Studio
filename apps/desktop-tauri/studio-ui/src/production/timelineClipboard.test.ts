@@ -78,7 +78,7 @@ describe("timeline clipboard", () => {
     expect(findClip(pasted.timeline, pasted.pastedClipIds[0])!.track.id).toBe(fallbackTrackId);
   });
 
-  it("is atomic: returns null when any copied clip cannot fit anywhere", () => {
+  it("creates fresh tracks instead of overwriting when every compatible track is occupied", () => {
     const video = appendClip(createTimeline(), videoAsset, { atSec: 0, duration: 5 });
     const audio = appendClip(video.timeline, audioAsset, { atSec: 0, duration: 5 });
     const copied = copyTimelineClipsToClipboard(audio.timeline, [
@@ -86,16 +86,31 @@ describe("timeline clipboard", () => {
       audio.clip.id,
     ]);
     // Only one video and one audio track exist and both are occupied at 0.
-    expect(pasteCopiedTimelineClipsAtTime(audio.timeline, copied, 0)).toBeNull();
+    const pasted = pasteCopiedTimelineClipsAtTime(audio.timeline, copied, 0)!;
+    expect(pasted.timeline.tracks).toHaveLength(4);
+    const [pastedVideo, pastedAudio] = pasted.pastedClipIds.map(
+      (id) => findClip(pasted.timeline, id)!,
+    );
+    expect(pastedVideo.track.kind).toBe("video");
+    expect(pastedVideo.track.id).not.toBe(video.trackId);
+    expect(pastedAudio.track.kind).toBe("audio");
+    expect(pastedAudio.track.id).not.toBe(audio.trackId);
+    // The originals are untouched.
+    expect(findClip(pasted.timeline, video.clip.id)!.clip.start).toBe(0);
+    expect(findClip(pasted.timeline, audio.clip.id)!.clip.start).toBe(0);
     // An empty clipboard pastes nothing.
     expect(pasteCopiedTimelineClipsAtTime(audio.timeline, [], 10)).toBeNull();
   });
 
-  it("skips locked tracks when choosing a paste target", () => {
+  it("skips locked tracks and pastes onto a fresh track instead", () => {
     const first = appendClip(createTimeline(), videoAsset, { atSec: 0, duration: 5 });
     const copied = copyTimelineClipsToClipboard(first.timeline, [first.clip.id]);
     const locked = toggleTrackLock(first.timeline, first.trackId);
-    expect(pasteCopiedTimelineClipsAtTime(locked, copied, 10)).toBeNull();
+    const pasted = pasteCopiedTimelineClipsAtTime(locked, copied, 10)!;
+    const location = findClip(pasted.timeline, pasted.pastedClipIds[0])!;
+    expect(location.track.id).not.toBe(first.trackId);
+    expect(location.track.kind).toBe("video");
+    expect(location.clip.start).toBe(10);
   });
 
   it("co-pasted clips on the same track cannot overlap each other", () => {
