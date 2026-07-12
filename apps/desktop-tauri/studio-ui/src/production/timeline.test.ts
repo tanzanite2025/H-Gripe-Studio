@@ -10,6 +10,7 @@ import {
   clipKindForAsset,
   createTimeline,
   findClip,
+  moveClipToTrackWithLinkedPartner,
   moveClipWithLinkedPartner,
   moveClipsWithLinkedPartners,
   removeClip,
@@ -320,6 +321,90 @@ describe("timeline model", () => {
     expect(past.movedToStartSec).toBe(25);
     expect(findClip(past.timeline, pair.video.id)!.clip.start).toBe(25);
     expect(findClip(past.timeline, pair.audio.id)!.clip.start).toBe(25);
+  });
+
+  it("moves a clip onto another track of the same kind", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const withSecondVideoTrack = addTrack(first.timeline, "video");
+    const targetTrackId = withSecondVideoTrack.tracks[withSecondVideoTrack.tracks.length - 1].id;
+    const moved = moveClipToTrackWithLinkedPartner(
+      withSecondVideoTrack,
+      first.clip.id,
+      targetTrackId,
+      5.017,
+    )!;
+    expect(moved.movedToStartSec).toBe(5);
+    const location = findClip(moved.timeline, first.clip.id)!;
+    expect(location.track.id).toBe(targetTrackId);
+    expect(location.clip.start).toBe(5);
+    expect(findClip(moved.timeline, first.clip.id)).not.toBeNull();
+    expect(
+      moved.timeline.tracks.find((t) => t.id === first.trackId)!.clips,
+    ).toHaveLength(0);
+  });
+
+  it("a cross-track move is clamped into a free gap on the target track", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const withSecondVideoTrack = addTrack(first.timeline, "video");
+    const targetTrackId = withSecondVideoTrack.tracks[withSecondVideoTrack.tracks.length - 1].id;
+    const blocker = appendClip(withSecondVideoTrack, videoAsset, {
+      trackId: targetTrackId,
+      atSec: 0,
+      duration: 6,
+    });
+    const moved = moveClipToTrackWithLinkedPartner(
+      blocker.timeline,
+      first.clip.id,
+      targetTrackId,
+      2,
+    )!;
+    expect(moved.movedToStartSec).toBe(6);
+    expect(findClip(moved.timeline, first.clip.id)!.track.id).toBe(targetTrackId);
+  });
+
+  it("rejects cross-track moves to locked tracks or tracks of another kind", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const audioTrackId = first.timeline.tracks.find((t) => t.kind === "audio")!.id;
+    expect(
+      moveClipToTrackWithLinkedPartner(first.timeline, first.clip.id, audioTrackId, 0),
+    ).toBeNull();
+    const withLockedVideoTrack = addTrack(first.timeline, "video");
+    const lockedId = withLockedVideoTrack.tracks[withLockedVideoTrack.tracks.length - 1].id;
+    const locked = toggleTrackLock(withLockedVideoTrack, lockedId);
+    expect(
+      moveClipToTrackWithLinkedPartner(locked, first.clip.id, lockedId, 0),
+    ).toBeNull();
+    expect(
+      moveClipToTrackWithLinkedPartner(first.timeline, first.clip.id, "missing", 0),
+    ).toBeNull();
+  });
+
+  it("a cross-track move shifts the linked A/V partner on its own track", () => {
+    const pair = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 10 });
+    const withSecondVideoTrack = addTrack(pair.timeline, "video");
+    const targetTrackId = withSecondVideoTrack.tracks[withSecondVideoTrack.tracks.length - 1].id;
+    const moved = moveClipToTrackWithLinkedPartner(
+      withSecondVideoTrack,
+      pair.video.id,
+      targetTrackId,
+      4,
+    )!;
+    expect(moved.movedToStartSec).toBe(4);
+    expect(findClip(moved.timeline, pair.video.id)!.track.id).toBe(targetTrackId);
+    expect(findClip(moved.timeline, pair.audio.id)!.clip.start).toBe(4);
+    expect(findClip(moved.timeline, pair.audio.id)!.track.id).toBe(pair.audioTrackId);
+  });
+
+  it("dropping onto the clip's own track falls back to the horizontal move", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const moved = moveClipToTrackWithLinkedPartner(
+      first.timeline,
+      first.clip.id,
+      first.trackId,
+      3,
+    )!;
+    expect(moved.movedToStartSec).toBe(3);
+    expect(findClip(moved.timeline, first.clip.id)!.track.id).toBe(first.trackId);
   });
 
   it("moves several clips by a common delta, keeping their relative offsets", () => {

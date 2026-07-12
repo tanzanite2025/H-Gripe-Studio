@@ -24,6 +24,7 @@ import {
   createTimeline,
   findClip,
   moveClipsWithLinkedPartners,
+  moveClipToTrackWithLinkedPartner,
   removeClips,
   removeClipsForAsset,
   removeMarker,
@@ -406,6 +407,26 @@ export function moveTimelineClip(store: ProductionStore, clipId: string, toStart
     },
     { coalesceKey: `move:${clipId}` },
   );
+}
+
+/** Drop a dragged clip onto a different track of the same kind (vertical
+ * drag-move); a linked A/V partner stays on its own track but shifts by the
+ * same time delta. Nothing changes when the drop cannot fit. */
+export function moveTimelineClipToTrack(
+  store: ProductionStore,
+  clipId: string,
+  targetTrackId: string,
+  toStartSec: number,
+): void {
+  store.mutate((state) => {
+    const result = moveClipToTrackWithLinkedPartner(
+      state.timeline,
+      clipId,
+      targetTrackId,
+      toStartSec,
+    );
+    return result ? withTimeline(state, result.timeline) : state;
+  });
 }
 
 /** Drag-trim one clip edge; a linked A/V partner's matching edge trims with it. */
