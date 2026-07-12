@@ -10,11 +10,16 @@ import { ProgramMonitor } from "./ProgramMonitor";
 import { ProductionInspector } from "./ProductionInspector";
 import type { ProductionTarget } from "./productionTarget";
 import {
+  clearSequencePlaybackInPointAction,
+  clearSequencePlaybackOutPointAction,
   clipGradeDocOf,
   removeAssetFromBin,
   removeSelectedTimelineClips,
   selectBinAsset,
   setClipProperties,
+  setSequencePlaybackInPoint,
+  setSequencePlaybackOutPoint,
+  toggleTimelineMarker,
 } from "./productionStore";
 import {
   useProductionStateFromContext,
@@ -113,6 +118,8 @@ export function ProductionDrawer({
   const [dragAssetId, setDragAssetId] = useState<string | null>(null);
   const [timelineTool, setTimelineTool] = useState<TimelineTool>("select");
   const [playheadSec, setPlayheadSec] = useState(0);
+  const playheadSecRef = useRef(0);
+  playheadSecRef.current = playheadSec;
   const programColumnRef = useRef<HTMLDivElement | null>(null);
   const [monitorCardHeight, setMonitorCardHeight] = useState<number | null>(null);
 
@@ -142,11 +149,13 @@ export function ProductionDrawer({
   }, [expanded, renderExpanded]);
 
   // Timeline keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo,
-  // Delete / Backspace removes the selected clips. Skipped while typing in
-  // form fields or editable content.
+  // Delete / Backspace removes the selected clips, M toggles a sequence
+  // marker and I / O set the playback in/out points at the playhead.
+  // Skipped while typing in form fields or editable content.
   useEffect(() => {
     if (!renderExpanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -172,6 +181,22 @@ export function ProductionDrawer({
         if (store.getState().selectedClipIds.length === 0) return;
         event.preventDefault();
         removeSelectedTimelineClips(store);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (key === "m") {
+        event.preventDefault();
+        toggleTimelineMarker(store, playheadSecRef.current);
+        return;
+      }
+      if (key === "i") {
+        event.preventDefault();
+        setSequencePlaybackInPoint(store, playheadSecRef.current);
+        return;
+      }
+      if (key === "o") {
+        event.preventDefault();
+        setSequencePlaybackOutPoint(store, playheadSecRef.current);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -329,6 +354,11 @@ export function ProductionDrawer({
                 clipPropsDoc={clipPropsDoc}
                 playheadSec={playheadSec}
                 onPlayheadSecChange={setPlayheadSec}
+                onToggleSequenceMarkerAtSec={(sec) => toggleTimelineMarker(store, sec)}
+                onSetSequencePlaybackInPointSec={(sec) => setSequencePlaybackInPoint(store, sec)}
+                onSetSequencePlaybackOutPointSec={(sec) => setSequencePlaybackOutPoint(store, sec)}
+                onClearSequencePlaybackInPoint={() => clearSequencePlaybackInPointAction(store)}
+                onClearSequencePlaybackOutPoint={() => clearSequencePlaybackOutPointAction(store)}
                 onExportedFrame={(asset) => {
                   ports.exportService.addExportedFrame?.(asset);
                   setAssetPanelOpen(true);

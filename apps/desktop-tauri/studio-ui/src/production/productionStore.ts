@@ -46,6 +46,12 @@ import {
   type ClipProperties,
 } from "./clipProps";
 import { targetKey } from "./productionTarget";
+import {
+  clearSequencePlaybackInPoint,
+  clearSequencePlaybackOutPoint,
+  setSequencePlaybackInPointAtTime,
+  setSequencePlaybackOutPointAtTime,
+} from "./sequencePlaybackRange";
 
 export interface AudioEditEntry {
   edit: AudioClipEdit;
@@ -337,6 +343,38 @@ export function toggleTimelineMarker(store: ProductionStore, sec: number): void 
 
 export function removeTimelineMarker(store: ProductionStore, markerId: string): void {
   store.mutate((state) => ({ ...state, timeline: removeMarker(state.timeline, markerId) }));
+}
+
+/** Set the sequence playback in point (I key / monitor mark-in button). */
+export function setSequencePlaybackInPoint(store: ProductionStore, sec: number): void {
+  store.mutate((state) => ({
+    ...state,
+    timeline: setSequencePlaybackInPointAtTime(state.timeline, sec),
+  }));
+}
+
+/** Set the sequence playback out point (O key / monitor mark-out button). */
+export function setSequencePlaybackOutPoint(store: ProductionStore, sec: number): void {
+  store.mutate((state) => ({
+    ...state,
+    timeline: setSequencePlaybackOutPointAtTime(state.timeline, sec),
+  }));
+}
+
+/** Clear the sequence playback in point (Alt+click the mark-in button). */
+export function clearSequencePlaybackInPointAction(store: ProductionStore): void {
+  store.mutate((state) => ({
+    ...state,
+    timeline: clearSequencePlaybackInPoint(state.timeline),
+  }));
+}
+
+/** Clear the sequence playback out point (Alt+click the mark-out button). */
+export function clearSequencePlaybackOutPointAction(store: ProductionStore): void {
+  store.mutate((state) => ({
+    ...state,
+    timeline: clearSequencePlaybackOutPoint(state.timeline),
+  }));
 }
 
 export function toggleTimelineTrackLock(store: ProductionStore, trackId: string): void {

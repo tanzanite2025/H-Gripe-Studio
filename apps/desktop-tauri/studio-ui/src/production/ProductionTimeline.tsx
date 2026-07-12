@@ -234,6 +234,8 @@ export function ProductionTimeline({
                 markers={timeline.markers}
                 onToggleMarker={onToggleMarkerAt ? () => onToggleMarkerAt(playheadSec) : undefined}
                 onRemoveMarker={onRemoveMarker}
+                playbackInPointSec={timeline.playbackRange?.inPointSec ?? null}
+                playbackOutPointSec={timeline.playbackRange?.outPointSec ?? null}
                 zoom={timelineZoom}
                 onZoomChange={setTimelineZoom}
               />
