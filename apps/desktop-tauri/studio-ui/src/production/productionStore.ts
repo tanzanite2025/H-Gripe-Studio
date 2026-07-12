@@ -23,6 +23,7 @@ import {
   appendVideoWithAudio,
   createTimeline,
   findClip,
+  moveClipWithLinkedPartner,
   removeClip,
   removeClipsForAsset,
   removeMarker,
@@ -32,6 +33,8 @@ import {
   toggleTrackHidden,
   toggleTrackLock,
   trimClip,
+  trimClipEdgeWithLinkedPartner,
+  type ClipTrimEdge,
   type TimelineModel,
   type TrackKind,
 } from "./timeline";
@@ -290,6 +293,27 @@ export function addTimelineTrack(store: ProductionStore, kind: TrackKind): void 
 /** Remove a track; its clips' edit documents cascade away. */
 export function removeTimelineTrack(store: ProductionStore, trackId: string): void {
   store.mutate((state) => withTimeline(state, removeTrack(state.timeline, trackId)));
+}
+
+/** Drag-move a clip within its track; a linked A/V partner moves with it. */
+export function moveTimelineClip(store: ProductionStore, clipId: string, toStartSec: number): void {
+  store.mutate((state) => {
+    const result = moveClipWithLinkedPartner(state.timeline, clipId, toStartSec);
+    return result ? withTimeline(state, result.timeline) : state;
+  });
+}
+
+/** Drag-trim one clip edge; a linked A/V partner's matching edge trims with it. */
+export function trimTimelineClipEdge(
+  store: ProductionStore,
+  clipId: string,
+  edge: ClipTrimEdge,
+  toSec: number,
+): void {
+  store.mutate((state) => {
+    const result = trimClipEdgeWithLinkedPartner(state.timeline, clipId, edge, toSec);
+    return result ? withTimeline(state, result.timeline) : state;
+  });
 }
 
 /** Remove a clip; its edit documents cascade away. */

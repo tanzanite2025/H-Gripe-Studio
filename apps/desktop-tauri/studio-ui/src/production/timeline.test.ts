@@ -10,6 +10,7 @@ import {
   clipKindForAsset,
   createTimeline,
   findClip,
+  moveClipWithLinkedPartner,
   removeClip,
   removeClipsForAsset,
   removeMarker,
@@ -24,6 +25,7 @@ import {
   timelineSnapPoints,
   trackKindForClip,
   trimClip,
+  trimClipEdgeWithLinkedPartner,
 } from "./timeline";
 
 const imageAsset = { id: "a-img", kind: "image" as const };
@@ -281,5 +283,112 @@ describe("timeline model", () => {
     const r = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 42.5 });
     expect(r.video.duration).toBe(42.5);
     expect(r.audio.duration).toBe(42.5);
+  });
+
+  it("moves a clip to a frame-snapped start within its track", () => {
+    const r = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const moved = moveClipWithLinkedPartner(r.timeline, r.clip.id, 3.017)!;
+    expect(moved.movedToStartSec).toBe(3);
+    expect(findClip(moved.timeline, r.clip.id)!.clip.start).toBe(3);
+    expect(moveClipWithLinkedPartner(r.timeline, "missing", 1)).toBeNull();
+  });
+
+  it("clamps a move so the clip never overlaps neighbors or starts before 0", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const second = appendClip(first.timeline, videoAsset, { atSec: 20, duration: 5 });
+    // Dragging the second clip into the first stops flush against its end.
+    const intoFirst = moveClipWithLinkedPartner(second.timeline, second.clip.id, 7)!;
+    expect(intoFirst.movedToStartSec).toBe(10);
+    // Dragging the first clip left of 0 clamps to 0.
+    const beforeZero = moveClipWithLinkedPartner(second.timeline, first.clip.id, -4)!;
+    expect(beforeZero.movedToStartSec).toBe(0);
+  });
+
+  it("moves a linked A/V pair together, constrained by both tracks", () => {
+    const pair = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 10 });
+    const blocked = appendClip(pair.timeline, audioAsset, { atSec: 15, duration: 5 });
+    // The audio-track blocker at 15..20 stops the pair at 5 even though the
+    // video track is free.
+    const moved = moveClipWithLinkedPartner(blocked.timeline, pair.video.id, 8)!;
+    expect(moved.movedToStartSec).toBe(5);
+    expect(findClip(moved.timeline, pair.video.id)!.clip.start).toBe(5);
+    expect(findClip(moved.timeline, pair.audio.id)!.clip.start).toBe(5);
+    // Past the blocker both clips land at the requested start.
+    const past = moveClipWithLinkedPartner(blocked.timeline, pair.audio.id, 25)!;
+    expect(past.movedToStartSec).toBe(25);
+    expect(findClip(past.timeline, pair.video.id)!.clip.start).toBe(25);
+    expect(findClip(past.timeline, pair.audio.id)!.clip.start).toBe(25);
+  });
+
+  it("trims the end edge, clamped to MIN_CLIP_SECONDS and the next neighbor", () => {
+    const first = appendClip(createTimeline(), videoAsset, { duration: 10 });
+    const second = appendClip(first.timeline, videoAsset, { atSec: 12, duration: 5 });
+    const shortened = trimClipEdgeWithLinkedPartner(second.timeline, first.clip.id, "end", 6)!;
+    expect(findClip(shortened.timeline, first.clip.id)!.clip).toMatchObject({
+      start: 0,
+      duration: 6,
+      sourceStartSec: 0,
+    });
+    // Extending right stops at the next clip's start.
+    const extended = trimClipEdgeWithLinkedPartner(second.timeline, first.clip.id, "end", 30)!;
+    expect(extended.trimmedToSec).toBe(12);
+    // Collapsing left stops at MIN_CLIP_SECONDS.
+    const collapsed = trimClipEdgeWithLinkedPartner(second.timeline, first.clip.id, "end", 0)!;
+    expect(findClip(collapsed.timeline, first.clip.id)!.clip.duration).toBeCloseTo(
+      MIN_CLIP_SECONDS,
+      5,
+    );
+    expect(trimClipEdgeWithLinkedPartner(second.timeline, "missing", "end", 3)).toBeNull();
+  });
+
+  it("trims the start edge while preserving source continuity", () => {
+    const r = appendClip(createTimeline(), videoAsset, { atSec: 2, duration: 10 });
+    const trimmed = trimClipEdgeWithLinkedPartner(r.timeline, r.clip.id, "start", 5)!;
+    expect(findClip(trimmed.timeline, r.clip.id)!.clip).toMatchObject({
+      start: 5,
+      duration: 7,
+      sourceStartSec: 3,
+    });
+    // Dragging the start back left restores the hidden head, but a media clip
+    // never extends before its source in-point (sourceStartSec 0 => start 2).
+    const restored = trimClipEdgeWithLinkedPartner(trimmed.timeline, r.clip.id, "start", 0)!;
+    expect(restored.trimmedToSec).toBe(2);
+    expect(findClip(restored.timeline, r.clip.id)!.clip).toMatchObject({
+      start: 2,
+      duration: 10,
+      sourceStartSec: 0,
+    });
+  });
+
+  it("lets a still clip extend freely left and right", () => {
+    const r = appendClip(createTimeline(), imageAsset, { atSec: 5, duration: 5 });
+    const widened = trimClipEdgeWithLinkedPartner(r.timeline, r.clip.id, "start", 1)!;
+    expect(findClip(widened.timeline, r.clip.id)!.clip).toMatchObject({
+      start: 1,
+      duration: 9,
+      sourceStartSec: 0,
+    });
+    const extended = trimClipEdgeWithLinkedPartner(widened.timeline, r.clip.id, "end", 20)!;
+    expect(findClip(extended.timeline, r.clip.id)!.clip.duration).toBe(19);
+  });
+
+  it("trims a linked A/V pair's matching edges together", () => {
+    const pair = appendVideoWithAudio(createTimeline(), videoAsset, { duration: 10 });
+    const trimmed = trimClipEdgeWithLinkedPartner(pair.timeline, pair.video.id, "start", 4)!;
+    expect(findClip(trimmed.timeline, pair.video.id)!.clip).toMatchObject({
+      start: 4,
+      duration: 6,
+      sourceStartSec: 4,
+    });
+    expect(findClip(trimmed.timeline, pair.audio.id)!.clip).toMatchObject({
+      start: 4,
+      duration: 6,
+      sourceStartSec: 4,
+    });
+    // A blocker behind the audio partner constrains the shared end trim.
+    const blocked = appendClip(trimmed.timeline, audioAsset, { atSec: 12, duration: 3 });
+    const extended = trimClipEdgeWithLinkedPartner(blocked.timeline, pair.video.id, "end", 20)!;
+    expect(extended.trimmedToSec).toBe(12);
+    expect(findClip(extended.timeline, pair.audio.id)!.clip.duration).toBe(8);
   });
 });
