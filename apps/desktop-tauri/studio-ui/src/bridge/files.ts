@@ -122,6 +122,34 @@ export async function videoProbe(path: string, timestamp = 0): Promise<VideoProb
   return (await invoke("video_probe", { path, timestamp })) as VideoProbeResult;
 }
 
+// Fields are snake_case to match the Rust `AudioWaveformPeaksResult` serialization.
+export interface AudioWaveformPeaksResult {
+  /** Per-bucket peak amplitude in 0..=1, evenly spanning the audio stream. */
+  peaks: number[];
+  /** Decoded audio stream length, seconds. */
+  duration_sec: number;
+}
+
+/**
+ * Decode a media file's audio stream to per-bucket waveform peaks for the
+ * audio edit modal's sample waveform. Decoding runs through the timeline
+ * mixdown's native FFmpeg path. Returns `null` outside Tauri (browser
+ * preview) or when the file has no decodable audio; callers fall back to the
+ * schematic envelope.
+ */
+export async function audioWaveformPeaks(
+  path: string,
+  bucketCount: number,
+): Promise<AudioWaveformPeaksResult | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) return null;
+  try {
+    return (await invoke("audio_waveform_peaks", { path, bucketCount })) as AudioWaveformPeaksResult;
+  } catch {
+    return null;
+  }
+}
+
 // Fields are snake_case to match the Rust `ImageDims` serialization.
 export interface ImageDims {
   width: number;

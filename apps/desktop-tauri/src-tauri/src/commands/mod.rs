@@ -3,6 +3,7 @@
 //! keeps only the crate-root shared helpers (`broker`, `runtime_paths`,
 //! `modified_ms`) that the studio modules also reach through `crate::`.
 
+pub(crate) mod audio;
 pub(crate) mod config;
 pub(crate) mod history;
 pub(crate) mod media;

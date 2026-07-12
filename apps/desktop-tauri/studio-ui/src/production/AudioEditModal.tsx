@@ -9,15 +9,24 @@ import {
   gainScalar,
   type AudioClipEdit,
 } from "./audioEdit";
+import {
+  sliceWaveformPeaksToTrimmedSourceWindow,
+  waveformPolygonPointsFromPeaks,
+} from "./audioWaveformDisplay";
+import { useAudioWaveformPeaks } from "./useAudioWaveformPeaks";
 
 // On-demand minimal audio editor (plan step 8): source trim + gain + fades
 // for one timeline audio clip, opened by right-clicking the clip in the
-// drawer. The stage draws a schematic gain/fade envelope of the trimmed clip;
-// a real sample waveform needs a backend audio decoder and comes later. Edits
+// drawer. The stage draws the source's decoded sample waveform (backend
+// `audio_waveform_peaks`, native FFmpeg) under a gain/fade envelope of the
+// trimmed clip; outside the desktop app the envelope stands alone. Edits
 // are non-destructive documents the export render plan applies via FFmpeg.
 
 interface AudioEditModalProps {
   title: string;
+  /** Absolute media path of the clip's source file; `null` when unknown
+   * (browser preview assets), which skips the sample waveform. */
+  sourceMediaPath: string | null;
   /** Length of the source media, seconds (assumed until audio probing lands). */
   sourceDurationSec: number;
   initialEdit: AudioClipEdit;
@@ -27,6 +36,7 @@ interface AudioEditModalProps {
 
 export function AudioEditModal({
   title,
+  sourceMediaPath,
   sourceDurationSec,
   initialEdit,
   onCommit,
@@ -34,6 +44,7 @@ export function AudioEditModal({
 }: AudioEditModalProps) {
   const t = useT();
   const [edit, setEdit] = useState<AudioClipEdit>(() => clampAudioEdit(initialEdit, sourceDurationSec));
+  const waveform = useAudioWaveformPeaks(sourceMediaPath);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -59,6 +70,18 @@ export function AudioEditModal({
     `${x(length - edit.fadeOutSec)},${h - level}`,
     `100,${h}`,
   ].join(" ");
+  const trimmedWindowWaveformPoints = waveform
+    ? waveformPolygonPointsFromPeaks(
+        sliceWaveformPeaksToTrimmedSourceWindow(
+          waveform.peaks,
+          edit.trimStartSec,
+          trimEnd,
+          waveform.duration_sec,
+        ),
+        100,
+        h,
+      )
+    : "";
 
   const slider = (
     label: string,
@@ -110,6 +133,9 @@ export function AudioEditModal({
               role="img"
               aria-label={t("audioEdit.envelopeLabel")}
             >
+              {trimmedWindowWaveformPoints && (
+                <polygon className="audio-edit-waveform" points={trimmedWindowWaveformPoints} />
+              )}
               <polygon points={points} />
             </svg>
             <small className="muted">
@@ -142,7 +168,9 @@ export function AudioEditModal({
             {slider(t("audioEdit.fadeOut"), edit.fadeOutSec, 0, sourceDurationSec, 0.1, (fadeOutSec) =>
               patch({ fadeOutSec }),
             )}
-            <small className="muted">{t("audioEdit.waveformHint")}</small>
+            {!trimmedWindowWaveformPoints && (
+              <small className="muted">{t("audioEdit.waveformHint")}</small>
+            )}
           </div>
         </div>
       </div>

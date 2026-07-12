@@ -1039,8 +1039,8 @@ export const messages = {
   },
   "audioEdit.envelopeLabel": { en: "gain and fade envelope", zh: "增益与淡入淡出包络" },
   "audioEdit.waveformHint": {
-    en: "schematic envelope — the sample waveform arrives with the audio decoder",
-    zh: "示意包络——采样波形将随音频解码器一起加入",
+    en: "schematic envelope — the sample waveform needs the desktop audio decoder",
+    zh: "示意包络——采样波形需在桌面端解码后显示",
   },
   "drawer.export": { en: "export", zh: "导出" },
   "drawer.exportTitle": { en: "open the timeline export dialog", zh: "打开时间线导出弹窗" },
