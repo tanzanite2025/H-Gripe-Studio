@@ -53,8 +53,8 @@ import {
 } from "./clipProps";
 import { targetKey } from "./productionTarget";
 import {
-  clearSequencePlaybackInPoint,
-  clearSequencePlaybackOutPoint,
+  clearSequencePlaybackInPoint as clearSequencePlaybackInPointInTimeline,
+  clearSequencePlaybackOutPoint as clearSequencePlaybackOutPointInTimeline,
   setSequencePlaybackInPointAtTime,
   setSequencePlaybackOutPointAtTime,
 } from "./sequencePlaybackRange";
@@ -372,18 +372,18 @@ export function setSequencePlaybackOutPoint(store: ProductionStore, sec: number)
 }
 
 /** Clear the sequence playback in point (Alt+click the mark-in button). */
-export function clearSequencePlaybackInPointAction(store: ProductionStore): void {
+export function clearSequencePlaybackInPoint(store: ProductionStore): void {
   store.mutate((state) => ({
     ...state,
-    timeline: clearSequencePlaybackInPoint(state.timeline),
+    timeline: clearSequencePlaybackInPointInTimeline(state.timeline),
   }));
 }
 
 /** Clear the sequence playback out point (Alt+click the mark-out button). */
-export function clearSequencePlaybackOutPointAction(store: ProductionStore): void {
+export function clearSequencePlaybackOutPoint(store: ProductionStore): void {
   store.mutate((state) => ({
     ...state,
-    timeline: clearSequencePlaybackOutPoint(state.timeline),
+    timeline: clearSequencePlaybackOutPointInTimeline(state.timeline),
   }));
 }
 

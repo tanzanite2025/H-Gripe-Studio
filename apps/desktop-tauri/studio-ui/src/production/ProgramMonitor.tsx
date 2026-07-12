@@ -33,6 +33,10 @@ import {
 } from "./monitorIcons";
 import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
 import {
+  advancePlaybackTime,
+  clampTimeToSequenceDuration,
+} from "./programMonitorPlayback";
+import {
   resolveSequencePlaybackBounds,
   sequencePlaybackRangeOf,
   type SequencePlaybackRange,
@@ -88,46 +92,6 @@ export const SAFE_AREA_SCENE: ViewportOverlayScene = {
     },
   ],
 };
-
-function clampTime(sec: number, duration: number) {
-  return Math.max(0, Math.min(duration, sec));
-}
-
-export function resolveLoopPlaybackRange(
-  duration: number,
-  inPointSec: number | null,
-  outPointSec: number | null,
-) {
-  const bounds = resolveSequencePlaybackBounds(duration, { inPointSec, outPointSec });
-  return { start: bounds.startSec, end: bounds.endSec };
-}
-
-export function advancePlaybackTime({
-  currentSec,
-  elapsedSec,
-  duration,
-  loop,
-  loopStartSec,
-  loopEndSec,
-}: {
-  currentSec: number;
-  elapsedSec: number;
-  duration: number;
-  loop: boolean;
-  loopStartSec: number;
-  loopEndSec: number;
-}) {
-  if (duration <= 0) return { timeSec: 0, playing: false };
-  if (!loop || loopEndSec <= loopStartSec) {
-    const next = currentSec + elapsedSec;
-    return next >= duration ? { timeSec: duration, playing: false } : { timeSec: next, playing: true };
-  }
-  const base = currentSec < loopStartSec || currentSec >= loopEndSec ? loopStartSec : currentSec;
-  const next = base + elapsedSec;
-  if (next < loopEndSec) return { timeSec: next, playing: true };
-  const span = loopEndSec - loopStartSec;
-  return { timeSec: loopStartSec + ((next - loopEndSec) % span), playing: true };
-}
 
 /**
  * Register the program tracks' clips (image tracks plus the first video
@@ -384,7 +348,7 @@ export function ProgramMonitor({
   };
   const seekTo = (sec: number) => {
     setPlaying(false);
-    setPlayheadSec(clampTime(sec, duration));
+    setPlayheadSec(clampTimeToSequenceDuration(sec, duration));
   };
   const toggleSequenceMarkerAtPlayhead = () => {
     if (duration <= 0) return;

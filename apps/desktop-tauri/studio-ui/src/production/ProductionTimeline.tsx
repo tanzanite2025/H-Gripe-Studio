@@ -33,6 +33,7 @@ import { TimelineClipView } from "./TimelineClipView";
 import { clipIdsIntersectingMarqueeSelection } from "./timelineMarqueeSelection";
 import { TimelineRuler, timelineRulerDuration } from "./TimelineRuler";
 import {
+  clipAssetDisplayName,
   clipKindForAsset,
   DEFAULT_TIMELINE_FPS,
   snapTimeToFrame,
@@ -186,14 +187,6 @@ export function ProductionTimeline({
 
   const trackKindLabel = (kind: TrackKind): string =>
     t(kind === "video" ? "drawer.trackVideo" : kind === "audio" ? "drawer.trackAudio" : "drawer.trackImage");
-
-  const clipAssetName = (clipId: string): string => {
-    for (const track of timeline.tracks) {
-      const clip = track.clips.find((candidate) => candidate.id === clipId);
-      if (clip) return assets.find((asset) => asset.id === clip.assetId)?.name ?? clip.assetId;
-    }
-    return clipId;
-  };
 
   const marqueeOverlayRectFromClientPoints = (
     container: HTMLElement,
@@ -457,7 +450,7 @@ export function ProductionTimeline({
                           <TimelineClipView
                             key={clip.id}
                             clip={clip}
-                            clipDisplayName={clipAssetName(clip.id)}
+                            clipDisplayName={clipAssetDisplayName(timeline, assets, clip.id)}
                             selected={selectedClipIds.includes(clip.id)}
                             trackLocked={!!track.locked}
                             rulerDurationSec={rulerDuration}
