@@ -5,6 +5,8 @@ import {
   addAssetToBin,
   addTimelineTrack,
   clearProductionSelection,
+  clearSequencePlaybackInPointAction,
+  clearSequencePlaybackOutPointAction,
   clipGradeDocOf,
   clipGradeKey,
   commitAudioEdit,
@@ -21,6 +23,8 @@ import {
   setBinAssetMediaInfo,
   setClipGradeDoc,
   setClipProperties,
+  setSequencePlaybackInPoint,
+  setSequencePlaybackOutPoint,
   splitTimelineClip,
   type ProductionStore,
 } from "./productionStore";
@@ -41,6 +45,21 @@ function storeWithClip(kind: "image" | "audio" = "image"): {
 }
 
 describe("productionStore", () => {
+  it("persists sequence playback in/out points on the timeline and undoes them", () => {
+    const store = createProductionStore();
+    setSequencePlaybackInPoint(store, 1);
+    setSequencePlaybackOutPoint(store, 4);
+    expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: 1, outPointSec: 4 });
+    clearSequencePlaybackInPointAction(store);
+    expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: null, outPointSec: 4 });
+    clearSequencePlaybackOutPointAction(store);
+    expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: null, outPointSec: null });
+    store.undo();
+    expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: null, outPointSec: 4 });
+    store.undo();
+    expect(store.getState().timeline.playbackRange).toEqual({ inPointSec: 1, outPointSec: 4 });
+  });
+
   it("notifies subscribers on mutation and not on no-ops", () => {
     const store = createProductionStore();
     let calls = 0;

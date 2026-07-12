@@ -32,8 +32,13 @@ import {
   StepForwardIcon,
 } from "./monitorIcons";
 import { paceToFrameGrid, resolvePreviewFrame } from "./previewFrame";
+import {
+  resolveSequencePlaybackBounds,
+  sequencePlaybackRangeOf,
+  type SequencePlaybackRange,
+} from "./sequencePlaybackRange";
 import { formatTimecode } from "./timecode";
-import { findClip, timelineDuration, type TimelineModel } from "./timeline";
+import { findClip, timelineDuration, timelineMarkers, type TimelineModel } from "./timeline";
 import { useSourceFps } from "./useSourceFps";
 
 /** Safe-area guides (WGPU plan item 3): action-safe 90% (solid) and
@@ -93,9 +98,8 @@ export function resolveLoopPlaybackRange(
   inPointSec: number | null,
   outPointSec: number | null,
 ) {
-  const end = clampTime(outPointSec ?? duration, duration);
-  const start = clampTime(inPointSec ?? 0, duration);
-  return start < end ? { start, end } : { start: 0, end: duration };
+  const bounds = resolveSequencePlaybackBounds(duration, { inPointSec, outPointSec });
+  return { start: bounds.startSec, end: bounds.endSec };
 }
 
 export function advancePlaybackTime({
@@ -208,6 +212,11 @@ export function ProgramMonitor({
   clipPropsDoc,
   playheadSec: controlledPlayheadSec,
   onPlayheadSecChange,
+  onToggleSequenceMarkerAtSec,
+  onSetSequencePlaybackInPointSec,
+  onSetSequencePlaybackOutPointSec,
+  onClearSequencePlaybackInPoint,
+  onClearSequencePlaybackOutPoint,
   onExportedFrame,
 }: {
   timeline: TimelineModel;
@@ -220,6 +229,15 @@ export function ProgramMonitor({
   clipPropsDoc?: (clipId: string) => string | null;
   playheadSec?: number;
   onPlayheadSecChange?: (sec: number) => void;
+  /** Marker button: add / clear a sequence marker at the playhead (the same
+   * markers the timeline ruler renders). */
+  onToggleSequenceMarkerAtSec?: (sec: number) => void;
+  /** Mark-in / mark-out buttons: persist the sequence playback in/out points
+   * on the timeline model. When omitted the points stay monitor-local. */
+  onSetSequencePlaybackInPointSec?: (sec: number) => void;
+  onSetSequencePlaybackOutPointSec?: (sec: number) => void;
+  onClearSequencePlaybackInPoint?: () => void;
+  onClearSequencePlaybackOutPoint?: () => void;
   onExportedFrame?: (asset: { path: string; name: string }) => void;
 }) {
   const t = useT();
@@ -230,9 +248,16 @@ export function ProgramMonitor({
   const [loopPlayback, setLoopPlayback] = useState(false);
   const [safeArea, setSafeArea] = useState(false);
   const [exportFrameOpen, setExportFrameOpen] = useState(false);
-  const [, setMarkers] = useState<number[]>([]);
-  const [inPointSec, setInPointSec] = useState<number | null>(null);
-  const [outPointSec, setOutPointSec] = useState<number | null>(null);
+  const [localPlaybackRange, setLocalPlaybackRange] = useState<SequencePlaybackRange>({
+    inPointSec: null,
+    outPointSec: null,
+  });
+  const playbackRange = onSetSequencePlaybackInPointSec
+    ? sequencePlaybackRangeOf(timeline)
+    : localPlaybackRange;
+  const inPointSec = playbackRange.inPointSec;
+  const outPointSec = playbackRange.outPointSec;
+  const sequenceMarkers = timelineMarkers(timeline);
   const playheadRef = useRef(0);
   playheadRef.current = playheadSec;
   const { state, showFrame, host } = useVideoPreview();
@@ -258,9 +283,9 @@ export function ProgramMonitor({
   const sourceFps = useSourceFps(playheadTarget?.kind === "video" ? playheadTarget.path : null);
   const displayFps = sourceFps && sourceFps > 0 ? sourceFps : 24;
   const frameStep = 1 / displayFps;
-  const loopRange = useMemo(
-    () => resolveLoopPlaybackRange(duration, inPointSec, outPointSec),
-    [duration, inPointSec, outPointSec],
+  const loopBounds = useMemo(
+    () => resolveSequencePlaybackBounds(duration, playbackRange),
+    [duration, playbackRange],
   );
   const requestSec = playing ? paceToFrameGrid(playheadTarget, clampedSec, sourceFps) : clampedSec;
   const target = useMemo(
@@ -325,8 +350,8 @@ export function ProgramMonitor({
         elapsedSec: (now - last) / 1000,
         duration,
         loop: loopPlayback,
-        loopStartSec: loopRange.start,
-        loopEndSec: loopRange.end,
+        loopStartSec: loopBounds.startSec,
+        loopEndSec: loopBounds.endSec,
       });
       last = now;
       setPlayheadSec(result.timeSec);
@@ -338,7 +363,7 @@ export function ProgramMonitor({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, duration, loopPlayback, loopRange.start, loopRange.end]);
+  }, [playing, duration, loopPlayback, loopBounds.startSec, loopBounds.endSec]);
 
   // Normalized device transparency for the backend badge (shared vocabulary).
   const backendReport = useMemo(
@@ -349,8 +374,8 @@ export function ProgramMonitor({
   const togglePlay = () => {
     if (duration <= 0) return;
     if (!playing && loopPlayback) {
-      if (playheadRef.current < loopRange.start || playheadRef.current >= loopRange.end) {
-        setPlayheadSec(loopRange.start);
+      if (playheadRef.current < loopBounds.startSec || playheadRef.current >= loopBounds.endSec) {
+        setPlayheadSec(loopBounds.startSec);
       }
     }
     // Play from the start when the playhead sits at the end.
@@ -361,23 +386,41 @@ export function ProgramMonitor({
     setPlaying(false);
     setPlayheadSec(clampTime(sec, duration));
   };
-  const addMarker = () => {
+  const toggleSequenceMarkerAtPlayhead = () => {
     if (duration <= 0) return;
-    const next = Number(clampedSec.toFixed(3));
-    setMarkers((prev) => {
-      const deduped = prev.filter((sec) => Math.abs(sec - next) > frameStep / 2);
-      return [...deduped, next].sort((a, b) => a - b).slice(-24);
-    });
+    onToggleSequenceMarkerAtSec?.(clampedSec);
   };
-  const setInPoint = () => {
+  const setInPoint = (clearRequested: boolean) => {
     if (duration <= 0) return;
-    setInPointSec(clampedSec);
-    if (outPointSec != null && outPointSec < clampedSec) setOutPointSec(null);
+    if (clearRequested) {
+      if (onClearSequencePlaybackInPoint) onClearSequencePlaybackInPoint();
+      else setLocalPlaybackRange((prev) => ({ ...prev, inPointSec: null }));
+      return;
+    }
+    if (onSetSequencePlaybackInPointSec) {
+      onSetSequencePlaybackInPointSec(clampedSec);
+      return;
+    }
+    setLocalPlaybackRange((prev) => ({
+      inPointSec: clampedSec,
+      outPointSec: prev.outPointSec != null && prev.outPointSec <= clampedSec ? null : prev.outPointSec,
+    }));
   };
-  const setOutPoint = () => {
+  const setOutPoint = (clearRequested: boolean) => {
     if (duration <= 0) return;
-    setOutPointSec(clampedSec);
-    if (inPointSec != null && inPointSec > clampedSec) setInPointSec(null);
+    if (clearRequested) {
+      if (onClearSequencePlaybackOutPoint) onClearSequencePlaybackOutPoint();
+      else setLocalPlaybackRange((prev) => ({ ...prev, outPointSec: null }));
+      return;
+    }
+    if (onSetSequencePlaybackOutPointSec) {
+      onSetSequencePlaybackOutPointSec(clampedSec);
+      return;
+    }
+    setLocalPlaybackRange((prev) => ({
+      inPointSec: prev.inPointSec != null && prev.inPointSec >= clampedSec ? null : prev.inPointSec,
+      outPointSec: clampedSec,
+    }));
   };
   const exportFrameName = `frame_${formatTimecode(clampedSec, displayFps).replace(/:/g, "-")}`;
   const exportFrame = async (request: ExportFrameRequest): Promise<ExportFrameResult> => {
@@ -389,24 +432,32 @@ export function ProgramMonitor({
     <div className="production-monitor">
       <div className="production-monitor-stage">
         <div className="production-monitor-controls" aria-label="program monitor controls">
-          <button type="button" className="production-monitor-control" onClick={addMarker} disabled={duration <= 0} title="添加标记">
+          <button
+            type="button"
+            className="production-monitor-control"
+            onClick={toggleSequenceMarkerAtPlayhead}
+            disabled={duration <= 0 || !onToggleSequenceMarkerAtSec}
+            title="添加/清除标记（M）"
+          >
             <MarkerIcon />
           </button>
           <button
             type="button"
             className={`production-monitor-control${inPointSec != null ? " active" : ""}`}
-            onClick={setInPoint}
+            onClick={(event) => setInPoint(event.altKey)}
             disabled={duration <= 0}
-            title="添加入点"
+            title="添加入点（I，Alt+点击清除）"
+            aria-pressed={inPointSec != null}
           >
             <MarkInIcon />
           </button>
           <button
             type="button"
             className={`production-monitor-control${outPointSec != null ? " active" : ""}`}
-            onClick={setOutPoint}
+            onClick={(event) => setOutPoint(event.altKey)}
             disabled={duration <= 0}
-            title="添加出点"
+            title="添加出点（O，Alt+点击清除）"
+            aria-pressed={outPointSec != null}
           >
             <MarkOutIcon />
           </button>
@@ -489,19 +540,41 @@ export function ProgramMonitor({
           <span className="production-monitor-time production-monitor-time-start">
             {formatTimecode(clampedSec, displayFps)}
           </span>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(duration, 0.001)}
-            step={0.05}
-            value={clampedSec}
-            onChange={(e) => {
-              setPlaying(false);
-              setPlayheadSec(Number(e.target.value));
-            }}
-            title={t("drawer.monitorScrubTitle")}
-            disabled={duration <= 0}
-          />
+          <div className="production-monitor-scrub-track">
+            {duration > 0 && (inPointSec != null || outPointSec != null) ? (
+              <span
+                className="production-monitor-scrub-playback-range"
+                style={{
+                  left: `${(loopBounds.startSec / duration) * 100}%`,
+                  width: `${((loopBounds.endSec - loopBounds.startSec) / duration) * 100}%`,
+                }}
+                aria-hidden="true"
+              />
+            ) : null}
+            {duration > 0
+              ? sequenceMarkers.map((marker) => (
+                  <span
+                    key={marker.id}
+                    className="production-monitor-scrub-marker"
+                    style={{ left: `${(Math.min(marker.sec, duration) / duration) * 100}%` }}
+                    title={formatTimecode(marker.sec, displayFps)}
+                  />
+                ))
+              : null}
+            <input
+              type="range"
+              min={0}
+              max={Math.max(duration, 0.001)}
+              step={0.05}
+              value={clampedSec}
+              onChange={(e) => {
+                setPlaying(false);
+                setPlayheadSec(Number(e.target.value));
+              }}
+              title={t("drawer.monitorScrubTitle")}
+              disabled={duration <= 0}
+            />
+          </div>
           <span className="production-monitor-time production-monitor-time-end">
             {formatTimecode(duration, displayFps)}
           </span>

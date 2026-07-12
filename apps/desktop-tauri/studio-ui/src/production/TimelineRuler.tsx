@@ -107,6 +107,9 @@ export interface TimelineRulerProps {
   onToggleMarker?: () => void;
   /** Right-click a marker to remove it. */
   onRemoveMarker?: (markerId: string) => void;
+  /** Sequence playback in/out points, rendered as a shaded range. */
+  playbackInPointSec?: number | null;
+  playbackOutPointSec?: number | null;
   /** Horizontal zoom factor (1 = fit). Enables Ctrl+wheel and =/-/\ keys. */
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
@@ -121,6 +124,8 @@ export function TimelineRuler({
   markers,
   onToggleMarker,
   onRemoveMarker,
+  playbackInPointSec,
+  playbackOutPointSec,
   zoom,
   onZoomChange,
 }: TimelineRulerProps) {
@@ -196,6 +201,16 @@ export function TimelineRuler({
         scrub(e.clientX, e.currentTarget, e.shiftKey);
       }}
     >
+      {playbackInPointSec != null || playbackOutPointSec != null ? (
+        <span
+          className="production-timeline-ruler-playback-range"
+          style={{
+            left: `${((playbackInPointSec ?? 0) / rulerDuration) * 100}%`,
+            width: `${(Math.max(0, (playbackOutPointSec ?? rulerDuration) - (playbackInPointSec ?? 0)) / rulerDuration) * 100}%`,
+          }}
+          aria-hidden="true"
+        />
+      ) : null}
       {minorTicks.map((sec) => (
         <span
           key={`minor-${sec.toFixed(3)}`}

@@ -6,6 +6,7 @@
 // come in later steps.
 
 import type { MediaAssetKind } from "./mediaBin";
+import type { SequencePlaybackRange } from "./sequencePlaybackRange";
 
 export type TrackKind = "video" | "audio" | "image";
 export type ClipKind = "still" | "video" | "audio";
@@ -50,6 +51,9 @@ export interface TimelineModel {
   tracks: TimelineTrack[];
   /** Sequence markers, kept sorted by time. Absent on older models. */
   markers?: TimelineMarker[];
+  /** Sequence playback in/out points (`sequencePlaybackRange.ts`). Absent on
+   * older models. */
+  playbackRange?: SequencePlaybackRange;
 }
 
 /** Default clip lengths until real media durations are probed. */
