@@ -39,6 +39,11 @@ import {
   type TimelineModel,
   type TrackKind,
 } from "./timeline";
+import {
+  copyTimelineClipsToClipboard,
+  pasteCopiedTimelineClipsAtTime,
+  type CopiedTimelineClip,
+} from "./timelineClipboard";
 import { clampAudioEdit, editedDuration, type AudioClipEdit } from "./audioEdit";
 import {
   clampClipProperties,
@@ -75,6 +80,9 @@ export interface ProductionState {
   audioEdits: Record<string, AudioEditEntry>;
   /** Per-clip property documents (transform / crop), keyed by clip id. */
   clipProps: Record<string, ClipProperties>;
+  /** Copied clips awaiting a paste (Ctrl+C / Ctrl+X). Detached from the
+   * timeline, so it survives edits and deletion of the originals. */
+  clipClipboard: CopiedTimelineClip[];
 }
 
 function initialState(): ProductionState {
@@ -87,6 +95,7 @@ function initialState(): ProductionState {
     gradeDocs: {},
     audioEdits: {},
     clipProps: {},
+    clipClipboard: [],
   };
 }
 
@@ -448,6 +457,43 @@ export function trimTimelineClipEdge(
 /** Remove a clip; its edit documents cascade away. */
 export function removeTimelineClip(store: ProductionStore, clipId: string): void {
   store.mutate((state) => withTimeline(state, removeClips(state.timeline, [clipId])));
+}
+
+/** Ctrl+C: snapshot the selected clips into the clipboard. Not undoable (the
+ * timeline is untouched); an empty selection leaves the clipboard as is. */
+export function copySelectedTimelineClipsToClipboard(store: ProductionStore): void {
+  store.mutate((state) => {
+    const copied = copyTimelineClipsToClipboard(state.timeline, state.selectedClipIds);
+    return copied.length === 0 ? state : { ...state, clipClipboard: copied };
+  });
+}
+
+/** Ctrl+X: copy the selected clips, then remove them (one undo step). */
+export function cutSelectedTimelineClipsToClipboard(store: ProductionStore): void {
+  store.mutate((state) => {
+    const copied = copyTimelineClipsToClipboard(state.timeline, state.selectedClipIds);
+    if (copied.length === 0) return state;
+    return {
+      ...withTimeline(state, removeClips(state.timeline, state.selectedClipIds)),
+      clipClipboard: copied,
+    };
+  });
+}
+
+/** Ctrl+V: paste the clipboard with its earliest clip at the given time
+ * (usually the playhead) and select the pasted clips. A paste that cannot fit
+ * changes nothing. */
+export function pasteTimelineClipboardAtTime(store: ProductionStore, atSec: number): void {
+  store.mutate((state) => {
+    const result = pasteCopiedTimelineClipsAtTime(state.timeline, state.clipClipboard, atSec);
+    if (!result) return state;
+    return {
+      ...withTimeline(state, result.timeline),
+      selectedClipIds: result.pastedClipIds,
+      selectedClipId: result.pastedClipIds[result.pastedClipIds.length - 1] ?? null,
+      activeAssetId: null,
+    };
+  });
 }
 
 /** Remove every clip in the current multi-selection (Delete key). */

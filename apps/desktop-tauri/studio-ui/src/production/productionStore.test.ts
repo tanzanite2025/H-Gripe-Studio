@@ -10,9 +10,12 @@ import {
   clipGradeDocOf,
   clipGradeKey,
   commitAudioEdit,
+  copySelectedTimelineClipsToClipboard,
   createProductionStore,
+  cutSelectedTimelineClipsToClipboard,
   moveTimelineClip,
   moveTimelineClipToTrack,
+  pasteTimelineClipboardAtTime,
   removeAssetFromBin,
   removeSelectedTimelineClips,
   removeTimelineClip,
@@ -363,6 +366,43 @@ describe("productionStore", () => {
     store.undo();
     location = findClip(store.getState().timeline, clipId)!;
     expect(location.track.id).toBe(sourceTrackId);
+  });
+
+  it("copy/cut/paste round-trips clips through the clipboard", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
+    addAssetClip(store, asset.id, { atSec: 0 });
+    const originalId = store.getState().selectedClipId!;
+
+    const timelineBeforeCopy = store.getState().timeline;
+    copySelectedTimelineClipsToClipboard(store);
+    expect(store.getState().clipClipboard).toHaveLength(1);
+    expect(store.getState().timeline).toBe(timelineBeforeCopy); // copy leaves the timeline alone
+
+    pasteTimelineClipboardAtTime(store, 30);
+    let state = store.getState();
+    const pastedId = state.selectedClipId!;
+    expect(pastedId).not.toBe(originalId);
+    expect(findClip(state.timeline, pastedId)!.clip.start).toBe(30);
+    expect(findClip(state.timeline, originalId)).not.toBeNull();
+
+    cutSelectedTimelineClipsToClipboard(store); // cuts the pasted clip
+    state = store.getState();
+    expect(findClip(state.timeline, pastedId)).toBeNull();
+    expect(state.clipClipboard).toHaveLength(1);
+
+    store.undo(); // undo the cut restores the pasted clip
+    expect(findClip(store.getState().timeline, pastedId)).not.toBeNull();
+  });
+
+  it("a paste that cannot fit changes nothing", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "audio", path: "/media/a.wav" });
+    addAssetClip(store, asset.id, { atSec: 0 });
+    copySelectedTimelineClipsToClipboard(store);
+    const before = store.getState();
+    pasteTimelineClipboardAtTime(store, 0); // the original occupies 0
+    expect(store.getState()).toBe(before);
   });
 
   it("replaceTimelineClipSelection swaps the selection and drops missing ids", () => {

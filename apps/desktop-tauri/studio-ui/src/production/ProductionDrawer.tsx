@@ -13,6 +13,9 @@ import {
   clearSequencePlaybackInPointAction,
   clearSequencePlaybackOutPointAction,
   clipGradeDocOf,
+  copySelectedTimelineClipsToClipboard,
+  cutSelectedTimelineClipsToClipboard,
+  pasteTimelineClipboardAtTime,
   removeAssetFromBin,
   removeSelectedTimelineClips,
   selectBinAsset,
@@ -149,8 +152,9 @@ export function ProductionDrawer({
   }, [expanded, renderExpanded]);
 
   // Timeline keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo,
-  // Delete / Backspace removes the selected clips, M toggles a sequence
-  // marker and I / O set the playback in/out points at the playhead.
+  // Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste-at-playhead the selected
+  // clips, Delete / Backspace removes the selected clips, M toggles a
+  // sequence marker and I / O set the playback in/out points at the playhead.
   // Skipped while typing in form fields or editable content.
   useEffect(() => {
     if (!renderExpanded) return;
@@ -175,6 +179,24 @@ export function ProductionDrawer({
       if ((event.ctrlKey || event.metaKey) && key === "y") {
         event.preventDefault();
         store.redo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && key === "c") {
+        if (store.getState().selectedClipIds.length === 0) return;
+        event.preventDefault();
+        copySelectedTimelineClipsToClipboard(store);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && key === "x") {
+        if (store.getState().selectedClipIds.length === 0) return;
+        event.preventDefault();
+        cutSelectedTimelineClipsToClipboard(store);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && key === "v") {
+        if (store.getState().clipClipboard.length === 0) return;
+        event.preventDefault();
+        pasteTimelineClipboardAtTime(store, playheadSecRef.current);
         return;
       }
       if (event.key === "Delete" || event.key === "Backspace") {
