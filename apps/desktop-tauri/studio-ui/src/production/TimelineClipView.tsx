@@ -52,6 +52,7 @@ export function TimelineClipView({
   onSplitClipAt,
   onRemoveClip,
   onMoveClipTo,
+  onMoveClipToTrack,
   onTrimClipEdge,
   onSetClipProperties,
   onOpenContextMenu,
@@ -72,6 +73,8 @@ export function TimelineClipView({
   onSplitClipAt: (clipId: string, atSec: number) => void;
   onRemoveClip: (clipId: string) => void;
   onMoveClipTo: (clipId: string, toStartSec: number) => void;
+  /** Drop on another track's lane at the end of a drag (vertical move). */
+  onMoveClipToTrack: (clipId: string, targetTrackId: string, toStartSec: number) => void;
   onTrimClipEdge: (clipId: string, edge: ClipTrimEdge, toSec: number) => void;
   onSetClipProperties?: (clipId: string, props: ClipProperties) => void;
   onOpenContextMenu: (menu: TimelineClipMenuState) => void;
@@ -208,7 +211,18 @@ export function TimelineClipView({
         onMoveClipTo(clip.id, desiredStartSec);
       }}
       onPointerUp={(event) => {
-        if (moveDrag.current?.pointerId === event.pointerId) moveDrag.current = null;
+        const drag = moveDrag.current;
+        if (drag?.pointerId !== event.pointerId) return;
+        moveDrag.current = null;
+        if (!drag.moved) return;
+        const laneUnderPointer = document
+          .elementFromPoint(event.clientX, event.clientY)
+          ?.closest<HTMLElement>(".production-track-lane[data-track-id]");
+        const targetTrackId = laneUnderPointer?.dataset.trackId;
+        if (!targetTrackId) return;
+        const desiredStartSec =
+          drag.clipStartSecAtDragStart + (event.clientX - drag.startClientX) / drag.pixelsPerSecond;
+        onMoveClipToTrack(clip.id, targetTrackId, desiredStartSec);
       }}
       onPointerCancel={(event) => {
         if (moveDrag.current?.pointerId === event.pointerId) moveDrag.current = null;

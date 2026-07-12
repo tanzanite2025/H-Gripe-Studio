@@ -12,6 +12,7 @@ import {
   commitAudioEdit,
   createProductionStore,
   moveTimelineClip,
+  moveTimelineClipToTrack,
   removeAssetFromBin,
   removeSelectedTimelineClips,
   removeTimelineClip,
@@ -342,6 +343,26 @@ describe("productionStore", () => {
 
     selectClip(store, firstId); // plain click collapses to a single selection
     expect(store.getState().selectedClipIds).toEqual([firstId]);
+  });
+
+  it("moveTimelineClipToTrack drops a clip onto another track and is undoable", () => {
+    const store = createProductionStore();
+    const asset = addAssetToBin(store, { kind: "video", path: "/media/a.mp4" });
+    addAssetClip(store, asset.id, { atSec: 0 });
+    const clipId = store.getState().selectedClipId!;
+    const sourceTrackId = findClip(store.getState().timeline, clipId)!.track.id;
+    addTimelineTrack(store, "video");
+    const tracks = store.getState().timeline.tracks;
+    const targetTrackId = tracks[tracks.length - 1].id;
+
+    moveTimelineClipToTrack(store, clipId, targetTrackId, 4);
+    let location = findClip(store.getState().timeline, clipId)!;
+    expect(location.track.id).toBe(targetTrackId);
+    expect(location.clip.start).toBe(4);
+
+    store.undo();
+    location = findClip(store.getState().timeline, clipId)!;
+    expect(location.track.id).toBe(sourceTrackId);
   });
 
   it("replaceTimelineClipSelection swaps the selection and drops missing ids", () => {
