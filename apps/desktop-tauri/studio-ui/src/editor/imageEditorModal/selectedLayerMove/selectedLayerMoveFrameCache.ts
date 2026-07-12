@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
-import type { SelectedLayerFrame } from "../selectedLayerFrame";
-import type { Rect } from "../studioTarget";
+import type { SelectedLayerFrame } from "../../selectedLayerFrame";
+import type { Rect } from "../../studioTarget";
 
 interface SelectedLayerMoveFrameCache {
   layerId: string;
@@ -11,6 +11,7 @@ interface UseSelectedLayerMoveFrameCacheArgs {
   selectedLayerId: string | null;
   resolvedFrame: SelectedLayerFrame | null;
   layerMoveActive: boolean;
+  liveLayerMoveDraft?: readonly [number, number] | null;
   displayedLayerMoveDraft: readonly [number, number] | null;
   viewportTargetSettled: boolean;
 }
@@ -34,10 +35,12 @@ export function useSelectedLayerMoveFrameCache({
   selectedLayerId,
   resolvedFrame,
   layerMoveActive,
+  liveLayerMoveDraft = null,
   displayedLayerMoveDraft,
   viewportTargetSettled,
 }: UseSelectedLayerMoveFrameCacheArgs): SelectedLayerFrame | null {
   const cacheRef = useRef<SelectedLayerMoveFrameCache | null>(null);
+  const frameMoveDraft = displayedLayerMoveDraft ?? (layerMoveActive ? liveLayerMoveDraft : null);
 
   if (layerMoveActive && selectedLayerId && resolvedFrame && cacheRef.current?.layerId !== selectedLayerId) {
     cacheRef.current = { layerId: selectedLayerId, baseFrame: resolvedFrame };
@@ -56,14 +59,15 @@ export function useSelectedLayerMoveFrameCache({
   }, [selectedLayerId]);
 
   useLayoutEffect(() => {
-    if (layerMoveActive || displayedLayerMoveDraft || !viewportTargetSettled) return;
+    if (layerMoveActive || frameMoveDraft || !viewportTargetSettled) return;
     cacheRef.current = null;
-  }, [layerMoveActive, displayedLayerMoveDraft, viewportTargetSettled]);
+  }, [layerMoveActive, frameMoveDraft, viewportTargetSettled]);
 
   const cache = cacheRef.current;
-  if (displayedLayerMoveDraft && cache && cache.layerId === selectedLayerId) {
-    return translateSelectedLayerFrame(cache.baseFrame, displayedLayerMoveDraft);
+  if (frameMoveDraft) {
+    const baseFrame = cache && cache.layerId === selectedLayerId ? cache.baseFrame : resolvedFrame;
+    return baseFrame ? translateSelectedLayerFrame(baseFrame, frameMoveDraft) : null;
   }
-  if (layerMoveActive || displayedLayerMoveDraft) return null;
+  if (layerMoveActive) return resolvedFrame;
   return viewportTargetSettled ? resolvedFrame : null;
 }

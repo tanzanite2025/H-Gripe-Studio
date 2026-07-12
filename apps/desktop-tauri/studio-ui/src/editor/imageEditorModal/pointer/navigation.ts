@@ -1,4 +1,4 @@
-// Canvas navigation (M8): hand tool / Space-hold pan and the rotate-view drag.
+// Canvas navigation (M8): Space-hold pan and the rotate-view drag.
 // Pure view changes — nothing records on the document.
 import type React from "react";
 import { panBy, rotateTo } from "../../canvasView";
@@ -6,8 +6,8 @@ import type { PointerEnv, PointerGestures } from "./types";
 
 export function navigationDown(env: PointerEnv, g: PointerGestures, e: React.PointerEvent): boolean {
   const { tool } = env;
-  // Hand tool / Space-hold pans anchored at the cursor.
-  if (env.spacePan || tool.id === "hand") {
+  // Space-hold pans anchored at the cursor.
+  if (env.spacePan) {
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     g.panDrag = { x: e.clientX, y: e.clientY };
     return true;

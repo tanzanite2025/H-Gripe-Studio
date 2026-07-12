@@ -15,6 +15,7 @@ export type CommandId =
   | "selection.invert"
   | "selection.deselect"
   | "selection.feather"
+  | "selection.subject"
   | "target.transform";
 
 export interface StudioCommand {
@@ -52,6 +53,7 @@ export const STUDIO_COMMANDS: Record<CommandId, StudioCommand> = {
   "selection.invert": { id: "selection.invert", titleKey: "mask.selectInvert", icon: "invert", group: "selection" },
   "selection.deselect": { id: "selection.deselect", titleKey: "mask.selectDeselect", icon: "selection", group: "selection" },
   "selection.feather": { id: "selection.feather", titleKey: "mask.selectFeather", icon: "selection", group: "selection" },
+  "selection.subject": { id: "selection.subject", titleKey: "mask.selectSubject", icon: "subject", group: "selection" },
   "target.transform": { id: "target.transform", titleKey: "mask.freeTransform", icon: "transform", group: "transform" },
 };
 
@@ -132,6 +134,9 @@ export function getCommandCapability(commandId: CommandId, ctx: CommandContext):
     case "selection.deselect":
     case "selection.feather": {
       return target.kind === "selection" ? enabled(command) : disabled("target is not a selection", command);
+    }
+    case "selection.subject": {
+      return target.kind === "pixel_layer" ? enabled(command) : disabled("target is not a pixel layer", command);
     }
     case "target.transform": {
       return editablePixelLayer(doc, target) ? enabled(command) : disabled("target cannot be transformed", command);

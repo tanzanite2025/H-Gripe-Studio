@@ -12,7 +12,6 @@ interface UseSelectedLayerFramePresentationArgs {
   selectedLayerId: string | null;
   documentWidth: number;
   documentHeight: number;
-  baseNeedsExplicitSource: boolean;
 }
 
 export interface SelectedLayerFramePresentation {
@@ -25,7 +24,6 @@ export function useSelectedLayerFramePresentation({
   selectedLayerId,
   documentWidth,
   documentHeight,
-  baseNeedsExplicitSource,
 }: UseSelectedLayerFramePresentationArgs): SelectedLayerFramePresentation {
   const [result, setResult] = useState<{
     document: ImageEditorDocument;
@@ -40,7 +38,6 @@ export function useSelectedLayerFramePresentation({
   const ready = canResolveSelectedLayerFrame({
     workspace,
     selectedLayerId,
-    baseNeedsExplicitSource,
     documentWidth,
     documentHeight,
   });

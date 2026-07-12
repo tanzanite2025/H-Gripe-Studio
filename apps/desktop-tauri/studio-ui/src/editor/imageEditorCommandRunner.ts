@@ -74,5 +74,7 @@ export function runImageEditorCommand(id: CommandId, env: ImageEditorCommandEnv)
       return runSelectionCommand("deselect", env);
     case "selection.feather":
       return runSelectionCommand("feather", env);
+    case "selection.subject":
+      return false;
   }
 }

@@ -758,8 +758,7 @@ pub(crate) fn resolve_selected_layer_frame(
     ))
 }
 
-#[tauri::command]
-pub(crate) async fn read_selection_assist_pixels(
+async fn read_selected_layer_pixels_response(
     image_path: String,
     document: Value,
     selected_layer_id: String,
@@ -801,7 +800,59 @@ pub(crate) async fn read_selection_assist_pixels(
         )?))
     })
     .await
-    .map_err(|err| format!("selection assist read task failed: {err}"))?
+    .map_err(|err| format!("selected layer pixels read task failed: {err}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn read_selection_assist_pixels(
+    image_path: String,
+    document: Value,
+    selected_layer_id: String,
+    document_width: u32,
+    document_height: u32,
+    frame_x: f32,
+    frame_y: f32,
+    frame_width: u32,
+    frame_height: u32,
+) -> Result<tauri::ipc::Response, String> {
+    read_selected_layer_pixels_response(
+        image_path,
+        document,
+        selected_layer_id,
+        document_width,
+        document_height,
+        frame_x,
+        frame_y,
+        frame_width,
+        frame_height,
+    )
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn read_selected_layer_move_surface_pixels(
+    image_path: String,
+    document: Value,
+    selected_layer_id: String,
+    document_width: u32,
+    document_height: u32,
+    frame_x: f32,
+    frame_y: f32,
+    frame_width: u32,
+    frame_height: u32,
+) -> Result<tauri::ipc::Response, String> {
+    read_selected_layer_pixels_response(
+        image_path,
+        document,
+        selected_layer_id,
+        document_width,
+        document_height,
+        frame_x,
+        frame_y,
+        frame_width,
+        frame_height,
+    )
+    .await
 }
 
 /// The layer's alpha gate: its mask attachment intersected with the selection

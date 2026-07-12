@@ -56,6 +56,8 @@ import { ToolIcon } from "./imageEditorModal/toolIcons";
 import { resolveActiveTarget } from "./studioTarget";
 import { getCommand, getCommandCapability, type CommandId } from "./studioCommands";
 import { ContextActionBar } from "./imageEditorModal/ContextActionBar";
+import { SubjectSelectionDialog } from "./imageEditorModal/SubjectSelectionDialog";
+import { SubjectSelectionDialogFailureBoundary } from "./imageEditorModal/subjectSelectionDialog/SubjectSelectionDialogFailureBoundary";
 import { runImageEditorCommand } from "./imageEditorCommandRunner";
 import { useBrushParams } from "./imageEditorModal/useBrushParams";
 import { useToolSlots } from "./imageEditorModal/useToolSlots";
@@ -73,15 +75,14 @@ import { listenFileDrop, probeImageDims } from "../bridge/tauri";
 import { useSelectionController } from "./imageEditorModal/useSelectionController";
 import { useUnderlayController } from "./imageEditorModal/useUnderlayController";
 import { useSelectedLayerFramePresentation } from "./imageEditorModal/useSelectedLayerFramePresentation";
-import { useSelectedLayerMoveFrameCache } from "./imageEditorModal/selectedLayerMoveFrameCache";
-import { useSelectedLayerMovePresentation } from "./imageEditorModal/useSelectedLayerMovePresentation";
-import { useSelectedLayerMoveSurface } from "./imageEditorModal/useSelectedLayerMoveSurface";
+import { usePreloadedSelectedLayerMoveSurfaceForCurrentLayerAndViewport } from "./imageEditorModal/selectedLayerMove/usePreloadedSelectedLayerMoveSurfaceForCurrentLayerAndViewport";
+import { createSelectedLayerMoveDraftStore } from "./imageEditorModal/selectedLayerMove/selectedLayerMoveDraftStore";
 import { readSelectionAssistPixels } from "./selectionAssistRead";
 import { ASSISTED_SELECTION_TOOL_IDS, GEOMETRY_SELECTION_TOOL_IDS } from "./imageEditorModal/selectionToolProtocol";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
-const IMAGE_PIXEL_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "layer.addMask", "layer.duplicate", "target.transform"];
+const IMAGE_PIXEL_CONTEXT_COMMANDS: CommandId[] = ["layer.invert", "selection.subject", "layer.duplicate"];
 const IMAGE_MASK_CONTEXT_COMMANDS: CommandId[] = ["mask.invert", "mask.disable"];
 
 function toolKeyBadge(toolId: string): string {
@@ -395,32 +396,9 @@ export function ImageEditorModal({
       }),
     [workspace, selectionDraft, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, colorSamples],
   );
-  const [moveDraft, setMoveDraft] = useState<[number, number] | null>(null);
-  const pendingMoveDraftRef = useRef<[number, number] | null>(null);
-  const moveDraftRafRef = useRef<number | null>(null);
-  const setMoveDraftQueued = useCallback((draft: [number, number] | null) => {
-    if (draft === null) {
-      pendingMoveDraftRef.current = null;
-      if (moveDraftRafRef.current !== null) {
-        window.cancelAnimationFrame(moveDraftRafRef.current);
-        moveDraftRafRef.current = null;
-      }
-      setMoveDraft(null);
-      return;
-    }
-    pendingMoveDraftRef.current = draft;
-    if (moveDraftRafRef.current !== null) return;
-    moveDraftRafRef.current = window.requestAnimationFrame(() => {
-      moveDraftRafRef.current = null;
-      setMoveDraft(pendingMoveDraftRef.current);
-    });
-  }, []);
-  useEffect(() => () => {
-    if (moveDraftRafRef.current !== null) {
-      window.cancelAnimationFrame(moveDraftRafRef.current);
-      moveDraftRafRef.current = null;
-    }
-  }, []);
+  const selectedLayerMoveDraftStore = useMemo(() => createSelectedLayerMoveDraftStore(), []);
+  const [subjectDialogOpen, setSubjectDialogOpen] = useState(false);
+  useEffect(() => () => selectedLayerMoveDraftStore.dispose(), [selectedLayerMoveDraftStore]);
   // All in-flight pointer gesture state (drags, picked sources, pending
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
@@ -511,8 +489,8 @@ export function ImageEditorModal({
     const docRef = { canvasId: "image-editor-stage", documentId: imagePath ?? "active-document" };
     return resolveActiveTarget(state.current, docRef);
   }, [state.current, imagePath]);
-  const selectedLayerMoveSurface = useSelectedLayerMoveSurface({
-    queueEnabled: workspace === "image" && toolId === "move" && viewport.targetSettled,
+  const selectedLayerMoveSurface = usePreloadedSelectedLayerMoveSurfaceForCurrentLayerAndViewport({
+    preloadEnabled: workspace === "image" && toolId === "move" && viewport.targetSettled,
     workspace,
     imagePath,
     document: state.current,
@@ -521,33 +499,19 @@ export function ImageEditorModal({
     documentHeight: dims.h,
     sceneFrame,
   });
-  const selectedLayerMovePresentation = useSelectedLayerMovePresentation({
-    layerMoveActive,
-    moveDraft,
-    selectedLayerMoveSurface,
-    viewportTargetSettled: viewport.targetSettled,
-  });
   const selectedLayerFramePresentation = useSelectedLayerFramePresentation({
     workspace,
     document: state.current,
     selectedLayerId,
-    baseNeedsExplicitSource,
     documentWidth: dims.w,
     documentHeight: dims.h,
-  });
-  const displayedSelectedLayerFrame = useSelectedLayerMoveFrameCache({
-    selectedLayerId,
-    resolvedFrame: selectedLayerFramePresentation.frame,
-    layerMoveActive,
-    displayedLayerMoveDraft: selectedLayerMovePresentation.displayedLayerMoveDraft,
-    viewportTargetSettled: viewport.targetSettled,
   });
   const contextActionItems = useMemo(() => {
     if (workspace !== "image") return [];
     const commandIds = activeStudioTarget.kind === "layer_mask" ? IMAGE_MASK_CONTEXT_COMMANDS : IMAGE_PIXEL_CONTEXT_COMMANDS;
     return commandIds
       .map((id) => ({ command: getCommand(id), capability: getCommandCapability(id, { doc: state.current, target: activeStudioTarget }) }))
-      .filter((item) => item.capability.enabled);
+      .filter((item) => item.capability.enabled || item.command.id === "selection.subject");
   }, [workspace, state.current, activeStudioTarget]);
   const cropView = useMemo(() => {
     if (!cropRegion) return null;
@@ -957,6 +921,10 @@ export function ImageEditorModal({
   };
 
   const runContextCommand = useCallback((id: CommandId) => {
+    if (id === "selection.subject") {
+      setSubjectDialogOpen(true);
+      return;
+    }
     runImageEditorCommand(id, {
       doc: stateRef.current.current,
       target: activeStudioTarget,
@@ -1028,7 +996,7 @@ export function ImageEditorModal({
     confirmCropDraft,
     setActiveSelection,
     setSelectionDraft,
-    setMoveDraft: setMoveDraftQueued,
+    setMoveDraft: selectedLayerMoveDraftStore.setDraft,
     setColorSamples,
     sampleUnderlay,
     captureEdgeMap,
@@ -1284,12 +1252,14 @@ export function ImageEditorModal({
             selectionDraft={workspace === "image" && penAnchors.length === 0 ? selectionDraft : null}
             activeSelection={workspace === "image" ? activeSelection : null}
             antsPhase={antsPhase}
-            selectedLayerMoveSurface={selectedLayerMoveSurface?.pixels ?? null}
-            selectedLayerMoveDraft={selectedLayerMovePresentation.displayedLayerMoveDraft}
-            selectedLayerFrame={displayedSelectedLayerFrame}
-            suppressPixelLayer={selectedLayerMovePresentation.suppressPixelLayer}
+            selectedLayerId={selectedLayerId}
+            selectedLayerMoveSurface={selectedLayerMoveSurface}
+            selectedLayerMoveDraftStore={selectedLayerMoveDraftStore}
+            layerMoveActive={layerMoveActive}
+            selectedLayerFrame={selectedLayerFramePresentation.frame}
+            viewportTargetSettled={viewport.targetSettled}
             contextActionBar={
-              workspace === "image" && displayedSelectedLayerFrame ? (
+              workspace === "image" ? (
                 <ContextActionBar
                   items={contextActionItems}
                   onCommand={runContextCommand}
@@ -1522,6 +1492,13 @@ export function ImageEditorModal({
             close={() => setImageSizeDraft(null)}
           />
         ) : null}
+          {subjectDialogOpen ? (
+            // Subject selection owns a lightweight dialog-local prompt/result
+            // flow. Keep it independent from the editor selection/lasso chain.
+            <SubjectSelectionDialogFailureBoundary onClose={() => setSubjectDialogOpen(false)}>
+              <SubjectSelectionDialog onClose={() => setSubjectDialogOpen(false)} />
+            </SubjectSelectionDialogFailureBoundary>
+          ) : null}
         {historyReviewSnapshot ? (
           <HistorySnapshotDialog
             snapshot={historyReviewSnapshot}

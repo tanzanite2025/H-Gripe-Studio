@@ -2,8 +2,8 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useSelectedLayerMovePresentation } from "./useSelectedLayerMovePresentation";
-import type { SelectedLayerMoveSurface } from "./useSelectedLayerMoveSurface";
+import { useSelectedLayerMovePresentation } from "./selectedLayerMove/useSelectedLayerMovePresentation";
+import type { SelectedLayerMoveSurface } from "./selectedLayerMove/selectedLayerMoveTypes";
 
 const surface: SelectedLayerMoveSurface = {
   key: "layer:100:100:0:0:100:100",

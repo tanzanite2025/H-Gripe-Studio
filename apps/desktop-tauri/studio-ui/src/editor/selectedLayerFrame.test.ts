@@ -50,13 +50,11 @@ describe("resolveSelectedLayerFrame bridge", () => {
     const ready = {
       workspace: "image" as const,
       selectedLayerId: "layer-1",
-      baseNeedsExplicitSource: false,
       documentWidth: 100,
       documentHeight: 80,
     };
 
     expect(canResolveSelectedLayerFrame(ready)).toBe(true);
-    expect(canResolveSelectedLayerFrame({ ...ready, baseNeedsExplicitSource: true })).toBe(false);
     expect(canResolveSelectedLayerFrame({ ...ready, documentWidth: 1 })).toBe(false);
     expect(canResolveSelectedLayerFrame({ ...ready, selectedLayerId: null })).toBe(false);
     expect(canResolveSelectedLayerFrame({ ...ready, workspace: "mask" })).toBe(false);

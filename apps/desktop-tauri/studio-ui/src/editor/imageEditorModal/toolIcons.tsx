@@ -323,11 +323,6 @@ const ICONS: Record<string, ReactElement> = {
       <path d="M6 2.5l6 6-3.6.4 2.1 3.6-1.8 1-2-3.7L4.5 12z" fill="currentColor" stroke="none" opacity="0.85" />
     </g>
   ),
-  hand: (
-    <g {...P}>
-      <path d="M5 8V4.5a1 1 0 0 1 2 0V7m0-3.5a1 1 0 0 1 2 0V7m0-2.5a1 1 0 0 1 2 0V8m0-.5a1 1 0 0 1 2 0v3c0 2-1.5 3.5-4 3.5S5.5 13 4.5 11L3.2 8.6a1 1 0 0 1 1.8-.9z" />
-    </g>
-  ),
   rotate_view: (
     <g {...P}>
       <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />

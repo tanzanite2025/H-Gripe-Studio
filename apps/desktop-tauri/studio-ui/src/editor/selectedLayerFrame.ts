@@ -21,7 +21,6 @@ interface ResolveSelectedLayerFrameRequest {
 interface SelectedLayerFrameReadinessInput {
   workspace: "image" | "mask";
   selectedLayerId: string | null;
-  baseNeedsExplicitSource: boolean;
   documentWidth: number;
   documentHeight: number;
 }
@@ -29,14 +28,12 @@ interface SelectedLayerFrameReadinessInput {
 export function canResolveSelectedLayerFrame({
   workspace,
   selectedLayerId,
-  baseNeedsExplicitSource,
   documentWidth,
   documentHeight,
 }: SelectedLayerFrameReadinessInput): boolean {
   return (
     workspace === "image" &&
     Boolean(selectedLayerId) &&
-    !baseNeedsExplicitSource &&
     documentWidth > 1 &&
     documentHeight > 1
   );

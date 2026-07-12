@@ -9,7 +9,7 @@
   --ps-tab-strip: #11131a; /* inactive tab strip / input wells */
   --ps-hover: #2a2f3d; /* hover wash on flat icon buttons */
   --ps-active-overlay: rgba(255, 255, 255, 0.14); /* neutral grey active-row highlight */
-  --ps-row-h: 34px; /* layer-row height */
+  --ps-row-h: 66px; /* two-line layer-row height with readable thumbnails */
 }
 
 .media-viewer.image-editor {
@@ -1211,11 +1211,13 @@
   margin: 0 -8px;
 }
 .mask-layer-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 26px 54px minmax(86px, 1fr);
+  grid-template-rows: 30px 28px;
   align-items: center;
-  gap: 0;
+  column-gap: 0;
   font-size: 12px;
-  padding: 0 6px 0 0;
+  padding: 4px 6px 4px 0;
   min-height: var(--ps-row-h);
   border-radius: 0;
   background: transparent;
@@ -1224,12 +1226,17 @@
   color: var(--text);
   cursor: pointer;
 }
+.mask-layer-row.has-mask {
+  grid-template-columns: 26px 54px 16px 54px minmax(86px, 1fr);
+}
 .mask-layer-row.active { background: var(--ps-active-overlay); }
 /* Multi-selected (but not active) rows: a lighter wash of the same highlight. */
 .mask-layer-row.selected { background: rgba(255, 255, 255, 0.07); }
 .mask-layer-row.hidden .mask-layer-name,
 .mask-layer-row.hidden .mask-layer-thumb { opacity: 0.45; }
 .mask-layer-visible {
+  grid-column: 1;
+  grid-row: 1 / 3;
   width: 26px;
   align-self: stretch;
   display: flex;
@@ -1239,14 +1246,14 @@
   border-radius: 0 !important;
 }
 .mask-layer-group-cell {
-  width: 90px;
+  width: 82px;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .mask-layer-group-select {
-  width: 82px;
+  width: 76px;
   height: 22px;
   padding: 0 8px;
   border-radius: 999px;
@@ -1291,10 +1298,11 @@
   letter-spacing: 0;
 }
 .mask-layer-thumb {
-  width: 26px;
-  height: 26px;
-  margin: 4px 8px 4px 6px;
-  flex: none;
+  grid-column: 2;
+  grid-row: 1 / 3;
+  width: 46px;
+  height: 46px;
+  margin: 0 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1313,34 +1321,51 @@
   box-shadow: 0 0 0 1px var(--accent, #5aa7ff);
 }
 /* The mask slot sits right of the chain; the content thumb keeps its inset. */
-.mask-layer-thumb.mask-thumb { margin-left: 0; }
-/* Reserved empty mask slot: an add-mask affordance so rows do not jump. */
-.mask-layer-thumb.mask-thumb.empty {
-  border-style: dashed;
-  background: transparent;
-  color: transparent;
+.mask-layer-row.has-mask .mask-layer-thumb.mask-thumb {
+  grid-column: 4;
+  margin: 0 4px;
 }
-.mask-layer-row:hover .mask-layer-thumb.mask-thumb.empty:not(:disabled) { color: var(--muted); }
-.mask-layer-thumb.mask-thumb.empty:disabled { cursor: default; }
 /* Disabled mask (PS red X: data kept, gating bypassed). */
 .mask-layer-thumb.mask-thumb.off { opacity: 0.4; border-color: #c05050; }
 /* Pixel↔mask chain toggle between the two thumbnails. */
 .mask-layer-mask-link {
-  flex: none;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  width: 16px;
   font-size: 9px !important;
   padding: 0 2px !important;
-  margin-right: 2px;
+  margin: 0;
   color: var(--muted);
   opacity: 0.4;
 }
 .mask-layer-mask-link.on { opacity: 1; }
-.mask-layer-name {
-  flex: 0 1 clamp(92px, 36%, 150px);
+.mask-layer-row-main {
+  grid-column: 3;
+  grid-row: 1 / 3;
   min-width: 0;
-  max-width: clamp(92px, 36%, 150px);
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: 30px 28px;
+  align-items: center;
+}
+.mask-layer-row.has-mask .mask-layer-row-main {
+  grid-column: 5;
+}
+.mask-layer-name {
+  display: block;
+  min-width: 0;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.mask-layer-row-tools {
+  min-width: 0;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
 }
 .mask-layer-row button {
   padding: 0 4px;
@@ -1353,6 +1378,15 @@
 }
 .mask-layer-row button:hover:not(:disabled) { color: #fff; }
 .mask-layer-row button:disabled { opacity: 0.4; cursor: default; }
+.mask-layer-row button.mask-layer-thumb {
+  box-sizing: border-box;
+  border: 1px solid #4a4d57 !important;
+  border-radius: 0 !important;
+}
+.mask-layer-row button.mask-layer-thumb.target {
+  border-color: var(--accent, #5aa7ff) !important;
+  box-shadow: 0 0 0 1px var(--accent, #5aa7ff);
+}
 /* The Layers tab body is a full-height column so the action bar can pin to
    the panel's bottom edge; the list scrolls in between. */
 .mask-layers-body {
@@ -1444,9 +1478,9 @@
 .mask-layer-adjustment-add option { background: var(--panel-2); color: var(--text); }
 /* Inline rename editor (double-click a layer name). */
 .mask-layer-rename {
-  flex: 0 1 clamp(92px, 36%, 150px);
   min-width: 0;
-  max-width: clamp(92px, 36%, 150px);
+  width: 100%;
+  height: 20px;
   font-size: 12px;
   padding: 1px 4px;
   background: var(--panel-2);
@@ -1491,6 +1525,13 @@
   font-size: 10px;
   padding: 0 4px;
   color: var(--muted);
+}
+.mask-layer-linked {
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mask-layer-opacity {
   width: 44px;

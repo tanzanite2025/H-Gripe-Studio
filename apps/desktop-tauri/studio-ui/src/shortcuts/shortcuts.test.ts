@@ -122,8 +122,8 @@ describe("image-editor M5 bindings", () => {
 });
 
 describe("image-editor M8 bindings", () => {
-  it("keeps hand / rotate-view / navigation combos ready", () => {
-    for (const id of ["tool_hand", "tool_rotate_view", "pan_space", "zoom_in", "zoom_out", "zoom_fit", "zoom_100"]) {
+  it("keeps rotate-view / navigation combos ready", () => {
+    for (const id of ["tool_rotate_view", "pan_space", "zoom_in", "zoom_out", "zoom_fit", "zoom_100"]) {
       const b = IMAGE_EDITOR_SHORTCUTS.find((x) => x.id === id);
       expect(b?.status, id).toBe("ready");
     }

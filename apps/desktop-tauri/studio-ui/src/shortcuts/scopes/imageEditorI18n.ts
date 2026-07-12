@@ -38,7 +38,6 @@ export const IMAGE_EDITOR_SHORTCUT_ZH: Record<string, { hint: string }> = {
   tool_type: { hint: "文字工具（规划中）。" },
   tool_path_select: { hint: "路径选择工具（重编辑已提交的路径）。" },
   tool_shape: { hint: "形状工具（拖出一个框；三角/多边形/星形/直线作为路径步骤提交）。" },
-  tool_hand: { hint: "抓手工具（拖拽平移放大后的视图；任意工具下按住 Space 也可平移）。" },
   tool_rotate_view: { hint: "旋转视图工具（拖拽旋转视图；Esc 复位）。" },
   default_colors: { hint: "重置为默认画笔 / 添加模式（对应 PS 默认前后景色）。" },
   quick_mask: { hint: "切换当前选区的快速蒙版（宝石红）叠加。" },

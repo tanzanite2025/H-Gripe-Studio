@@ -37,7 +37,6 @@ export const IMAGE_EDITOR_TOOL_ZH: Record<string, { label: string; hint: string 
   gradient: { label: "渐变", hint: "拖拽 起点 → 终点：从完全选中到无的线性渐变，作为可随时改参的一步（按住 Alt 拖拽为减去）。" },
   move: { label: "移动", hint: "拖拽以移动蒙版；Ctrl+T 打开自由变换（移动 / 缩放 / 旋转，可随时改参）。" },
   crop: { label: "裁剪", hint: "拖出裁剪框——框外的蒙版被清除（可随时改参的一步）。" },
-  hand: { label: "抓手", hint: "拖拽以平移放大后的视图（任意工具下按住 Space 也可平移）。" },
   rotate_view: { label: "旋转视图", hint: "拖拽绕中心旋转视图——仅屏幕空间，不改动蒙版（Esc 复位，Ctrl+0 适应屏幕并复位）。" },
   eyedropper: { label: "吸管", hint: "吸管：点击取样光标下的图像颜色——色样显示在工具选项里。" },
   shape: { label: "形状", hint: "形状：拖出一个框——所选形状（三角/多边形/星形/直线）作为普通路径步骤提交（添加/减去/交集）。" },

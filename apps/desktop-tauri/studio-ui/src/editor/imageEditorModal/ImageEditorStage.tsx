@@ -7,7 +7,6 @@
 
 import type { MutableRefObject, ReactNode } from "react";
 import type { ViewportBackend } from "../../bridge/viewport";
-import type { ViewportPixels } from "../../bridge/viewport";
 import { ViewportBackendBadge } from "../../viewport/ViewportBackendBadge";
 import type { ViewportViewState } from "../../viewport/view";
 import type { CanvasView } from "../canvasView";
@@ -15,6 +14,11 @@ import type { SelectedLayerFrame } from "../selectedLayerFrame";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 import { InteractionResultLayer } from "./InteractionResultLayer";
 import type { SceneFrame } from "./sceneFrame";
+import type { SelectedLayerMoveSurface } from "./selectedLayerMove/selectedLayerMoveTypes";
+import type { SelectedLayerMoveDraftStore } from "./selectedLayerMove/selectedLayerMoveDraftStore";
+import { useSelectedLayerMoveDraftSnapshot } from "./selectedLayerMove/selectedLayerMoveDraftStore";
+import { useSelectedLayerMoveFrameCache } from "./selectedLayerMove/selectedLayerMoveFrameCache";
+import { useSelectedLayerMovePresentation } from "./selectedLayerMove/useSelectedLayerMovePresentation";
 import { projectFrameInStage, projectedFrameStyle, type StageSize } from "./stageProjection";
 
 interface ImageEditorStageProps {
@@ -57,14 +61,31 @@ interface ImageEditorStageProps {
   selectionDraft?: SelectionDraft | null;
   activeSelection?: ActiveSelection | null;
   antsPhase?: number;
-  selectedLayerMoveSurface?: ViewportPixels | null;
-  selectedLayerMoveDraft?: readonly [number, number] | null;
+  selectedLayerId?: string | null;
+  selectedLayerMoveSurface?: SelectedLayerMoveSurface | null;
+  selectedLayerMoveDraftStore: SelectedLayerMoveDraftStore;
+  layerMoveActive?: boolean;
   selectedLayerFrame?: SelectedLayerFrame | null;
-  suppressPixelLayer?: boolean;
+  viewportTargetSettled?: boolean;
   contextActionBar?: ReactNode;
 }
 
-export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageSize = null, documentAvailable, view, viewportFrameUrl, isNativeSurfacePresented, nativeSurfacePlacementAnchorRef, viewportFrameView, viewportBackend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, selectedLayerMoveSurface = null, selectedLayerMoveDraft = null, selectedLayerFrame = null, suppressPixelLayer = false, contextActionBar }: ImageEditorStageProps) {
+export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageSize = null, documentAvailable, view, viewportFrameUrl, isNativeSurfacePresented, nativeSurfacePlacementAnchorRef, viewportFrameView, viewportBackend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, selectedLayerId = null, selectedLayerMoveSurface = null, selectedLayerMoveDraftStore, layerMoveActive = false, selectedLayerFrame = null, viewportTargetSettled = true, contextActionBar }: ImageEditorStageProps) {
+  const liveLayerMoveDraft = useSelectedLayerMoveDraftSnapshot(selectedLayerMoveDraftStore);
+  const selectedLayerMovePresentation = useSelectedLayerMovePresentation({
+    layerMoveActive,
+    moveDraft: liveLayerMoveDraft,
+    selectedLayerMoveSurface,
+    viewportTargetSettled,
+  });
+  const displayedSelectedLayerFrame = useSelectedLayerMoveFrameCache({
+    selectedLayerId,
+    resolvedFrame: selectedLayerFrame,
+    layerMoveActive,
+    liveLayerMoveDraft,
+    displayedLayerMoveDraft: selectedLayerMovePresentation.displayedLayerMoveDraft,
+    viewportTargetSettled,
+  });
   const frame = sceneFrame ?? { x: 0, y: 0, w: Math.max(1, dims.w), h: Math.max(1, dims.h) };
   const windowRect = {
     left: `${viewportFrameView.panX * 100}%`,
@@ -99,18 +120,18 @@ export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageS
     <div
       ref={stageRef}
       className={`image-editor-stage${isNativeSurfacePresented && !overlayOnly ? " presented" : ""}`}
-      style={spacePan || toolId === "hand" ? { cursor: "grab" } : undefined}
+      style={spacePan ? { cursor: "grab" } : undefined}
       // Nothing on the stage is a native drag source: a stray drag-and-drop
       // shows the no-drop cursor and swallows the tool's pointer events.
       onDragStart={(e) => e.preventDefault()}
       onPointerDown={(e) => {
-        if ((spacePan || toolId === "hand") && e.target === e.currentTarget) onPointerDown(e);
+        if (spacePan && e.target === e.currentTarget) onPointerDown(e);
       }}
       onPointerMove={(e) => {
-        if ((spacePan || toolId === "hand") && e.target === e.currentTarget) onPointerMove(e);
+        if (spacePan && e.target === e.currentTarget) onPointerMove(e);
       }}
       onPointerUp={(e) => {
-        if ((spacePan || toolId === "hand") && e.target === e.currentTarget) onPointerUp();
+        if (spacePan && e.target === e.currentTarget) onPointerUp();
       }}
     >
       {documentFrameStyle ? (
@@ -124,7 +145,10 @@ export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageS
           }}
         >
           <div className="image-editor-document-layer" style={documentLayerStyle}>
-            <div className="image-editor-pixel-layer" style={suppressPixelLayer ? { visibility: "hidden" } : undefined}>
+            <div
+              className="image-editor-pixel-layer"
+              style={selectedLayerMovePresentation.suppressPixelLayer ? { visibility: "hidden" } : undefined}
+            >
               <div ref={nativeSurfacePlacementAnchorRef} className="image-editor-native-surface-anchor" style={windowRect} />
               {viewportFrameUrl && !overlayOnly && (
                 <img
@@ -140,7 +164,7 @@ export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageS
               ref={canvasRef}
               className="image-editor-canvas"
               style={{
-                cursor: spacePan || toolId === "hand" ? "grab" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
+                cursor: spacePan ? "grab" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
               }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -152,13 +176,13 @@ export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageS
         </div>
       ) : null}
       {projectedInteractionStyle ? (
-          <InteractionResultLayer
-            dims={dims}
-            frame={frame}
-            style={projectedInteractionStyle}
-            selectedLayerMoveSurface={selectedLayerMoveSurface}
-            selectedLayerMoveDraft={selectedLayerMoveDraft}
-            selectedLayerFrame={selectedLayerFrame}
+        <InteractionResultLayer
+          dims={dims}
+          frame={frame}
+          style={projectedInteractionStyle}
+          selectedLayerMoveSurface={selectedLayerMoveSurface?.pixels ?? null}
+          selectedLayerMoveDraft={selectedLayerMovePresentation.displayedLayerMoveDraft}
+          selectedLayerFrame={displayedSelectedLayerFrame}
           selectionDraft={selectionDraft ?? null}
           activeSelection={activeSelection ?? null}
           antsPhase={antsPhase}
@@ -167,7 +191,7 @@ export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageS
           brushCursorRef={brushCursorRef}
         />
       ) : null}
-      {contextActionBar}
+      {displayedSelectedLayerFrame ? contextActionBar : null}
       <ViewportBackendBadge backend={viewportBackend} />
     </div>
   );

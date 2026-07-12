@@ -1,5 +1,5 @@
 // Canvas navigation for the Image Editor modal (M8 view layer): zoom / pan state
-// and its pure math, PS-aligned (H hand pan, Space-hold pan, Ctrl+= /
+// and its pure math, PS-aligned (Space-hold pan, Ctrl+= /
 // Ctrl+- / Ctrl+0 / Ctrl+1).
 //
 // The view never touches the document or the render path: it is applied as a
@@ -130,7 +130,7 @@ export function zoom100(view: CanvasView, imageW: number, baseW: number, baseH: 
   return clampView({ ...view, zoom }, baseW, baseH);
 }
 
-/** Pan by an on-screen drag delta (hand tool / Space-drag). */
+/** Pan by an on-screen Space-drag delta. */
 export function panBy(view: CanvasView, dx: number, dy: number, baseW: number, baseH: number): CanvasView {
   return clampView({ ...view, panX: view.panX + dx, panY: view.panY + dy }, baseW, baseH);
 }

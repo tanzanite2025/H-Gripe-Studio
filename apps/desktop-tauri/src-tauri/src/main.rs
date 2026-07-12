@@ -117,6 +117,7 @@ fn main() {
             studio::cancel_studio_run,
             studio::resolve_selected_layer_frame,
             studio::read_selection_assist_pixels,
+            studio::read_selected_layer_move_surface_pixels,
             studio::merge_layer_masks,
             studio::sam2_prompt_mask,
             studio::split_layer_mask,

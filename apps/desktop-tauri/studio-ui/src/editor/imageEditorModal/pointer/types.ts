@@ -73,7 +73,7 @@ export interface PointerGestures {
   wholePathDrag: Pt | null;
   /** Index of the anchor square being dragged in anchor re-edit mode. */
   draggingAnchor: number | null;
-  /** Hand tool / Space-hold pan: the last pointer position (screen px). */
+  /** Space-hold pan: the last pointer position (screen px). */
   panDrag: { x: number; y: number } | null;
   /** In-progress rotate-view drag: the pointer's start angle about the canvas
    * centre plus the rotation it started from. */

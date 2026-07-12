@@ -122,7 +122,6 @@ export function useImageEditorShortcuts({
     tool_dodge_burn: () => toolSlots.selectSlot("dodge"),
     tool_eyedropper: () => toolSlots.selectSlot("sample"),
     tool_shape: () => toolSlots.selectSlot("shape"),
-    tool_hand: () => toolSlots.selectSlot("hand"),
     tool_rotate_view: () => toolSlots.selectSlot("rotate_view"),
     screen_mode: () => setScreenMode((mode) => ((mode + 1) % 3) as 0 | 1 | 2),
     pan_space: () => navigation.setSpacePan(true),

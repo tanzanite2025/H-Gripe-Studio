@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import type { SelectedLayerMoveSurface } from "./useSelectedLayerMoveSurface";
+import type { SelectedLayerMoveSurface } from "./selectedLayerMoveTypes";
 
 interface UseSelectedLayerMovePresentationArgs {
   layerMoveActive: boolean;

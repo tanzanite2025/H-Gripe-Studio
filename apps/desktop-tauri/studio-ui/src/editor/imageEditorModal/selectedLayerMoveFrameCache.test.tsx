@@ -6,7 +6,7 @@ import type { SelectedLayerFrame } from "../selectedLayerFrame";
 import {
   translateSelectedLayerFrame,
   useSelectedLayerMoveFrameCache,
-} from "./selectedLayerMoveFrameCache";
+} from "./selectedLayerMove/selectedLayerMoveFrameCache";
 
 const frame: SelectedLayerFrame = {
   owner: "selected-layer-frame",
@@ -26,27 +26,34 @@ describe("selectedLayerMoveFrameCache", () => {
     });
   });
 
-  it("hides the frame during a V move until a move-surface draft is displayed", () => {
+  it("keeps the frame during a V move even before a move-surface draft is displayed", () => {
     const { result, rerender } = renderHook(
-      ({ displayedLayerMoveDraft }) =>
+      ({ displayedLayerMoveDraft, liveLayerMoveDraft }) =>
         useSelectedLayerMoveFrameCache({
           selectedLayerId: "layer-a",
           resolvedFrame: frame,
           layerMoveActive: true,
+          liveLayerMoveDraft,
           displayedLayerMoveDraft,
           viewportTargetSettled: true,
         }),
       {
         initialProps: {
           displayedLayerMoveDraft: null as readonly [number, number] | null,
+          liveLayerMoveDraft: null as readonly [number, number] | null,
         },
       },
     );
 
-    expect(result.current).toBeNull();
+    expect(result.current).toBe(frame);
 
     act(() => {
-      rerender({ displayedLayerMoveDraft: [7, -3] });
+      rerender({ displayedLayerMoveDraft: null, liveLayerMoveDraft: [5, 4] });
+    });
+    expect(result.current?.rect).toEqual([15, 24, 115, 224]);
+
+    act(() => {
+      rerender({ displayedLayerMoveDraft: [7, -3], liveLayerMoveDraft: [5, 4] });
     });
     expect(result.current?.rect).toEqual([17, 17, 117, 217]);
   });

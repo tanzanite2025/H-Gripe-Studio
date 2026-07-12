@@ -39,7 +39,8 @@ export type ToolKind =
   // variants. Recorded as an `EditPath`; the backend rasterises the closed
   // polygon and boolean-combines it with the mask (add/subtract/intersect).
   | "path"
-  // Canvas navigation (M8): hand pans the zoomed view, rotate-view rotates it.
+  // Canvas navigation (M8): rotate-view rotates the screen-space view. Space
+  // hold panning lives outside the toolbar tool registry.
   // Records nothing — the view is a CSS transform, never part of the document.
   | "view"
   // Drag a start → end vector that records a `gradient` op: a linear ramp
@@ -143,7 +144,6 @@ export const IMAGE_EDITOR_TOOLS: readonly ImageEditorTool[] = [
   { id: "gradient", label: "Gradient", status: "ready", kind: "gradient", mode: "add", lane: "interactive", hint: "Drag start → end: a linear ramp from full selection to none, as a revisable step (Alt-drag subtracts)." },
   { id: "move", label: "Move", status: "ready", kind: "transform", lane: "preview", hint: "Drag to move the mask; Ctrl+T opens free transform (move / scale / rotate as a revisable step)." },
   { id: "crop", label: "Crop", status: "ready", kind: "marquee", lane: "preview", hint: "Drag a crop box — the mask is cleared outside it (a revisable step)." },
-  { id: "hand", label: "Hand", status: "ready", kind: "view", lane: "interactive", hint: "Drag to pan the zoomed view (or hold Space with any tool)." },
   { id: "rotate_view", label: "Rotate view", status: "ready", kind: "view", lane: "interactive", hint: "Drag to rotate the view around its centre — screen-space only, the mask is untouched (Esc resets, Ctrl+0 fits and resets)." },
   // Planned tools: greyed placeholders holding their PS toolbar slot (and
   // reserved key) until each ships. Keep `planned` after every `ready` entry.
@@ -207,7 +207,6 @@ export const PS_TOOL_SECTIONS: readonly (readonly PsToolSlot[])[] = [
     { id: "shape", shortcut: "U", label: "Shape", variants: ["shape"] },
   ],
   [
-    { id: "hand", shortcut: "H", label: "Hand", variants: ["hand"] },
     { id: "rotate_view", shortcut: "R", label: "Rotate View", variants: ["rotate_view"] },
   ],
 ] as const;

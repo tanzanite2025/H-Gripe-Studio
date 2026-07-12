@@ -19,6 +19,7 @@ import { getCommand, getCommandCapability, type CommandId } from "../studioComma
 import type { StudioTarget } from "../studioTarget";
 import { imageLayerHasSourceContent, layerSourceImageOp } from "../imageCompositeSource";
 import type { ImageEditorDispatch } from "./actions";
+import { LayerRowLockToggle } from "./LayerRowLockToggle";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 
 const LAYER_MIME = "application/x-hgripe-layer";
@@ -532,7 +533,7 @@ export function LayersPanel({
           return (
             <div
               key={layer.id}
-              className={`mask-layer-row${i === active ? " active" : selectedIndices.includes(i) ? " selected" : ""}${layer.visible ? "" : " hidden"}`}
+              className={`mask-layer-row${layer.mask ? " has-mask" : ""}${i === active ? " active" : selectedIndices.includes(i) ? " selected" : ""}${layer.visible ? "" : " hidden"}`}
               draggable={renaming !== i && !layer.locked}
               onDragStart={(e) => {
                 e.dataTransfer.setData(LAYER_MIME, String(i));
@@ -553,25 +554,6 @@ export function LayersPanel({
               >
                 {layer.visible ? "V" : ""}
               </button>
-              <span className="mask-layer-group-cell">
-                <select
-                  className={`mask-layer-group-select${group ? " has-group" : ""}`}
-                  value={group?.id ?? ""}
-                  disabled={layerGroups.length === 0}
-                  title={group ? group.name : t("mask.layerNoGroup")}
-                  style={group ? groupStyle(group) : undefined}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => dispatch({ type: "layer_group", index: i, groupId: e.target.value || null })}
-                >
-                  <option value="">{t("mask.layerNoGroupShort")}</option>
-                  {layerGroups.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </span>
               <button
                 className={`mask-layer-thumb${i === active && activeTarget === "pixel" ? " target" : ""}`}
                 title={t("mask.pixelThumbTitle")}
@@ -607,70 +589,70 @@ export function LayersPanel({
                     <LayerThumb layer={{ ...layer, ops: layer.mask.ops }} dims={dims} />
                   </button>
                 </>
-              ) : (
-                // Reserved mask slot so rows do not jump; click attaches a mask.
-                <button
-                  className="mask-layer-thumb mask-thumb empty"
-                  title={t("mask.maskAdd")}
-                  disabled={layer.kind === "adjustment" || layer.locked}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onBeforeLayerChange();
-                    dispatch({ type: "layer_mask_add", index: i });
-                  }}
-                >
-                  +
-                </button>
-              )}
-              {renaming === i ? (
-                <input
-                  className="mask-layer-rename"
-                  value={draft}
-                  autoFocus
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    if (e.key === "Escape") setRenaming(null);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span
-                  className="mask-layer-name"
-                  title={showSourceImage && imagePath ? imagePath : layer.name}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    if (layer.locked) return;
-                    setDraft(layer.name);
-                    setRenaming(i);
-                  }}
-                >
-                  {displayName}
-                </span>
-              )}
-              {layer.linked ? (
-                <span className="mask-layer-linked" title={t("mask.layerLinked")} aria-hidden="true">
-                  {t("mask.layerBadgeLink")}
-                </span>
               ) : null}
-              {layer.locked ? (
-                <span className="mask-layer-locked" title={t("mask.layerLocked")} aria-hidden="true">
-                  {t("mask.layerBadgeLock")}
-                </span>
-              ) : null}
-              <button
-                className="mask-layer-delete"
-                title={t("mask.layerDelete")}
-                disabled={layer.locked}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBeforeLayerChange();
-                  dispatch({ type: "layer_remove", index: i });
-                }}
-              >
-                x
-              </button>
+              <div className="mask-layer-row-main">
+                {renaming === i ? (
+                  <input
+                    className="mask-layer-rename"
+                    value={draft}
+                    autoFocus
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") setRenaming(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span
+                    className="mask-layer-name"
+                    title={showSourceImage && imagePath ? imagePath : layer.name}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (layer.locked) return;
+                      setDraft(layer.name);
+                      setRenaming(i);
+                    }}
+                  >
+                    {displayName}
+                  </span>
+                )}
+                <div className="mask-layer-row-tools">
+                  <span className="mask-layer-group-cell">
+                    <select
+                      className={`mask-layer-group-select${group ? " has-group" : ""}`}
+                      value={group?.id ?? ""}
+                      disabled={layerGroups.length === 0}
+                      title={group ? group.name : t("mask.layerNoGroup")}
+                      style={group ? groupStyle(group) : undefined}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => dispatch({ type: "layer_group", index: i, groupId: e.target.value || null })}
+                    >
+                      <option value="">{t("mask.layerNoGroupShort")}</option>
+                      {layerGroups.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                  <LayerRowLockToggle
+                    locked={Boolean(layer.locked)}
+                    title={layer.locked ? t("mask.layerUnlock") : t("mask.layerLock")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dispatch({ type: "layer_lock", index: i });
+                    }}
+                  />
+                  {layer.linked ? (
+                    <span className="mask-layer-linked" title={t("mask.layerLinked")} aria-hidden="true">
+                      {t("mask.layerBadgeLink")}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             </div>
           );
         })}

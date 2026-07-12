@@ -20,14 +20,6 @@ function CommandIcon({ icon }: { icon: string }) {
       </svg>
     );
   }
-  if (icon === "mask") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="1.8" y="3" width="12.4" height="10" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <circle cx="8" cy="8" r="3" fill="currentColor" />
-      </svg>
-    );
-  }
   if (icon === "duplicate") {
     return (
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -36,18 +28,19 @@ function CommandIcon({ icon }: { icon: string }) {
       </svg>
     );
   }
+  if (icon === "subject") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M4.2 12.7c.4-2 1.8-3.2 3.8-3.2s3.4 1.2 3.8 3.2" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+        <circle cx="8" cy="5.5" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.35" />
+        <path d="M2.3 3.8V2.3h1.5M12.2 2.3h1.5v1.5M13.7 12.2v1.5h-1.5M3.8 13.7H2.3v-1.5" fill="none" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
   if (icon === "delete") {
     return (
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path d="M3 4.5h10M6.2 4.5V3.2h3.6v1.3M5 6v6.5c0 .7.5 1.2 1.2 1.2h3.6c.7 0 1.2-.5 1.2-1.2V6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (icon === "transform") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M4 4l3 3M12 4 9 7M12 12 9 9M4 12l3-3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
       </svg>
     );
   }
