@@ -174,6 +174,7 @@ fn main() {
             studio::grade_export_cube,
             #[cfg(feature = "native-ffmpeg")]
             studio::video_frame_grade_preview,
+            commands::audio::audio_waveform_peaks,
             commands::video::video_probe,
             commands::video::video_scrub,
             studio::timeline_export,

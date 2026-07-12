@@ -964,6 +964,9 @@ function Studio({ onToggleLang }: { onToggleLang: () => void }) {
             binAssets.find((a) => a.id === audioEditClip.clip.assetId)?.name ??
             audioEditClip.clip.assetId
           }
+          sourceMediaPath={
+            binAssets.find((a) => a.id === audioEditClip.clip.assetId)?.path ?? null
+          }
           sourceDurationSec={
             audioEdits[audioEditClipId]?.sourceDurationSec ?? audioEditClip.clip.duration
           }

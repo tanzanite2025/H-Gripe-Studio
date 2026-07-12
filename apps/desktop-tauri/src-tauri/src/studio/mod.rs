@@ -139,6 +139,11 @@ pub(crate) use clip_props::{ClipPropsEvaluator, ResolvedClipProps};
 #[cfg(test)]
 pub(crate) use clip_props_raster::apply_clip_props_srgb_proxy;
 pub(crate) use clip_props_raster::{apply_clip_props_srgb_proxy_preferred, ClipPropsBackend};
+#[cfg(feature = "native-ffmpeg")]
+pub(crate) use audio_mix::decode_audio_pcm;
+pub(crate) use audio_mix::{
+    waveform_peaks_from_interleaved_stereo_pcm, MIX_CHANNELS, MIX_SAMPLE_RATE,
+};
 pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;

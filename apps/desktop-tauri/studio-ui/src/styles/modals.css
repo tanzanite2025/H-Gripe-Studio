@@ -494,6 +494,10 @@
   stroke: var(--accent, #7aa2f7);
   stroke-width: 1;
 }
+.audio-edit-envelope polygon.audio-edit-waveform {
+  fill: rgba(255, 255, 255, 0.18);
+  stroke: none;
+}
 .audio-edit-controls { display: flex; flex-direction: column; }
 .audio-edit-controls .field { margin-top: 8px; }
 .audio-edit-controls small { margin-top: 12px; }

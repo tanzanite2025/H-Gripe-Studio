@@ -91,6 +91,31 @@ pub(crate) fn mix_timeline_audio(
     out
 }
 
+/// Reduce interleaved stereo PCM (the canonical mix surface) to `bucket_count`
+/// per-bucket peak amplitudes in `0..=1` — the audio edit modal's sample
+/// waveform. Each bucket is the max `|sample|` over its frame span, across
+/// both channels.
+pub(crate) fn waveform_peaks_from_interleaved_stereo_pcm(
+    pcm: &[f32],
+    bucket_count: usize,
+) -> Vec<f32> {
+    let frames = pcm.len() / MIX_CHANNELS;
+    if frames == 0 || bucket_count == 0 {
+        return Vec::new();
+    }
+    let mut peaks = vec![0f32; bucket_count];
+    for frame in 0..frames {
+        let bucket = (frame * bucket_count / frames).min(bucket_count - 1);
+        for ch in 0..MIX_CHANNELS {
+            let amplitude = pcm[frame * MIX_CHANNELS + ch].abs().min(1.0);
+            if amplitude > peaks[bucket] {
+                peaks[bucket] = amplitude;
+            }
+        }
+    }
+    peaks
+}
+
 #[cfg(feature = "native-ffmpeg")]
 pub(crate) use ffi_impl::{decode_audio_pcm, mux_video_with_audio};
 
@@ -663,6 +688,22 @@ mod tests {
             "peak carries the gain: {mid}"
         );
         assert!(at(0.999) < 0.02, "fade-out ends near 0");
+    }
+
+    #[test]
+    fn waveform_peaks_report_the_loudest_sample_per_bucket() {
+        // 4 frames of stereo: quiet, loud-left, loud-right, quiet.
+        let pcm = [0.1f32, 0.1, 0.9, 0.2, 0.2, -0.7, 0.1, 0.1];
+        let peaks = waveform_peaks_from_interleaved_stereo_pcm(&pcm, 2);
+        assert_eq!(peaks, vec![0.9, 0.7]);
+    }
+
+    #[test]
+    fn waveform_peaks_clamp_to_full_scale_and_handle_empty_input() {
+        let pcm = [1.5f32, -2.0];
+        assert_eq!(waveform_peaks_from_interleaved_stereo_pcm(&pcm, 1), vec![1.0]);
+        assert!(waveform_peaks_from_interleaved_stereo_pcm(&[], 4).is_empty());
+        assert!(waveform_peaks_from_interleaved_stereo_pcm(&pcm, 0).is_empty());
     }
 
     #[test]
