@@ -86,6 +86,64 @@ pub(super) fn composite_mask_overlay(
     }
 }
 
+/// Composite a document-sized mask into an arbitrary retained scene window.
+/// Pixels outside the document stay untouched, including inverted quick-mask
+/// overlays; the pasteboard is not part of the document mask.
+pub(super) fn composite_document_mask_overlay(
+    surface: &mut hgripe_grade::GradeSurface,
+    overlay: &MaskOverlay,
+    document_dims: (u32, u32),
+    visible_frame: [f32; 4],
+) {
+    let (dw, dh) = document_dims;
+    let (sw, sh) = (surface.w, surface.h);
+    let [frame_x, frame_y, frame_w, frame_h] = visible_frame;
+    if sw == 0
+        || sh == 0
+        || dw == 0
+        || dh == 0
+        || overlay.w == 0
+        || overlay.h == 0
+        || !frame_w.is_finite()
+        || !frame_h.is_finite()
+        || frame_w <= 0.0
+        || frame_h <= 0.0
+    {
+        return;
+    }
+    let tint = [
+        f32::from(overlay.rgb[0]) / 255.0,
+        f32::from(overlay.rgb[1]) / 255.0,
+        f32::from(overlay.rgb[2]) / 255.0,
+    ];
+    for py in 0..sh {
+        let document_y = frame_y + (py as f32 + 0.5) / sh as f32 * frame_h;
+        let ny = document_y / dh as f32;
+        if !(0.0..=1.0).contains(&ny) {
+            continue;
+        }
+        for px in 0..sw {
+            let document_x = frame_x + (px as f32 + 0.5) / sw as f32 * frame_w;
+            let nx = document_x / dw as f32;
+            if !(0.0..=1.0).contains(&nx) {
+                continue;
+            }
+            let mut c = overlay.coverage(nx, ny);
+            if overlay.invert {
+                c = 1.0 - c;
+            }
+            let a = (c * overlay.alpha).clamp(0.0, 1.0);
+            if a <= 0.0 {
+                continue;
+            }
+            let base = ((py * sw + px) * 4) as usize;
+            for ch in 0..3 {
+                surface.data[base + ch] = tint[ch] * a + surface.data[base + ch] * (1.0 - a);
+            }
+        }
+    }
+}
+
 /// One primitive of a vector overlay scene, in normalized document
 /// coordinates (0..=1 over the full document, view-independent).
 #[derive(Deserialize)]
@@ -288,6 +346,46 @@ pub(super) fn composite_overlay_scene(
             (ny * ph as f32 - y0) / vh as f32 * sh as f32 - 0.5,
         )
     };
+    composite_overlay_scene_projected(surface, scene, map, pw as f32 * sw as f32 / vw as f32);
+}
+
+/// Stroke document-normalized vector overlays into an arbitrary retained
+/// scene window without reinterpreting the pasteboard as the document.
+pub(super) fn composite_document_overlay_scene(
+    surface: &mut hgripe_grade::GradeSurface,
+    scene: &OverlayScene,
+    document_dims: (u32, u32),
+    visible_frame: [f32; 4],
+) {
+    let (dw, dh) = document_dims;
+    let (sw, sh) = (surface.w, surface.h);
+    let [frame_x, frame_y, frame_w, frame_h] = visible_frame;
+    if sw == 0
+        || sh == 0
+        || dw == 0
+        || dh == 0
+        || !frame_w.is_finite()
+        || !frame_h.is_finite()
+        || frame_w <= 0.0
+        || frame_h <= 0.0
+    {
+        return;
+    }
+    let map = |nx: f32, ny: f32| -> (f32, f32) {
+        (
+            (nx * dw as f32 - frame_x) / frame_w * sw as f32 - 0.5,
+            (ny * dh as f32 - frame_y) / frame_h * sh as f32 - 0.5,
+        )
+    };
+    composite_overlay_scene_projected(surface, scene, map, dw as f32 * sw as f32 / frame_w);
+}
+
+fn composite_overlay_scene_projected(
+    surface: &mut hgripe_grade::GradeSurface,
+    scene: &OverlayScene,
+    map: impl Fn(f32, f32) -> (f32, f32),
+    document_width_scale: f32,
+) {
     for item in &scene.items {
         match item {
             OverlayItem::Marquee { region, ellipse } => {
@@ -364,7 +462,7 @@ pub(super) fn composite_overlay_scene(
                 let pts: Vec<(f32, f32)> = points.iter().map(|p| map(p[0], p[1])).collect();
                 // The document-space radius on the surface: normalized doc
                 // width times the x scale of `map`.
-                let r = (radius * pw as f32 * sw as f32 / vw as f32).max(0.5);
+                let r = (radius * document_width_scale).max(0.5);
                 fill_band(surface, &pts, r, *color);
             }
             OverlayItem::Marker {
@@ -594,6 +692,7 @@ pub(crate) fn viewport_set_mask_overlay(
         ));
     }
     state.mask_overlay = parsed;
+    state.bump_render_generation();
     Ok(())
 }
 
@@ -725,5 +824,6 @@ pub(crate) fn viewport_set_overlay_scene(
         ));
     }
     state.overlay_scene = parsed;
+    state.bump_render_generation();
     Ok(())
 }

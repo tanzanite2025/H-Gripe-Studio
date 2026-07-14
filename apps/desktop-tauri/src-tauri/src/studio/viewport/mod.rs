@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 use serde_json::Value;
 
 use crate::resource;
-use crate::studio::ClipPropsEvaluator;
+use crate::studio::{ClipPropsEvaluator, RetainedImageSceneKey};
 
 mod registries;
 pub(crate) use registries::*;
@@ -32,6 +32,8 @@ mod render;
 use render::*;
 mod render_image;
 use render_image::*;
+mod retained_image_scene;
+use retained_image_scene::*;
 #[cfg(feature = "native-ffmpeg")]
 mod render_video;
 #[cfg(feature = "native-ffmpeg")]
@@ -84,6 +86,12 @@ pub(crate) fn viewport_create(kind: String) -> Result<ViewportDescriptor, String
             overlay_scene: None,
             view: ViewportView::IDENTITY,
             proxies: Vec::new(),
+            retained_image_scene: None,
+            image_layer_presentation: None,
+            retired_image_layer_transactions: Vec::new(),
+            target_request_epoch: 0,
+            content_generation: 1,
+            render_generation: 1,
             temporal_denoise: 0.0,
             temporal: None,
             clip_props: None,
@@ -166,13 +174,383 @@ pub(crate) fn viewport_set_target(
         }
     }
     let id = parse_id(&viewport_id)?;
+    let desired_scene_key = match &target {
+        ViewportTarget::ImageComposite {
+            resource_id,
+            document_key,
+            document_width,
+            document_height,
+            frame_x,
+            frame_y,
+            frame_width,
+            frame_height,
+            ..
+        } => {
+            if document_key.trim().is_empty() {
+                return Err("image composite documentKey must not be empty".to_string());
+            }
+            if !frame_x.is_finite() || !frame_y.is_finite() {
+                return Err("image composite frame origin must be finite".to_string());
+            }
+            let entry = resource::get(resource_id)
+                .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
+            Some(RetainedImageSceneKey::new(
+                &entry.path,
+                document_key,
+                *document_width,
+                *document_height,
+                *frame_x,
+                *frame_y,
+                frame_width.unwrap_or(*document_width),
+                frame_height.unwrap_or(*document_height),
+            ))
+        }
+        _ => None,
+    };
+    let (request_epoch, existing_scene) = {
+        let mut map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        let state = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+        state.target_request_epoch = state.target_request_epoch.wrapping_add(1);
+        let existing = desired_scene_key.as_ref().and_then(|key| {
+            state
+                .retained_image_scene
+                .as_ref()
+                .filter(|scene| scene.key() == key)
+                .cloned()
+        });
+        (state.target_request_epoch, existing)
+    };
+    let prepared_scene = match (&target, existing_scene) {
+        (ViewportTarget::ImageComposite { .. }, Some(scene)) => Some(scene),
+        (
+            ViewportTarget::ImageComposite {
+                resource_id,
+                document,
+                document_key,
+                document_width,
+                document_height,
+                frame_x,
+                frame_y,
+                frame_width,
+                frame_height,
+            },
+            None,
+        ) => {
+            let entry = resource::get(resource_id)
+                .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
+            Some(build_retained_image_scene(
+                id,
+                &entry.path,
+                document,
+                document_key,
+                *document_width,
+                *document_height,
+                *frame_x,
+                *frame_y,
+                frame_width.unwrap_or(*document_width),
+                frame_height.unwrap_or(*document_height),
+            )?)
+        }
+        _ => None,
+    };
+    {
+        let mut map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        let state = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+        if state.target_request_epoch != request_epoch {
+            return Err("viewport target superseded by a newer target request".to_string());
+        }
+        let next_document_key = prepared_scene
+            .as_ref()
+            .map(|scene| scene.document_key().to_string());
+        state.image_layer_presentation = state.image_layer_presentation.take().filter(|current| {
+            next_document_key.as_deref() == Some(current.base_document_key.as_str())
+        });
+        if state.image_layer_presentation.is_none() {
+            state.retired_image_layer_transactions.clear();
+        }
+        state.target = Some(target);
+        state.retained_image_scene = prepared_scene;
+        state.bump_content_generation();
+        crate::commands::viewport_surface::invalidate_content(&viewport_id);
+    }
+    Ok(())
+}
+
+/// Build a replacement document revision while the previous complete scene
+/// remains presented, then atomically swap the document payload and retained
+/// nodes. The image resource and native backing texture keep their identity.
+#[tauri::command]
+pub(crate) async fn viewport_set_image_scene(
+    viewport_id: String,
+    scene: ViewportImageScene,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || viewport_set_image_scene_inner(viewport_id, scene))
+        .await
+        .map_err(|error| format!("viewport image scene worker failed: {error}"))?
+}
+
+fn viewport_set_image_scene_inner(
+    viewport_id: String,
+    scene: ViewportImageScene,
+) -> Result<(), String> {
+    scene.validate()?;
+    let id = parse_id(&viewport_id)?;
+    let (request_epoch, resource_id, source_path, existing_scene) = {
+        let mut map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned")?;
+        let state = map
+            .get_mut(&id)
+            .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+        let resource_id = match state.target.as_ref() {
+            Some(ViewportTarget::ImageComposite { resource_id, .. }) => resource_id.clone(),
+            _ => {
+                return Err(format!(
+                    "viewport {viewport_id} has no image composite target"
+                ));
+            }
+        };
+        let source_path = resource::get(&resource_id)
+            .ok_or_else(|| format!("unknown resource id: {resource_id}"))?
+            .path;
+        let key = RetainedImageSceneKey::new(
+            &source_path,
+            &scene.document_key,
+            scene.document_width,
+            scene.document_height,
+            scene.frame_x,
+            scene.frame_y,
+            scene.frame_width,
+            scene.frame_height,
+        );
+        state.target_request_epoch = state.target_request_epoch.wrapping_add(1);
+        let existing_scene = state
+            .retained_image_scene
+            .as_ref()
+            .filter(|retained| retained.key() == &key)
+            .cloned();
+        (
+            state.target_request_epoch,
+            resource_id,
+            source_path,
+            existing_scene,
+        )
+    };
+    let prepared_scene = match existing_scene {
+        Some(retained) => retained,
+        None => build_retained_image_scene(
+            id,
+            &source_path,
+            &scene.document,
+            &scene.document_key,
+            scene.document_width,
+            scene.document_height,
+            scene.frame_x,
+            scene.frame_y,
+            scene.frame_width,
+            scene.frame_height,
+        )?,
+    };
     let mut map = viewports()
         .lock()
         .map_err(|_| "viewport registry poisoned")?;
     let state = map
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
-    state.target = Some(target);
+    if state.target_request_epoch != request_epoch {
+        return Err("viewport image scene superseded by a newer scene request".to_string());
+    }
+    let target = match state.target.as_mut() {
+        Some(ViewportTarget::ImageComposite {
+            resource_id: current_resource_id,
+            document,
+            document_key,
+            document_width,
+            document_height,
+            frame_x,
+            frame_y,
+            frame_width,
+            frame_height,
+        }) if *current_resource_id == resource_id => (
+            document,
+            document_key,
+            document_width,
+            document_height,
+            frame_x,
+            frame_y,
+            frame_width,
+            frame_height,
+        ),
+        _ => return Err("viewport image composite target changed during scene build".to_string()),
+    };
+    *target.0 = scene.document;
+    *target.1 = scene.document_key.clone();
+    *target.2 = scene.document_width;
+    *target.3 = scene.document_height;
+    *target.4 = scene.frame_x;
+    *target.5 = scene.frame_y;
+    *target.6 = Some(scene.frame_width);
+    *target.7 = Some(scene.frame_height);
+    state.image_layer_presentation = state
+        .image_layer_presentation
+        .take()
+        .filter(|current| current.base_document_key == scene.document_key);
+    if state.image_layer_presentation.is_none() {
+        state.retired_image_layer_transactions.clear();
+    }
+    state.retained_image_scene = Some(prepared_scene);
+    state.bump_render_generation();
+    Ok(())
+}
+
+/// Select a retained layer node and optionally apply one in-memory drag
+/// transform. The transaction is scoped to the exact document key. A new
+/// transaction is established only by sequence zero without a draft; every
+/// subsequent packet must keep the transaction id and advance monotonically.
+fn image_layer_transaction_ids(
+    document: &Value,
+    selected_layer_id: &str,
+) -> Result<Vec<String>, String> {
+    let layers = document
+        .get("layers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "image layer presentation requires a layered document".to_string())?;
+    let selected = layers
+        .iter()
+        .find(|layer| layer.get("id").and_then(Value::as_str) == Some(selected_layer_id))
+        .ok_or_else(|| format!("unknown selected layer id: {selected_layer_id}"))?;
+    if selected.get("linked").and_then(Value::as_bool) != Some(true) {
+        return Ok(vec![selected_layer_id.to_string()]);
+    }
+    let mut affected = layers
+        .iter()
+        .filter(|layer| {
+            layer.get("linked").and_then(Value::as_bool) == Some(true)
+                && layer.get("kind").and_then(Value::as_str) == Some("pixel")
+                && layer.get("locked").and_then(Value::as_bool) != Some(true)
+        })
+        .filter_map(|layer| layer.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect::<Vec<_>>();
+    if !affected.iter().any(|id| id == selected_layer_id) {
+        affected.push(selected_layer_id.to_string());
+    }
+    Ok(affected)
+}
+
+#[tauri::command]
+pub(crate) fn viewport_present_image_layer_scene(
+    viewport_id: String,
+    mut presentation: ViewportImageLayerPresentation,
+) -> Result<(), String> {
+    presentation.validate()?;
+    let id = parse_id(&viewport_id)?;
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    if state.kind != "image_edit" {
+        return Err(format!(
+            "viewport {viewport_id} (kind={}) does not accept image layer presentation",
+            state.kind
+        ));
+    }
+    let (document_key, document) = match state.target.as_ref() {
+        Some(ViewportTarget::ImageComposite {
+            document_key,
+            document,
+            ..
+        }) => (document_key, document),
+        _ => {
+            return Err(format!(
+                "viewport {viewport_id} has no image composite target"
+            ));
+        }
+    };
+    if presentation.base_document_key != *document_key {
+        return Err(format!(
+            "image layer presentation base document mismatch: expected {document_key}, got {}",
+            presentation.base_document_key
+        ));
+    }
+    if state
+        .retained_image_scene
+        .as_ref()
+        .is_none_or(|scene| scene.document_key() != document_key)
+    {
+        return Err("image composite scene is not ready for the target document".to_string());
+    }
+    let active_transaction_id = state
+        .image_layer_presentation
+        .as_ref()
+        .map(|current| current.transaction_id.as_str());
+    if active_transaction_id != Some(presentation.transaction_id.as_str())
+        && state
+            .retired_image_layer_transactions
+            .iter()
+            .any(|transaction_id| transaction_id == &presentation.transaction_id)
+    {
+        return Err(format!(
+            "image layer presentation transaction {} is retired",
+            presentation.transaction_id
+        ));
+    }
+    let mut retired_transaction = None;
+    if let Some(current) = state.image_layer_presentation.as_ref() {
+        if current.transaction_id != presentation.transaction_id {
+            if !presentation.is_transaction_start() {
+                return Err(format!(
+                    "image layer presentation transaction mismatch: active {}, got {}",
+                    current.transaction_id, presentation.transaction_id
+                ));
+            }
+            retired_transaction = Some(current.transaction_id.clone());
+            presentation.affected_layer_ids =
+                image_layer_transaction_ids(document, &presentation.selected_layer_id)?;
+        } else if current.selected_layer_id != presentation.selected_layer_id {
+            return Err(format!(
+                "image layer presentation transaction {} is fixed to selected layer {}, got {}",
+                current.transaction_id, current.selected_layer_id, presentation.selected_layer_id
+            ));
+        } else if presentation.sequence <= current.sequence {
+            return Err(format!(
+                "image layer presentation sequence must advance past {}, got {}",
+                current.sequence, presentation.sequence
+            ));
+        } else {
+            presentation
+                .affected_layer_ids
+                .clone_from(&current.affected_layer_ids);
+        }
+    } else if !presentation.is_transaction_start() {
+        return Err(
+            "image layer presentation transaction must start at sequence 0 without moveDraft"
+                .to_string(),
+        );
+    } else {
+        presentation.affected_layer_ids =
+            image_layer_transaction_ids(document, &presentation.selected_layer_id)?;
+    }
+    if let Some(retired) = retired_transaction {
+        state
+            .retired_image_layer_transactions
+            .retain(|id| id != &retired);
+        state.retired_image_layer_transactions.push(retired);
+        if state.retired_image_layer_transactions.len() > 16 {
+            state.retired_image_layer_transactions.remove(0);
+        }
+    }
+    state.image_layer_presentation = Some(presentation);
+    state.bump_render_generation();
     Ok(())
 }
 
@@ -187,6 +565,8 @@ pub(crate) fn viewport_resize(viewport_id: String, width: u32, height: u32) -> R
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
     state.width = width;
     state.height = height;
+    state.bump_content_generation();
+    crate::commands::viewport_surface::invalidate_content(&viewport_id);
     Ok(())
 }
 
@@ -227,6 +607,7 @@ pub(crate) fn viewport_set_grade(
     if amount == 0.0 {
         state.temporal = None;
     }
+    state.bump_render_generation();
     Ok(())
 }
 
@@ -269,6 +650,7 @@ pub(crate) fn viewport_set_clip_props(
         Some(raw) => state.clip_props = Some((raw.clone(), ClipPropsEvaluator::parse(&raw)?)),
     }
     state.clip_props_time = time;
+    state.bump_render_generation();
     Ok(())
 }
 
@@ -295,6 +677,7 @@ pub(crate) fn viewport_set_view(
         .get_mut(&id)
         .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
     state.view = ViewportView { zoom, pan_x, pan_y };
+    state.bump_render_generation();
     Ok(())
 }
 
@@ -317,15 +700,18 @@ pub(crate) fn viewport_present_view(
         return Err(format!("zoom must be positive, got {zoom}"));
     }
     let id = parse_id(&viewport_id)?;
-    {
-        let mut map = viewports()
-            .lock()
-            .map_err(|_| "viewport registry poisoned")?;
-        let state = map
-            .get_mut(&id)
-            .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
-        state.view = ViewportView { zoom, pan_x, pan_y };
-    }
+    let mut map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get_mut(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    state.view = ViewportView { zoom, pan_x, pan_y };
+    state.bump_render_generation();
+    // Render-only changes keep the previous complete texture usable as a fast
+    // crop until the settled render arrives. Target/resize changes instead
+    // invalidate `frame_tex` while holding this same registry lock, so this
+    // path can never resurrect pixels from another backing surface.
     Ok(crate::commands::viewport_surface::present_view(
         &viewport_id,
         (zoom, pan_x, pan_y),
@@ -352,6 +738,407 @@ mod tests {
         // Destroyed viewports are gone.
         assert!(viewport_resize(desc.viewport_id.clone(), 1, 1).is_err());
         assert!(viewport_destroy_inner(desc.viewport_id).is_err());
+    }
+
+    #[test]
+    fn image_composite_camera_and_resize_reuse_retained_layer_scene() {
+        let path = std::env::temp_dir().join("hgripe_retained_scene_identity.png");
+        image::RgbaImage::from_pixel(64, 48, image::Rgba([1, 2, 3, 255]))
+            .save(&path)
+            .expect("write source");
+        let canonical = path.to_string_lossy().to_string();
+        let resource_id = resource::id_for(&canonical);
+        resource::put(
+            &resource_id,
+            resource::ResourceEntry {
+                path: canonical.clone(),
+                width: Some(64),
+                height: Some(48),
+            },
+        );
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        let id = parse_id(&desc.viewport_id).expect("id");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageComposite {
+                resource_id,
+                document: serde_json::json!({
+                    "layers": [{
+                        "id": "base",
+                        "kind": "pixel",
+                        "visible": true,
+                        "opacity": 1.0,
+                        "ops": [{
+                            "type": "source_image",
+                            "source": { "path": canonical, "width": 64, "height": 48 },
+                            "placement": [0, 0, 64, 48]
+                        }]
+                    }]
+                }),
+                document_key: "document-a".to_string(),
+                document_width: 64,
+                document_height: 48,
+                frame_x: 0.0,
+                frame_y: 0.0,
+                frame_width: Some(64),
+                frame_height: Some(48),
+            },
+        )
+        .expect("set target");
+        let first = {
+            let map = viewports().lock().expect("lock viewports");
+            map.get(&id)
+                .and_then(|state| state.retained_image_scene.clone())
+                .expect("retained scene")
+        };
+
+        viewport_set_view(desc.viewport_id.clone(), 2.0, 0.25, 0.5).expect("set camera");
+        viewport_resize(desc.viewport_id.clone(), 1280, 720).expect("resize");
+        let after_camera = {
+            let map = viewports().lock().expect("lock viewports");
+            map.get(&id)
+                .and_then(|state| state.retained_image_scene.clone())
+                .expect("retained scene after view")
+        };
+        assert!(Arc::ptr_eq(&first, &after_camera));
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn image_scene_framebuffer_detail_prefers_native_frame_and_stays_bounded() {
+        assert_eq!(
+            image_scene_framebuffer_detail(4096, 3072, 1280, 720),
+            4096,
+            "a 4096-native frame must not be reduced to viewport detail"
+        );
+        assert_eq!(
+            image_scene_framebuffer_detail(800, 800, 1280, 720),
+            1280,
+            "the viewport is the detail floor for a small frame"
+        );
+        assert_eq!(
+            image_scene_framebuffer_detail(8192, 6144, 1280, 720),
+            4096,
+            "retained allocations remain bounded"
+        );
+        // Camera is deliberately absent from the detail function and cache
+        // key. The preceding test changes camera state and asserts Arc reuse.
+    }
+
+    #[test]
+    fn target_size_and_render_only_generations_have_distinct_lifetimes() {
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        let id = parse_id(&desc.viewport_id).expect("id");
+        let initial = {
+            let map = viewports().lock().expect("lock viewports");
+            map.get(&id).expect("viewport").generations()
+        };
+
+        viewport_resize(desc.viewport_id.clone(), 640, 480).expect("resize");
+        let after_content = {
+            let map = viewports().lock().expect("lock viewports");
+            map.get(&id).expect("viewport").generations()
+        };
+        assert_ne!(after_content.content, initial.content);
+        assert_ne!(after_content.render, initial.render);
+        assert!(!rendered_generations_match(after_content, initial));
+
+        viewport_set_mask_overlay(desc.viewport_id.clone(), None).expect("clear mask overlay");
+        let after_overlay = {
+            let map = viewports().lock().expect("lock viewports");
+            map.get(&id).expect("viewport").generations()
+        };
+        assert_eq!(after_overlay.content, after_content.content);
+        assert_ne!(after_overlay.render, after_content.render);
+        assert!(!rendered_generations_match(after_overlay, after_content));
+
+        viewport_set_view(desc.viewport_id.clone(), 2.0, 0.25, 0.25).expect("set view");
+        let after_view = {
+            let map = viewports().lock().expect("lock viewports");
+            map.get(&id).expect("viewport").generations()
+        };
+        assert_eq!(after_view.content, after_overlay.content);
+        assert_ne!(after_view.render, after_overlay.render);
+        assert!(!rendered_generations_match(after_view, after_overlay));
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+    }
+
+    #[test]
+    fn image_scene_commit_is_atomic_and_keeps_content_identity() {
+        let path = std::env::temp_dir().join("hgripe_atomic_scene_commit.png");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([4, 5, 6, 255]))
+            .save(&path)
+            .expect("write source");
+        let canonical = path.to_string_lossy().to_string();
+        let resource_id = resource::id_for(&canonical);
+        resource::put(
+            &resource_id,
+            resource::ResourceEntry {
+                path: canonical.clone(),
+                width: Some(16),
+                height: Some(16),
+            },
+        );
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        let id = parse_id(&desc.viewport_id).expect("id");
+        let document = |dx: i32| {
+            serde_json::json!({
+                "layers": [{
+                    "id": "base",
+                    "kind": "pixel",
+                    "visible": true,
+                    "opacity": 1.0,
+                    "ops": [
+                        {
+                            "type": "source_image",
+                            "source": { "path": canonical, "width": 16, "height": 16 },
+                            "placement": [0, 0, 16, 16]
+                        },
+                        { "type": "transform", "dx": dx, "dy": 0 }
+                    ]
+                }]
+            })
+        };
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageComposite {
+                resource_id,
+                document: document(0),
+                document_key: "document-a".to_string(),
+                document_width: 16,
+                document_height: 16,
+                frame_x: 0.0,
+                frame_y: 0.0,
+                frame_width: Some(16),
+                frame_height: Some(16),
+            },
+        )
+        .expect("set target");
+        let (before_scene, before_generations) = {
+            let map = viewports().lock().expect("lock viewports");
+            let state = map.get(&id).expect("viewport");
+            (
+                state.retained_image_scene.clone().expect("scene"),
+                state.generations(),
+            )
+        };
+        let invalid = ViewportImageScene {
+            document: serde_json::json!({
+                "layers": [{ "id": "base", "kind": "pixel", "visible": true, "ops": [] }]
+            }),
+            document_key: "invalid".to_string(),
+            document_width: 16,
+            document_height: 16,
+            frame_x: 0.0,
+            frame_y: 0.0,
+            frame_width: 16,
+            frame_height: 16,
+        };
+        assert!(viewport_set_image_scene_inner(desc.viewport_id.clone(), invalid).is_err());
+        {
+            let map = viewports().lock().expect("lock viewports");
+            let state = map.get(&id).expect("viewport");
+            assert!(Arc::ptr_eq(
+                &before_scene,
+                state.retained_image_scene.as_ref().expect("scene")
+            ));
+            assert_eq!(state.generations(), before_generations);
+        }
+        viewport_set_image_scene_inner(
+            desc.viewport_id.clone(),
+            ViewportImageScene {
+                document: document(2),
+                document_key: "document-b".to_string(),
+                document_width: 16,
+                document_height: 16,
+                frame_x: 0.0,
+                frame_y: 0.0,
+                frame_width: 16,
+                frame_height: 16,
+            },
+        )
+        .expect("commit replacement scene");
+        {
+            let map = viewports().lock().expect("lock viewports");
+            let state = map.get(&id).expect("viewport");
+            assert_eq!(state.generations().content, before_generations.content);
+            assert_ne!(state.generations().render, before_generations.render);
+            assert!(!Arc::ptr_eq(
+                &before_scene,
+                state.retained_image_scene.as_ref().expect("scene")
+            ));
+            assert_eq!(
+                state
+                    .retained_image_scene
+                    .as_ref()
+                    .expect("scene")
+                    .document_key(),
+                "document-b"
+            );
+        }
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn layer_presentation_moves_linked_pixels_outside_document_and_frame_in_one_render() {
+        let red_path = std::env::temp_dir().join("hgripe_scene_linked_red.png");
+        let green_path = std::env::temp_dir().join("hgripe_scene_linked_green.png");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([220, 20, 40, 255]))
+            .save(&red_path)
+            .expect("write red source");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([20, 220, 40, 255]))
+            .save(&green_path)
+            .expect("write green source");
+        let red = red_path.to_string_lossy().to_string();
+        let green = green_path.to_string_lossy().to_string();
+        let resource_id = resource::id_for(&red);
+        resource::put(
+            &resource_id,
+            resource::ResourceEntry {
+                path: red.clone(),
+                width: Some(4),
+                height: Some(4),
+            },
+        );
+        let document = serde_json::json!({
+            "layers": [
+                {
+                    "id": "selected",
+                    "kind": "pixel",
+                    "visible": true,
+                    "linked": true,
+                    "locked": false,
+                    "opacity": 1.0,
+                    "ops": [{
+                        "type": "source_image",
+                        "source": { "path": red, "width": 4, "height": 4 },
+                        "placement": [0, 0, 4, 4]
+                    }]
+                },
+                {
+                    "id": "linked",
+                    "kind": "pixel",
+                    "visible": true,
+                    "linked": true,
+                    "locked": false,
+                    "opacity": 1.0,
+                    "ops": [{
+                        "type": "source_image",
+                        "source": { "path": green, "width": 4, "height": 4 },
+                        "placement": [0, 4, 4, 8]
+                    }]
+                }
+            ]
+        });
+        let desc = viewport_create("image_edit".to_string()).expect("create");
+        viewport_resize(desc.viewport_id.clone(), 16, 8).expect("resize");
+        viewport_set_target(
+            desc.viewport_id.clone(),
+            ViewportTarget::ImageComposite {
+                resource_id,
+                document,
+                document_key: "linked-a".to_string(),
+                document_width: 4,
+                document_height: 4,
+                frame_x: 0.0,
+                frame_y: 0.0,
+                frame_width: Some(16),
+                frame_height: Some(8),
+            },
+        )
+        .expect("set target");
+        let presentation =
+            |transaction_id: &str,
+             base_document_key: &str,
+             sequence: u64,
+             move_draft: Option<crate::studio::SelectedLayerMoveDraft>| {
+                ViewportImageLayerPresentation {
+                    selected_layer_id: "selected".to_string(),
+                    transaction_id: transaction_id.to_string(),
+                    base_document_key: base_document_key.to_string(),
+                    sequence,
+                    move_draft,
+                    affected_layer_ids: Vec::new(),
+                }
+            };
+        viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation("move-1", "linked-a", 0, None),
+        )
+        .expect("start transaction");
+        viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation(
+                "move-1",
+                "linked-a",
+                1,
+                Some(crate::studio::SelectedLayerMoveDraft { dx: 4.0, dy: 0.0 }),
+            ),
+        )
+        .expect("present move");
+        let rendered = viewport_render_rgba(&desc.viewport_id).expect("render preview");
+        assert_eq!(rendered.image.get_pixel(4, 0).0, [220, 20, 40, 255]);
+        assert_eq!(rendered.image.get_pixel(4, 4).0, [20, 220, 40, 255]);
+        assert_eq!(rendered.image.get_pixel(0, 0).0, [0, 0, 0, 0]);
+        assert_eq!(
+            rendered.image_layer.document_key.as_deref(),
+            Some("linked-a")
+        );
+        assert_eq!(
+            rendered.image_layer.transaction_id.as_deref(),
+            Some("move-1")
+        );
+        assert_eq!(rendered.image_layer.sequence, Some(1));
+        let frame = rendered
+            .image_layer
+            .selected_layer_frame
+            .expect("selected frame from the rendered pixels");
+        assert_eq!(frame.rect, [4.0, 0.0, 8.0, 4.0]);
+
+        assert!(viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation(
+                "move-2",
+                "linked-a",
+                1,
+                Some(crate::studio::SelectedLayerMoveDraft { dx: 5.0, dy: 0.0 }),
+            ),
+        )
+        .is_err());
+        assert!(viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation(
+                "move-1",
+                "linked-a",
+                1,
+                Some(crate::studio::SelectedLayerMoveDraft { dx: 5.0, dy: 0.0 }),
+            ),
+        )
+        .is_err());
+        assert!(viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation("move-1", "wrong-base", 2, None),
+        )
+        .is_err());
+        viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation("move-2", "linked-a", 0, None),
+        )
+        .expect("replace transaction from a sequence-zero baseline");
+        assert!(viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            presentation("move-1", "linked-a", 0, None),
+        )
+        .is_err());
+
+        viewport_destroy_inner(desc.viewport_id).expect("destroy");
+        let _ = std::fs::remove_file(red_path);
+        let _ = std::fs::remove_file(green_path);
     }
 
     #[test]
@@ -741,11 +1528,75 @@ mod tests {
     }
 
     #[test]
+    fn document_overlays_project_inside_a_larger_retained_scene_frame() {
+        let mut mask_surface = hgripe_grade::GradeSurface {
+            w: 4,
+            h: 4,
+            data: vec![0.0; 4 * 4 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let overlay = MaskOverlay {
+            w: 2,
+            h: 2,
+            data: vec![255; 4],
+            rgb: [255, 0, 0],
+            alpha: 1.0,
+            invert: false,
+        };
+        composite_document_mask_overlay(
+            &mut mask_surface,
+            &overlay,
+            (2, 2),
+            [-1.0, -1.0, 4.0, 4.0],
+        );
+        let pixel = |surface: &hgripe_grade::GradeSurface, x: usize, y: usize, channel: usize| {
+            surface.data[(y * surface.w as usize + x) * 4 + channel]
+        };
+        assert!(pixel(&mask_surface, 1, 1, 0) > 0.9);
+        assert!(pixel(&mask_surface, 2, 2, 0) > 0.9);
+        assert_eq!(pixel(&mask_surface, 0, 0, 0), 0.0);
+        assert_eq!(pixel(&mask_surface, 3, 3, 0), 0.0);
+
+        let mut vector_surface = hgripe_grade::GradeSurface {
+            w: 4,
+            h: 4,
+            data: vec![0.0; 4 * 4 * 4],
+            space: hgripe_grade::GradeSpace::Srgb,
+        };
+        let scene = OverlayScene {
+            items: vec![OverlayItem::Polygon {
+                points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                stroke: [0.0, 0.0, 0.0, 0.0],
+                fill: Some([0.0, 1.0, 0.0, 1.0]),
+                dash: false,
+            }],
+            phase: 0.0,
+        };
+        composite_document_overlay_scene(
+            &mut vector_surface,
+            &scene,
+            (2, 2),
+            [-1.0, -1.0, 4.0, 4.0],
+        );
+        assert!(pixel(&vector_surface, 1, 1, 1) > 0.9);
+        assert_eq!(pixel(&vector_surface, 0, 0, 1), 0.0);
+        assert_eq!(pixel(&vector_surface, 3, 3, 1), 0.0);
+    }
+
+    #[test]
     fn frame_bin_payload_carries_meta_header_and_png_bytes() {
         let img = image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]));
         let png = encode_frame_png(&img).expect("encode png");
 
-        let payload = frame_bin_payload(3, 2, &cpu_backend(), false, &png).expect("payload");
+        let payload = frame_bin_payload(
+            3,
+            2,
+            &cpu_backend(),
+            false,
+            &ViewportImageLayerFrameMetadata::default(),
+            &png,
+        )
+        .expect("payload");
         let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
         let meta: serde_json::Value =
             serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
@@ -753,16 +1604,55 @@ mod tests {
         assert_eq!(meta["height"], 2);
         assert_eq!(meta["backend"]["actual"], "cpu");
         assert_eq!(meta["presented"], false);
+        assert!(meta["selectedLayerFrame"].is_null());
+        assert!(meta["documentKey"].is_null());
+        assert!(meta["transactionId"].is_null());
+        assert!(meta["sequence"].is_null());
         // The trailing bytes are the PNG, byte for byte.
         assert_eq!(&payload[4 + meta_len..], &png[..]);
 
         // A natively presented frame carries the flag and no PNG bytes.
-        let payload = frame_bin_payload(3, 2, &cpu_backend(), true, &[]).expect("payload");
+        let payload = frame_bin_payload(
+            3,
+            2,
+            &cpu_backend(),
+            true,
+            &ViewportImageLayerFrameMetadata::default(),
+            &[],
+        )
+        .expect("payload");
         let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
         let meta: serde_json::Value =
             serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
         assert_eq!(meta["presented"], true);
         assert!(payload[4 + meta_len..].is_empty());
+
+        let image_layer = ViewportImageLayerFrameMetadata {
+            selected_layer_frame: Some(crate::studio::SelectedLayerFrame {
+                owner: "selected-layer-frame",
+                shape: "axis-aligned-rect",
+                layer_id: "layer-1".to_string(),
+                rect: [4.0, 5.0, 14.0, 15.0],
+                source_rect: [0.0, 0.0, 10.0, 10.0],
+                source: "asset-frame",
+            }),
+            document_key: Some("document-a".to_string()),
+            transaction_id: Some("transaction-a".to_string()),
+            sequence: Some(7),
+        };
+        let payload = frame_bin_payload(3, 2, &cpu_backend(), false, &image_layer, &png)
+            .expect("payload with image layer metadata");
+        let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
+        let meta: serde_json::Value =
+            serde_json::from_slice(&payload[4..4 + meta_len]).expect("meta json");
+        assert_eq!(meta["selectedLayerFrame"]["layerId"], "layer-1");
+        assert_eq!(
+            meta["selectedLayerFrame"]["rect"],
+            serde_json::json!([4.0, 5.0, 14.0, 15.0])
+        );
+        assert_eq!(meta["documentKey"], "document-a");
+        assert_eq!(meta["transactionId"], "transaction-a");
+        assert_eq!(meta["sequence"], 7);
     }
 
     #[test]
@@ -1264,12 +2154,19 @@ mod tests {
                 document: serde_json::json!({
                     "version": 3,
                     "layers": [
-                        { "kind": "mask", "visible": false, "opacity": 1.0, "ops": [] },
                         {
-                            "kind": "mask",
+                            "id": "hidden",
+                            "kind": "pixel",
+                            "visible": false,
+                            "opacity": 1.0,
+                            "ops": [{ "type": "source_image", "placement": [0, 0, 64, 64] }]
+                        },
+                        {
+                            "id": "copy",
+                            "kind": "pixel",
                             "visible": true,
                             "opacity": 1.0,
-                            "ops": [{ "type": "source_image" }],
+                            "ops": [{ "type": "source_image", "placement": [0, 0, 64, 64] }],
                             "mask": { "ops": [{ "type": "rect", "region": [16, 16, 48, 48] }] }
                         }
                     ]
@@ -1281,6 +2178,20 @@ mod tests {
         let rendered = viewport_render_rgba(&desc.viewport_id).expect("render composite");
         assert_eq!(rendered.image.get_pixel(24, 24).0, [220, 20, 40, 255]);
         assert_eq!(rendered.image.get_pixel(4, 4).0, [0, 0, 0, 0]);
+        viewport_present_image_layer_scene(
+            desc.viewport_id.clone(),
+            ViewportImageLayerPresentation {
+                selected_layer_id: "hidden".to_string(),
+                transaction_id: "hidden-selection".to_string(),
+                base_document_key: "copy-rect".to_string(),
+                sequence: 0,
+                move_draft: None,
+                affected_layer_ids: Vec::new(),
+            },
+        )
+        .expect("select hidden layer");
+        let hidden = viewport_render_rgba(&desc.viewport_id).expect("render hidden selection");
+        assert!(hidden.image_layer.selected_layer_frame.is_none());
 
         viewport_destroy_inner(desc.viewport_id).expect("destroy");
         let _ = std::fs::remove_file(&path);
@@ -1321,11 +2232,12 @@ mod tests {
                     "layers": [
                         { "kind": "mask", "visible": false, "opacity": 1.0, "ops": [] },
                         {
-                            "kind": "mask",
+                            "id": "copy",
+                            "kind": "pixel",
                             "visible": true,
                             "opacity": 1.0,
                             "ops": [
-                                { "type": "source_image" },
+                                { "type": "source_image", "placement": [0, 0, 64, 64] },
                                 { "type": "transform", "dx": 8, "dy": 0 }
                             ],
                             "mask": { "ops": [{ "type": "rect", "region": [16, 16, 48, 48] }] }

@@ -1,783 +1,494 @@
-# Image Editor Selection State Protocol Plan
+# Image Editor Shared Canvas And Layer Rendering Protocol
 
-> Status: active planning document.
-> Purpose: freeze the image editor's selection state contract before more
-> lasso, pen, marquee, layer-via-copy, Studio Action, or WGPU overlay work.
+> Status: active and authoritative.
+> Scope: image-editor pixels, layers, selected-layer frame, navigation,
+> dragging, image resize, and `Ctrl+J` / Layer Via Copy.
+
+This document replaces every older image-editor description of dynamic scene
+frames, pasteboard-sized composite bitmaps, selected-layer move surfaces,
+retargeted image composites, stale-frame fallbacks, and `clip.region`-based
+layer positioning. Do not restore those designs from history or from another
+document. If another document conflicts with this protocol, this protocol wins.
 
 ## Hard Gate
 
-Do not add new selection tools, `Ctrl+J` behavior, selection context-menu
-commands, Studio Action selection targets, or WGPU selection overlays until this
-boundary is preserved:
+The image editor uses one shared logical world and one retained layer scene.
 
 ```text
-selection creation tool
-  -> solid draft geometry
-  -> explicit Make Selection
-  -> one active marching-ants selection state
-  -> commands such as Ctrl+J / Delete / Invert / Feather
+document coordinates
+  -> shared logical pasteboard
+  -> retained layer nodes
+  -> one viewport compositor
+  -> one screen-sized framebuffer
 ```
 
-The visual result path is also gated:
+Every visible layer and its selected-layer frame use the same layer transform
+and the same camera matrix.
+
+The following are forbidden:
+
+- allocating one document-sized or pasteboard-sized canvas per layer;
+- baking the editor pasteboard into an image-composite PNG or texture;
+- changing world bounds because the stage, modal, or window changed size;
+- retargeting or regenerating pixels for pan, zoom, rotate-view, or layer drag;
+- keeping a previous image frame while drawing current geometry;
+- drawing a yellow frame before the exact current pixels are presented;
+- using `clip.region`, active selection bounds, alpha bounds, mask bounds, or
+  source natural size as a fallback for layer placement;
+- moving pixels and the yellow frame through separate draft/fallback pipelines.
+
+There is no old-frame fallback. A new pixel revision is either fully ready and
+presented with its matching geometry, or it is not displayed.
+
+## Selection State Boundary
+
+Selection state remains separate from layer pixels and the selected-layer
+frame:
 
 ```text
-Rust/controller-owned result
-  -> InteractionResultLayer
-  -> DOM/SVG now, WGPU renderer later
+tool gesture -> SelectionDraft -> explicit Make Selection -> ActiveSelection
 ```
 
-Do not mount separate visual overlay chains for selected layer frames, selection
-drafts, marching ants, move previews, brush cursors, or future transform
-handles. They all enter the same interaction result layer so zoom, pan, frame
-expansion, WGPU migration, and future compositor work cannot drift apart.
+Only `ActiveSelection` is a command read constraint. A solid or in-progress
+draft is not an active selection, layer, mask, pixel source, or Studio Action
+target. `Ctrl+J`, Delete, Invert, Feather, and Selection To Mask consume the
+committed active selection and active editable target; they never branch on the
+tool that produced the selection. Renderers display this state but do not own
+or infer it.
 
-The pixel read path is separate again:
+## Coordinate Spaces
+
+The editor has four explicit spaces. They must not be collapsed into one
+`sceneFrame` value.
+
+### Document Space
+
+Document space is the exported image coordinate system. World units are image
+pixels at 100% zoom.
 
 ```text
-Active editable pixel layer
-  -> LayerPixelReadSource
-ActiveSelection
-  -> ReadConstraint
-LayerPixelReadSource + ReadConstraint
-  -> Layer Via Copy transaction
-  -> Rust compositor/materializer reads pixels
+documentBounds = [0, 0, documentWidth, documentHeight]
 ```
 
-The interaction result layer never provides pixels. It can display a selected
-layer frame or marching ants, but commands such as `Ctrl+J` must read from the
-document layer stack, not from DOM/SVG/WGPU preview state.
+Layer placement, selections, paths, masks, and history transactions are stored
+in document coordinates.
 
-The interaction result layer also never owns editor chrome. Selection drafts,
-marching ants, selected-layer frames, move previews, brush cursors, and future
-WGPU interaction overlays are stage-local visuals. They must not require global
-CSS, app-root transparency, shared-modal transparency, or `.media-viewer`
-behavior changes. If an overlay or WGPU viewport needs a transparent region, it
-must be a scoped hole owned by the image-editor stage, not by `App`,
-`.media-viewer-backdrop`, or `.media-viewer`.
+### Logical Pasteboard Space
 
-The tool that drew the shape must not own the command result. A rectangle,
-ellipse, pen path, polygon path, magnetic-lasso loop, object selection, quick
-selection, magic-wand result, or future model-assisted hint can all create the
-same active selection state. After the selection is active, commands must not
-branch on which tool created it.
-
-The top selection tool strip is only a tool-entry surface. It must visually and
-architecturally separate pure geometry tools (rectangle marquee, ellipse
-marquee, pen, polygon lasso) from pixel-assisted tools (magnetic lasso, object
-selection, quick selection, magic wand, SAM/model-assisted selection). Neither
-family owns the "Make Selection" result or `Ctrl+J`; only the pixel-assisted
-family may request a `SelectionAssistReadSource`.
-
-In the UI code, this split is centralized in
-`apps/desktop-tauri/studio-ui/src/editor/imageEditorModal/selectionToolProtocol.ts`.
-Do not duplicate the tool-family arrays in toolbar, pointer, command, or painter
-modules. A tool may trigger `SelectionAssistReadSource` only if
-`usesSelectionAssistRead(toolId)` returns true; currently that is limited to
-`magnetic_lasso` until wand, quick select, object select, and SAM/model tools
-are migrated one by one.
-
-Current migration status:
-
-- `magnetic_lasso`: wired as a pixel-assisted `SelectionDraft` producer and the
-  only current `SelectionAssistReadSource` consumer.
-- `wand`, `quick_select`, `object_select`: still legacy mask-op producers in
-  the replay path. They must not silently read pixels in the editor UI until
-  they are converted into explicit `SelectionDraft` producers.
-- `point` / SAM 2 prompts: model prompt state, mapped to `sam2` as a selection
-  source, but not yet a committed `SelectionDraft` producer.
-
-## Core Decision
-
-The editor has two different concepts that must stay separate:
-
-| Concept | Visual state | Meaning | Can `Ctrl+J` use it? |
-| --- | --- | --- | --- |
-| Selection draft | Solid outline / anchors / live path | A closed or in-progress candidate drawn by a tool. | No. It must be committed first. |
-| Active selection | Marching ants / flowing dashed outline | The current edit constraint, independent of its source tool. | Yes. |
-
-The selected-layer frame is a third concept and must not be folded into either
-of those states. It means only "the currently selected layer/element's layer
-bounds". It is not a mask bound, not an active selection bound, not an inverse
-selection, not a brush/color region, and not a crop command output. The yellow
-frame may follow zoom, pan, and move-preview deltas, but the geometry source
-remains the selected layer's own recorded pixel bounds.
-
-For source-backed pixel layers, the selected-layer frame is the layer's explicit
-`source_image.placement`, narrowed by the same `source_image.clip.region` when
-that clip is part of the layer's own recorded pixel source, then transformed by
-the layer's committed transform. The resolver must not infer a replacement
-rectangle from source-image natural size, active selection bounds,
-alpha/content bounds, later crop/edit op clips, or layer masks. A source-backed
-layer without explicit placement is invalid for the selected-layer yellow frame;
-the producer that created the layer must write the placement.
-
-V/move tool ownership is separate from selection ownership:
+The pasteboard is an editor-only logical boundary. It is not a bitmap and is
+never exported. The initial absolute ratio is `2.5` times the document size,
+centred on the document:
 
 ```text
-pointer V drag
-  -> layerMoveInteraction.ts owns begin/update/commit
-  -> selected-layer move surface is materialized once for the current layer/frame
-  -> moveDraft only moves that selected-layer surface
-  -> selected-layer frame presentation reads moveDraft
-  -> mouseup writes one transform op to the active layer
+PASTEBOARD_FACTOR = 2.5
+marginX = documentWidth  * (PASTEBOARD_FACTOR - 1) / 2
+marginY = documentHeight * (PASTEBOARD_FACTOR - 1) / 2
+
+pasteboardBounds = [
+  -marginX,
+  -marginY,
+  documentWidth + marginX,
+  documentHeight + marginY,
+]
 ```
 
-The V/move path must not CSS-translate the whole rendered composite, must not
-put `moveDraft` into viewport placement keys, and must not store selected-frame
-handoff state inside `ImageEditorModal.tsx`. Moving a layer and moving the
-canvas are different operations. During drag, the image editor must not retarget
-or re-render the full composite on every pointer move. It presents a cached
-selected-layer surface through `InteractionResultLayer`; moving only changes
-that surface's transform. Mouseup commits the same delta as one transform op on
-the active layer.
+For an `800 x 800` document, the logical pasteboard is `2000 x 2000` with
+bounds `[-600, -600, 1400, 1400]`.
 
-The selected-layer move surface must not be materialized synchronously when the
-editor opens or when a V drag begins. It is queued only after the image viewport
-is stable and the Move tool is active; the prepared surface is drawn once into a
-hidden canvas, then a drag only toggles visibility and updates transform. The
-Rust command that materializes pixels must run on a blocking/background task so
-the desktop shell does not freeze while decoding or compositing the layer
-surface.
+Pasteboard bounds depend only on document dimensions and the fixed factor.
+They never depend on stage aspect ratio, window size, panel layout, zoom, pan,
+or the current layer position.
 
-The base image/composite must load and remain visible first. Selected-layer
-frame and move surface are overlay work queued after that; they must not remove
-or blank the base image while they are loading.
-When a prepared move surface is actively displayed, the stage may hide the main
-pixel presentation with CSS for that interaction only, so the original and moved
-image do not double-render. It must not hide the active layer by retargeting the
-document, and it must not clear the base image while the move surface is still
-loading.
-The image surface, selected-layer yellow frame, and transform/action affordance
-must consume the same displayed move delta. If the selected-layer move surface
-is not ready, the yellow frame and affordance must stay with the loaded image
-instead of moving alone.
+### Camera Space
 
-This is the product rule:
-
-```text
-solid outline != active selection
-active selection != layer mask
-active selection != pixel layer
-active selection != node output
-selected layer frame != active selection
-selected layer frame != mask bounds
-interaction result layer != pixel read source
-active selection != pixel read source
-```
-
-They may convert into each other through explicit commands, but they are not
-the same state.
-
-## State Machine
-
-The image editor should use one selection state machine:
-
-```text
-idle
-  -> drafting_selection
-  -> closed_selection_draft
-  -> active_selection
-  -> transforming_selection   (future)
-  -> idle
-```
-
-### `idle`
-
-No draft and no active selection. Tool clicks start a new draft. `Ctrl+J`
-performs the ordinary layer duplicate only if the command registry says the
-active layer can be duplicated.
-
-### `drafting_selection`
-
-The user is dragging or placing points. The overlay is live solid feedback or
-tool-specific anchors. No selection command should consume this state.
-
-### `closed_selection_draft`
-
-The user has a closed shape, but it is still a draft. It remains a solid
-outline. The available commands are draft commands:
-
-- Make Selection
-- Cancel Draft
-- Edit Anchors, where supported
-- Convert To Path, where supported later
-
-There should be at most one closed draft unless an explicit multi-draft mode is
-introduced. Multiple accidental uncommitted outlines are a bug, not a feature.
-
-### `active_selection`
-
-The draft was committed. The editor now has one unified selection with marching
-ants. Tool-specific draft state is gone, except for optional source metadata
-used by history, labels, or later re-editing.
-
-The available commands are selection commands:
-
-- Layer Via Copy (`Ctrl+J`)
-- Delete / Clear selected pixels
-- Invert Selection
-- Feather / Refine Edge
-- Selection To Layer Mask
-- Deselect
-
-### `transforming_selection`
-
-Future state for moving or transforming the active selection boundary. This
-must still operate on the active selection object, not on the original drawing
-tool.
-
-## Contracts
-
-The exact TypeScript can evolve, but the model should keep these shapes.
+The camera contains view-only state:
 
 ```ts
-type SelectionSource =
-  | "rect_marquee"
-  | "ellipse_marquee"
-  | "pen"
-  | "polygon_lasso"
-  | "magnetic_lasso"
-  | "object_select"
-  | "quick_select"
-  | "magic_wand"
-  | "sam2"
-  | "mask"
-  | "path";
-
-type SelectionCombineMode = "replace" | "add" | "subtract" | "intersect";
-
-interface SelectionDraft {
-  id: string;
-  source: SelectionSource;
-  status: "drafting" | "closed";
-  combineMode: SelectionCombineMode;
-  geometry:
-    | { kind: "rect"; region: Rect }
-    | { kind: "ellipse"; region: Rect }
-    | { kind: "polygon"; points: Point[] }
-    | { kind: "bezier_path"; pathId?: string; points: PathPoint[] }
-    | { kind: "mask_artifact"; artifactRef: string; bounds: Rect };
-  bounds: Rect;
-  targetSpace: "document" | "layer";
-  targetLayerId?: string;
-}
-
-interface ActiveSelection {
-  id: string;
-  source: SelectionSource;
-  bounds: Rect;
-  combineMode: SelectionCombineMode;
-  outline: SelectionOutline;
-  selectionAlphaRef?: SelectionAlphaRef;
-  featherPx?: number;
-  antiAlias: boolean;
-  createdFromDraftId?: string;
-  targetSpace: "document" | "layer";
-  targetLayerId?: string;
+interface ImageEditorCamera {
+  centerX: number;
+  centerY: number;
+  zoom: number;
+  rotate: number;
 }
 ```
 
-Important:
+Pan, zoom, and rotate-view modify only the camera. They do not change the
+document, pasteboard, layer textures, placements, target keys, or pixel
+revision.
 
-- `SelectionDraft` has no `StudioTarget` id yet.
-- `ActiveSelection` may become a `StudioTarget`.
-- `selectionAlphaRef` is the future high-quality path for anti-aliased,
-  feathered, AI, or refined selections.
-- `outline` is for display and hit testing; `selectionAlphaRef` is the
-  authoritative pixel constraint when available.
-- `mask` is reserved for layer masks. Do not name active-selection pixel
-  constraints, clip payloads, or future refined-selection artifacts `mask`.
-  Those are `selectionAlpha`, `selectionAlphaRef`, or selection-alpha
-  artifacts.
+Initial fit and `Ctrl+0` fit the document, not the entire pasteboard. Otherwise
+an `800 x 800` image would occupy only 40% of a `2000 x 2000` pasteboard view.
 
-## Controllers And Ownership
+### Screen Space
 
-The code should be split by responsibility, not by tool.
+The stage size is used only to build the camera-to-screen matrix and pointer
+inverse. Resizing or maximizing the window updates that matrix without
+changing any pixel target.
 
-| Module role | Owns | Must not own |
-| --- | --- | --- |
-| Tool adapter | Pointer gestures for one drawing style. | Selection commands or `Ctrl+J`. |
-| Selection controller | Draft lifecycle, active selection lifecycle, one-state rules. | Canvas painting details. |
-| Selection compiler | Draft geometry to active selection / selection-alpha artifact. | UI or shortcuts. |
-| Overlay scene builder | Which overlays exist and their order. | Business decisions. |
-| Renderer (`stagePainter` / WGPU overlay) | Drawing solid draft or marching ants. | Whether a draft is a selection. |
-| Command registry | `Ctrl+J`, Delete, Feather, Selection To Mask capabilities. | Tool pointer math. |
-| History transaction layer | Undoable document changes and selection/history metadata. | Per-frame pointer updates. |
+## Layer Model
 
-The key implementation direction:
+All layers share document and pasteboard coordinates. A layer owns compact
+pixel storage plus placement and transform metadata; it does not own a full
+canvas.
 
-```text
-pointer tool -> SelectionDraft
-SelectionDraft -> commitSelection() -> ActiveSelection
-ActiveSelection + active StudioTarget -> command capability -> transaction
+```ts
+interface RetainedPixelLayer {
+  id: string;
+  pixelStoreId: string;
+  localPixelBounds: [number, number, number, number];
+  placement: [number, number, number, number];
+  transform: LayerTransform;
+  opacity: number;
+  blendMode: BlendMode;
+  maskId?: string;
+  pixelRevision: number;
+}
 ```
 
-## Rendering Rules
+`pixelStoreId` initially references one tightly bounded RGBA resource. Large
+documents migrate to sparse `256 x 256` or `512 x 512` tiles without changing
+the layer contract.
 
-Rendering should be a pure view of state.
-
-| State | Renderer output |
-| --- | --- |
-| `drafting_selection` | Solid live outline, anchors, handles, or magnetic preview. |
-| `closed_selection_draft` | Solid closed outline. No marching ants. |
-| `active_selection` | Marching ants only. |
-| `transforming_selection` | Marching ants plus transform frame, if enabled. |
-
-The marching-ants phase is a renderer parameter. It must not mutate the
-selection state. WGPU and 2D canvas renderers must consume the same overlay
-scene; neither renderer may decide whether something is a draft or an active
-selection.
-
-## Top Selection Tools And Draft Affordance
-
-All top-center selection tools and their shortcut variants must feed one
-selection draft flow:
+Layer screen geometry is always:
 
 ```text
-top selection tool strip / shortcut
-  -> tool adapter
-  -> SelectionDraft solid geometry
-  -> draft affordance model
-  -> Make Selection command
-  -> ActiveSelection marching ants
+screenGeometry = cameraMatrix * layerTransform * placementGeometry
 ```
 
-The draft affordance model owns the compact "Make Selection / Cancel / Edit
-Anchors" surface for a closed solid draft. That surface may be shown as a
-floating action bar, a right-click menu, or both, but those are only render
-views of the same draft command model. Do not duplicate this state in the top
-toolbar, a painter, an individual tool component, or a local context-menu
-branch.
+The image quad, yellow frame, transform handles, and hit testing consume this
+same result. No renderer may independently reconstruct layer bounds.
 
-The draft affordance is anchored from draft geometry in document/layer space
-and projected through the same screen-space projection path as the draft
-outline. It must not be positioned from DOM image bounds, thumbnail sizes, or
-the selected-layer yellow frame. Pan, zoom, stage resize, or opening the
-right-click menu may move the projected screen position, but they must not make
-the panel jump to another owner, disappear before a command is chosen, or
-create a second hidden draft.
+## Selected-Layer Frame
 
-When the user chooses Make Selection, the draft is consumed by
-`commitSelectionDraft()` and replaced by `ActiveSelection`. After that point the
-active selection owns its own marching ants and command availability; the tool
-that drew the solid outline is no longer consulted.
+The selected-layer yellow frame is display-only geometry for the active layer.
 
-## Single Interaction Result Layer
-
-`InteractionResultLayer` is the only DOM/SVG layer for image-editor interaction
-results. It is mounted once above `.image-editor-stage` and projected to the
-current document frame in screen-space layout pixels, not by CSS-scaling a
-cached frame. It owns display placement for:
-
-- selected-layer yellow frame;
-- move-preview image;
-- selection draft outline;
-- active marching-ants selection;
-- live selection SVG;
-- brush cursor;
-- future transform frames/handles.
-
-`MaskStage` owns the stage, underlay, canvas, pointer wiring, view transform,
-and the single screen-space projection rect used by `InteractionResultLayer`.
-It must not mount another selected-frame, selection, move-preview, or transform
-overlay outside `InteractionResultLayer`, and it must not let those result
-visuals ride the image frame's CSS scale path.
-
-Selected-layer-frame geometry is resolved by Rust through
-`resolve_selected_layer_frame`. TypeScript may call the command and render the
-returned rect, but it must not re-implement layer-op geometry, asset placement,
-layer-mask clipping, transform accumulation, or move-draft math. If the Tauri
-command is unavailable, the UI should fail that operation instead of inventing a
-second browser-side geometry path.
-
-The current selected-layer-frame pipe is:
+Its source rectangle is exactly the layer's explicit `placement`, followed by
+the layer's committed transform and current in-memory drag delta.
 
 ```text
-image_document.rs::selected_layer_frame()
-  -> Tauri command resolve_selected_layer_frame
-  -> selectedLayerFrame.ts bridge
-  -> InteractionResultLayer
-  -> SelectedLayerFrameOverlay
+frameGeometry = cameraMatrix
+              * dragTransform
+              * committedLayerTransform
+              * placement
 ```
-
-The current selection pipe is:
-
-```text
-selection controller / overlay scene
-  -> InteractionResultLayer
-  -> SelectionOverlay / live SVG
-```
-
-Future WGPU presentation must consume the same result state. It can change how
-the result is drawn; it cannot introduce another source of truth for selection
-or selected-layer-frame geometry.
-
-## Pixel Read Source Layer
-
-The image editor needs one named read boundary for commands that create pixels
-from existing pixels. Call it `LayerPixelReadSource`.
-
-`LayerPixelReadSource` means:
-
-- the active editable pixel layer in the document layer stack;
-- its source image content, including the implicit opened base image when the
-  base layer has no explicit `source_image` op yet;
-- that layer's ordered pixel/edit ops that define its current content;
-- its document-space placement, scale, and transform as interpreted by the
-  compositor/materializer at command time;
-- its layer mask only when the command is explicitly defined to read the masked
-  result. If a future command needs "read before mask", that must be a separate
-  named command mode.
-
-`LayerPixelReadSource` does not mean:
-
-- `InteractionResultLayer`;
-- `SelectedLayerFrameOverlay`;
-- selection draft outline or marching ants SVG;
-- WGPU/DOM preview pixels;
-- thumbnail pixels;
-- the selected-layer yellow frame;
-- a mask target, path target, adjustment target, or node output.
-
-`ActiveSelection` is only a `ReadConstraint`. It clips the read source; it is
-not the read source. Therefore rectangle marquee, ellipse marquee, pen, lasso,
-magnetic lasso, object select, quick select, magic wand, SAM 2, and future
-selection sources all feed the same `ReadConstraint` contract after commit.
-
-The read happens against the current document state at the moment the command
-runs. If the active layer has been moved, scaled, transformed, or produced by a
-previous operation, `LayerPixelReadSource` is the compositor/materializer's
-authoritative interpretation of those pixels under the `ActiveSelection`, not a
-screen rectangle copied from the current preview. This is the boundary that
-keeps `Ctrl+J` correct when the visible layer no longer matches its original
-asset size or placement.
-
-The `Ctrl+J` chain must stay:
-
-```text
-selection source tool
-  -> SelectionDraft
-  -> ActiveSelection / ReadConstraint
-active layer target
-  -> LayerPixelReadSource
-LayerPixelReadSource + ReadConstraint
-  -> duplicate layer transaction
-  -> compositor/materializer produces the copied pixels
-```
-
-In today's implementation, the transaction records this by copying the source
-layer's ops and attaching the active selection as `clip`; in the image workspace
-the implicit base image is materialized as a `source_image` op before clipping.
-When the selection is rect/ellipse/polygon, the clip records that geometry.
-When the selection is pixel-shaped, the clip records `selectionAlpha`, an RLE
-alpha map bounded by `clip.region`. The Rust compositor then rasterizes
-`source_image.clip` and true layer masks when it materializes the visible
-result. Future WGPU compute may accelerate the same materialization, but it
-cannot read from the visual overlay layer or invent a second read source.
-
-## Selection Assist Read
-
-Selection tools split into two families:
-
-| Family | Examples | Reads pixels while drafting? | Output |
-| --- | --- | --- | --- |
-| Pure geometry draft tools | Rect, ellipse, pen, polygon lasso | No. They only record geometry. | `SelectionDraft` |
-| Pixel-assisted draft tools | Magnetic lasso, object selection, quick selection, wand, SAM/model tools | Yes, through an explicit assist-read path. | `SelectionDraft` |
-
-Magnetic lasso must not be treated as an ordinary geometric marquee. It needs a
-`SelectionAssistReadSource` built from the active editable pixel layer's
-materialized pixels, including that layer's current placement, scale, transform,
-and relevant layer ops. This is the same conceptual source family as
-`LayerPixelReadSource`, but it is read for tool assistance only and must remain
-separate from command-time pixel copy.
-
-`SelectionAssistReadSource` does not mean:
-
-- the whole document composite;
-- the underlay image;
-- the selected-layer yellow frame;
-- the SVG/DOM interaction layer;
-- thumbnail pixels;
-- a stale viewport readback that does not match the active layer and frame.
 
 Rules:
 
-- assist reads are triggered by an active tool gesture, such as magnetic-lasso
-  pointer down, not by merely selecting a tool;
-- the current implementation entry is the Rust/Tauri command
-  `read_selection_assist_pixels`, called from `readSelectionAssistPixels()`;
-  magnetic lasso must use this command path for edge-map pixels instead of
-  decoding the underlay image or reading the viewport/composite surface;
-- assist reads are cached only as transient gesture/tool-assist state;
-- assist reads may help shape a `SelectionDraft`;
-- assist reads must never create or mutate layers;
-- assist reads must never be used by `Ctrl+J`, Delete, Invert, Feather, Studio
-  Action, or any command that reads/copies pixels;
-- assist reads must be discarded when the gesture ends, the visible window
-  changes, the active layer changes, or the source key no longer matches.
+- `clip.region` never participates.
+- Masks and alpha/content bounds never participate.
+- A source-backed pixel layer without explicit placement is invalid and must
+  be fixed by its producer; the frame renderer must not invent a fallback.
+- If the exact current layer pixels are not presented, the frame is not drawn.
+- During a drag, the image quad and frame are children of the same transformed
+  layer node and therefore cannot receive different deltas.
 
-Do not prewarm assist reads on idle just because a tool is selected. If a future
-tool wants prediction or pre-analysis, it must go through a named scheduler with
-explicit cancellation, source keys, and performance limits, and it still cannot
-become the command-time pixel read source.
+## Viewport Compositor
 
-## Context Menu Rules
+The renderer retains layer pixel resources and composites only the visible
+viewport into one screen-sized framebuffer.
 
-Right-click behavior is state-specific:
+It does not allocate a texture for the whole pasteboard. For example, an
+`800 x 800` layer on a `2000 x 2000` logical pasteboard still owns only its
+`800 x 800` pixel resource.
 
-| Hit target | Menu |
-| --- | --- |
-| Closed draft | Make Selection, Cancel Draft, Edit Anchors where supported. |
-| Active selection | Deselect, Invert, Feather, Layer Via Copy, Selection To Mask. |
-| Path target | Make Selection, Edit Anchors, Delete Path. |
-| Empty canvas | Canvas/tool context only. |
+The retained scene frame is the stable logical pasteboard, while the document
+frame remains the edit/export boundary. The compositor samples only the current
+camera window from that scene into its bounded output framebuffer; the scene
+frame does not authorize a pasteboard-sized pixel store per layer. Browser
+pixels and the future native placement anchor are positioned in the shared
+world, not inside the document child. Document-normalized mask and vector
+overlays are projected through the document frame into the same visible scene
+window, so expanding the sampleable world does not stretch an overlay across
+the pasteboard.
 
-The context menu should never hide the draft outline before the user chooses a
-command. If a right-click opens the menu, the solid draft remains visible.
+Navigation is a draw-time matrix change:
+
+```text
+pan / zoom / rotate-view
+  -> update camera uniform or DOM transform
+  -> redraw retained layer quads
+  -> no decode
+  -> no image-composite target change
+  -> no PNG/blob replacement
+```
+
+Pixel edits produce a new `pixelRevision`. The renderer prepares that revision
+offscreen and atomically swaps pixels and matching geometry. It never exposes a
+new placement with an old texture or a new texture with an old placement.
+
+## Layer Drag
+
+Dragging is a transform-only interaction.
+
+```text
+pointer down
+  -> select retained layer node
+  -> record pointer-to-layer offset
+
+pointer move
+  -> update one in-memory drag transform
+  -> request one animation frame
+  -> draw layer pixels, yellow frame, and handles with that transform
+
+pointer up
+  -> commit the same delta as one history transaction
+  -> clear the in-memory drag transform after the committed state is visible
+```
+
+The full document is not recomposited on pointer move. There is no separately
+materialized `SelectedLayerMoveSurface`, no draft-frame cache, and no operation
+that hides the layer in one viewport while showing it in another.
+
+The GPU path draws retained layer textures directly. The CPU renderer path may
+cache the non-moving background once at pointer down and draw the selected
+layer over it, but that cache belongs to the same `PresentationRevision` and
+camera revision. It is a renderer-local acceleration, not a target/frame
+fallback, and it is destroyed before any target or geometry change.
+
+Layer movement is clamped against logical pasteboard bounds using the explicit
+placement, committed layer transform, and rotated layer AABB. Preview and
+commit consume the same clamped delta. Linked movable layers are clamped as one
+combined envelope; locked or non-source active layers cannot start a move. If
+an envelope is larger than the pasteboard, it remains movable only while it
+continues to cover the pasteboard. The pasteboard factor therefore gives
+deterministic drag room without expanding in response to the drag.
+
+A move transaction has `dragging` and `committing` phases. Pointer up commits
+the final preview delta but retains that final draft against its base document
+until the replacement document scene and matching frame have settled. The new
+document requests its own baseline presentation rather than reusing a draft
+whose base key belongs to the previous document. Only then is the matching
+transaction released, so the handoff cannot flash an unclamped, stale, or
+double-applied transform.
+
+## Native File Drop Ownership
+
+The application owns one Tauri native file-drop listener. It converts the
+native device-pixel position to CSS coordinates, resolves the topmost DOM
+target, and routes the event to the highest-priority matching consumer only.
+Once a consumer claims an event, lower-priority consumers do not also receive
+it; an async consumer failure is contained and does not fork delivery.
+
+The image editor claims drops over its entire `.image-editor` modal. A drop on
+editor chrome is therefore swallowed by the editor and cannot create a graph
+node behind the modal, but it does not import anything. Only a drop whose target
+is inside `.image-editor-stage` may import supported image paths as layers.
+
+For a multi-file stage drop:
+
+- source path order is authoritative even when dimension probes finish out of
+  order;
+- unsupported paths and invalid dimensions are filtered without reordering the
+  remaining images;
+- all resolved images are appended by one `layer_add_images` document command,
+  producing one history transaction, so one undo removes the whole batch; and
+- each image keeps its own source resource and receives a centred contain-fit
+  placement in the current canvas.
 
 ## `Ctrl+J` / Layer Via Copy
 
-`Ctrl+J` must be implemented as one command:
+### Without An Active Selection
+
+Ordinary layer duplicate preserves visual position exactly:
 
 ```text
-active selection + active editable pixel layer
-  -> resolve LayerPixelReadSource from the active pixel layer
-  -> treat ActiveSelection as ReadConstraint
-  -> copy constrained pixels from that read source
-  -> create a new pixel layer above the source
-  -> preserve source transform, color profile, blend defaults, group label where safe
-  -> make the new layer active
-  -> record one undoable history transaction
+new.pixelStoreId = source.pixelStoreId  // copy-on-write when supported
+new.placement = source.placement
+new.transform = source.transform
+new.mask = source.mask
+new.opacity = source.opacity
+new.blendMode = source.blendMode
 ```
 
-Rules:
+The duplicate may share immutable tiles with the source until either layer is
+edited. It must not allocate a document-sized transparent canvas.
 
-- `Ctrl+J` never reads the selected tool.
-- `Ctrl+J` never reads from `InteractionResultLayer`, DOM/SVG overlays, WGPU
-  preview pixels, thumbnails, or the selected-layer yellow frame.
-- `Ctrl+J` never consumes a `SelectionDraft`; the draft must be committed first.
-  If a closed solid draft exists, the command surface should guide the user to
-  Make Selection instead of guessing from the draft geometry.
-- `Ctrl+J` reads only from the active editable pixel layer's
-  `LayerPixelReadSource`, constrained by `ActiveSelection` when one exists.
-- `Ctrl+J` is an immediate document transaction against the current document
-  state. It must not wait for thumbnail refresh, native surface presentation,
-  image-preview transport, or overlay repaint.
-- If no active selection exists, `Ctrl+J` may perform ordinary layer duplicate,
-  but that is a different capability branch of the same command.
-- If the active target is a layer mask, path, adjustment layer, or node output,
-  the capability resolver must either disable `Ctrl+J` or route to an explicit
-  target-safe command. It must not guess.
-- After `Ctrl+J` succeeds with an active selection, clear the active selection
-  and remove the marching ants. Layer Via Copy is treated as a completed
-  selection-consuming command in this product surface, so later edits do not
-  accidentally stay constrained by the previous selection.
+### With An Active Selection
 
-This command should be tested with every selection source:
-
-- rectangle marquee
-- ellipse marquee
-- pen path
-- polygon / magnetic lasso polygon
-- selection-alpha artifact selection
-- future SAM/object selection
-
-The expected result is always "new layer from active selection", not
-tool-specific output.
-
-## History And Persistence
-
-Selection history should distinguish draft interaction from committed edits.
-
-| Action | History behavior |
-| --- | --- |
-| Move pointer while drafting | No document history entry. |
-| Close draft | Optional UI/session history only. |
-| Make Selection | Records active selection state if selections are persisted. |
-| `Ctrl+J` | Records a full document transaction with the new layer, then clears the active selection UI state. |
-| Delete selected pixels | Records a full document transaction. |
-| Deselect | Records selection state only if the product wants reselect/session restore. |
-
-Long-term project persistence should be able to restore old editor history
-steps, including the layer stack at that point. A layer-via-copy history entry
-therefore cannot store "new empty layer" plus a hidden reference to current
-selection. It must store the resulting document state or a deterministic
-operation record that replays against the historical selected layer and
-selection alpha.
-
-## Studio Action Boundary
-
-Studio Action and agent calls can target only committed, addressable states.
-
-Allowed:
+Layer Via Copy creates real compact pixels at their real document position.
+It does not duplicate the full source and attach a clip.
 
 ```text
-ActiveSelection(selectionId) -> selection_to_layer_mask
-ActiveSelection(selectionId) + PixelLayer(layerId) -> layer_via_copy
-Path(pathId) -> make_selection
-SelectionAlphaArtifact(selectionAlphaRef) -> make_selection
+active editable layer + active selection
+  -> sample the final selected pixels in document space
+  -> compute the copied pixel bounds
+  -> create a tightly bounded RGBA pixel store
+  -> create a new layer with placement equal to those document bounds
+  -> use identity transform for the rasterized result
 ```
 
-Not allowed:
+Example:
 
 ```text
-SelectionDraft -> StudioAction target
-current tool -> layer_via_copy
-right-click menu item -> hidden document mutation
-agent -> raw edit_paths write
+selection/document bounds = [300, 200, 500, 450]
+new pixel store            = 200 x 250
+new placement              = [300, 200, 500, 450]
+new transform              = identity
 ```
 
-If an assistant wants to use a pen/magnetic/box hint, it must create or request
-a committed selection or selection-alpha artifact first, then run the next
-action.
+If the source layer is scaled, rotated, masked, or otherwise transformed,
+Layer Via Copy samples its final visible pixels in document space. Baking that
+result into a compact texture with identity transform avoids applying the old
+transform twice.
 
-## WGPU Boundary
+The active selection is a read constraint only. The tool that created it does
+not affect `Ctrl+J`. A selection draft must be committed before the command can
+use it.
 
-WGPU is a renderer and compute/presentation layer. It does not own selection
-semantics.
+`clip.region` is not positioning data and must not be written as a substitute
+for the new layer's placement.
 
-WGPU may own:
+## Image Size (`Ctrl+Alt+I`)
 
-- presenting the image editor frame on the native viewport surface as the
-  normal desktop path, with PNG transport only as a platform/hardware fallback;
-- drawing the active selection ants at viewport detail;
-- drawing solid draft overlays at viewport detail when moved off the DOM canvas;
-- compositing selection-alpha previews and true layer-mask tint textures;
-- caching `selectionAlpha` textures and upload resources.
+Image Size changes document pixel dimensions. For an `800 x 800` document
+resized to `2000 x 2000`:
 
-WGPU must not own:
+```text
+document       800 x 800  -> 2000 x 2000
+logical world  2000 x 2000 -> 5000 x 5000
+scaleX = 2000 / 800
+scaleY = 2000 / 800
+```
 
-- deciding draft vs active selection;
-- deciding whether `Ctrl+J` is enabled;
-- inventing a second selection id or second selection history;
-- converting a path to a selection without going through the selection
-  compiler/command layer.
+The operation resamples layer pixel stores and scales placements, masks,
+paths, and other document-space geometry according to the command semantics.
+The pasteboard is recomputed from the same fixed factor.
 
-## Implementation Order
+Pixels, document dimensions, pasteboard bounds, placements, and revision are
+published as one atomic document transaction. The renderer keeps the previous
+complete revision visible until the replacement is ready, then swaps the whole
+revision. It never combines old pixels with new geometry.
 
-### Current Code Landing
+Camera centre is preserved in normalized document coordinates. Camera zoom is
+view state and is not stored as image data. `Canvas Size` is a separate command:
+it changes document bounds without resampling layer pixels.
 
-The first implementation slice now exists in the image editor code:
+## Memory And Tiling
 
-- `selection.ts` defines `SelectionDraft` and `ActiveSelection`; solid draft
-  geometry and marching-ants selection are separate states.
-- `useSelectionController.ts` owns draft commit/cancel, active selection clear,
-  and the single active-selection ref used by command dispatch. It must not
-  expose a "visible selection resize" path that treats solid drafts and active
-  marching ants as the same editable object.
-- `selectionActions.ts` applies the active selection as an exact edit `clip`
-  for ordinary paint/path/op actions. Polygon selections must stay polygon
-  clips; they must not fall back to only their bounding box.
-- `selectionCommands.ts` owns keyboard/system selection command resolution for
-  Clear, Escape/Cancel, Delete, Invert, Duplicate, Deselect, and Feather.
-  `Ctrl+J` / Layer Duplicate with an active selection is Layer Via Copy and
-  clears the active marching-ants selection after dispatch. The selection
-  context menu's Deselect, Invert, Feather, and Layer Via Copy items route
-  through `runImageEditorCommand()` and the same resolver, so the menu, the
-  shortcuts, and the Layers panel share one selection command path.
-- `runImageEditorCommand()` and the Layers panel duplicate button route layer
-  duplicate through the same selection command resolver, so shortcuts, context
-  actions, and layer-panel actions do not fork selection semantics.
-- `duplicateLayer()` is the current transaction writer for Layer Via Copy. It
-  does not read pixels from UI overlays; it records the active layer's
-  `LayerPixelReadSource` plus the active selection `ReadConstraint` as clipped
-  layer ops for the compositor/materializer.
-- `buildSelectionOverlayScene()` in `selection.ts` is the one place that
-  decides which selection representation renders: a solid draft outline always
-  suppresses the marching ants. The SVG overlay (`SelectionOverlay`), the 2D
-  canvas renderer (`paintStage`), and the WGPU host scene
-  (`buildViewportOverlayScene`) all consume this shared scene instead of
-  making their own draft/active decisions.
-- `image_document.rs::selected_layer_frame()` is the only selected-layer-frame
-  geometry authority. It resolves the selected layer's asset/frame bounds plus
-  transform and optional move draft, and intentionally ignores masks, selection
-  clips, normal edit ops, inverse/color/brush regions, and Layer Via Copy source
-  clips.
-- `selectedLayerFrame.ts` is only an IPC bridge to the Rust command. It must not
-  grow a browser-side geometry implementation.
-- `InteractionResultLayer.tsx` is the only DOM/SVG mount point for interaction
-  result visuals: selected-layer frame, selection draft, marching ants, move
-  preview, brush cursor, and future transform handles all pass through it.
-- `stageProjection.ts` is the only current screen-space projection helper for
-  that interaction layer. It converts stage size plus zoom/pan into layout
-  pixels so SVG strokes stay sharp instead of being CSS-scaled with the image
-  frame.
-- The top selection tool strip, context menus, and draft action bar now share
-  the same draft command model: solid draft first, explicit Make Selection,
-  then active marching ants. No toolbar button or floating panel owns a private
-  draft/selection state.
-- `surfacePresentation.ts` defines the image-editor native-surface policy. The
-  native viewport surface is the default display path; only states the surface
-  cannot represent, such as rotate-view, transparency-only preview, crop view,
-  grade preview, or enter/leave animation, may fall back to PNG.
+A full `2000 x 2000` RGBA canvas costs about 16 MB before browser/GPU copies.
+One hundred such layer canvases cost about 1.6 GB. A full 4K RGBA layer costs
+about 33 MB, so fifty full canvases already exceed 1.6 GB before mipmaps,
+double buffers, masks, and undo history.
 
-This is still a first command layer, not the final full command registry. The
-remaining long-term work is to move future Feather, Refine Edge, Selection To
-Mask, and persistent selection targets into the same resolver/capability path
-instead of adding one-off handlers.
+Therefore:
 
-1. Add a first-class selection state model that contains both `draft` and
-   `active`, replacing ad-hoc `workSelection` / `lastMarquee` naming.
-2. Move rectangle, ellipse, pen, and polygon lasso into pure geometry
-   `SelectionDraft` producers.
-3. Move magnetic lasso and other pixel/model-assisted tools into assist-read
-   `SelectionDraft` producers that use `SelectionAssistReadSource` only while
-   the tool gesture is active.
-4. Add `commitSelectionDraft()` as the only path from solid outline to active
-   marching ants.
-5. Move right-click "Make Selection", the draft action bar, and
-   `Enter`/confirm behavior onto the same draft command model.
-6. Move `Ctrl+J`, Delete, Invert, Feather, Deselect, and Selection To Mask onto
-   the command registry and capability resolver.
-7. Add tests that every selection source produces the same `ActiveSelection`
-   contract.
-8. Add tests that `Ctrl+J` ignores the tool id and depends only on active
-   selection + active editable pixel layer.
-9. Add overlay-scene tests that solid drafts and active marching ants cannot
-   render at the same time for the same candidate.
-10. Wire WGPU/2D canvas renderers to the same overlay scene.
-10. Only then add stronger selection tools or model-assisted selection.
+- the pasteboard is logical only;
+- layers store tight pixel bounds or sparse tiles;
+- the compositor allocates one screen-sized framebuffer;
+- unchanged tiles may be shared copy-on-write;
+- dirty-region invalidation recomposites only affected visible tiles;
+- mip levels are caches and may be evicted;
+- large undo payloads may spill to the existing scratch/cache layer.
 
-## Review Checklist
+## Photoshop Reference Model
 
-Before accepting image-editor selection work:
+Photoshop's current source is proprietary, so this project must not invent
+claims about private implementation details. Its public PSD contract and
+observable behavior provide the relevant model:
 
-- Does the tool produce a draft, not a command result?
-- Is there only one active selection state?
-- Does the active selection survive independently of the tool that created it?
-- Does `Ctrl+J` read active selection + active target, not tool id?
-- Does `Ctrl+J` resolve `LayerPixelReadSource` from the active editable pixel
-  layer at command time, including layer placement/scale/transform, with
-  `ActiveSelection` only as a read constraint?
-- Did the change avoid reading pixels from `InteractionResultLayer`, DOM/SVG
-  overlays, WGPU preview pixels, thumbnails, or the selected-layer yellow frame?
-- Is there only one draft affordance model for Make Selection / Cancel / Edit
-  Anchors, shared by the top tool strip, right-click menu, and floating action
-  bar?
-- Is the draft affordance projected from draft geometry through the same
-  interaction projection path, instead of being positioned from DOM image
-  bounds, preview pixels, toolbar state, or the selected-layer frame?
-- Does `Ctrl+J` clear the marching-ants selection after a successful Layer Via Copy?
-- Does a closed draft stay visible while its context menu is open?
-- Are solid drafts and marching ants visually distinct?
-- Can the command capability resolver explain why `Ctrl+J` is disabled?
-- Does WGPU consume the same overlay scene as the 2D canvas renderer?
-- Are selection ids created only after commit?
-- Did the change avoid introducing a second mask/layer/selection meaning?
-- Did the change route interaction visuals through `InteractionResultLayer`
-  instead of mounting a second overlay chain?
-- Did selected-layer-frame geometry stay in Rust, with TypeScript only calling
-  the command and rendering the returned result?
-- Did the selected-layer yellow frame stay limited to the selected layer/element
-  bounds, not selection, mask, crop, brush, inverse, or copied-pixel bounds?
+- PSD layer records store independent `top/left/bottom/right` bounds.
+- Layer channel data is stored per layer and may be RLE/ZIP compressed.
+- Photoshop exposes tile/cache-level and scratch-disk behavior for large
+  documents.
+- Duplicated layers preserve document position.
+- Layer Via Copy creates pixels at the selected document position.
+- Pan and zoom are viewport operations, not destructive image resizes.
 
-## Related Documents
+When parity is uncertain, verify it by a black-box PSD fixture:
 
-- [`MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md`](MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md):
-  selection targets, layer masks, and Studio Action safety.
-- [`../../design/image-editor-ui-structure.md`](../../design/image-editor-ui-structure.md):
-  frontend file boundaries and modal ownership.
-- [`../../design/ps-editor-architecture.md`](../../design/ps-editor-architecture.md):
-  long-term Photoshop-grade image editor architecture.
-- [`../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](../completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md):
-  viewport presentation and overlay rendering boundary.
+1. Create a document and a small offset layer at known coordinates.
+2. Test `Ctrl+J` with and without an active selection.
+3. Include a transformed source layer and a feathered selection.
+4. Save PSD and inspect layer record bounds and channel dimensions.
+5. Compare those bounds with the on-screen result.
+
+Public behavior and the PSD layer record are evidence; an old H-Gripe preview
+or cached frame is not.
+
+## Atomic Presentation Contract
+
+Every displayed image-editor frame carries one identity:
+
+```text
+PresentationRevision {
+  documentRevision,
+  pixelRevisionByLayer,
+  layerGeometryRevision,
+  cameraRevision,
+}
+```
+
+Pixels and layer geometry must match the same document/layer revisions. Camera
+revision may change independently because it is applied to both in one render.
+
+If a pixel revision fails to build, report the error and keep the previous
+complete document revision as a complete scene. Never project a previous
+bitmap through current layer geometry. There is no stale-frame fallback inside
+a current revision.
+
+## Acceptance Tests
+
+The architecture is not complete until all of these pass:
+
+1. An `800 x 800` layer has placement `[0,0,800,800]` on a logical
+   `2000 x 2000` pasteboard; its frame and pixels share exact screen bounds.
+2. Resizing or maximizing the editor changes only the camera projection and
+   never requests new layer pixels.
+3. Pan, zoom, and rotate-view do not change document, pasteboard, placement,
+   texture identity, or pixel revision.
+4. During a layer drag, every captured frame shows pixels and yellow frame with
+   the same delta; neither disappears.
+5. If current pixels are unavailable, both the pixels and selected frame are
+   absent; an old bitmap is never stretched through a new coordinate frame.
+6. `Ctrl+J` without a selection produces an exactly overlapping layer.
+7. `Ctrl+J` with a selection produces a tight pixel store whose placement is
+   the copied document bounds and whose transform is identity.
+8. `clip.region` changes cannot move or resize the selected-layer frame.
+9. Image Size updates pixels, dimensions, placements, pasteboard, and revision
+   in one atomic swap.
+10. Layer-count and 4K/8K tests demonstrate bounded memory from tight bounds,
+    tiles, eviction, and one viewport framebuffer.
+11. A native drop over the editor stage is delivered only to the editor; a drop
+    over editor chrome imports no layer and cannot fall through to the graph.
+12. A multi-image drop preserves source path order in the layer stack even when
+    dimension probes complete out of order or invalid entries are filtered.
+13. A multi-image drop creates one history transaction; one undo removes every
+    layer in the batch, and each added layer has a centred contain-fit placement.
+14. A layer moved completely outside the document but still inside the logical
+    pasteboard keeps its pixels and yellow frame aligned, can be grabbed again,
+    and does not stretch document-normalized mask or vector overlays.
+
+## Migration Status (2026-07-14)
+
+This status records the current landing without weakening any rule above.
+
+| Protocol slice | Status | Current implementation boundary |
+| --- | --- | --- |
+| Shared logical world and fixed `2.5x` pasteboard | Landed | Pasteboard bounds are document-derived geometry and form the stable retained scene frame; initial fit and `Ctrl+0` still fit the document. The browser pixel plane lives in the shared world, while the document child retains tool/canvas coordinates. Camera changes select a bounded scene window without changing scene identity. |
+| Stable viewport resource target | Landed | The image-editor host/target identity is `image_composite:<resourceId>` and does not include the document revision, camera, selection, or drag delta. |
+| Atomic document-scene replacement | Landed | `viewport_set_image_scene` builds a complete `RetainedImageScene` off the active state, then swaps the document payload and ordered retained layer nodes together. A failed/superseded build cannot replace the active scene. |
+| Compact retained layer nodes | Core landed | Each visible pixel layer retains its own source pixels, explicit placement, document properties, and stack index. No layer owns a document- or pasteboard-sized canvas. Sparse tiles, eviction, and direct GPU-resident nodes remain scaling work. |
+| Unified selection/drag presentation | Landed | `viewport_present_image_layer_scene` validates `transactionId`, `baseDocumentKey`, monotonic `sequence`, selected layer, linked affected layers, and one in-memory `moveDraft`; it bumps render state without changing resource/content identity. |
+| Drag bounds and committed-scene handoff | Landed | Live preview and history commit share one delta clamped from explicit placement, committed transform, rotated AABB, and the combined linked-layer envelope. Pixels remain sampleable when the layer is outside the document but inside the pasteboard. Pointer up retains the final draft in `committing` until the replacement document scene and matching frame settle, while the new document requests its own baseline. |
+| Same-frame yellow-frame metadata | Landed | The retained-scene render computes pixels and `selectedLayerFrame` together. The frame payload returns that geometry with `documentKey`, `transactionId`, and `sequence`; the frontend exposes it only for the exact presented tuple. There is no independent frame IPC. |
+| Legacy drag/frame paths | Removed | `SelectedLayerMoveSurface`, its preload/cache modules, moving-layer hidden-document retarget, the separate selected-layer-frame request hook, and dynamic scene-frame helpers were deleted. The remaining `sceneFrame.ts` and `selectedLayerFrame.ts` files are types only. |
+| Exclusive native file-drop routing | Code and automated tests landed; native evidence pending | `App` retains the sole Tauri listener and priority-routes each event to one claimant. The editor owns its modal, imports only on the stage, preserves batch order, and records one undo transaction. Direct OS-to-Tauri drag/drop evidence on a native desktop run is still required. |
+| Compact Layer Via Copy, atomic Image Size, sparse tiling | Pending | These remain governed by the rules and acceptance tests above; the retained-scene landing must not be treated as completion of the whole protocol. |
+
+## Migration Order
+
+1. Freeze document, pasteboard, layer, camera, and presentation revision types.
+2. Make pasteboard bounds document-derived and session-stable; remove stage
+   aspect and window size from world geometry.
+3. Introduce retained per-layer pixel resources and the single viewport
+   compositor.
+4. Put pixels, frame, handles, and hit testing under one layer/camera transform.
+5. Move navigation to camera-only updates.
+6. Move layer dragging to an in-memory layer transform plus one mouse-up
+   transaction; delete move-surface and frame fallback paths.
+7. Implement `Ctrl+J` duplicate and Layer Via Copy using compact pixel stores
+   plus explicit placement; delete clip-based duplication.
+8. Implement atomic Image Size and Canvas Size transactions.
+9. Add sparse tiles, dirty-region scheduling, mip eviction, and scratch storage.
+10. Remove the old dynamic scene-frame, image-composite retarget, stale-frame,
+    and pasteboard-bitmap code after native and browser acceptance evidence.

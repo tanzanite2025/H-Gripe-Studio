@@ -7,7 +7,7 @@ import type { ColorSample } from "./stagePainter";
 import { localizeTool } from "../imageEditorToolsI18n";
 import { LangContext, useT } from "../../i18n";
 import { isPreviewableOp } from "../maskMorphology";
-import type { TransformParams } from "../imageEditorState";
+import type { TransformParams } from "../imageLayerTransform";
 import type { FillDraft, ImageEditorDispatch } from "./actions";
 
 export type PathMode = "add" | "subtract" | "intersect";

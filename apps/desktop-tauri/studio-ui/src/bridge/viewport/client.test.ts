@@ -39,6 +39,25 @@ describe("createTauriViewportClient", () => {
       alpha: 0.55,
     });
     await expect(client.presentViewportView("vp-1", 2, 0.25, 0.25)).resolves.toBe(true);
+    const presentation = {
+      selectedLayerId: "layer-1",
+      transactionId: "move-1",
+      baseDocumentKey: "doc-1",
+      sequence: 0,
+      moveDraft: null,
+    };
+    const scene = {
+      document: { layers: [] },
+      documentKey: "doc-1",
+      documentWidth: 640,
+      documentHeight: 480,
+      frameX: 0,
+      frameY: 0,
+      frameWidth: 640,
+      frameHeight: 480,
+    };
+    await client.setViewportImageScene("vp-1", scene);
+    await client.presentImageLayerScene("vp-1", presentation);
 
     expect(invoke).toHaveBeenCalledWith("viewport_register_node_output", {
       nodeId: "node-1",
@@ -56,13 +75,37 @@ describe("createTauriViewportClient", () => {
         invert: false,
       },
     });
+    expect(invoke).toHaveBeenCalledWith("viewport_present_image_layer_scene", {
+      viewportId: "vp-1",
+      presentation,
+    });
+    expect(invoke).toHaveBeenCalledWith("viewport_set_image_scene", {
+      viewportId: "vp-1",
+      scene,
+    });
   });
 
   it("decodes binary frame and pixel responses", async () => {
     const invoke = vi.fn<Invoke>(async (command) => {
       if (command === "viewport_render_frame_bin") {
         return payload(
-          { width: 640, height: 360, backend: BACKEND, presented: true },
+          {
+            width: 640,
+            height: 360,
+            backend: BACKEND,
+            presented: true,
+            selectedLayerFrame: {
+              owner: "selected-layer-frame",
+              shape: "axis-aligned-rect",
+              layerId: "layer-1",
+              rect: [10, 20, 110, 120],
+              sourceRect: [0, 0, 100, 100],
+              source: "asset-frame",
+            },
+            documentKey: "doc-1",
+            transactionId: "move-1",
+            sequence: 3,
+          },
           new Uint8Array(),
         );
       }
@@ -78,6 +121,13 @@ describe("createTauriViewportClient", () => {
       height: 360,
       data_url: "",
       presented: true,
+      selectedLayerFrame: expect.objectContaining({
+        layerId: "layer-1",
+        rect: [10, 20, 110, 120],
+      }),
+      documentKey: "doc-1",
+      transactionId: "move-1",
+      sequence: 3,
     });
     await expect(client.readViewportPixels("vp-1")).resolves.toMatchObject({
       width: 1,

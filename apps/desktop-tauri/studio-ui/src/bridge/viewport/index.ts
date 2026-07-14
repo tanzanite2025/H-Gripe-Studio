@@ -1,8 +1,10 @@
 import { viewportClient } from "./client";
 import type {
+  ImageLayerScenePresentation,
   LayeredAssetLayerRef,
   TimelineClipRef,
   ViewportFrameExportFormat,
+  ViewportImageScene,
   ViewportKind,
   ViewportMaskOverlay,
   ViewportOverlayScene,
@@ -84,6 +86,17 @@ export function setViewportOverlayScene(
   scene: ViewportOverlayScene | null,
 ) {
   return viewportClient().setViewportOverlayScene(viewportId, scene);
+}
+
+export function presentImageLayerScene(
+  viewportId: string,
+  presentation: ImageLayerScenePresentation,
+) {
+  return viewportClient().presentImageLayerScene(viewportId, presentation);
+}
+
+export function setViewportImageScene(viewportId: string, scene: ViewportImageScene) {
+  return viewportClient().setViewportImageScene(viewportId, scene);
 }
 
 export function setViewportView(viewportId: string, zoom: number, panX: number, panY: number) {

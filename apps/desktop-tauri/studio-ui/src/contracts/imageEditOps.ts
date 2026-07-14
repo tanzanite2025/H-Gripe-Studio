@@ -34,6 +34,14 @@ export interface LayerImageSource {
   height: number;
 }
 
+/** A Rust-materialized Layer Via Copy result. The copied pixels already own
+ * their final appearance, so the frontend records only this source and its
+ * exact document-space placement. */
+export interface MaterializedLayerViaCopy {
+  source: LayerImageSource;
+  placement: [number, number, number, number];
+}
+
 /** A recorded morphology, selection, or raster operation. */
 export interface ImageEditOperation {
   type: string;

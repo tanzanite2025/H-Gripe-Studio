@@ -193,6 +193,10 @@ describe("useVideoPreview coalescing", () => {
       height: 360,
       backend: { requested: "auto", actual: "wgpu" },
       presented: true,
+      selectedLayerFrame: null,
+      documentKey: null,
+      transactionId: null,
+      sequence: null,
     });
     const { result, unmount } = renderHook(() => useVideoPreview(320));
     act(() => result.current.showFrame({ target: still("a.png"), gradeDoc: null }));

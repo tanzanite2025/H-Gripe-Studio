@@ -1,11 +1,12 @@
-// Canvas navigation (M8): the stage's zoom/pan/rotate view, applied as a CSS
-// transform on the stage frame — the render path and pointer→image mapping
-// are untouched by it — plus the derived viewport view window the underlay
-// renders for, Alt+wheel zoom and the Space hold-to-pan flag.
+// Canvas navigation (M8): camera-only zoom/pan/rotate state plus the derived
+// retained viewport window, Alt+wheel zoom and Space hold-to-pan. World
+// projection consumes this state; document and pixel target identity do not.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ViewportViewState } from "../../viewport/view";
 import { FIT_VIEW, WHEEL_ZOOM_STEP, viewWindow, zoomAt, type CanvasView } from "../canvasView";
 import type { PointerGestures } from "./pointer/types";
+import type { SceneFrame } from "./sceneFrame";
+import { viewportWindowForWorld } from "./stageProjection";
 
 /** Idle time after the last view change before the underlay re-renders at
  * the new window's detail; the CSS transform carries the motion until then. */
@@ -28,9 +29,26 @@ export interface CanvasNavigation {
   setSpacePan: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
+export interface CanvasNavigationLayout {
+  /** Fitted document/crop size at camera zoom 1. */
+  baseW: number;
+  baseH: number;
+  /** Visible stage dimensions used to choose the retained viewport window. */
+  stageW: number;
+  stageH: number;
+  /** Stable retained scene and the frame fitted by the DOM camera. When both
+   * are present, the viewport window is normalized to the scene, not the
+   * document child. */
+  viewportWorldFrame?: SceneFrame;
+  viewportFitFrame?: SceneFrame;
+  /** Changes whenever document/world geometry changes at the same CSS size. */
+  revision: string;
+}
+
 export function useCanvasNavigation(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   gestures: PointerGestures,
+  layout: CanvasNavigationLayout | null = null,
 ): CanvasNavigation {
   const [view, setView] = useState<CanvasView>(FIT_VIEW);
   const viewRef = useRef(view);
@@ -40,24 +58,44 @@ export function useCanvasNavigation(
   // `offsetWidth`/`offsetHeight` are layout sizes, unaffected by the view's
   // CSS transform, so they stay correct under rotation.
   const viewBase = useCallback((): [number, number] => {
+    if (layout && layout.baseW > 0 && layout.baseH > 0) {
+      return [layout.baseW, layout.baseH];
+    }
     const canvas = canvasRef.current;
     if (!canvas) return [1, 1];
     return [canvas.offsetWidth || 1, canvas.offsetHeight || 1];
-  }, [canvasRef]);
+  }, [canvasRef, layout?.baseW, layout?.baseH, layout?.revision]);
 
   const targetViewportView = useMemo(() => {
     const canvas = canvasRef.current;
-    // The stage rect bounds what is visible of the transformed frame; the
-    // window must cover it even when the frame's base rect is smaller.
-    const stage = canvas?.closest<HTMLElement>(".image-editor-stage");
+    const stage = layout ? null : canvas?.closest<HTMLElement>(".image-editor-stage");
+    const baseW = layout?.baseW ?? canvas?.offsetWidth ?? 0;
+    const baseH = layout?.baseH ?? canvas?.offsetHeight ?? 0;
+    const stageW = layout?.stageW ?? stage?.clientWidth ?? 0;
+    const stageH = layout?.stageH ?? stage?.clientHeight ?? 0;
+    if (layout?.viewportWorldFrame && layout.viewportFitFrame) {
+      return viewportWindowForWorld(
+        { w: stageW, h: stageH },
+        layout.viewportWorldFrame,
+        layout.viewportFitFrame,
+        view,
+      );
+    }
     return viewWindow(
       view,
-      canvas?.offsetWidth ?? 0,
-      canvas?.offsetHeight ?? 0,
-      stage?.clientWidth ?? 0,
-      stage?.clientHeight ?? 0,
+      baseW,
+      baseH,
+      stageW,
+      stageH,
     );
-  }, [view]);
+  }, [
+    view,
+    layout?.baseW,
+    layout?.baseH,
+    layout?.stageW,
+    layout?.stageH,
+    layout?.revision,
+  ]);
   const [viewportView, setViewportView] = useState(targetViewportView);
   useEffect(() => {
     if (

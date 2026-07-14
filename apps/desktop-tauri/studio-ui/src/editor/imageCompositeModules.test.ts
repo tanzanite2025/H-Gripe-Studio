@@ -1,28 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { emptyImageEditorDocument } from "../contracts/imageEditorDocument";
+import { imageCompositeTarget } from "./imageCompositeTarget";
+import { imageLayerContentBounds, layerCompositeTransform } from "./imageLayerGeometry";
 import {
-  imageCompositeTarget,
   imageCompositeBackingPath,
-  imageLayerContentBounds,
   imageLayerDrawsSource,
   imageLayerHasSourceContent,
-  layerCompositeTransform,
   layerSourceImageOp,
-} from "./imageCompositeSource";
+} from "./imageLayerSource";
 import { addImageLayer, fitPlacement, initEditState } from "./imageEditorState";
 
-describe("image composite viewport source", () => {
-  it("keeps the image frame visible when the base is hidden but a source copy is visible", () => {
+describe("image composite module boundaries", () => {
+  const placedSource = {
+    type: "source_image" as const,
+    placement: [0, 0, 20, 20] as [number, number, number, number],
+  };
+
+  it("keeps the image frame visible when a hidden layer has a visible placed source sibling", () => {
     const doc = emptyImageEditorDocument();
     doc.layers[0].visible = false;
     doc.layers.push({
       ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
-      ops: [{ type: "source_image" }],
+      ops: [placedSource],
     });
-    expect(imageLayerDrawsSource(doc.layers[0], 0)).toBe(false);
-    expect(imageLayerDrawsSource(doc.layers[1], 1)).toBe(true);
+    expect(imageLayerDrawsSource(doc.layers[0])).toBe(false);
+    expect(imageLayerDrawsSource(doc.layers[1])).toBe(true);
   });
 
   it("keeps hidden source layers identifiable for thumbnails without drawing them", () => {
@@ -32,10 +36,10 @@ describe("image composite viewport source", () => {
       id: "copy",
       name: "Background copy",
       visible: false,
-      ops: [{ type: "source_image" }],
+      ops: [placedSource],
     });
-    expect(imageLayerHasSourceContent(doc.layers[1], 1)).toBe(true);
-    expect(imageLayerDrawsSource(doc.layers[1], 1)).toBe(false);
+    expect(imageLayerHasSourceContent(doc.layers[1])).toBe(true);
+    expect(imageLayerDrawsSource(doc.layers[1])).toBe(false);
   });
 
   it("does not treat fully transparent source layers as visible frame content", () => {
@@ -46,24 +50,40 @@ describe("image composite viewport source", () => {
       id: "copy",
       name: "Background copy",
       opacity: 0,
-      ops: [{ type: "source_image" }],
+      ops: [placedSource],
     });
-    expect(imageLayerHasSourceContent(doc.layers[1], 1)).toBe(true);
-    expect(imageLayerDrawsSource(doc.layers[1], 1)).toBe(false);
+    expect(imageLayerHasSourceContent(doc.layers[1])).toBe(true);
+    expect(imageLayerDrawsSource(doc.layers[1])).toBe(false);
   });
 
-  it("resolves image-layer content bounds for implicit background and source copies", () => {
+  it("requires an enabled source_image with explicit non-empty placement", () => {
+    const layer = emptyImageEditorDocument().layers[0];
+    expect(imageLayerHasSourceContent(layer)).toBe(false);
+    expect(imageLayerHasSourceContent({ ...layer, ops: [{ type: "source_image" }] })).toBe(false);
+    expect(imageLayerHasSourceContent({
+      ...layer,
+      ops: [{ type: "source_image", placement: [0, 0, 0, 20] }],
+    })).toBe(false);
+    expect(imageLayerHasSourceContent({
+      ...layer,
+      ops: [{ ...placedSource, disabled: true }],
+    })).toBe(false);
+    expect(imageLayerHasSourceContent({ ...layer, ops: [placedSource] })).toBe(true);
+  });
+
+  it("resolves image-layer content bounds only for explicit placed sources", () => {
     const doc = emptyImageEditorDocument();
+    doc.layers[0].ops = [placedSource];
     doc.layers[0].mask = { id: "mask-base", ops: [{ type: "rect", region: [2, 3, 12, 14] }] };
     doc.layers.push({
       ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
-      ops: [{ type: "source_image" }],
+      ops: [placedSource],
       mask: { id: "mask-copy", ops: [{ type: "rect", region: [4, 5, 16, 18] }] },
     });
-    expect(imageLayerContentBounds(doc.layers[0], 0, { w: 20, h: 20 })).toEqual([2, 3, 13, 15]);
-    expect(imageLayerContentBounds(doc.layers[1], 1, { w: 20, h: 20 })).toEqual([4, 5, 17, 19]);
+    expect(imageLayerContentBounds(doc.layers[0], { w: 20, h: 20 })).toEqual([2, 3, 13, 15]);
+    expect(imageLayerContentBounds(doc.layers[1], { w: 20, h: 20 })).toEqual([4, 5, 17, 19]);
   });
 
   it("keeps image-layer content bounds in pre-transform space", () => {
@@ -72,10 +92,10 @@ describe("image composite viewport source", () => {
       ...emptyImageEditorDocument().layers[0],
       id: "copy",
       name: "Background copy",
-      ops: [{ type: "source_image" }, { type: "transform", dx: 8, dy: 0, scale: 1, rotate: 0 }],
+      ops: [placedSource, { type: "transform", dx: 8, dy: 0, scale: 1, rotate: 0 }],
       mask: { id: "mask-copy", ops: [{ type: "rect", region: [4, 5, 12, 15] }] },
     });
-    expect(imageLayerContentBounds(doc.layers[1], 1, { w: 20, h: 20 })).toEqual([4, 5, 13, 16]);
+    expect(imageLayerContentBounds(doc.layers[1], { w: 20, h: 20 })).toEqual([4, 5, 13, 16]);
     expect(layerCompositeTransform(doc.layers[1])).toEqual({ dx: 8, dy: 0, scale: 1, rotate: 0 });
   });
 

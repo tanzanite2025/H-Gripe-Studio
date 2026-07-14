@@ -15,6 +15,17 @@
 > editor would need transparent app roots, shared modal backdrops, or shared
 > modal shells to reveal the surface, that editor must keep native presentation
 > disabled until it owns a scoped matte/hole layer.
+>
+> Image-editor scope correction: this plan freezes native surface transport
+> only. Its historical single-underlay, CSS rotate, and PNG rerender notes are
+> not image-editor architecture. The image editor must follow
+> [`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md):
+> compact retained layer pixels/tiles, one logical world, camera-only
+> navigation, atomic presentation revisions, and no stale-frame fallback. Its
+> stable resource target is updated with `viewport_set_image_scene`; selection
+> and drag use `viewport_present_image_layer_scene`; matching
+> `selectedLayerFrame` geometry is returned in the same rendered frame metadata,
+> never through an independent frame request.
 
 ## Current State (What We Replace)
 
@@ -91,6 +102,10 @@ performance rules). Each presented viewport owns:
 
 Slider drags then re-run only the grade pass + blit on the already-uploaded
 texture: zero decode, zero encode, zero IPC pixels.
+
+The cached-source-texture statement applies to generic single-source viewports.
+The image editor instead presents the retained per-layer scene defined by the
+active shared-canvas protocol.
 
 ### D3. Placement protocol (new host commands)
 
@@ -226,32 +241,12 @@ Exit: program monitor playback/scrub presents natively; no PNG per frame.
 Exit: parity green in CI (CPU fallback asserted on CI runners without GPU);
 badges truthful on both paths.
 
-### Phase S5: Image editor on the live surface (follow-up, done)
+### Phase S5: Image editor on the live surface (historical)
 
-- The image editor's underlay presents on the native surface: the stage keeps
-  a placement anchor at the underlay window's rect, `useViewportUnderlay`
-  tracks it (`useViewportPlacement` gains an `enabled` flag), and the
-  brush/path/marquee canvas — DOM, above the webview hole — keeps compositing
-  over the surface unchanged. The selection tint stays host-side
-  (`set_mask_overlay`), so it is composited into the presented frame. After the
-  2026-07 modal-boundary correction, this is valid only when the webview hole is
-  scoped inside the editor stage and does not require transparent app roots or
-  shared modal shells.
-- Selection semantics are not owned by the surface path. DOM canvas fallback
-  and WGPU overlays both consume the same state model from
-  [`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md):
-  solid drafts remain drafts; only committed active selections render as
-  marching ants and become command targets.
-- States the surface cannot represent fall back to the PNG transport without
-  re-opening the host: a rotated view (the CSS transform rotates the DOM, not
-  the surface window) and the transparency preview hide the surface
-  (`set_presented: false`) and re-render.
-- The eyedropper reads a presented frame via `viewport_read_pixels` (S4)
-  instead of decoding a data URL.
-
-Exit: brush/path/marquee/shape overlays draw over the natively presented
-underlay; rotate/transparency-preview fall back to PNG; browser preview
-unchanged.
+The surface transport and scoped-hole requirement remain valid. The old
+single-underlay, DOM-over-underlay, CSS rotate, and PNG rerender product design
+is superseded. Current image-editor rendering, overlays, camera behavior, and
+readback rules come only from the active shared-canvas protocol.
 
 ## Testing Strategy
 

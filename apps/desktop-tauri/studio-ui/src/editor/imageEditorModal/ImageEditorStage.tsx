@@ -1,9 +1,8 @@
-// Centre stage: the underlay frame plus the edit canvas, stacked in one
-// document-space frame that the view's CSS transform moves as a unit.
-// Rendering and pointer→image mapping live in the modal shell (which owns the
-// document state); this is the presentation. The underlay presents the
-// viewport host's rendered window at its rect in the full frame, so a zoomed
-// canvas shows a frame decoded at matching detail (WGPU migration Phase 2).
+// Centre stage: one geometry-only pasteboard world containing the document,
+// viewport pixels and interaction geometry. The camera projects that parent;
+// it never changes the compositor target or allocates pasteboard pixels.
+// The modal shell owns document state and pointer-to-document mapping; this
+// component owns only the shared presentation hierarchy.
 
 import type { MutableRefObject, ReactNode } from "react";
 import type { ViewportBackend } from "../../bridge/viewport";
@@ -14,18 +13,21 @@ import type { SelectedLayerFrame } from "../selectedLayerFrame";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 import { InteractionResultLayer } from "./InteractionResultLayer";
 import type { SceneFrame } from "./sceneFrame";
-import type { SelectedLayerMoveSurface } from "./selectedLayerMove/selectedLayerMoveTypes";
-import type { SelectedLayerMoveDraftStore } from "./selectedLayerMove/selectedLayerMoveDraftStore";
-import { useSelectedLayerMoveDraftSnapshot } from "./selectedLayerMove/selectedLayerMoveDraftStore";
-import { useSelectedLayerMoveFrameCache } from "./selectedLayerMove/selectedLayerMoveFrameCache";
-import { useSelectedLayerMovePresentation } from "./selectedLayerMove/useSelectedLayerMovePresentation";
-import { projectFrameInStage, projectedFrameStyle, type StageSize } from "./stageProjection";
+import {
+  frameClipWithinWorldStyle,
+  frameWithinWorldStyle,
+  projectedFrameStyle,
+  projectWorldFrameInStage,
+  type StageSize,
+} from "./stageProjection";
+import { ViewportFrameLayer } from "./ViewportFrameLayer";
 
 interface ImageEditorStageProps {
   stageRef: MutableRefObject<HTMLDivElement | null>;
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   dims: { w: number; h: number };
-  sceneFrame?: SceneFrame;
+  renderFrame: SceneFrame;
+  logicalPasteboard: SceneFrame;
   stageSize?: StageSize | null;
   /** Whether a real document pixel size is known. The workspace remains
    * available without one, but no arbitrary placeholder document is shown. */
@@ -61,61 +63,47 @@ interface ImageEditorStageProps {
   selectionDraft?: SelectionDraft | null;
   activeSelection?: ActiveSelection | null;
   antsPhase?: number;
-  selectedLayerId?: string | null;
-  selectedLayerMoveSurface?: SelectedLayerMoveSurface | null;
-  selectedLayerMoveDraftStore: SelectedLayerMoveDraftStore;
-  layerMoveActive?: boolean;
   selectedLayerFrame?: SelectedLayerFrame | null;
-  viewportTargetSettled?: boolean;
   contextActionBar?: ReactNode;
 }
 
-export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageSize = null, documentAvailable, view, viewportFrameUrl, isNativeSurfacePresented, nativeSurfacePlacementAnchorRef, viewportFrameView, viewportBackend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, selectedLayerId = null, selectedLayerMoveSurface = null, selectedLayerMoveDraftStore, layerMoveActive = false, selectedLayerFrame = null, viewportTargetSettled = true, contextActionBar }: ImageEditorStageProps) {
-  const liveLayerMoveDraft = useSelectedLayerMoveDraftSnapshot(selectedLayerMoveDraftStore);
-  const selectedLayerMovePresentation = useSelectedLayerMovePresentation({
-    layerMoveActive,
-    moveDraft: liveLayerMoveDraft,
-    selectedLayerMoveSurface,
-    viewportTargetSettled,
-  });
-  const displayedSelectedLayerFrame = useSelectedLayerMoveFrameCache({
-    selectedLayerId,
-    resolvedFrame: selectedLayerFrame,
-    layerMoveActive,
-    liveLayerMoveDraft,
-    displayedLayerMoveDraft: selectedLayerMovePresentation.displayedLayerMoveDraft,
-    viewportTargetSettled,
-  });
-  const frame = sceneFrame ?? { x: 0, y: 0, w: Math.max(1, dims.w), h: Math.max(1, dims.h) };
-  const windowRect = {
-    left: `${viewportFrameView.panX * 100}%`,
-    top: `${viewportFrameView.panY * 100}%`,
-    width: `${100 / viewportFrameView.zoom}%`,
-    height: `${100 / viewportFrameView.zoom}%`,
-  };
+function isStagePanBackground(target: EventTarget, stage: HTMLDivElement): boolean {
+  return target === stage
+    || (target instanceof HTMLElement && target.dataset.imageEditorPanBackground === "true");
+}
+
+export function ImageEditorStage({ stageRef, canvasRef, dims, renderFrame, logicalPasteboard, stageSize = null, documentAvailable, view, viewportFrameUrl, isNativeSurfacePresented, nativeSurfacePlacementAnchorRef, viewportFrameView, viewportBackend, overlayOnly, cropView, spacePan, toolId, onPointerDown, onPointerMove, onPointerUp, onContextMenu, brushCursor, brushCursorRef, liveSelectionOverlayRef, selectionDraft, activeSelection, antsPhase = 0, selectedLayerFrame = null, contextActionBar }: ImageEditorStageProps) {
+  const documentPixelsPresented = documentAvailable
+    && !overlayOnly
+    && (isNativeSurfacePresented || Boolean(viewportFrameUrl));
+  const displayedSelectedLayerFrame = documentPixelsPresented
+    ? selectedLayerFrame
+    : null;
+  const frame = renderFrame;
   const cropRegion = cropView?.region ?? null;
   const cropW = cropRegion ? Math.max(1, cropRegion[2] - cropRegion[0]) : dims.w;
   const cropH = cropRegion ? Math.max(1, cropRegion[3] - cropRegion[1]) : dims.h;
-  const projectedFrameRect = projectFrameInStage(
+  const fitFrame = cropRegion
+    ? { x: cropRegion[0], y: cropRegion[1], w: cropW, h: cropH }
+    : frame;
+  const projectedWorldRect = projectWorldFrameInStage(
     stageSize,
-    cropRegion ? cropW / cropH : frame.w / frame.h,
+    logicalPasteboard,
+    fitFrame,
     view,
   );
-  const projectedInteractionStyle = projectedFrameStyle(projectedFrameRect);
-  const documentFrameStyle = projectedInteractionStyle
+  const projectedWorldStyle = projectedFrameStyle(projectedWorldRect);
+  const fitFrameWithinWorldStyle = frameWithinWorldStyle(fitFrame, logicalPasteboard);
+  const documentWithinFitFrameStyle = frameWithinWorldStyle(frame, fitFrame);
+  const pixelClipStyle = cropRegion
+    ? frameClipWithinWorldStyle(fitFrame, logicalPasteboard)
+    : undefined;
+  const worldStyle = projectedWorldStyle
     ? {
-        ...projectedInteractionStyle,
+        ...projectedWorldStyle,
         position: "absolute" as const,
       }
     : null;
-  const documentLayerStyle = cropRegion
-    ? {
-        left: `${-(cropRegion[0] / cropW) * 100}%`,
-        top: `${-(cropRegion[1] / cropH) * 100}%`,
-        width: `${(dims.w / cropW) * 100}%`,
-        height: `${(dims.h / cropH) * 100}%`,
-      }
-    : undefined;
   return (
     <div
       ref={stageRef}
@@ -125,71 +113,73 @@ export function ImageEditorStage({ stageRef, canvasRef, dims, sceneFrame, stageS
       // shows the no-drop cursor and swallows the tool's pointer events.
       onDragStart={(e) => e.preventDefault()}
       onPointerDown={(e) => {
-        if (spacePan && e.target === e.currentTarget) onPointerDown(e);
+        if ((spacePan || toolId === "move") && isStagePanBackground(e.target, e.currentTarget)) onPointerDown(e);
       }}
       onPointerMove={(e) => {
-        if (spacePan && e.target === e.currentTarget) onPointerMove(e);
+        if ((spacePan || toolId === "move") && isStagePanBackground(e.target, e.currentTarget)) onPointerMove(e);
       }}
       onPointerUp={(e) => {
-        if (spacePan && e.target === e.currentTarget) onPointerUp();
+        if ((spacePan || toolId === "move") && isStagePanBackground(e.target, e.currentTarget)) onPointerUp();
       }}
     >
-      {documentFrameStyle ? (
+      {worldStyle && fitFrameWithinWorldStyle && documentWithinFitFrameStyle ? (
         <div
-          className={`image-editor-frame${cropRegion ? " cropped" : ""}`}
+          className="image-editor-world"
+          data-image-editor-pan-background="true"
           style={{
-            aspectRatio: cropRegion ? `${cropW} / ${cropH}` : `${frame.w} / ${frame.h}`,
             visibility: documentAvailable ? undefined : "hidden",
             pointerEvents: documentAvailable ? undefined : "none",
-            ...documentFrameStyle,
+            ...worldStyle,
           }}
         >
-          <div className="image-editor-document-layer" style={documentLayerStyle}>
-            <div
-              className="image-editor-pixel-layer"
-              style={selectedLayerMovePresentation.suppressPixelLayer ? { visibility: "hidden" } : undefined}
-            >
-              <div ref={nativeSurfacePlacementAnchorRef} className="image-editor-native-surface-anchor" style={windowRect} />
-              {viewportFrameUrl && !overlayOnly && (
-                <img
-                  className="image-editor-viewport-frame-img"
-                  src={viewportFrameUrl}
-                  alt=""
-                  draggable={false}
-                  style={windowRect}
-                />
-              )}
+          <div
+            className="image-editor-pasteboard-boundary"
+            data-image-editor-pan-background="true"
+            aria-hidden="true"
+          />
+          <ViewportFrameLayer
+            frameUrl={viewportFrameUrl}
+            frameView={viewportFrameView}
+            overlayOnly={overlayOnly}
+            nativeSurfacePlacementAnchorRef={nativeSurfacePlacementAnchorRef}
+            style={pixelClipStyle}
+          />
+          <div
+            className={`image-editor-frame${cropRegion ? " cropped" : ""}`}
+            style={{
+              aspectRatio: `${fitFrame.w} / ${fitFrame.h}`,
+              ...fitFrameWithinWorldStyle,
+            }}
+          >
+            <div className="image-editor-document-layer" style={documentWithinFitFrameStyle}>
+              <canvas
+                ref={canvasRef}
+                className="image-editor-canvas"
+                style={{
+                  cursor: spacePan ? "grab" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
+                }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                onLostPointerCapture={onPointerUp}
+                onPointerLeave={onPointerUp}
+                onContextMenu={onContextMenu}
+              />
+              <InteractionResultLayer
+                dims={dims}
+                frame={frame}
+                selectedLayerFrame={displayedSelectedLayerFrame}
+                selectionDraft={selectionDraft ?? null}
+                activeSelection={activeSelection ?? null}
+                antsPhase={antsPhase}
+                liveSelectionOverlayRef={liveSelectionOverlayRef}
+                brushCursor={brushCursor}
+                brushCursorRef={brushCursorRef}
+              />
             </div>
-            <canvas
-              ref={canvasRef}
-              className="image-editor-canvas"
-              style={{
-                cursor: spacePan ? "grab" : toolId === "rotate_view" ? "crosshair" : brushCursor ? "none" : undefined,
-              }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerUp}
-              onContextMenu={onContextMenu}
-            />
           </div>
         </div>
-      ) : null}
-      {projectedInteractionStyle ? (
-        <InteractionResultLayer
-          dims={dims}
-          frame={frame}
-          style={projectedInteractionStyle}
-          selectedLayerMoveSurface={selectedLayerMoveSurface?.pixels ?? null}
-          selectedLayerMoveDraft={selectedLayerMovePresentation.displayedLayerMoveDraft}
-          selectedLayerFrame={displayedSelectedLayerFrame}
-          selectionDraft={selectionDraft ?? null}
-          activeSelection={activeSelection ?? null}
-          antsPhase={antsPhase}
-          liveSelectionOverlayRef={liveSelectionOverlayRef}
-          brushCursor={brushCursor}
-          brushCursorRef={brushCursorRef}
-        />
       ) : null}
       {displayedSelectedLayerFrame ? contextActionBar : null}
       <ViewportBackendBadge backend={viewportBackend} />

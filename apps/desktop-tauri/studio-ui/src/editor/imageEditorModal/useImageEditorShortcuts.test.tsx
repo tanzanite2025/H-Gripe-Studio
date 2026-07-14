@@ -61,41 +61,38 @@ describe("useImageEditorShortcuts", () => {
       setScreenMode: vi.fn(),
       closePenPath: vi.fn(),
       requestClose: vi.fn(),
+      runCommand: vi.fn(),
       ...overrides,
     };
   }
 
-  it("clears the active marching-ants selection after Ctrl+J layer via copy", () => {
+  it("routes Ctrl+J through the shared layer command controller", () => {
     const selection: ActiveSelection = {
       region: [10, 20, 80, 90],
       ellipse: false,
       source: "rect_marquee",
       combineMode: "replace",
     };
-    const dispatch = vi.fn();
     const setActiveSelection = vi.fn();
+    const runCommand = vi.fn();
 
     const hook = renderHook(() =>
       useImageEditorShortcuts(baseArgs({
-        dispatch,
         activeSelectionRef: { current: selection },
         setActiveSelection,
+        runCommand,
       })),
     );
 
     expect(dispatchShortcut(key({ key: "j", ctrlKey: true }))).toBe(true);
 
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "layer_duplicate",
-      selection,
-      includeSourceImage: true,
-    });
-    expect(setActiveSelection).toHaveBeenCalledWith(null);
+    expect(runCommand).toHaveBeenCalledWith("layer.duplicate");
+    expect(setActiveSelection).not.toHaveBeenCalled();
 
     hook.unmount();
   });
 
-  it("does not dispatch Ctrl+J while a solid draft is waiting for Make Selection", () => {
+  it("leaves draft blocking to the shared layer command controller", () => {
     const selection: ActiveSelection = {
       region: [10, 20, 80, 90],
       ellipse: false,
@@ -109,21 +106,21 @@ describe("useImageEditorShortcuts", () => {
       source: "rect_marquee",
       combineMode: "replace",
     };
-    const dispatch = vi.fn();
     const setActiveSelection = vi.fn();
+    const runCommand = vi.fn();
 
     const hook = renderHook(() =>
       useImageEditorShortcuts(baseArgs({
-        dispatch,
         activeSelectionRef: { current: selection },
         setActiveSelection,
         selectionDraft: draft,
+        runCommand,
       })),
     );
 
     expect(dispatchShortcut(key({ key: "j", ctrlKey: true }))).toBe(true);
 
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(runCommand).toHaveBeenCalledWith("layer.duplicate");
     expect(setActiveSelection).not.toHaveBeenCalled();
 
     hook.unmount();

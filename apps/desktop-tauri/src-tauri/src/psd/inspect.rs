@@ -1,7 +1,7 @@
 //! Native PSD template reading: a minimal, read-only PSD/PSB parser behind
 //! the `inspect_psd` and `analyze_psd_context` commands — the PSD read
-//! capabilities moved off the Python bridge (see
-//! PYTHON_TO_RUST_MIGRATION_PLAN.md, "Phase 5").
+//! capabilities moved off the Python bridge during the completed Rust PSD
+//! migration (Phase 5).
 //!
 //! The parser reads the file header and the layer records (names, bounds,
 //! group dividers, smart-object markers, channel data locations) without

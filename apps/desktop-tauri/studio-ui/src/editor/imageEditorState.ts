@@ -27,6 +27,7 @@ import {
   type EditPath,
   type EditPathPoint,
   type LayerImageSource,
+  type MaterializedLayerViaCopy,
   type ImageEditOperation,
   type PointPrompt,
 } from "../contracts/imageEditOps";
@@ -39,16 +40,16 @@ import {
   emptyPixelLayer,
   LAYER_BLENDS,
 } from "../contracts/imageEditorDocument";
-import { isBrushOp, isImageEditOperation, isPathOp, type SelectionAlphaClip } from "../contracts/imageEditOps";
+import { isBrushOp, isImageEditOperation, isPathOp } from "../contracts/imageEditOps";
+import {
+  duplicateActiveLayerInDocument,
+  insertMaterializedLayerViaCopyInDocument,
+} from "./imageEditorLayerDuplication";
+import { hasSourceImageContent, SOURCE_IMAGE_OP_TYPE } from "./imageLayerSource";
+import { composeTransforms, type TransformParams } from "./imageLayerTransform";
 
-export const SOURCE_IMAGE_OP_TYPE = "source_image";
-
-export interface LayerCopySelection {
-  region: [number, number, number, number];
-  ellipse?: boolean;
-  polygon?: [number, number][];
-  selectionAlpha?: SelectionAlphaClip;
-}
+export { composeTransforms, hasSourceImageContent, SOURCE_IMAGE_OP_TYPE };
+export type { TransformParams };
 
 export interface EditState {
   /** The committed document. */
@@ -550,29 +551,6 @@ export function updateOpAmount(state: EditState, index: number, amount: number):
   return commit(state, withActiveOps(state.current, ops.map((o, i) => (i === index ? { ...o, amount } : o))));
 }
 
-/** Free-transform params (identity when a field is absent on the op). */
-export interface TransformParams {
-  dx: number;
-  dy: number;
-  scale: number;
-  rotate: number;
-}
-
-/** Compose `b` applied after `a`. A transform op scales and rotates about
- * the image centre, then translates: `b ∘ a` keeps that shape, with `a`'s
- * translation carried through `b`'s rotation and scale. */
-export function composeTransforms(a: TransformParams, b: TransformParams): TransformParams {
-  const rad = (b.rotate * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  return {
-    dx: b.scale * (cos * a.dx - sin * a.dy) + b.dx,
-    dy: b.scale * (sin * a.dx + cos * a.dy) + b.dy,
-    scale: a.scale * b.scale,
-    rotate: a.rotate + b.rotate,
-  };
-}
-
 /** Revise a committed `transform` step's params (undoable; M5 re-transform). */
 export function updateOpTransform(state: EditState, index: number, params: TransformParams): EditState {
   const ops = activeOps(state.current);
@@ -626,11 +604,23 @@ export function addImageLayer(
   canvas: { w: number; h: number },
   name?: string,
 ): EditState {
-  const layer: ImageEditorLayer = {
-    ...emptyPixelLayer(name ?? sourceBasename(source.path) ?? `Layer ${state.current.layers.length + 1}`),
+  return addImageLayers(state, [{ source, name }], canvas);
+}
+
+/** Append a dropped image batch in source order as one undoable transaction. */
+export function addImageLayers(
+  state: EditState,
+  additions: readonly { source: LayerImageSource; name?: string }[],
+  canvas: { w: number; h: number },
+): EditState {
+  if (additions.length === 0) return state;
+  const added = additions.map(({ source, name }, index): ImageEditorLayer => ({
+    ...emptyPixelLayer(
+      name ?? sourceBasename(source.path) ?? `Layer ${state.current.layers.length + index + 1}`,
+    ),
     ops: [{ type: SOURCE_IMAGE_OP_TYPE, source, placement: fitPlacement(source, canvas) }],
-  };
-  const layers = [...state.current.layers, layer];
+  }));
+  const layers = [...state.current.layers, ...added];
   return commit(state, { ...state.current, layers, active: layers.length - 1 });
 }
 
@@ -744,10 +734,6 @@ export function layerOpStacks(layer: ImageEditorLayer): { target: LayerTargetKin
   const stacks: { target: LayerTargetKind; ops: EditOp[] }[] = [{ target: "pixel", ops: layer.ops }];
   if (layer.mask && !layer.mask.disabled) stacks.push({ target: "mask", ops: layer.mask.ops });
   return stacks;
-}
-
-export function hasSourceImageContent(layer: ImageEditorLayer): boolean {
-  return layer.kind !== "adjustment" && layer.ops.some((op) => op.type === SOURCE_IMAGE_OP_TYPE);
 }
 
 /** Give the base layer an explicit `source_image` op covering the full canvas,
@@ -941,67 +927,26 @@ export function reselect(state: EditState): EditState {
   return state;
 }
 
-/**
- * PS duplicate-via-copy (Ctrl+J; M9): copy the active layer (fresh id,
- * "… copy" name) directly above itself and make the copy active (undoable).
- * Adjustment layers duplicate too — the copy re-tone-maps the composite.
- * With an active selection this is PS Layer Via Copy: the copy holds only the
- * selected region's pixels — every replayed step carries the selection as its
- * `clip`, so the layer's own content is the cut-out (no mask attachment). In
- * the image workspace the base layer is the opened image even when its op
- * stack is empty; `includeSourceImage` records that source-backed content
- * explicitly so the copy is not mistaken for a transparent layer.
- */
-// LayerPixelReadSource boundary: this records the active layer read plus an
-// optional selection constraint. Pixels are materialized by the compositor, not
-// read from interaction overlays, thumbnails, or selected-frame visuals.
-export function duplicateLayer(
+/** Ordinary Ctrl+J duplicates the active layer at its current placement.
+ * Selection-constrained Layer Via Copy is a separate Rust materialization
+ * transaction and never reaches this builder as a clip. */
+export function duplicateLayer(state: EditState): EditState {
+  const next = duplicateActiveLayerInDocument(state.current);
+  return next === state.current ? state : commit(state, next);
+}
+
+/** Commit one Rust-materialized Layer Via Copy result as one undoable history
+ * transaction. The document reference prevents a result prepared from stale
+ * state from landing after another edit. */
+export function commitMaterializedLayerViaCopy(
   state: EditState,
-  selection?: LayerCopySelection | null,
-  options: { includeSourceImage?: boolean } = {},
+  baseDocument: ImageEditorDocument,
+  sourceLayerId: string,
+  materialized: MaterializedLayerViaCopy,
 ): EditState {
-  const doc = state.current;
-  const index = Math.min(Math.max(doc.active, 0), doc.layers.length - 1);
-  const source = doc.layers[index];
-  const copyOps = source.ops.map((op) => ({ ...op }));
-  const shouldCarrySourceImage =
-    source.kind !== "adjustment" && (hasSourceImageContent(source) || (options.includeSourceImage === true && index === 0));
-  if (shouldCarrySourceImage && !copyOps.some((op) => op.type === SOURCE_IMAGE_OP_TYPE)) {
-    copyOps.unshift({ type: SOURCE_IMAGE_OP_TYPE });
-  }
-  const clip: NonNullable<EditOp["clip"]> | null =
-    selection && source.kind !== "adjustment"
-      ? selection.selectionAlpha
-        ? {
-            region: [...selection.region] as [number, number, number, number],
-            selectionAlpha: {
-              ...selection.selectionAlpha,
-              runs: [...selection.selectionAlpha.runs],
-            },
-          }
-        : selection.polygon && selection.polygon.length >= 3
-        ? {
-            region: [...selection.region] as [number, number, number, number],
-            points: selection.polygon.map(([x, y]) => [x, y] as [number, number]),
-          }
-        : {
-            region: [...selection.region] as [number, number, number, number],
-            ...(selection.ellipse ? { ellipse: true } : null),
-          }
-      : null;
-  const ops = clip ? copyOps.map((op) => ({ ...op, clip })) : copyOps;
-  const mask: LayerMask | null = source.mask
-    ? { ...source.mask, id: emptyLayerMask().id, ops: source.mask.ops.map((op) => ({ ...op })) }
-    : null;
-  const copy: ImageEditorLayer = {
-    ...source,
-    id: emptyPixelLayer().id,
-    name: `${source.name} copy`,
-    ops,
-    ...(mask ? { mask } : null),
-  };
-  const layers = [...doc.layers.slice(0, index + 1), copy, ...doc.layers.slice(index + 1)];
-  return commit(state, { ...doc, layers, active: index + 1 });
+  if (state.current !== baseDocument) return state;
+  const next = insertMaterializedLayerViaCopyInDocument(state.current, sourceLayerId, materialized);
+  return next === state.current ? state : commit(state, next);
 }
 
 export function undo(state: EditState): EditState {

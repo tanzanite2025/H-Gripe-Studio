@@ -1,4 +1,5 @@
 import type {
+  ImageLayerScenePresentation,
   LayeredAssetLayerRef,
   TimelineClipRef,
   ViewportBackend,
@@ -6,6 +7,7 @@ import type {
   ViewportFrame,
   ViewportFrameExportFormat,
   ViewportFrameExportResult,
+  ViewportImageScene,
   ViewportKind,
   ViewportMaskOverlay,
   ViewportOverlayScene,
@@ -34,6 +36,7 @@ interface MockViewport {
   clipPropsTimeSec: number;
   maskOverlay: ViewportMaskOverlay | null;
   overlayScene: ViewportOverlayScene | null;
+  imageLayerPresentation: ImageLayerScenePresentation | null;
   view: { zoom: number; panX: number; panY: number };
   placement: ViewportPlacement | null;
   presented: boolean;
@@ -68,6 +71,10 @@ export class MockViewportClient implements ViewportClient {
     return { placement: viewport.placement, presented: viewport.presented };
   }
 
+  viewportImageLayerPresentation(viewportId: string): ImageLayerScenePresentation | null {
+    return this.get(viewportId).imageLayerPresentation;
+  }
+
   async createViewport(kind: ViewportKind) {
     const viewport_id = `mock-vp-${this.nextId++}`;
     this.viewports.set(viewport_id, {
@@ -80,6 +87,7 @@ export class MockViewportClient implements ViewportClient {
       clipPropsTimeSec: 0,
       maskOverlay: null,
       overlayScene: null,
+      imageLayerPresentation: null,
       view: { zoom: 1, panX: 0, panY: 0 },
       placement: null,
       presented: false,
@@ -115,7 +123,9 @@ export class MockViewportClient implements ViewportClient {
     ) {
       throw new Error(`unknown node output: ${nodeOutputKey(target.nodeId, target.outputPort)}`);
     }
-    this.get(viewportId).target = target;
+    const viewport = this.get(viewportId);
+    viewport.target = target;
+    viewport.imageLayerPresentation = null;
   }
 
   async registerLayeredAsset(
@@ -269,6 +279,77 @@ export class MockViewportClient implements ViewportClient {
     viewport.overlayScene = scene;
   }
 
+  async setViewportImageScene(
+    viewportId: string,
+    scene: ViewportImageScene,
+  ): Promise<void> {
+    const viewport = this.get(viewportId);
+    if (viewport.kind !== "image_edit" || viewport.target?.kind !== "image_composite") {
+      throw new Error(`viewport ${viewportId} has no image composite target`);
+    }
+    const numbers = [
+      scene.documentWidth,
+      scene.documentHeight,
+      scene.frameX,
+      scene.frameY,
+      scene.frameWidth,
+      scene.frameHeight,
+    ];
+    if (numbers.some((value) => !Number.isFinite(value))) {
+      throw new Error("image scene dimensions must be finite");
+    }
+    if (
+      scene.documentWidth <= 0
+      || scene.documentHeight <= 0
+      || scene.frameWidth <= 0
+      || scene.frameHeight <= 0
+    ) {
+      throw new Error("image scene dimensions must be positive");
+    }
+    viewport.target = { ...viewport.target, ...scene };
+    viewport.imageLayerPresentation = null;
+  }
+
+  async presentImageLayerScene(
+    viewportId: string,
+    presentation: ImageLayerScenePresentation,
+  ): Promise<void> {
+    const viewport = this.get(viewportId);
+    if (viewport.kind !== "image_edit") {
+      throw new Error(
+        `viewport ${viewportId} (kind=${viewport.kind}) does not accept an image layer scene`,
+      );
+    }
+    if (viewport.target?.kind !== "image_composite") {
+      throw new Error(`viewport ${viewportId} has no image composite target`);
+    }
+    if (!presentation.selectedLayerId || !presentation.transactionId) {
+      throw new Error("image layer scene ids must not be empty");
+    }
+    if (presentation.baseDocumentKey !== viewport.target.documentKey) {
+      throw new Error("image layer scene base document key does not match the current target");
+    }
+    if (!Number.isSafeInteger(presentation.sequence) || presentation.sequence < 0) {
+      throw new Error(`invalid image layer scene sequence ${presentation.sequence}`);
+    }
+    if (
+      presentation.moveDraft
+      && (!Number.isFinite(presentation.moveDraft.dx)
+        || !Number.isFinite(presentation.moveDraft.dy))
+    ) {
+      throw new Error("image layer scene move draft must be finite");
+    }
+    const current = viewport.imageLayerPresentation;
+    if (!current || current.transactionId !== presentation.transactionId) {
+      if (presentation.sequence !== 0 || presentation.moveDraft !== null) {
+        throw new Error("a new image layer scene transaction must start at sequence 0");
+      }
+    } else if (presentation.sequence <= current.sequence) {
+      throw new Error("image layer scene sequence must increase within a transaction");
+    }
+    viewport.imageLayerPresentation = presentation;
+  }
+
   async setViewportView(
     viewportId: string,
     zoom: number,
@@ -294,12 +375,20 @@ export class MockViewportClient implements ViewportClient {
     const viewport = this.get(viewportId);
     if (!viewport.target) throw new Error(`viewport ${viewportId} has no target`);
     const zoom = Math.max(viewport.view.zoom, 1);
+    const documentKey = viewport.target.kind === "image_composite"
+      ? viewport.target.documentKey
+      : null;
+    const presentation = viewport.imageLayerPresentation;
     return {
       data_url: MOCK_FRAME_PNG,
       width: Math.max(Math.round(viewport.width / zoom), 1),
       height: Math.max(Math.round(viewport.height / zoom), 1),
       backend: MOCK_BACKEND,
       presented: false,
+      selectedLayerFrame: null,
+      documentKey,
+      transactionId: presentation?.transactionId ?? null,
+      sequence: presentation?.sequence ?? null,
     };
   }
 

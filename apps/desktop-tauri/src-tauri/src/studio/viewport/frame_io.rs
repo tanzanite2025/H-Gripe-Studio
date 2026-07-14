@@ -6,8 +6,9 @@ use image::{DynamicImage, ImageFormat, RgbaImage};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ensure_viewport, surface_backend_report, viewport_render_rgba,
-    viewport_render_rgba_with_overlay, ViewportBackend, ViewportFrame, ViewportView,
+    ensure_viewport, parse_id, surface_backend_report, viewport_render_rgba,
+    viewport_render_rgba_with_overlay, viewports, ViewportBackend, ViewportFrame,
+    ViewportGenerations, ViewportImageLayerFrameMetadata, ViewportView,
 };
 
 #[tauri::command]
@@ -24,6 +25,11 @@ pub(super) struct RenderedRgba {
     /// The view window the frame was rendered for — the native surface
     /// caches it so later views re-present as GPU crops (the fast path).
     pub(super) view: ViewportView,
+    /// State revision snapshotted with the pixels. Native presentation must
+    /// compare it against the current viewport before uploading.
+    pub(super) generations: super::ViewportGenerations,
+    /// Geometry identity produced by the same image-scene pass as `image`.
+    pub(super) image_layer: ViewportImageLayerFrameMetadata,
 }
 
 pub(super) fn encode_frame_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
@@ -45,6 +51,7 @@ fn rgba_to_frame(rendered: RenderedRgba) -> Result<ViewportFrame, String> {
         width: w,
         height: h,
         backend: rendered.backend,
+        image_layer: rendered.image_layer,
     })
 }
 
@@ -161,16 +168,14 @@ fn viewport_render_frame_bin_inner(
             h,
             &surface_backend_report("gpu"),
             true,
+            &ViewportImageLayerFrameMetadata::default(),
             &[],
         )?));
     }
     let rendered = viewport_render_rgba(&viewport_id)?;
-    let presented = crate::commands::viewport_surface::present_frame(
-        &app,
-        &viewport_id,
-        &rendered.image,
-        (rendered.view.zoom, rendered.view.pan_x, rendered.view.pan_y),
-    );
+    let Some(presented) = present_rendered_if_current(&app, &viewport_id, &rendered)? else {
+        return Err("viewport render superseded by newer state".to_string());
+    };
     let png = if presented {
         Vec::new()
     } else {
@@ -183,8 +188,50 @@ fn viewport_render_frame_bin_inner(
     };
     let (w, h) = rendered.image.dimensions();
     Ok(tauri::ipc::Response::new(frame_bin_payload(
-        w, h, &backend, presented, &png,
+        w,
+        h,
+        &backend,
+        presented,
+        &rendered.image_layer,
+        &png,
     )?))
+}
+
+pub(super) fn rendered_generations_match(
+    current: ViewportGenerations,
+    rendered: ViewportGenerations,
+) -> bool {
+    current == rendered
+}
+
+/// Compare and upload while holding the viewport registry lock. Every target
+/// mutation takes this lock and invalidates the surface before returning, so a
+/// worker cannot pass this comparison and then upload after a newer target.
+/// The cross-viewport lock during upload is an intentional bounded correctness
+/// tradeoff for the current small viewport count. If upload contention grows,
+/// replace it with a per-viewport presentation lock; do not split the compare
+/// from the upload.
+fn present_rendered_if_current(
+    app: &tauri::AppHandle,
+    viewport_id: &str,
+    rendered: &RenderedRgba,
+) -> Result<Option<bool>, String> {
+    let id = parse_id(viewport_id)?;
+    let map = viewports()
+        .lock()
+        .map_err(|_| "viewport registry poisoned")?;
+    let state = map
+        .get(&id)
+        .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+    if !rendered_generations_match(state.generations(), rendered.generations) {
+        return Ok(None);
+    }
+    Ok(Some(crate::commands::viewport_surface::present_frame(
+        app,
+        viewport_id,
+        &rendered.image,
+        (rendered.view.zoom, rendered.view.pan_x, rendered.view.pan_y),
+    )))
 }
 
 /// Explicit pixel readback for the cases that genuinely need bytes in the
@@ -253,6 +300,7 @@ pub(super) fn frame_bin_payload(
     height: u32,
     backend: &ViewportBackend,
     presented: bool,
+    image_layer: &ViewportImageLayerFrameMetadata,
     png: &[u8],
 ) -> Result<Vec<u8>, String> {
     let meta = serde_json::json!({
@@ -260,6 +308,10 @@ pub(super) fn frame_bin_payload(
         "height": height,
         "backend": backend,
         "presented": presented,
+        "selectedLayerFrame": image_layer.selected_layer_frame,
+        "documentKey": image_layer.document_key,
+        "transactionId": image_layer.transaction_id,
+        "sequence": image_layer.sequence,
     })
     .to_string();
     let mut payload = Vec::with_capacity(4 + meta.len() + png.len());

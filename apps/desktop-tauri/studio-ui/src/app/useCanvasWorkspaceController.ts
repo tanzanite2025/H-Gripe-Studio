@@ -14,7 +14,7 @@ import type {
 } from "@hgripe/flow";
 import { withHgripeDataEdge } from "@hgripe/flow";
 
-import { listenFileDrop, primeIngest } from "../bridge/tauri";
+import { primeIngest } from "../bridge/tauri";
 import { setGraphHelperLines } from "../editor/graphStore";
 import {
   detachChildren,
@@ -45,6 +45,7 @@ import {
   MAX_IMAGE_SOURCE_SLOTS,
   normalizeImageSourceSlots,
 } from "../domain/imageSourceSlots";
+import { nativeFileDropRouter } from "./nativeFileDropRouter";
 
 type Translate = (key: MsgKey, vars?: Record<string, string | number>) => string;
 type NewNodeId = ReturnType<typeof useNodeEditing>["newNodeId"];
@@ -270,19 +271,15 @@ export function useCanvasWorkspaceController({
 
   useEffect(() => {
     startIngestListener();
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    void listenFileDrop((event) =>
-      ingestDroppedFiles(event.paths, event.position),
-    ).then((stop) => {
-      if (disposed) stop?.();
-      else unlisten = stop;
-    });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [ingestDroppedFiles]);
+  }, []);
+  useEffect(() => nativeFileDropRouter.register({
+    id: "canvas-workspace",
+    priority: 10,
+    claims: ({ target }) => Boolean(target?.closest(
+      ".production-bin-popover, .react-flow, [data-image-source-node-id]",
+    )),
+    handle: ({ event }) => ingestDroppedFiles(event.paths, event.position),
+  }), [ingestDroppedFiles]);
 
   const handleSplitClipToLayers = useCallback(
     (clipId: string) => {

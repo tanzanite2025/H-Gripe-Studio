@@ -5,7 +5,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::studio::{ClipPropsBackend, ClipPropsEvaluator};
+use crate::studio::{
+    ClipPropsBackend, ClipPropsEvaluator, RetainedImageScene, SelectedLayerFrame,
+    SelectedLayerMoveDraft,
+};
 
 use super::{MaskOverlay, OverlayScene, SourceProxy, TemporalChain, ViewportView};
 
@@ -79,6 +82,38 @@ pub(crate) enum ViewportTarget {
         #[serde(rename = "outputPort")]
         output_port: Option<String>,
     },
+}
+
+impl ViewportTarget {
+    /// Snapshot only render-relevant target fields. Image-composite pixels and
+    /// node properties live in the retained scene, so a drag render must not
+    /// clone the full document JSON on every pointer packet.
+    pub(super) fn render_snapshot(&self) -> Self {
+        match self {
+            Self::ImageComposite {
+                resource_id,
+                document_key,
+                document_width,
+                document_height,
+                frame_x,
+                frame_y,
+                frame_width,
+                frame_height,
+                ..
+            } => Self::ImageComposite {
+                resource_id: resource_id.clone(),
+                document: Value::Null,
+                document_key: document_key.clone(),
+                document_width: *document_width,
+                document_height: *document_height,
+                frame_x: *frame_x,
+                frame_y: *frame_y,
+                frame_width: *frame_width,
+                frame_height: *frame_height,
+            },
+            other => other.clone(),
+        }
+    }
 }
 
 /// Backend report for the fallback contract: fallback is a reportable runtime
@@ -193,6 +228,88 @@ pub(crate) struct ViewportFrame {
     pub width: u32,
     pub height: u32,
     pub backend: ViewportBackend,
+    #[serde(flatten)]
+    pub(super) image_layer: ViewportImageLayerFrameMetadata,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ViewportImageLayerPresentation {
+    pub(super) selected_layer_id: String,
+    pub(super) transaction_id: String,
+    pub(super) base_document_key: String,
+    pub(super) sequence: u64,
+    pub(super) move_draft: Option<SelectedLayerMoveDraft>,
+    #[serde(skip)]
+    pub(super) affected_layer_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ViewportImageScene {
+    pub(super) document: Value,
+    pub(super) document_key: String,
+    pub(super) document_width: u32,
+    pub(super) document_height: u32,
+    pub(super) frame_x: f32,
+    pub(super) frame_y: f32,
+    pub(super) frame_width: u32,
+    pub(super) frame_height: u32,
+}
+
+impl ViewportImageScene {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        if self.document_key.trim().is_empty() {
+            return Err("image scene documentKey must not be empty".to_string());
+        }
+        if self.document_width == 0 || self.document_height == 0 {
+            return Err("image scene document dimensions must be positive".to_string());
+        }
+        if self.frame_width == 0 || self.frame_height == 0 {
+            return Err("image scene frame dimensions must be positive".to_string());
+        }
+        if !self.frame_x.is_finite() || !self.frame_y.is_finite() {
+            return Err("image scene frame origin must be finite".to_string());
+        }
+        Ok(())
+    }
+}
+
+impl ViewportImageLayerPresentation {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        if self.selected_layer_id.trim().is_empty() {
+            return Err("selectedLayerId must not be empty".to_string());
+        }
+        if self.transaction_id.trim().is_empty() {
+            return Err("transactionId must not be empty".to_string());
+        }
+        if self.base_document_key.trim().is_empty() {
+            return Err("baseDocumentKey must not be empty".to_string());
+        }
+        if self.move_draft.is_some_and(|draft| !draft.is_finite()) {
+            return Err("moveDraft coordinates must be finite".to_string());
+        }
+        Ok(())
+    }
+
+    pub(super) fn is_transaction_start(&self) -> bool {
+        self.sequence == 0 && self.move_draft.is_none()
+    }
+}
+
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ViewportImageLayerFrameMetadata {
+    pub(super) selected_layer_frame: Option<SelectedLayerFrame>,
+    pub(super) document_key: Option<String>,
+    pub(super) transaction_id: Option<String>,
+    pub(super) sequence: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct ViewportGenerations {
+    pub(super) content: u64,
+    pub(super) render: u64,
 }
 
 pub(super) struct ViewportState {
@@ -214,6 +331,27 @@ pub(super) struct ViewportState {
     pub(super) view: ViewportView,
     /// Most-recently-used first, at most [`PROXY_CACHE_DEPTH`] entries.
     pub(super) proxies: Vec<SourceProxy>,
+    /// Ordered compact layer resources for one fully prepared image-document
+    /// revision. Target and scene are committed under the same registry lock.
+    pub(super) retained_image_scene: Option<Arc<RetainedImageScene>>,
+    /// The selected node and its in-memory drag transform. It never changes
+    /// target/content identity; a preview advances only render generation.
+    pub(super) image_layer_presentation: Option<ViewportImageLayerPresentation>,
+    /// Recently replaced transaction ids for the current document revision.
+    /// A delayed sequence-zero packet cannot revive one of them.
+    pub(super) retired_image_layer_transactions: Vec<String>,
+    /// Latest target request reservation. A slower scene build may commit only
+    /// if no later target request has superseded it.
+    pub(super) target_request_epoch: u64,
+    /// Backing-surface identity (target + render size). A change invalidates
+    /// the native texture immediately. Grade, clip, mask, scene and camera
+    /// parameters do not change this generation: `present_view` may transform
+    /// the previous complete presentation until their next settled render,
+    /// but can never reuse pixels from another target or size.
+    pub(super) content_generation: u64,
+    /// Every mutation that can change a settled render increments this value.
+    /// A worker may publish only the exact generation it snapshotted.
+    pub(super) render_generation: u64,
     /// Temporal denoise amount (`0` disables) applied to graded video
     /// frames after the grade doc, blending against the previous graded
     /// frame ([`TemporalChain`]).
@@ -226,6 +364,24 @@ pub(super) struct ViewportState {
     pub(super) clip_props: Option<(String, ClipPropsEvaluator)>,
     /// Clip-local evaluation time (seconds) for `clip_props`.
     pub(super) clip_props_time: f64,
+}
+
+impl ViewportState {
+    pub(super) fn generations(&self) -> ViewportGenerations {
+        ViewportGenerations {
+            content: self.content_generation,
+            render: self.render_generation,
+        }
+    }
+
+    pub(super) fn bump_render_generation(&mut self) {
+        self.render_generation = self.render_generation.wrapping_add(1);
+    }
+
+    pub(super) fn bump_content_generation(&mut self) {
+        self.content_generation = self.content_generation.wrapping_add(1);
+        self.bump_render_generation();
+    }
 }
 
 static VIEWPORTS: OnceLock<Mutex<HashMap<u64, ViewportState>>> = OnceLock::new();

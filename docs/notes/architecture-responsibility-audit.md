@@ -313,15 +313,12 @@ app/
 - command/shortcut glue；
 - 多个 dialog 和 panel 的状态。
 
-Selection note: `active selection 推导` must move behind the protocol in
-`docs/plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`. The shell may
-wire state, but it must not decide that a solid pen/lasso/marquee draft is an
-active marching-ants selection, and it must not own `Ctrl+J` capability logic.
-
-`docs/notes/image-editor-review.md` 已列出后续候选：
-
-- `useBrushParams`
-- `useToolSlots`
+Image-editor rendering, layer placement, navigation, dragging, yellow frames,
+Image Size, and `Ctrl+J` must follow
+`docs/plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`. The former
+underlay-window review was deleted because its rerender and CSS-move
+descriptions were superseded. Do not restore those paths while splitting this
+orchestrator.
 
 #### 建议拆分
 
@@ -332,7 +329,7 @@ imageEditorModal/
   useBrushParams.ts
   useToolSlots.ts
   useMaskPreviewController.ts
-  useUnderlayController.ts
+  useImageEditorViewport.ts
   useImageEditorShortcuts.ts
 ```
 

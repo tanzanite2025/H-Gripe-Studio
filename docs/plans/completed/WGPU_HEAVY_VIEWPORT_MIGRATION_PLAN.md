@@ -20,6 +20,19 @@
 > scoped viewport slot and surface hole. If that scoped hole is not implemented,
 > the presenter must stay on the non-presented transport rather than leaking the
 > graph/canvas behind an independent editor modal.
+>
+> Image-editor scope correction: this completed plan freezes only the generic
+> viewport host and transport history. It does not define current image-editor
+> layer storage, world/camera geometry, navigation, dragging, yellow frames, or
+> `Ctrl+J`. Those are governed exclusively by
+> [`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+> In particular, do not restore visible-window pixel rerenders, a single
+> underlay texture, dynamic scene frames, or stale-frame presentation from this
+> historical plan. The current editor keeps one stable resource target, swaps
+> complete retained scenes through `viewport_set_image_scene`, applies drag
+> transactions through `viewport_present_image_layer_scene`, and receives the
+> matching `selectedLayerFrame` in the rendered frame metadata rather than a
+> separate frame IPC.
 
 ## Status Snapshot (2026-07)
 
@@ -100,12 +113,13 @@ Implemented (PRs #329-400):
   while `nodeId` remains only opening/commit context. This prevents editor
   underlays from going blank when a node artifact target is stale, pending
   registration, or being recomputed.
-- Image editor presentation: the underlay detail follows canvas zoom (the
-  modal requests the visible window from the host and places the rendered
-  frame at the window's rect under the edit canvas), and the selection tint
-  composites host-side via `viewport_set_mask_overlay` — a working-scale
-  coverage buffer the host bilinearly samples over the rendered frame at the
-  view window's detail (quick-mask ruby uses the inverted style).
+- Image editor presentation in this historical snapshot has been superseded.
+  The current editor retains compact layer nodes in one shared logical world,
+  keeps the resource target/host stable, atomically commits document scenes,
+  and uses a sequenced layer-presentation transaction for selection and drag.
+  Navigation changes only the camera matrix. Pixels and selected-layer-frame
+  metadata return from the same rendered revision. See the active shared-canvas
+  protocol.
 
 Remaining work (next stage), roughly in priority order:
 
@@ -273,26 +287,11 @@ implementation details behind H-Gripe-owned contracts.
 
 ### 1. Image Edit Viewport
 
-React keeps:
-
-- modal / panel shell
-- toolbar buttons
-- tool option panels
-- layer list
-- action buttons
-
-WGPU owns:
-
-- image underlay texture
-- mask overlay texture
-- brush cursor and brush preview
-- zoom / pan presentation
-- checkerboard / transparency background
-- layer compositing preview
-- lasso / pen / crop overlays where performance matters, as rendering only
-
-The edit document remains a lightweight operation document. Do not place pixels
-or base64 previews in React node state.
+This migration target is superseded for image-editor product architecture. The
+host remains reusable transport, but the editor now requires a retained
+per-layer scene, compact pixel resources/tiles, one logical pasteboard, and one
+camera projection. Exact ownership and acceptance tests live only in the active
+shared-canvas protocol.
 
 ### 2. Grade Preview Viewport
 
@@ -414,13 +413,10 @@ The WGPU viewport must consume the same target model as the production drawer:
 This prevents the image editor, grade tab, video preview, and timeline from
 inventing separate identity systems.
 
-For image-editor selections, the semantic authority is
-[`../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
-WGPU may render solid drafts, marching ants, mask/selection tint, and cached
-selection masks at viewport detail, but it must consume the existing overlay
-scene and selection ids. It must not decide whether a pen/lasso/marquee draft
-has become an active selection, and it must not enable `Ctrl+J` or selection
-commands by inspecting renderer state.
+For the image editor, WGPU is an implementation of the retained scene defined
+by the active shared-canvas protocol. It must use the same layer/camera matrix
+for pixels and interaction geometry and must not infer command state from
+renderer output.
 
 ### CPU Fallback
 
@@ -487,22 +483,9 @@ Exit criteria:
 
 ### Phase 2: Image Edit Viewport
 
-Goal: replace the heaviest image editor display path first.
-
-Tasks:
-
-1. Move underlay presentation from React image / canvas to WGPU texture.
-2. Move zoom and pan to viewport state.
-3. Draw mask overlay and brush preview in WGPU.
-4. Keep edit operations as the existing lightweight document.
-5. Keep React toolbar and panels unchanged where possible.
-
-Exit criteria:
-
-- image edit opens on demand
-- zoom / pan / brush preview stays responsive on large images
-- React state does not hold the underlay as a large `data:` URL
-- closing image edit releases viewport resources
+Historical phase, superseded. Do not reimplement its single-underlay migration
+tasks. Current exit criteria and migration order are in the active
+shared-canvas protocol.
 
 ### Phase 3: Grade Preview Viewport
 

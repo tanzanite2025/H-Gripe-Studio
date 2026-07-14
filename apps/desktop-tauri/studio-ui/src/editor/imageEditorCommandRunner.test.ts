@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   emptyLayerMask,
   emptyImageEditorDocument,
@@ -7,7 +7,7 @@ import {
 } from "../contracts/imageEditorDocument";
 import { runImageEditorCommand } from "./imageEditorCommandRunner";
 import type { ImageEditorAction } from "./imageEditorModal/actions";
-import type { ActiveSelection, SelectionDraft } from "./imageEditorModal/selection";
+import type { ActiveSelection } from "./imageEditorModal/selection";
 import type { StudioTarget } from "./studioTarget";
 
 function docWithTwoLayers(): ImageEditorDocument {
@@ -31,14 +31,13 @@ describe("runImageEditorCommand", () => {
     const doc = docWithTwoLayers();
     const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-1" };
     const { actions, dispatch } = capture();
+    const runLayerDuplicate = vi.fn();
 
     expect(runImageEditorCommand("layer.addMask", { doc, target, dispatch })).toBe(true);
-    expect(runImageEditorCommand("layer.duplicate", { doc, target, dispatch })).toBe(true);
+    expect(runImageEditorCommand("layer.duplicate", { doc, target, dispatch, runLayerDuplicate })).toBe(true);
 
-    expect(actions).toEqual([
-      { type: "layer_mask_add", index: 1 },
-      { type: "layer_duplicate" },
-    ]);
+    expect(actions).toEqual([{ type: "layer_mask_add", index: 1 }]);
+    expect(runLayerDuplicate).toHaveBeenCalledOnce();
   });
 
   it("deletes a mask target without deleting the whole layer", () => {
@@ -63,70 +62,31 @@ describe("runImageEditorCommand", () => {
     expect(toolId).toBe("move");
   });
 
-  it("routes layer duplicate with an active selection through Layer Via Copy", () => {
+  it("delegates layer duplicate to the unified asynchronous controller", () => {
     const doc = docWithTwoLayers();
     const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-1" };
-    const selection: ActiveSelection = {
-      region: [10, 20, 80, 90],
-      ellipse: false,
-      source: "rect_marquee",
-      combineMode: "replace",
-    };
     const { actions, dispatch } = capture();
-    let cleared = false;
+    const runLayerDuplicate = vi.fn();
 
     expect(runImageEditorCommand("layer.duplicate", {
       doc,
       target,
       dispatch,
-      includeSourceImage: true,
-      activeSelection: selection,
-      clearActiveSelection: () => {
-        cleared = true;
-      },
-    })).toBe(true);
-
-    expect(actions).toEqual([{
-      type: "layer_duplicate",
-      selection,
-      includeSourceImage: true,
-    }]);
-    expect(cleared).toBe(true);
-  });
-
-  it("does not duplicate or read pixels while a draft selection is uncommitted", () => {
-    const doc = docWithTwoLayers();
-    const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-1" };
-    const selection: ActiveSelection = {
-      region: [10, 20, 80, 90],
-      ellipse: false,
-      source: "rect_marquee",
-      combineMode: "replace",
-    };
-    const draft: SelectionDraft = {
-      region: [5, 6, 40, 44],
-      ellipse: false,
-      status: "closed",
-      source: "rect_marquee",
-      combineMode: "replace",
-    };
-    const { actions, dispatch } = capture();
-    let cleared = false;
-
-    expect(runImageEditorCommand("layer.duplicate", {
-      doc,
-      target,
-      dispatch,
-      includeSourceImage: true,
-      activeSelection: selection,
-      selectionDraft: draft,
-      clearActiveSelection: () => {
-        cleared = true;
-      },
+      runLayerDuplicate,
     })).toBe(true);
 
     expect(actions).toEqual([]);
-    expect(cleared).toBe(false);
+    expect(runLayerDuplicate).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim duplicate when no duplicate controller is installed", () => {
+    const doc = docWithTwoLayers();
+    const target: StudioTarget = { kind: "pixel_layer", canvasId: "canvas", documentId: "doc", layerId: "layer-1" };
+    const { actions, dispatch } = capture();
+
+    expect(runImageEditorCommand("layer.duplicate", { doc, target, dispatch })).toBe(false);
+
+    expect(actions).toEqual([]);
   });
 
   it("routes selection commands through the shared resolver", () => {

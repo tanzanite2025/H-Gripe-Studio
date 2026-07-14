@@ -42,6 +42,39 @@ describe("decodeFramePayload", () => {
     expect(frame.width).toBe(640);
   });
 
+  it("decodes image layer scene metadata from the same frame payload", () => {
+    const selectedLayerFrame = {
+      owner: "selected-layer-frame",
+      shape: "axis-aligned-rect",
+      layerId: "layer-1",
+      rect: [25, 30, 125, 130],
+      sourceRect: [0, 0, 100, 100],
+      source: "asset-frame",
+    };
+    const frame = decodeFramePayload(
+      payload(
+        {
+          width: 640,
+          height: 360,
+          backend: BACKEND,
+          selectedLayerFrame,
+          documentKey: "doc-1",
+          transactionId: "move-1",
+          sequence: 4,
+        },
+        new Uint8Array([0x89]),
+      ),
+    );
+
+    expect(frame).toMatchObject({
+      selectedLayerFrame,
+      documentKey: "doc-1",
+      transactionId: "move-1",
+      sequence: 4,
+    });
+    URL.revokeObjectURL(frame.data_url);
+  });
+
   it("accepts an ArrayBuffer payload", () => {
     const bytes = payload({ width: 1, height: 1, backend: BACKEND }, new Uint8Array([1]));
     const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);

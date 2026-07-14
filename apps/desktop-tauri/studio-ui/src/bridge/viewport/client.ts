@@ -85,6 +85,12 @@ export function createTauriViewportClient(invoke: Invoke): ViewportClient {
     async setViewportOverlayScene(viewportId, scene) {
       await invoke("viewport_set_overlay_scene", { viewportId, scene });
     },
+    async setViewportImageScene(viewportId, scene) {
+      await invoke("viewport_set_image_scene", { viewportId, scene });
+    },
+    async presentImageLayerScene(viewportId, presentation) {
+      await invoke("viewport_present_image_layer_scene", { viewportId, presentation });
+    },
     async setViewportView(viewportId, zoom, panX, panY) {
       await invoke("viewport_set_view", { viewportId, zoom, panX, panY });
     },

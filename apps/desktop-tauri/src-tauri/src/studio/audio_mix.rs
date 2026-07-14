@@ -701,7 +701,10 @@ mod tests {
     #[test]
     fn waveform_peaks_clamp_to_full_scale_and_handle_empty_input() {
         let pcm = [1.5f32, -2.0];
-        assert_eq!(waveform_peaks_from_interleaved_stereo_pcm(&pcm, 1), vec![1.0]);
+        assert_eq!(
+            waveform_peaks_from_interleaved_stereo_pcm(&pcm, 1),
+            vec![1.0]
+        );
         assert!(waveform_peaks_from_interleaved_stereo_pcm(&[], 4).is_empty());
         assert!(waveform_peaks_from_interleaved_stereo_pcm(&pcm, 0).is_empty());
     }

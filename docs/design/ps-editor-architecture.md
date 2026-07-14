@@ -6,6 +6,13 @@ Photoshop-grade integrated image editor. This is not a one-shot re-implementatio
 so every PS feature lands as an increment on the same skeleton and nothing has
 to be rebuilt from scratch.
 
+Rendering and layer positioning are not defined in this roadmap. The sole
+authority for shared logical canvas, compact layer pixels/tiles, viewport
+composition, camera navigation, dragging, selected-layer frames, Image Size,
+and `Ctrl+J` is
+[`../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+Any older wording below must be interpreted through that protocol.
+
 ## 1. Existing foundation (in place / directly reusable)
 
 | Foundation | Status | Why it matters for PS parity |
@@ -134,29 +141,29 @@ brightness-contrast as `AdjustmentLayer` (the 16-bit working space pays off
 directly); gaussian blur / sharpen as filter Ops. From here on, every feature is
 a "registry row + one pure Rust function" increment.
 
-**M7 — Performance layer.** `image_buffer` → tile cache (256 px tiles); the
-compositor recomputes dirty tiles only; large-image interaction validated (8K
-scenarios). M7 comes after M3 because tiling should wait for the compositor's
-shape to stabilise.
+**M7 — Retained layer compositor.** Layers share one logical
+document/pasteboard space and store tight pixel resources, migrating to 256 px
+sparse tiles. One viewport compositor recomputes dirty visible tiles only; the
+pasteboard never becomes a bitmap and layers never receive full-document
+canvases. Validate 8K and high-layer-count memory before completion.
 
-**M8 — Canvas navigation.** Zoom / pan as a pure view layer (a CSS transform
-on the canvas; the document and the M7 render path are untouched): `H` hand
-tool, `Z` zoom tool (click in / Alt+click out, cursor-anchored), Space-hold
-pan with any tool, `Ctrl+=` / `Ctrl+-` / `Ctrl+0` (fit) / `Ctrl+1` (100%).
-Follows M7 so 100% zoom on 8K images lands on an interaction that stays cheap.
+**M8 — Camera navigation.** Zoom, pan, and rotate-view update only the retained
+scene camera matrix; document data, pasteboard bounds, layer resources, and
+pixel revisions stay untouched. `H` is hand, `Z` is cursor-anchored zoom,
+Space pans with any tool, and `Ctrl+=` / `Ctrl+-` / `Ctrl+0` / `Ctrl+1` control
+the camera. Pixels, yellow frames, handles, and hit testing share this matrix.
 
 **M9 — Selection commands.** Implementation authority:
 [`../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
 `Ctrl+A` select all and `Delete` as recorded ops (`select_all` / `delete` —
 history steps, replayed identically by the proxy and the Rust run, unlike
-`Ctrl+D` clear which wipes the stack itself); `Ctrl+Shift+D` reselect
-(restores the last snapshot a clear dropped, itself undoable); `Ctrl+J`
-duplicates via copy from the active editable pixel layer, clipped by the active
-marching-ants selection when one exists. `Ctrl+J` reads the layer's
-`LayerPixelReadSource` at command time, including its current placement, scale,
-transform, and compositor/materializer interpretation. It must never consume a
-solid selection draft, read from toolbar/overlay/preview pixels, or branch on
-whether the selection came from pen, marquee, lasso, wand, or model assist.
+`Ctrl+D` clear which wipes the stack itself); `Ctrl+Shift+D` reselect restores
+the last selection snapshot. `Ctrl+J` without a selection duplicates compact
+pixel storage, placement, and transform at the same document position. With an
+active selection it rasterizes the final selected pixels into a tight resource,
+writes the copied document bounds as the new placement, and uses identity
+transform. It never positions a duplicate with `clip.region`, never reads a
+selection draft or preview pixels, and never branches on the source tool.
 
 **M10 — Gradient tool.** `G` gradient as a recorded `gradient` op: dragging a
 start → end vector composites a linear selection ramp (full at the start,

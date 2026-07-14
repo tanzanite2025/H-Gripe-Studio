@@ -11,6 +11,7 @@ import type { ToolSlotsController } from "./useToolSlots";
 import type { BrushParamsController } from "./useBrushParams";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 import { resolveSelectionCommand, type SelectionCommandId } from "./selectionCommands";
+import type { CommandId } from "../studioCommands";
 
 interface UseImageEditorShortcutsArgs {
   workspace: "image" | "mask";
@@ -34,6 +35,7 @@ interface UseImageEditorShortcutsArgs {
   setScreenMode: Dispatch<SetStateAction<0 | 1 | 2>>;
   closePenPath: () => void;
   requestClose: () => void;
+  runCommand: (id: CommandId) => void;
 }
 
 export interface ImageEditorShortcutsController {
@@ -59,6 +61,7 @@ export function useImageEditorShortcuts({
   setScreenMode,
   closePenPath,
   requestClose,
+  runCommand,
 }: UseImageEditorShortcutsArgs): ImageEditorShortcutsController {
   const openFreeTransform = () => {
     toolSlots.selectTool("move");
@@ -67,7 +70,6 @@ export function useImageEditorShortcuts({
 
   const runSelectionCommand = (id: SelectionCommandId): boolean => {
     const resolution = resolveSelectionCommand(id, {
-      workspace,
       activeSelection: activeSelectionRef.current,
       selectionDraft,
     });
@@ -105,7 +107,7 @@ export function useImageEditorShortcuts({
     },
     reselect: () => dispatch({ type: "reselect" }),
     duplicate: () => {
-      runSelectionCommand("duplicate");
+      runCommand("layer.duplicate");
     },
     invert: () => {
       runSelectionCommand("invert");

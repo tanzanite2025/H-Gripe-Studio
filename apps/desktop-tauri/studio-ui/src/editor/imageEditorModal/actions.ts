@@ -5,6 +5,7 @@ import {
   addAdjustmentLayer,
   addBrushStroke,
   addImageLayer,
+  addImageLayers,
   addMatteStroke,
   addOperation,
   addPath,
@@ -12,6 +13,7 @@ import {
   addLayer,
   addLayerMask,
   clearEdits,
+  commitMaterializedLayerViaCopy,
   duplicateLayer,
   jumpToHistorySnapshot,
   mergeLayers,
@@ -42,12 +44,12 @@ import {
   updatePathAnchors,
   withExplicitBaseSource,
   type EditState,
-  type LayerCopySelection,
-  type TransformParams,
 } from "../imageEditorState";
+import type { TransformParams } from "../imageLayerTransform";
 import {
   type AdjustmentType,
   type ImageCanvasSize,
+  type ImageEditorDocument,
   type LayerAdjustment,
   type LayerBlend,
   type LayerGroup,
@@ -59,6 +61,7 @@ import {
   type EditPath,
   type EditPathPoint,
   type LayerImageSource,
+  type MaterializedLayerViaCopy,
   type ImageEditOperation,
   type PointPrompt,
 } from "../../contracts/imageEditOps";
@@ -74,7 +77,13 @@ export type ImageEditorAction =
   | { type: "history_jump"; index: number }
   | { type: "clear" }
   | { type: "reselect" }
-  | { type: "layer_duplicate"; selection?: LayerCopySelection | null; includeSourceImage?: boolean }
+  | { type: "layer_duplicate" }
+  | {
+      type: "layer_via_copy_commit";
+      baseDocument: ImageEditorDocument;
+      sourceLayerId: string;
+      materialized: MaterializedLayerViaCopy;
+    }
   | { type: "remove_op"; index: number }
   | { type: "toggle_op"; index: number }
   | { type: "op_amount"; index: number; amount: number }
@@ -82,6 +91,7 @@ export type ImageEditorAction =
   | { type: "path_anchors"; index: number; points: EditPathPoint[] }
   | { type: "layer_add"; name?: string }
   | { type: "layer_add_image"; source: LayerImageSource; canvas: { w: number; h: number }; name?: string }
+  | { type: "layer_add_images"; sources: LayerImageSource[]; canvas: { w: number; h: number } }
   | { type: "base_source"; source: LayerImageSource }
   | { type: "layer_add_adjustment"; adjType: AdjustmentType; name?: string }
   | { type: "layer_adjustment"; index: number; adjustment: LayerAdjustment }
@@ -135,7 +145,14 @@ export function imageEditorReducer(state: EditState, action: ImageEditorAction):
     case "reselect":
       return reselect(state);
     case "layer_duplicate":
-      return duplicateLayer(state, action.selection, { includeSourceImage: action.includeSourceImage });
+      return duplicateLayer(state);
+    case "layer_via_copy_commit":
+      return commitMaterializedLayerViaCopy(
+        state,
+        action.baseDocument,
+        action.sourceLayerId,
+        action.materialized,
+      );
     case "remove_op":
       return removeOp(state, action.index);
     case "toggle_op":
@@ -150,6 +167,12 @@ export function imageEditorReducer(state: EditState, action: ImageEditorAction):
       return addLayer(state, action.name);
     case "layer_add_image":
       return addImageLayer(state, action.source, action.canvas, action.name);
+    case "layer_add_images":
+      return addImageLayers(
+        state,
+        action.sources.map((source) => ({ source })),
+        action.canvas,
+      );
     case "base_source":
       return withExplicitBaseSource(state, action.source);
     case "layer_add_adjustment":

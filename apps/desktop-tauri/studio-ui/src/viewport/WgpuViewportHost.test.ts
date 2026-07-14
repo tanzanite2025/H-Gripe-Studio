@@ -50,6 +50,56 @@ describe("WgpuViewportHost", () => {
     await host.close();
   });
 
+  it("presents an image layer scene transaction without replacing its target", async () => {
+    const host = await WgpuViewportHost.open("image_edit");
+    await host.command({
+      kind: "set_target",
+      target: {
+        kind: "image_composite",
+        resourceId: "res-1",
+        document: { layers: [] },
+        documentKey: "doc-1",
+        documentWidth: 640,
+        documentHeight: 480,
+      },
+    });
+    await host.command({ kind: "resize", width: 640, height: 480 });
+    await host.command({
+      kind: "set_image_scene",
+      scene: {
+        document: { layers: [] },
+        documentKey: "doc-1",
+        documentWidth: 640,
+        documentHeight: 480,
+        frameX: 0,
+        frameY: 0,
+        frameWidth: 640,
+        frameHeight: 480,
+      },
+    });
+    const baseline = {
+      selectedLayerId: "layer-1",
+      transactionId: "move-1",
+      baseDocumentKey: "doc-1",
+      sequence: 0,
+      moveDraft: null,
+    };
+
+    await host.command({ kind: "present_image_layer_scene", presentation: baseline });
+    await host.command({
+      kind: "present_image_layer_scene",
+      presentation: { ...baseline, sequence: 1, moveDraft: { dx: 12, dy: 7 } },
+    });
+    const frame = await host.renderFrame();
+    expect(frame).toMatchObject({
+      documentKey: "doc-1",
+      transactionId: "move-1",
+      sequence: 1,
+    });
+    expect(viewportClient.openViewportCount()).toBe(1);
+    await host.close();
+  });
+
   it("accepts a mask overlay on image_edit viewports only, and validates it", async () => {
     const overlay = {
       w: 2,

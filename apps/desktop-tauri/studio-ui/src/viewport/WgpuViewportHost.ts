@@ -7,12 +7,14 @@ import {
   createViewport,
   destroyViewport,
   exportViewportFrame,
+  presentImageLayerScene,
   presentViewportView,
   readViewportPixels,
   renderViewportFrame,
   resizeViewport,
   setViewportClipProps,
   setViewportGrade,
+  setViewportImageScene,
   setViewportMaskOverlay,
   setViewportOverlayScene,
   setViewportPlacement,
@@ -24,12 +26,14 @@ import {
   type ViewportFrameExportResult,
   type ViewportFrame,
   type ViewportKind,
+  type ViewportImageScene,
   type ViewportMaskOverlay,
   type ViewportOverlayScene,
   type ViewportPlacement,
   type ViewportPlacementReport,
   type ViewportPixels,
   type ViewportTarget,
+  type ImageLayerScenePresentation,
 } from "../bridge/viewport";
 
 export type ViewportCommand =
@@ -52,6 +56,12 @@ export type ViewportCommand =
    * video_preview viewports): selection outlines and safe-area guides drawn
    * host-side at the view window's detail. */
   | { kind: "set_overlay_scene"; scene: ViewportOverlayScene | null }
+  /** Commit a complete image document scene while keeping the resource target
+   * and viewport host stable. */
+  | { kind: "set_image_scene"; scene: ViewportImageScene }
+  /** Atomically select the retained image layer scene transaction and its
+   * current absolute move draft. This changes render geometry only. */
+  | { kind: "present_image_layer_scene"; presentation: ImageLayerScenePresentation }
   /** Native surface presentation (surface swap Phase S1): the element rect
    * the host's surface window sits under, and whether it is shown at all. */
   | { kind: "set_placement"; placement: ViewportPlacement }
@@ -109,6 +119,12 @@ export class WgpuViewportHost {
         return;
       case "set_overlay_scene":
         await setViewportOverlayScene(this.id(), cmd.scene);
+        return;
+      case "set_image_scene":
+        await setViewportImageScene(this.id(), cmd.scene);
+        return;
+      case "present_image_layer_scene":
+        await presentImageLayerScene(this.id(), cmd.presentation);
         return;
       case "set_placement":
         await setViewportPlacement(this.id(), cmd.placement);

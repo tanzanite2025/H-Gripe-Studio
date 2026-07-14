@@ -185,6 +185,9 @@ mod tests {
         // has not initialised, the entry says so instead of triggering init.
         #[cfg(feature = "viewport-surface")]
         {
+            let _guard = super::super::wgpu_device::SHARED_GPU_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let initialised_before = super::super::wgpu_device::shared_gpu_initialised();
             let snap = snapshot();
             assert_eq!(

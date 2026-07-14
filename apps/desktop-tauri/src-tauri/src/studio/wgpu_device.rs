@@ -46,6 +46,10 @@ pub(crate) struct SurfaceDeviceReport {
 #[cfg(feature = "viewport-surface")]
 static SHARED: OnceLock<Result<Arc<SharedGpu>, String>> = OnceLock::new();
 
+/// Serialises tests that observe or initialise the process-wide shared GPU.
+#[cfg(all(test, feature = "viewport-surface"))]
+pub(crate) static SHARED_GPU_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// The resolved surface presentation capability for this process: recorded
 /// once when the first viewport surface configures (or permanently fails)
 /// and reused by every heavy viewport afterwards, so support is decided one
@@ -497,17 +501,29 @@ mod tests {
 
     #[test]
     fn report_vocabulary_is_shared() {
-        // Whatever the machine, the report must resolve to the shared
-        // vocabulary: wgpu with an adapter summary, or cpu with a reason.
+        // Whatever the process-wide initialisation state, the report must
+        // resolve to the shared vocabulary. A CPU fallback may still carry
+        // the adapter summary when WGPU initialised with a generic device
+        // that cannot present to a surface.
         let report = surface_device_report();
         match report.used {
             DeviceUsed::Wgpu => {
-                assert!(report.backend.is_some());
+                let backend = report.backend.as_deref().expect("wgpu backend detail");
+                assert!(!backend.trim().is_empty(), "wgpu backend detail is empty");
                 assert!(report.fallback_reason.is_none());
             }
             DeviceUsed::Cpu => {
-                assert!(report.backend.is_none());
-                assert!(report.fallback_reason.is_some());
+                if let Some(backend) = report.backend.as_deref() {
+                    assert!(
+                        !backend.trim().is_empty(),
+                        "cpu fallback backend detail is empty"
+                    );
+                }
+                let reason = report
+                    .fallback_reason
+                    .as_deref()
+                    .expect("cpu fallback reason");
+                assert!(!reason.trim().is_empty(), "cpu fallback reason is empty");
             }
             other => panic!("unexpected device: {}", other.as_str()),
         }
@@ -544,6 +560,9 @@ mod tests {
     #[cfg(feature = "viewport-surface")]
     #[test]
     fn failed_init_is_cached() {
+        let _guard = SHARED_GPU_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Two calls must agree — the OnceLock caches the outcome either way.
         let a = shared_gpu().map(|g| g.adapter_summary.clone());
         let b = shared_gpu().map(|g| g.adapter_summary.clone());

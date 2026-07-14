@@ -2,7 +2,8 @@
 // (Shift+F5) and the Image Size dialog (Ctrl+Alt+I) — three "draft +
 // open / apply / close" clusters the modal shell surfaces.
 import { useCallback, useRef, useState } from "react";
-import { activeOps, type EditState, type TransformParams } from "../imageEditorState";
+import { activeOps, type EditState } from "../imageEditorState";
+import type { TransformParams } from "../imageLayerTransform";
 import { isBrushOp, isPathOp, type EditOp } from "../../contracts/imageEditOps";
 import { type ImageResample } from "../../contracts/imageEditorDocument";
 import type { FillDraft, ImageEditorDispatch } from "./actions";

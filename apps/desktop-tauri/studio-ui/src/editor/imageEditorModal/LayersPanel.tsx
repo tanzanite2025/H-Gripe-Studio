@@ -12,15 +12,16 @@ import {
   type ImageEditorLayer,
 } from "../../contracts/imageEditorDocument";
 import { LAYER_BLENDS } from "../../contracts/imageEditorDocument";
-import { hasSourceImageContent, LAYER_GROUP_COLORS, SOURCE_IMAGE_OP_TYPE } from "../imageEditorState";
-import { runImageEditorCommand } from "../imageEditorCommandRunner";
+import { LAYER_GROUP_COLORS } from "../imageEditorState";
 import { buildLayerThumb } from "../maskMorphology";
 import { getCommand, getCommandCapability, type CommandId } from "../studioCommands";
 import type { StudioTarget } from "../studioTarget";
-import { imageLayerHasSourceContent, layerSourceImageOp } from "../imageCompositeSource";
+import {
+  imageLayerHasSourceContent,
+  layerSourceImageOp,
+} from "../imageLayerSource";
 import type { ImageEditorDispatch } from "./actions";
 import { LayerRowLockToggle } from "./LayerRowLockToggle";
-import type { ActiveSelection, SelectionDraft } from "./selection";
 
 const LAYER_MIME = "application/x-hgripe-layer";
 const MAX_THUMBNAIL_CACHE = 64;
@@ -41,12 +42,11 @@ interface LayersPanelProps {
   /** Product surface: the image workspace's bottom layer is the image itself,
    * so it keeps the file's name and thumbnail even once it records edits. */
   workspace?: "image" | "mask";
-  activeSelection?: ActiveSelection | null;
-  selectionDraft?: SelectionDraft | null;
   dispatch: ImageEditorDispatch;
+  runCommand: (id: CommandId) => void;
+  layerDuplicatePending?: boolean;
   /** Called before any layer switch/removal to drop an in-flight anchor edit. */
   onBeforeLayerChange: () => void;
-  clearActiveSelection?: () => void;
 }
 
 function loadLayerThumbnail(imagePath: string, size = 96): Promise<string | null> {
@@ -120,20 +120,14 @@ function SourceImageLayerThumb({
   imagePath,
   layer,
   dims,
-  implicitSource = false,
 }: {
   imagePath: string;
   layer: ImageEditorLayer;
   dims: { w: number; h: number };
-  implicitSource?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
-  const thumbLayer = useMemo<ImageEditorLayer>(() => {
-    if (!implicitSource || hasSourceImageContent(layer)) return layer;
-    return { ...layer, ops: [{ type: SOURCE_IMAGE_OP_TYPE }, ...layer.ops] };
-  }, [implicitSource, layer]);
-  const thumb = useMemo(() => buildLayerThumb(thumbLayer, dims), [thumbLayer, dims.w, dims.h]);
+  const thumb = useMemo(() => buildLayerThumb(layer, dims), [layer, dims.w, dims.h]);
 
   useEffect(() => {
     let alive = true;
@@ -283,11 +277,10 @@ export function LayersPanel({
   dims,
   imagePath,
   workspace = "mask",
-  activeSelection = null,
-  selectionDraft = null,
   dispatch,
+  runCommand,
+  layerDuplicatePending = false,
   onBeforeLayerChange,
-  clearActiveSelection,
 }: LayersPanelProps) {
   const t = useT();
   const activeLayer = layers[active];
@@ -414,16 +407,7 @@ export function LayersPanel({
     return reason ? `${title} - ${reason}` : title;
   };
   const runLayerCommand = (id: CommandId) => {
-    runImageEditorCommand(id, {
-      doc,
-      target: activeStudioTarget,
-      dispatch,
-      beforeStructuralChange: onBeforeLayerChange,
-      includeSourceImage: workspace === "image",
-      activeSelection,
-      selectionDraft,
-      clearActiveSelection,
-    });
+    runCommand(id);
   };
 
   return (
@@ -512,12 +496,12 @@ export function LayersPanel({
         {[...layers].map((_, ri) => layers.length - 1 - ri).map((i) => {
           const layer = layers[i];
           const group = layer.groupId ? groupById.get(layer.groupId) : undefined;
-          // The image workspace's pixel layers can draw the backing image:
-          // the bottom layer implicitly, and source_image copies explicitly.
+          // Image pixels are present only when the layer owns an explicit
+          // enabled source_image placement.
           const showSourceImage = Boolean(
               imagePath &&
               workspace === "image" &&
-              imageLayerHasSourceContent(layer, i),
+              imageLayerHasSourceContent(layer),
           );
           const showPlainBaseImage = Boolean(
             imagePath &&
@@ -562,7 +546,7 @@ export function LayersPanel({
                 {showPlainBaseImage && imagePath ? (
                   <BaseImageThumb imagePath={imagePath} />
                 ) : showSourceImage && layerImagePath ? (
-                  <SourceImageLayerThumb imagePath={layerImagePath} layer={layer} dims={dims} implicitSource={i === 0} />
+                  <SourceImageLayerThumb imagePath={layerImagePath} layer={layer} dims={dims} />
                 ) : layer.kind === "adjustment" ? (
                   "ADJ"
                 ) : (
@@ -681,6 +665,7 @@ export function LayersPanel({
             )}
             <button
               className="mask-flyout-item"
+              disabled={layerDuplicatePending}
               onClick={() => {
                 runLayerCommand("layer.duplicate");
                 setMenu(null);
@@ -772,7 +757,7 @@ export function LayersPanel({
           className="mask-layer-action"
           title={titleFor("layer.duplicate", duplicateCapability.reason)}
           aria-label={titleFor("layer.duplicate", duplicateCapability.reason)}
-          disabled={!duplicateCapability.enabled}
+          disabled={!duplicateCapability.enabled || layerDuplicatePending}
           onClick={() => runLayerCommand("layer.duplicate")}
         >
           <LayerActionIcon icon="duplicate" />

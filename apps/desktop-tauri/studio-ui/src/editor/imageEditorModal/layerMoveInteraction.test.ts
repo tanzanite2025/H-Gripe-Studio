@@ -7,7 +7,11 @@ import type { PointerEnv, Pt } from "./pointer/types";
 
 const moveTool = IMAGE_EDITOR_TOOLS.find((tool) => tool.id === "move")!;
 
-function envWith(setMoveDraft = vi.fn()): PointerEnv {
+function envWith(
+  setMoveDraft = vi.fn(),
+  completeMoveDraft = vi.fn(),
+  beginMovePreview = vi.fn(),
+): PointerEnv {
   return {
     tool: moveTool,
     toolId: "move",
@@ -34,6 +38,8 @@ function envWith(setMoveDraft = vi.fn()): PointerEnv {
     cropLock: false,
     toImage: () => [0, 0],
     canStartSelectedLayerMove: () => true,
+    resolveSelectedLayerMoveDelta: (delta) => delta,
+    beginMovePreview,
     viewBase: () => [100, 100],
     pointerAngle: () => 0,
     viewRotate: () => 0,
@@ -50,6 +56,7 @@ function envWith(setMoveDraft = vi.fn()): PointerEnv {
     setActiveSelection: vi.fn(),
     setSelectionDraft: vi.fn(),
     setMoveDraft,
+    completeMoveDraft,
     setColorSamples: vi.fn(),
     sampleUnderlay: vi.fn(),
     captureEdgeMap: vi.fn(),
@@ -61,13 +68,15 @@ function envWith(setMoveDraft = vi.fn()): PointerEnv {
 }
 
 describe("layerMoveInteraction", () => {
-  it("does not publish a zero move draft on pointer down", () => {
+  it("begins one preview transaction without publishing a zero delta", () => {
     const setMoveDraft = vi.fn();
+    const beginMovePreview = vi.fn();
     const g = createPointerGestures();
 
-    beginSelectedLayerMove(envWith(setMoveDraft), g, [10, 10]);
+    beginSelectedLayerMove(envWith(setMoveDraft, vi.fn(), beginMovePreview), g, [10, 10]);
 
     expect(g.moveDrag).toEqual({ start: [10, 10], end: [10, 10] });
+    expect(beginMovePreview).toHaveBeenCalledOnce();
     expect(setMoveDraft).not.toHaveBeenCalled();
   });
 
@@ -86,15 +95,50 @@ describe("layerMoveInteraction", () => {
 
   it("clears the draft after a click without committing a transform", () => {
     const setMoveDraft = vi.fn();
+    const completeMoveDraft = vi.fn();
     const dispatch = vi.fn();
     const g = createPointerGestures();
-    const env = { ...envWith(setMoveDraft), dispatch };
+    const env = { ...envWith(setMoveDraft, completeMoveDraft), dispatch };
     beginSelectedLayerMove(env, g, [10, 10]);
 
     expect(commitSelectedLayerMove(env, g)).toBe(true);
 
     expect(dispatch).not.toHaveBeenCalled();
-    expect(setMoveDraft).toHaveBeenLastCalledWith(null);
+    expect(setMoveDraft).not.toHaveBeenCalled();
+    expect(completeMoveDraft).toHaveBeenCalledWith(null);
+  });
+
+  it("commits the synchronous gesture delta and finishes the preview transaction", () => {
+    const completeMoveDraft = vi.fn();
+    const dispatch = vi.fn();
+    const g = createPointerGestures();
+    const env = { ...envWith(vi.fn(), completeMoveDraft), dispatch };
+    beginSelectedLayerMove(env, g, [10, 10]);
+    g.moveDrag!.end = [19, 14];
+
+    expect(commitSelectedLayerMove(env, g)).toBe(true);
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "op", op: { type: "transform", dx: 9, dy: 4 } });
+    expect(completeMoveDraft).toHaveBeenCalledWith([9, 4]);
+  });
+
+  it("uses the same clamped delta for preview and commit", () => {
+    const setMoveDraft = vi.fn();
+    const dispatch = vi.fn();
+    const g = createPointerGestures();
+    const env = {
+      ...envWith(setMoveDraft),
+      dispatch,
+      resolveSelectedLayerMoveDelta: vi.fn(() => [3, -2] as Pt),
+      toImage: () => [30, 40] as Pt,
+    };
+    beginSelectedLayerMove(env, g, [10, 10]);
+
+    updateSelectedLayerMove(env, g, {} as React.PointerEvent);
+    commitSelectedLayerMove(env, g);
+
+    expect(setMoveDraft).toHaveBeenLastCalledWith([3, -2]);
+    expect(dispatch).toHaveBeenCalledWith({ type: "op", op: { type: "transform", dx: 3, dy: -2 } });
   });
 
   it("does not begin an image-layer move from a blank hit", () => {

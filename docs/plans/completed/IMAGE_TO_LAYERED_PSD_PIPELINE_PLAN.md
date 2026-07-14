@@ -494,8 +494,7 @@ Reports/
 - Python 不回到核心桌面 runtime；如需研究、golden fixture 或重模型实验，
   只能作为外部工具/插件边界存在。
 
-这和 [`PYTHON_TO_RUST_MIGRATION_PLAN.md`](PYTHON_TO_RUST_MIGRATION_PLAN.md)
-的原则一致。
+这和已完成的 Rust PSD 迁移原则一致。
 
 ## 和 GPU / 设备策略的关系
 

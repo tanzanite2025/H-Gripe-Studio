@@ -205,6 +205,16 @@ pub(crate) fn destroy_surface(app: &tauri::AppHandle, viewport_id: &str) {
 #[cfg(not(all(windows, feature = "viewport-surface")))]
 pub(crate) fn destroy_surface(_app: &tauri::AppHandle, _viewport_id: &str) {}
 
+/// Drop pixels for an obsolete target/size before another view can re-present
+/// them. The surface window stays alive and is cleared in place.
+#[cfg(all(windows, feature = "viewport-surface"))]
+pub(crate) fn invalidate_content(viewport_id: &str) {
+    native::invalidate_content(viewport_id);
+}
+
+#[cfg(not(all(windows, feature = "viewport-surface")))]
+pub(crate) fn invalidate_content(_viewport_id: &str) {}
+
 /// Present a rendered frame on the viewport's native surface window (surface
 /// swap Phase S2): upload the pixels as a texture and blit aspect-fit over
 /// the app background. Returns `true` when the frame is on the surface — the
@@ -974,6 +984,30 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 eprintln!("[viewport] surface present fell back for {viewport_id}: {reason}");
                 false
             }
+        }
+    }
+
+    pub(super) fn invalidate_content(viewport_id: &str) {
+        let gpu = match shared_gpu_cached() {
+            Some(Ok(gpu)) if gpu.surface_compatible => Some(gpu),
+            _ => None,
+        };
+        let mut map = match surfaces().lock() {
+            Ok(map) => map,
+            Err(_) => return,
+        };
+        let Some(entry) = map.get_mut(viewport_id) else {
+            return;
+        };
+        entry.frame_tex = None;
+        entry.frame_view = (1.0, 0.0, 0.0);
+        entry.crop_view = None;
+        let (Some(gpu), Some(config)) = (gpu, entry.config.as_ref()) else {
+            return;
+        };
+        let (width, height) = (config.width, config.height);
+        if let Err(reason) = clear_surface(&gpu, entry, width, height) {
+            eprintln!("[viewport] failed to clear obsolete frame for {viewport_id}: {reason}");
         }
     }
 

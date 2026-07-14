@@ -11,16 +11,15 @@ export interface ImageEditorCommandEnv {
   dispatch: ImageEditorDispatch;
   beforeStructuralChange?: () => void;
   setToolId?: (toolId: string) => void;
-  includeSourceImage?: boolean;
   activeSelection?: ActiveSelection | null;
   selectionDraft?: SelectionDraft | null;
   clearActiveSelection?: () => void;
   clearSelectionDraft?: () => void;
+  runLayerDuplicate?: () => void;
 }
 
 function runSelectionCommand(id: SelectionCommandId, env: ImageEditorCommandEnv): boolean {
   const resolution = resolveSelectionCommand(id, {
-    workspace: env.includeSourceImage ? "image" : "mask",
     activeSelection: env.activeSelection ?? null,
     selectionDraft: env.selectionDraft ?? null,
   });
@@ -52,7 +51,9 @@ export function runImageEditorCommand(id: CommandId, env: ImageEditorCommandEnv)
       dispatch({ type: "layer_mask_add", index: active });
       return true;
     case "layer.duplicate":
-      return runSelectionCommand("duplicate", env);
+      if (!env.runLayerDuplicate) return false;
+      env.runLayerDuplicate();
+      return true;
     case "layer.add":
       dispatch({ type: "layer_add" });
       return true;

@@ -19,11 +19,11 @@ import {
   activeOps,
   currentHistoryIndex,
   editCount,
-  hasSourceImageContent,
   historySnapshots,
   initEditState,
   type EditState,
 } from "./imageEditorState";
+import { hasSourceImageContent } from "./imageLayerSource";
 import { type LayerAdjustment, type ImageEditorDocument } from "../contracts/imageEditorDocument";
 import { activeTargetKind } from "../contracts/imageEditorDocument";
 import { imageEditorReducer, type ImageEditorAction } from "./imageEditorModal/actions";
@@ -63,6 +63,7 @@ import { useBrushParams } from "./imageEditorModal/useBrushParams";
 import { useToolSlots } from "./imageEditorModal/useToolSlots";
 import { useMaskPreviewController } from "./imageEditorModal/useMaskPreviewController";
 import { useImageEditorShortcuts } from "./imageEditorModal/useImageEditorShortcuts";
+import { useLayerDuplicateCommand } from "./imageEditorModal/useLayerDuplicateCommand";
 import {
   createPolygonSelection,
   pointInSelection,
@@ -71,14 +72,22 @@ import {
   type SelectionDraft,
 } from "./imageEditorModal/selection";
 import { applyActiveSelectionClip } from "./imageEditorModal/selectionActions";
-import { listenFileDrop, probeImageDims } from "../bridge/tauri";
+import { probeImageDims } from "../bridge/tauri";
 import { useSelectionController } from "./imageEditorModal/useSelectionController";
-import { useUnderlayController } from "./imageEditorModal/useUnderlayController";
-import { useSelectedLayerFramePresentation } from "./imageEditorModal/useSelectedLayerFramePresentation";
-import { usePreloadedSelectedLayerMoveSurfaceForCurrentLayerAndViewport } from "./imageEditorModal/selectedLayerMove/usePreloadedSelectedLayerMoveSurfaceForCurrentLayerAndViewport";
-import { createSelectedLayerMoveDraftStore } from "./imageEditorModal/selectedLayerMove/selectedLayerMoveDraftStore";
+import { useImageEditorViewport } from "./imageEditorModal/useImageEditorViewport";
+import {
+  createLayerMovePreviewStore,
+  useLayerMovePreviewTransaction,
+} from "./imageEditorModal/layerMovePreviewStore";
 import { readSelectionAssistPixels } from "./selectionAssistRead";
 import { ASSISTED_SELECTION_TOOL_IDS, GEOMETRY_SELECTION_TOOL_IDS } from "./imageEditorModal/selectionToolProtocol";
+import { nativeFileDropRouter } from "../app/nativeFileDropRouter";
+import {
+  isImageEditorDropOwner,
+  isImageEditorStageDrop,
+  resolveDroppedImageSources,
+} from "./imageEditorModal/imageDrop";
+import { clampSelectedLayerMoveDelta } from "./imageEditorModal/layerMoveBounds";
 
 const EMPTY_DOCUMENT_DIMS = { w: 1, h: 1 };
 const SELECTION_TOP_SLOT_IDS = ["marquee", "lasso", "selection", "pen"] as const;
@@ -396,32 +405,34 @@ export function ImageEditorModal({
       }),
     [workspace, selectionDraft, activeSelection, antsPhase, frameDims.w, frameDims.h, previewing, state, editingPath, colorSamples],
   );
-  const selectedLayerMoveDraftStore = useMemo(() => createSelectedLayerMoveDraftStore(), []);
+  const layerMovePreviewStore = useMemo(() => createLayerMovePreviewStore(), []);
+  const layerMovePreview = useLayerMovePreviewTransaction(layerMovePreviewStore);
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false);
-  useEffect(() => () => selectedLayerMoveDraftStore.dispose(), [selectedLayerMoveDraftStore]);
+  useEffect(() => () => layerMovePreviewStore.dispose(), [layerMovePreviewStore]);
   // All in-flight pointer gesture state (drags, picked sources, pending
   // loops) — one plain mutable object, mutated at pointer-move rate without
   // re-rendering. See pointerMachine.ts.
   const gestures = useRef(createPointerGestures()).current;
-  const layerMoveActive = workspace === "image" && Boolean(gestures.moveDrag);
   const selectedLayerId = state.current.layers[state.current.active]?.id ?? null;
   const magneticEdgeKeyRef = useRef<string | null>(null);
   const magneticEdgePendingKeyRef = useRef<string | null>(null);
   const {
     navigation: nav,
     viewport,
-    underlayAnchorRef,
-    underlay,
-    presented,
+    nativeSurfacePlacementAnchorRef,
+    viewportFrameUrl,
+    nativeSurfacePresented,
     frameView,
     documentDimensions: documentDims,
     dimensions: dims,
-    sceneFrame,
+    renderFrame,
+    logicalPasteboard,
     stageSize,
     sourceDimensions,
     cropRegion,
     gradePreview,
-  } = useUnderlayController({
+    documentKey,
+  } = useImageEditorViewport({
     workspace,
     imagePath,
     document: state.current,
@@ -433,9 +444,24 @@ export function ImageEditorModal({
     closing,
     viewportMaskOverlay,
     viewportOverlayScene,
+    selectedLayerId,
+    layerMovePreview,
     fallbackDimensions: frameDimsRef.current,
     emptyDimensions: EMPTY_DOCUMENT_DIMS,
   });
+  useEffect(() => {
+    if (!layerMovePreview || layerMovePreview.phase !== "committing") return;
+    if (layerMovePreview.baseDocumentKey === documentKey) return;
+    if (!viewport.sceneSettled) return;
+    if (viewport.presentedImageLayerScene?.documentKey !== documentKey) return;
+    layerMovePreviewStore.release(layerMovePreview.transactionId);
+  }, [
+    documentKey,
+    layerMovePreview,
+    layerMovePreviewStore,
+    viewport.presentedImageLayerScene?.documentKey,
+    viewport.sceneSettled,
+  ]);
   const { view, setView, viewRef, viewBase, spacePan } = nav;
   frameDimsRef.current = dims;
   // Image workspace: the opened image is the base layer's own source, stated
@@ -459,27 +485,25 @@ export function ImageEditorModal({
   useEffect(() => {
     if (workspace !== "image") return;
     let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void listenFileDrop((event) => {
-      for (const path of event.paths) {
-        if (!/\.(png|jpe?g|webp|bmp|gif|tiff?|avif)$/i.test(path)) continue;
-        void probeImageDims(path).then((probed) => {
-          if (!probed || probed.width <= 0 || probed.height <= 0) return;
-          const canvas = frameDimsRef.current;
-          rawDispatch({
-            type: "layer_add_image",
-            source: { path, width: probed.width, height: probed.height },
-            canvas: { w: canvas.w, h: canvas.h },
-          });
+    const unregister = nativeFileDropRouter.register({
+      id: "image-editor",
+      priority: 100,
+      claims: ({ target }) => isImageEditorDropOwner(target),
+      handle: async ({ event, target }) => {
+        if (!isImageEditorStageDrop(target)) return;
+        const sources = await resolveDroppedImageSources(event.paths, probeImageDims);
+        if (disposed || sources.length === 0) return;
+        const canvas = frameDimsRef.current;
+        rawDispatch({
+          type: "layer_add_images",
+          sources,
+          canvas: { w: canvas.w, h: canvas.h },
         });
-      }
-    }).then((stop) => {
-      if (disposed) stop?.();
-      else unlisten = stop;
+      },
     });
     return () => {
       disposed = true;
-      unlisten?.();
+      unregister();
     };
   }, [workspace]);
   useEffect(() => {
@@ -489,30 +513,70 @@ export function ImageEditorModal({
     const docRef = { canvasId: "image-editor-stage", documentId: imagePath ?? "active-document" };
     return resolveActiveTarget(state.current, docRef);
   }, [state.current, imagePath]);
-  const selectedLayerMoveSurface = usePreloadedSelectedLayerMoveSurfaceForCurrentLayerAndViewport({
-    preloadEnabled: workspace === "image" && toolId === "move" && viewport.targetSettled,
-    workspace,
+  const beforeLayerStructuralChange = useCallback(() => {
+    if (editingPathRef.current != null) cancelPathEdit();
+  }, [cancelPathEdit, editingPathRef]);
+  const {
+    runLayerDuplicate,
+    layerDuplicatePending,
+  } = useLayerDuplicateCommand({
     imagePath,
-    document: state.current,
-    selectedLayerId,
-    documentWidth: dims.w,
-    documentHeight: dims.h,
-    sceneFrame,
+    dimensions: dims,
+    stateRef,
+    activeSelectionRef,
+    setActiveSelection,
+    selectionDraft,
+    dispatch: rawDispatch,
+    beforeStructuralChange: beforeLayerStructuralChange,
   });
-  const selectedLayerFramePresentation = useSelectedLayerFramePresentation({
-    workspace,
-    document: state.current,
-    selectedLayerId,
-    documentWidth: dims.w,
-    documentHeight: dims.h,
-  });
+  const runContextCommand = useCallback((id: CommandId) => {
+    if (id === "selection.subject") {
+      setSubjectDialogOpen(true);
+      return;
+    }
+    runImageEditorCommand(id, {
+      doc: stateRef.current.current,
+      target: activeStudioTarget,
+      dispatch,
+      beforeStructuralChange: beforeLayerStructuralChange,
+      setToolId,
+      activeSelection: activeSelectionRef.current,
+      selectionDraft,
+      clearActiveSelection,
+      clearSelectionDraft: () => setSelectionDraft(null),
+      runLayerDuplicate,
+    });
+  }, [
+    activeStudioTarget,
+    activeSelectionRef,
+    beforeLayerStructuralChange,
+    clearActiveSelection,
+    dispatch,
+    runLayerDuplicate,
+    selectionDraft,
+    setSelectionDraft,
+    setToolId,
+    stateRef,
+  ]);
   const contextActionItems = useMemo(() => {
     if (workspace !== "image") return [];
     const commandIds = activeStudioTarget.kind === "layer_mask" ? IMAGE_MASK_CONTEXT_COMMANDS : IMAGE_PIXEL_CONTEXT_COMMANDS;
     return commandIds
-      .map((id) => ({ command: getCommand(id), capability: getCommandCapability(id, { doc: state.current, target: activeStudioTarget }) }))
-      .filter((item) => item.capability.enabled || item.command.id === "selection.subject");
-  }, [workspace, state.current, activeStudioTarget]);
+      .map((id) => {
+        const capability = getCommandCapability(id, { doc: state.current, target: activeStudioTarget });
+        return {
+          command: getCommand(id),
+          capability: id === "layer.duplicate" && layerDuplicatePending
+            ? { ...capability, enabled: false, reason: "Layer Via Copy is in progress" }
+            : capability,
+        };
+      })
+      .filter((item) => (
+        item.capability.enabled
+        || item.command.id === "selection.subject"
+        || (layerDuplicatePending && item.command.id === "layer.duplicate")
+      ));
+  }, [workspace, state.current, activeStudioTarget, layerDuplicatePending]);
   const cropView = useMemo(() => {
     if (!cropRegion) return null;
     const x0 = Math.max(0, Math.min(cropRegion[0], cropRegion[2], dims.w - 1));
@@ -526,10 +590,10 @@ export function ImageEditorModal({
   // The graded copy of the underlay frame: decode → f32 surface → `applyDoc`
   // → re-encode. Recomputes when the frame or the adjustment stack changes;
   // the ungraded frame keeps showing until the graded one lands.
-  const [gradedUnderlay, setGradedUnderlay] = useState<string | null>(null);
+  const [gradedViewportFrameUrl, setGradedViewportFrameUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!gradePreview || !underlay) {
-      setGradedUnderlay(null);
+    if (!gradePreview || !viewportFrameUrl) {
+      setGradedViewportFrameUrl(null);
       return;
     }
     let cancelled = false;
@@ -550,13 +614,13 @@ export function ImageEditorModal({
         id.data[i] = Math.round(Math.min(Math.max(data[i], 0), 1) * 255);
       }
       ctx.putImageData(id, 0, 0);
-      if (!cancelled) setGradedUnderlay(c.toDataURL());
+      if (!cancelled) setGradedViewportFrameUrl(c.toDataURL());
     };
-    img.src = underlay;
+    img.src = viewportFrameUrl;
     return () => {
       cancelled = true;
     };
-  }, [gradePreview, underlay]);
+  }, [gradePreview, viewportFrameUrl]);
 
   // PS-style brush cursor ring (positioned imperatively on pointer move).
   const brushCursorEl = useRef<HTMLDivElement | null>(null);
@@ -685,6 +749,7 @@ export function ImageEditorModal({
     setScreenMode,
     closePenPath: () => closePenPath(),
     requestClose,
+    runCommand: runContextCommand,
   });
 
   const makeSelectionFromDraft = (draft: SelectionDraft | null = selectionDraft) => {
@@ -726,12 +791,12 @@ export function ImageEditorModal({
     setToolId,
     setPathMode,
     setPaintTarget,
-    underlay,
-    presented,
+    underlay: viewportFrameUrl,
+    presented: nativeSurfacePresented,
     viewportHost: viewport.host,
     frameView,
     dims,
-    sceneFrame,
+    sceneFrame: renderFrame,
   };
 
   // Map a pointer event to image-pixel coordinates: offset from the rendered
@@ -750,11 +815,11 @@ export function ImageEditorModal({
       const uy = (dx * Math.sin(rad) + dy * Math.cos(rad)) / view.zoom;
       const baseW = canvas.offsetWidth || 1;
       const baseH = canvas.offsetHeight || 1;
-      const x = sceneFrame.x + ((ux + baseW / 2) / baseW) * sceneFrame.w;
-      const y = sceneFrame.y + ((uy + baseH / 2) / baseH) * sceneFrame.h;
+      const x = renderFrame.x + ((ux + baseW / 2) / baseW) * renderFrame.w;
+      const y = renderFrame.y + ((uy + baseH / 2) / baseH) * renderFrame.h;
       return [Math.round(x), Math.round(y)];
     },
-    [sceneFrame.x, sceneFrame.y, sceneFrame.w, sceneFrame.h],
+    [renderFrame.x, renderFrame.y, renderFrame.w, renderFrame.h],
   );
 
   const selectionDraftAtPoint = (pt: [number, number]): SelectionDraft | null => {
@@ -786,10 +851,10 @@ export function ImageEditorModal({
   // selection-assist read from the active editable pixel layer, not the
   // composite underlay/viewport and not a Layer Via Copy pixel read.
   const captureEdgeMap = useCallback(() => {
-    const winW = Math.max(1, Math.round(sceneFrame.w / frameView.zoom));
-    const winH = Math.max(1, Math.round(sceneFrame.h / frameView.zoom));
-    const offX = Math.round(sceneFrame.x + frameView.panX * sceneFrame.w);
-    const offY = Math.round(sceneFrame.y + frameView.panY * sceneFrame.h);
+    const winW = Math.max(1, Math.round(renderFrame.w / frameView.zoom));
+    const winH = Math.max(1, Math.round(renderFrame.h / frameView.zoom));
+    const offX = Math.round(renderFrame.x + frameView.panX * renderFrame.w);
+    const offY = Math.round(renderFrame.y + frameView.panY * renderFrame.h);
     const selectedLayer = state.current.layers[state.current.active] ?? null;
     const sourceKey = `selection-assist:${imagePath ?? ""}:${selectedLayerId ?? ""}:${JSON.stringify({
       canvas: state.current.canvas ?? null,
@@ -840,7 +905,7 @@ export function ImageEditorModal({
         failEdgeMap();
       },
     );
-  }, [imagePath, selectedLayerId, state.current, dims.w, dims.h, frameView, sceneFrame.x, sceneFrame.y, sceneFrame.w, sceneFrame.h]);
+  }, [imagePath, selectedLayerId, state.current, dims.w, dims.h, frameView, renderFrame.x, renderFrame.y, renderFrame.w, renderFrame.h]);
 
   // Redraw the overlay: committed brush strokes and the in-progress
   // stroke/marquee (see stageScene's paintStage). The underlay presents
@@ -851,15 +916,15 @@ export function ImageEditorModal({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    canvas.width = sceneFrame.w;
-    canvas.height = sceneFrame.h;
+    canvas.width = renderFrame.w;
+    canvas.height = renderFrame.h;
     paintStage(ctx, {
       workspace,
       dims,
-      frame: sceneFrame,
+      frame: renderFrame,
       overlayOnly,
-      underlay,
-      presented,
+      underlay: viewportFrameUrl,
+      presented: nativeSurfacePresented,
       previewing,
       doc: state.current,
       editingPath,
@@ -883,7 +948,7 @@ export function ImageEditorModal({
       antsPhase,
       gestures,
     });
-  }, [workspace, dims.w, dims.h, sceneFrame.x, sceneFrame.y, sceneFrame.w, sceneFrame.h, cropRegion, overlayOnly, underlay, presented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, cropDraft, activeSelection, selectionDraft, antsPhase]);
+  }, [workspace, dims.w, dims.h, renderFrame.x, renderFrame.y, renderFrame.w, renderFrame.h, cropRegion, overlayOnly, viewportFrameUrl, nativeSurfacePresented, state.current.layers, state.current.active, state.current.matte_strokes, state.current.points, tool.mode, tool.kind, tool.id, brushSize, brushHardness, brushFlow, paintTarget, penAnchors, editingPath, anchorDraft, previewing, preview, quickMask, quickProxy, shapeKind, shapeSides, colorSamples, cropDraft, activeSelection, selectionDraft, antsPhase]);
 
   useEffect(() => {
     redraw();
@@ -920,33 +985,14 @@ export function ImageEditorModal({
     setPenAnchors([]);
   };
 
-  const runContextCommand = useCallback((id: CommandId) => {
-    if (id === "selection.subject") {
-      setSubjectDialogOpen(true);
-      return;
-    }
-    runImageEditorCommand(id, {
-      doc: stateRef.current.current,
-      target: activeStudioTarget,
-      dispatch,
-      beforeStructuralChange: () => {
-        if (editingPathRef.current != null) cancelPathEdit();
-      },
-      setToolId,
-      includeSourceImage: workspace === "image",
-      activeSelection: activeSelectionRef.current,
-      selectionDraft,
-      clearActiveSelection,
-      clearSelectionDraft: () => setSelectionDraft(null),
-    });
-  }, [activeStudioTarget, cancelPathEdit, clearActiveSelection, editingPathRef, selectionDraft, setSelectionDraft, stateRef, setToolId, workspace]);
-
   // Pointer gestures: the shell only captures the pointer, serves one-shot
   // requests (the armed colour pick) and keeps the brush ring on the cursor;
   // the whole down/move/up decision tree lives in pointerMachine.ts.
   const canStartSelectedLayerMove = ([x, y]: [number, number]): boolean => {
     if (workspace !== "image") return true;
-    const frame = selectedLayerFramePresentation.frame;
+    if (!clampSelectedLayerMoveDelta(state.current, dims, logicalPasteboard, [0, 0])) return false;
+    if (!viewport.sceneSettled) return false;
+    const frame = viewport.selectedLayerFrame;
     if (!frame) return false;
     const [x0, y0, x1, y1] = frame.rect;
     const left = Math.min(x0, x1);
@@ -981,6 +1027,14 @@ export function ImageEditorModal({
     cropLock,
     toImage,
     canStartSelectedLayerMove,
+    resolveSelectedLayerMoveDelta: (delta) => (
+      workspace === "image"
+        ? clampSelectedLayerMoveDelta(state.current, dims, logicalPasteboard, delta)
+        : delta
+    ),
+    beginMovePreview: () => {
+      if (selectedLayerId) layerMovePreviewStore.begin(documentKey, selectedLayerId);
+    },
     viewBase,
     pointerAngle,
     viewRotate: () => viewRef.current.rotate ?? 0,
@@ -996,7 +1050,8 @@ export function ImageEditorModal({
     confirmCropDraft,
     setActiveSelection,
     setSelectionDraft,
-    setMoveDraft: selectedLayerMoveDraftStore.setDraft,
+    setMoveDraft: layerMovePreviewStore.update,
+    completeMoveDraft: layerMovePreviewStore.complete,
     setColorSamples,
     sampleUnderlay,
     captureEdgeMap,
@@ -1025,8 +1080,8 @@ export function ImageEditorModal({
     const cursorEl = brushCursorEl.current;
     if (cursorEl) {
       const [x, y] = toImage(e);
-      cursorEl.style.left = `${((x - sceneFrame.x) / sceneFrame.w) * 100}%`;
-      cursorEl.style.top = `${((y - sceneFrame.y) / sceneFrame.h) * 100}%`;
+      cursorEl.style.left = `${((x - renderFrame.x) / renderFrame.w) * 100}%`;
+      cursorEl.style.top = `${((y - renderFrame.y) / renderFrame.h) * 100}%`;
       cursorEl.style.display = spacePan ? "none" : "";
     }
     pointerMove(pointerEnv(), gestures, e);
@@ -1229,14 +1284,15 @@ export function ImageEditorModal({
             stageRef={stageRef}
             canvasRef={canvasRef}
             dims={dims}
-            sceneFrame={sceneFrame}
+            renderFrame={renderFrame}
+            logicalPasteboard={logicalPasteboard}
             stageSize={stageSize}
             documentAvailable={documentDims != null}
             view={view}
-            viewportFrameUrl={gradedUnderlay ?? underlay}
-            isNativeSurfacePresented={presented}
+            viewportFrameUrl={gradedViewportFrameUrl ?? viewportFrameUrl}
+            isNativeSurfacePresented={nativeSurfacePresented}
             cropView={cropView}
-            nativeSurfacePlacementAnchorRef={underlayAnchorRef}
+            nativeSurfacePlacementAnchorRef={nativeSurfacePlacementAnchorRef}
             viewportFrameView={frameView}
             viewportBackend={viewport.backend}
             overlayOnly={overlayOnly}
@@ -1252,12 +1308,7 @@ export function ImageEditorModal({
             selectionDraft={workspace === "image" && penAnchors.length === 0 ? selectionDraft : null}
             activeSelection={workspace === "image" ? activeSelection : null}
             antsPhase={antsPhase}
-            selectedLayerId={selectedLayerId}
-            selectedLayerMoveSurface={selectedLayerMoveSurface}
-            selectedLayerMoveDraftStore={selectedLayerMoveDraftStore}
-            layerMoveActive={layerMoveActive}
-            selectedLayerFrame={selectedLayerFramePresentation.frame}
-            viewportTargetSettled={viewport.targetSettled}
+            selectedLayerFrame={viewport.selectedLayerFrame}
             contextActionBar={
               workspace === "image" ? (
                 <ContextActionBar
@@ -1293,7 +1344,7 @@ export function ImageEditorModal({
               makeSelection={makeMarqueeSelection}
               cancelDraft={cancelSelectionDraft}
               dims={dims}
-              frame={sceneFrame}
+              frame={renderFrame}
               canvasEl={canvasRef.current}
             />
           ) : null}
@@ -1426,13 +1477,12 @@ export function ImageEditorModal({
               dims={dims}
               imagePath={imagePath}
               workspace={workspace}
-              activeSelection={activeSelection}
-              selectionDraft={selectionDraft}
               dispatch={dispatch}
+              runCommand={runContextCommand}
+              layerDuplicatePending={layerDuplicatePending}
               onBeforeLayerChange={() => {
                 if (editingPath != null) cancelPathEdit();
               }}
-              clearActiveSelection={clearActiveSelection}
             />
                   ),
                 },

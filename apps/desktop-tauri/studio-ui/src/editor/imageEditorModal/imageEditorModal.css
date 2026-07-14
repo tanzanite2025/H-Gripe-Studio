@@ -328,12 +328,22 @@
   border-radius: 8px;
   overflow: hidden;
 }
-/* The document-space frame: sized to fit the stage at the document's aspect
-   ratio (the max-height constraint transfers through `aspect-ratio`), holding
-   the underlay window and the edit canvas in one transformed unit. */
+/* Geometry-only shared world. Retained source pixels are sampled into one
+   camera window over this scene; no layer allocates a pasteboard bitmap. The
+   document interaction layer remains a compact child of the same world. */
+.image-editor-world {
+  position: absolute;
+  pointer-events: none;
+}
+.image-editor-pasteboard-boundary {
+  position: absolute;
+  inset: 0;
+  outline: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  outline-offset: -1px;
+  pointer-events: none;
+}
 .image-editor-frame {
-  position: relative;
-  width: 100%;
+  position: absolute;
 }
 .image-editor-frame.cropped {
   overflow: hidden;
@@ -341,6 +351,7 @@
 .image-editor-document-layer {
   position: absolute;
   inset: 0;
+  pointer-events: none;
 }
 .image-editor-pixel-layer {
   position: absolute;
@@ -359,8 +370,8 @@
   position: absolute;
   pointer-events: none;
 }
-/* Image pixels may have alpha; that alpha belongs inside the document frame,
-   never on the modal shell/body. */
+/* Image pixels may have alpha; that alpha belongs inside the scoped stage
+   world, never on the modal shell/body. */
 .image-editor-stage.presented .image-editor-frame,
 .image-editor-stage.presented .image-editor-document-layer,
 .image-editor-stage.presented .image-editor-canvas {
@@ -386,22 +397,17 @@
   touch-action: none;
   cursor: crosshair;
   display: block;
+  pointer-events: auto;
   z-index: 2;
 }
 .mask-interaction-result-layer {
   position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
   pointer-events: none;
   z-index: 3;
-}
-.selected-layer-move-surface {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
 }
 .mask-selection-overlay {
   position: absolute;

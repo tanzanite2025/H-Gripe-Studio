@@ -22,7 +22,7 @@ import {
 } from "../contracts/imageEditOps";
 import { type LayerAdjustment, type ImageEditorDocument, type ImageEditorLayer } from "../contracts/imageEditorDocument";
 import { isBrushOp, isPathOp } from "../contracts/imageEditOps";
-import { SOURCE_IMAGE_OP_TYPE } from "./imageEditorState";
+import { SOURCE_IMAGE_OP_TYPE } from "./imageLayerSource";
 
 /** A single-channel alpha buffer (0..255), row-major `w * h`. */
 export interface ProxyMask {
@@ -1026,19 +1026,17 @@ export function buildLayerThumb(layer: ImageEditorLayer, dims: { w: number; h: n
 
 export interface LayerAlphaBoundsOptions {
   proxyWidth?: number;
-  implicitSource?: boolean;
   ignoreTransforms?: boolean;
   alphaThreshold?: number;
 }
 
 function layerForAlphaSurface(
   layer: ImageEditorLayer,
-  options: Pick<LayerAlphaBoundsOptions, "implicitSource" | "ignoreTransforms">,
+  options: Pick<LayerAlphaBoundsOptions, "ignoreTransforms">,
 ): ImageEditorLayer {
-  let ops = options.ignoreTransforms === true ? layer.ops.filter((op) => op.type !== "transform") : layer.ops;
-  if (options.implicitSource === true && !ops.some((op) => op.type === SOURCE_IMAGE_OP_TYPE)) {
-    ops = [{ type: SOURCE_IMAGE_OP_TYPE }, ...ops];
-  }
+  const ops = options.ignoreTransforms === true
+    ? layer.ops.filter((op) => op.type !== "transform")
+    : layer.ops;
   return ops === layer.ops ? layer : { ...layer, ops };
 }
 

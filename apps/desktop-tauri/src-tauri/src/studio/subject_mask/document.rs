@@ -168,7 +168,7 @@ pub(super) fn migrate_edit_paths(value: Value) -> Value {
         ops.extend(arr("operations"));
         ops
     };
-    let mut layer = empty_layer();
+    let mut layer = empty_pixel_layer();
     layer["ops"] = json!(ops);
     json!({
         "version": 3,
@@ -180,10 +180,10 @@ pub(super) fn migrate_edit_paths(value: Value) -> Value {
     })
 }
 
-fn empty_layer() -> Value {
+fn empty_pixel_layer() -> Value {
     json!({
         "name": "Background",
-        "kind": "mask",
+        "kind": "pixel",
         "blend": "normal",
         "opacity": 1.0,
         "visible": true,
@@ -278,7 +278,7 @@ fn normalise_layer(layer: Value, group_ids: &BTreeSet<String>) -> Option<Value> 
     if !layer.is_object() {
         return None;
     }
-    let mut out = empty_layer();
+    let mut out = empty_pixel_layer();
     if let Some(id) = layer.get("id").and_then(Value::as_str) {
         out["id"] = json!(id);
     }
@@ -484,7 +484,7 @@ mod tests {
                 });
                 json!({
                     "name": layer.get("name").and_then(Value::as_str).unwrap_or("Background"),
-                    "kind": layer.get("kind").and_then(Value::as_str).unwrap_or("mask"),
+                    "kind": layer.get("kind").and_then(Value::as_str).unwrap_or("pixel"),
                     "blend": layer.get("blend").and_then(Value::as_str).unwrap_or("normal"),
                     "opacity": layer.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
                     "visible": layer.get("visible").and_then(Value::as_bool).unwrap_or(true),

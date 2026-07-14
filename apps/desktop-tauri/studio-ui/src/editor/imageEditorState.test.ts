@@ -11,7 +11,7 @@ import {
   canRedo,
   canUndo,
   clearEdits,
-  composeTransforms,
+  commitMaterializedLayerViaCopy,
   duplicateLayer,
   editCount,
   historySnapshots,
@@ -57,31 +57,6 @@ const stroke = (id: string): BrushStroke => ({
     [0, 0],
     [4, 4],
   ],
-});
-
-describe("imageEditorState composeTransforms", () => {
-  it("composes translations additively", () => {
-    expect(
-      composeTransforms({ dx: 10, dy: 5, scale: 1, rotate: 0 }, { dx: -4, dy: 3, scale: 1, rotate: 0 }),
-    ).toEqual({ dx: 6, dy: 8, scale: 1, rotate: 0 });
-  });
-  it("carries the earlier translation through the later rotation and scale", () => {
-    const t = composeTransforms({ dx: 10, dy: 0, scale: 1, rotate: 0 }, { dx: 0, dy: 0, scale: 2, rotate: 90 });
-    expect(t.dx).toBeCloseTo(0);
-    expect(t.dy).toBeCloseTo(20);
-    expect(t.scale).toBe(2);
-    expect(t.rotate).toBe(90);
-  });
-  it("matches the shared transform-compose contract", () => {
-    expect(fixtures.transformComposeCases.length).toBeGreaterThan(0);
-    for (const testCase of fixtures.transformComposeCases) {
-      const composed = composeTransforms(testCase.a, testCase.b);
-      expect(composed.dx, testCase.name).toBeCloseTo(testCase.expected.dx, 4);
-      expect(composed.dy, testCase.name).toBeCloseTo(testCase.expected.dy, 4);
-      expect(composed.scale, testCase.name).toBeCloseTo(testCase.expected.scale, 4);
-      expect(composed.rotate, testCase.name).toBeCloseTo(testCase.expected.rotate, 4);
-    }
-  });
 });
 
 describe("imageEditorState normalizeEditPaths", () => {
@@ -392,75 +367,44 @@ describe("imageEditorState reducer-style helpers", () => {
     expect(s.current.layers).toHaveLength(1);
   });
 
-  it("layer-via-copy: a selection clips the copy's own ops, no mask (undoable)", () => {
-    let s = initEditState();
-    s = addOperation(s, { type: "invert" });
-    s = duplicateLayer(s, { region: [2, 3, 20, 15] });
+  it("commits one materialized Layer Via Copy transaction with exact placement", () => {
+    const source = { path: "C:/img/base.png", width: 80, height: 60 };
+    let s = withExplicitBaseSource(initEditState(), source);
+    s.current.layers[0] = { ...s.current.layers[0], blend: "multiply", opacity: 0.4 };
+    const baseDocument = s.current;
+    const pastLength = s.past.length;
+    s = commitMaterializedLayerViaCopy(
+      s,
+      baseDocument,
+      baseDocument.layers[0].id,
+      { source: { path: "C:/copies/copy.png", width: 4, height: 2 }, placement: [10, 20, 14, 22] },
+    );
+
     expect(s.current.layers).toHaveLength(2);
-    expect(s.current.active).toBe(1);
-    expect(s.current.layers[1].ops).toEqual([{ type: "invert", clip: { region: [2, 3, 20, 15] } }]);
+    expect(s.past).toHaveLength(pastLength + 1);
+    expect(s.current.layers[1].ops).toEqual([{
+      type: "source_image",
+      source: { path: "C:/copies/copy.png", width: 4, height: 2 },
+      placement: [10, 20, 14, 22],
+    }]);
+    expect(s.current.layers[1]).toMatchObject({ blend: "multiply", opacity: 1 });
     expect(s.current.layers[1].mask).toBeUndefined();
     s = undo(s);
     expect(s.current.layers).toHaveLength(1);
-    // An elliptical selection clips elliptically.
-    s = duplicateLayer(s, { region: [0, 0, 8, 8], ellipse: true });
-    expect(s.current.layers[1].ops).toEqual([{ type: "invert", clip: { region: [0, 0, 8, 8], ellipse: true } }]);
+    s = redo(s);
+    expect(s.current.layers[1].ops[0]).toMatchObject({ placement: [10, 20, 14, 22] });
   });
 
-  it("image layer-via-copy records source image content clipped to the exact polygon", () => {
-    let s = initEditState();
-    s = duplicateLayer(
+  it("rejects a materialized result prepared from a stale document", () => {
+    let s = withExplicitBaseSource(initEditState(), { path: "C:/img/base.png", width: 80, height: 60 });
+    const staleDocument = s.current;
+    s = addOperation(s, { type: "invert" });
+    expect(commitMaterializedLayerViaCopy(
       s,
-      {
-        region: [2, 3, 20, 15],
-        polygon: [
-          [2, 3],
-          [20, 3],
-          [12, 15],
-        ],
-      },
-      { includeSourceImage: true },
-    );
-
-    expect(s.current.layers).toHaveLength(2);
-    expect(s.current.layers[1].ops).toEqual([
-      {
-        type: "source_image",
-        clip: {
-          region: [2, 3, 20, 15],
-          points: [
-            [2, 3],
-            [20, 3],
-            [12, 15],
-          ],
-        },
-      },
-    ]);
-    expect(s.current.layers[1].mask).toBeUndefined();
-  });
-
-  it("image layer-via-copy records source image content clipped to an exact selection alpha", () => {
-    let s = initEditState();
-    s = duplicateLayer(
-      s,
-      {
-        region: [10, 20, 14, 22],
-        selectionAlpha: { width: 4, height: 2, startsWith: 0, runs: [1, 2, 2, 3] },
-      },
-      { includeSourceImage: true },
-    );
-
-    expect(s.current.layers).toHaveLength(2);
-    expect(s.current.layers[1].ops).toEqual([
-      {
-        type: "source_image",
-        clip: {
-          region: [10, 20, 14, 22],
-          selectionAlpha: { width: 4, height: 2, startsWith: 0, runs: [1, 2, 2, 3] },
-        },
-      },
-    ]);
-    expect(s.current.layers[1].mask).toBeUndefined();
+      staleDocument,
+      staleDocument.layers[0].id,
+      { source: { path: "C:/copies/copy.png", width: 4, height: 2 }, placement: [10, 20, 14, 22] },
+    )).toBe(s);
   });
 
   it("gives the base layer an explicit full-canvas source_image op across the whole history", () => {

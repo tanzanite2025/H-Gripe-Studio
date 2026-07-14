@@ -1,17 +1,13 @@
 import type { CSSProperties, MutableRefObject } from "react";
-import type { ViewportPixels } from "../../bridge/viewport";
 import type { SelectedLayerFrame } from "../selectedLayerFrame";
 import type { ActiveSelection, SelectionDraft } from "./selection";
 import type { SceneFrame } from "./sceneFrame";
 import { SelectedLayerFrameOverlay } from "./SelectedLayerFrameOverlay";
-import { SelectedLayerMoveSurface } from "./SelectedLayerMoveSurface";
 import { SelectionOverlay } from "./SelectionOverlay";
 
 interface InteractionResultLayerProps {
   dims: { w: number; h: number };
   frame: SceneFrame;
-  selectedLayerMoveSurface?: ViewportPixels | null;
-  selectedLayerMoveDraft?: readonly [number, number] | null;
   selectedLayerFrame?: SelectedLayerFrame | null;
   selectionDraft?: SelectionDraft | null;
   activeSelection?: ActiveSelection | null;
@@ -28,8 +24,6 @@ interface InteractionResultLayerProps {
 export function InteractionResultLayer({
   dims,
   frame,
-  selectedLayerMoveSurface = null,
-  selectedLayerMoveDraft = null,
   selectedLayerFrame = null,
   selectionDraft = null,
   activeSelection = null,
@@ -41,7 +35,6 @@ export function InteractionResultLayer({
 }: InteractionResultLayerProps) {
   return (
     <div className="mask-interaction-result-layer" style={style} aria-hidden="true">
-      <SelectedLayerMoveSurface surface={selectedLayerMoveSurface} frame={frame} moveDraft={selectedLayerMoveDraft} />
       <SelectedLayerFrameOverlay selectedFrame={selectedLayerFrame} viewFrame={frame} />
       <SelectionOverlay
         dims={dims}

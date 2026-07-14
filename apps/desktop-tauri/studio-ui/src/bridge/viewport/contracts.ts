@@ -38,12 +38,50 @@ export interface ViewportDescriptor {
   backend: ViewportBackend;
 }
 
+export interface ImageLayerScenePresentation {
+  selectedLayerId: string;
+  transactionId: string;
+  baseDocumentKey: string;
+  sequence: number;
+  moveDraft: { dx: number; dy: number } | null;
+}
+
+export interface ViewportImageScene {
+  document: unknown;
+  documentKey: string;
+  documentWidth: number;
+  documentHeight: number;
+  frameX: number;
+  frameY: number;
+  frameWidth: number;
+  frameHeight: number;
+}
+
+export interface ViewportSelectedLayerFrame {
+  owner: "selected-layer-frame";
+  shape: "axis-aligned-rect";
+  layerId: string;
+  rect: [number, number, number, number];
+  sourceRect: [number, number, number, number];
+  source: "asset-frame";
+}
+
+export interface PresentedImageLayerScene {
+  documentKey: string | null;
+  transactionId: string | null;
+  sequence: number | null;
+}
+
 export interface ViewportFrame {
   data_url: string;
   width: number;
   height: number;
   backend: ViewportBackend;
   presented: boolean;
+  selectedLayerFrame: ViewportSelectedLayerFrame | null;
+  documentKey: string | null;
+  transactionId: string | null;
+  sequence: number | null;
 }
 
 export type ViewportFrameExportFormat = "png" | "jpeg" | "bmp";
@@ -162,6 +200,11 @@ export interface ViewportClient {
     viewportId: string,
     scene: ViewportOverlayScene | null,
   ): Promise<void>;
+  setViewportImageScene(viewportId: string, scene: ViewportImageScene): Promise<void>;
+  presentImageLayerScene(
+    viewportId: string,
+    presentation: ImageLayerScenePresentation,
+  ): Promise<void>;
   setViewportView(viewportId: string, zoom: number, panX: number, panY: number): Promise<void>;
   presentViewportView(
     viewportId: string,
@@ -186,13 +229,32 @@ export function decodeFramePayload(payload: ArrayBuffer | Uint8Array): ViewportF
   if (4 + metaLen > bytes.byteLength) throw new Error("viewport frame meta is truncated");
   const meta = JSON.parse(
     new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)),
-  ) as { width: number; height: number; backend: ViewportBackend; presented?: boolean };
+  ) as {
+    width: number;
+    height: number;
+    backend: ViewportBackend;
+    presented?: boolean;
+    selectedLayerFrame?: ViewportSelectedLayerFrame | null;
+    documentKey?: string | null;
+    transactionId?: string | null;
+    sequence?: number | null;
+  };
   const presented = meta.presented === true;
   const png = bytes.subarray(4 + metaLen);
   const data_url = presented
     ? ""
     : URL.createObjectURL(new Blob([new Uint8Array(png)], { type: "image/png" }));
-  return { data_url, width: meta.width, height: meta.height, backend: meta.backend, presented };
+  return {
+    data_url,
+    width: meta.width,
+    height: meta.height,
+    backend: meta.backend,
+    presented,
+    selectedLayerFrame: meta.selectedLayerFrame ?? null,
+    documentKey: meta.documentKey ?? null,
+    transactionId: meta.transactionId ?? null,
+    sequence: meta.sequence ?? null,
+  };
 }
 
 export function decodePixelsPayload(payload: ArrayBuffer | Uint8Array): ViewportPixels {

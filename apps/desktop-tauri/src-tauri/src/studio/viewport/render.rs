@@ -44,6 +44,9 @@ pub(super) fn viewport_render_rgba_with_overlay(
         mask_overlay,
         overlay_scene,
         clip_props,
+        retained_image_scene,
+        image_layer_presentation,
+        generations,
     ) = {
         let mut map = viewports()
             .lock()
@@ -52,7 +55,7 @@ pub(super) fn viewport_render_rgba_with_overlay(
             .get_mut(&id)
             .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
         (
-            state.target.clone(),
+            state.target.as_ref().map(ViewportTarget::render_snapshot),
             state.width,
             state.height,
             state.grade_doc.clone(),
@@ -71,10 +74,13 @@ pub(super) fn viewport_render_rgba_with_overlay(
                 .as_mut()
                 .map(|(_, evaluator)| evaluator.resolve(state.clip_props_time))
                 .filter(|resolved| !resolved.is_identity()),
+            state.retained_image_scene.clone(),
+            state.image_layer_presentation.clone(),
+            state.generations(),
         )
     };
     let target = target.ok_or_else(|| format!("viewport {viewport_id} has no target"))?;
-    match target {
+    let mut rendered = match target {
         ViewportTarget::Image { resource_id } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
@@ -108,7 +114,7 @@ pub(super) fn viewport_render_rgba_with_overlay(
         }
         ViewportTarget::ImageComposite {
             resource_id,
-            document,
+            document: _,
             document_key,
             document_width,
             document_height,
@@ -119,10 +125,11 @@ pub(super) fn viewport_render_rgba_with_overlay(
         } => {
             let entry = resource::get(&resource_id)
                 .ok_or_else(|| format!("unknown resource id: {resource_id}"))?;
+            let scene = retained_image_scene
+                .ok_or_else(|| format!("viewport {viewport_id} has no retained image scene"))?;
             render_image_composite_path(
-                id,
+                scene,
                 &entry.path,
-                &document,
                 &document_key,
                 document_width,
                 document_height,
@@ -136,6 +143,7 @@ pub(super) fn viewport_render_rgba_with_overlay(
                 view,
                 mask_overlay.as_deref(),
                 overlay_scene.as_deref(),
+                image_layer_presentation.as_ref(),
             )
         }
         #[cfg(feature = "native-ffmpeg")]
@@ -173,7 +181,7 @@ pub(super) fn viewport_render_rgba_with_overlay(
             // timeline playhead to clip-local source time.
             let clip = timeline_clip(&timeline_id, &clip_id)?;
             if clip.kind == "still" {
-                return render_image_path(
+                render_image_path(
                     id,
                     &clip.path,
                     width,
@@ -183,28 +191,29 @@ pub(super) fn viewport_render_rgba_with_overlay(
                     None,
                     overlay_scene.as_deref(),
                     clip_props.as_ref(),
-                );
-            }
-            let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
-            #[cfg(feature = "native-ffmpeg")]
-            {
-                render_video_path(
-                    id,
-                    &clip.path,
-                    source_time,
-                    width,
-                    height,
-                    grade_doc,
-                    view,
-                    temporal_denoise,
-                    overlay_scene.as_deref(),
-                    clip_props.as_ref(),
                 )
-            }
-            #[cfg(not(feature = "native-ffmpeg"))]
-            {
-                let _ = source_time;
-                Err("video clip targets require the native media engine".to_string())
+            } else {
+                let source_time = (time_sec - clip.start_sec).clamp(0.0, clip.duration_sec);
+                #[cfg(feature = "native-ffmpeg")]
+                {
+                    render_video_path(
+                        id,
+                        &clip.path,
+                        source_time,
+                        width,
+                        height,
+                        grade_doc,
+                        view,
+                        temporal_denoise,
+                        overlay_scene.as_deref(),
+                        clip_props.as_ref(),
+                    )
+                }
+                #[cfg(not(feature = "native-ffmpeg"))]
+                {
+                    let _ = source_time;
+                    Err("video clip targets require the native media engine".to_string())
+                }
             }
         }
         ViewportTarget::NodeOutput {
@@ -226,7 +235,9 @@ pub(super) fn viewport_render_rgba_with_overlay(
                 None,
             )
         }
-    }
+    }?;
+    rendered.generations = generations;
+    Ok(rendered)
 }
 
 /// Run the clip property raster over a decoded proxy. `source_dims` are the

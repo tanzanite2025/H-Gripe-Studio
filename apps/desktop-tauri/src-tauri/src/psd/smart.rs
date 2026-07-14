@@ -2,7 +2,7 @@
 //! an embedded (`kind = data`) smart object and refresh the layer's cached
 //! raster, mirroring the local psd_tools extension
 //! `SmartObjectLayer.replace_with_image` (the last compose capability moved
-//! off the Python bridge — PYTHON_TO_RUST_MIGRATION_PLAN.md, "Phase 5").
+//! off the Python bridge during the completed Rust PSD migration, Phase 5).
 //!
 //! Like the pixel-layer writer, this splices the template bytes instead of
 //! re-serialising the document. Exactly three spots change:

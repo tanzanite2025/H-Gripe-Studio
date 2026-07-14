@@ -17,7 +17,7 @@ Use it as the quick project-memory map:
 | [`active/COLOR_FEATURE_MASKING_PREPROCESS_PLAN.md`](active/COLOR_FEATURE_MASKING_PREPROCESS_PLAN.md) | Defines the future colour-space / feature-map preprocess layer for mask and matte work. | Do not implement before the Image Processing card, row ports, shared preview/editor entry points, backend selectors, and preview gate are structurally settled. |
 | [`active/EDGE_ROUTING_VISUAL_SYSTEM_PLAN.md`](active/EDGE_ROUTING_VISUAL_SYSTEM_PLAN.md) | Defines the single-cut 45° chamfer wire style and edge visual states for the node canvas. Steps 1–9 and explicit bend points have landed; selected-area tidy routing remains. | Use before changing edge rendering, edge states, or connection-drag visuals in `@hgripe/flow`. |
 | [`active/GPU_DEVICE_STRATEGY_PLAN.md`](active/GPU_DEVICE_STRATEGY_PLAN.md) | Defines device reporting, deeper device management, and the scoped surface-hole rule: zero-copy viewport presentation must not make app roots or shared modal shells transparent. The thin reporting track and D3D11VA-to-WGPU zero-copy implementation have landed: shared `DeviceReport`, node/viewport normalizers, UI badges/logs, capability summaries, adapter/hardware probes, registry diagnostics, texture import, and native viewport presentation. | Use for native-machine validation, fallback/runtime hardening, scoped modal/viewport surface work, or future cross-kernel scheduling. FFmpeg stays the repo-maintained vendored build under `third_party/ffmpeg`. |
-| [`active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md) | Defines the image editor selection state machine plus the single interaction result layer, modal/surface isolation boundary, and pixel read boundary: solid tool drafts, committed marching-ants active selection, selected-layer frame boundaries, `LayerPixelReadSource`, and Rust-owned geometry for target-safe `Ctrl+J` / selection commands. | Use before changing pen/lasso/marquee/object-selection behavior, selected-layer yellow frames, selection context menus, layer-via-copy, selection-to-mask, Studio Action selection targets, WGPU interaction overlays, editor-stage surface holes, or pixel-read/materialization code. |
+| [`active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md) | Authoritative image-editor rendering protocol. The current landing has one stable resource target and pasteboard scene frame, bounded camera-window compositing, atomic `viewport_set_image_scene` document swaps, compact retained layer nodes, unclipped pasteboard drag with committed-scene handoff, same-frame `selectedLayerFrame` metadata, and exclusive native file-drop routing with ordered single-undo image batches. Native OS-drop evidence, sparse tiling, atomic Image Size, and the remaining acceptance work stay active. | Read first before changing image-editor pixels, layers, yellow frames, pan/zoom, layer drag, native file drops, Image Size, `Ctrl+J`, compositor targets, viewport presentation, pixel storage, or tiling. Do not restore multiple native drop listeners, document-only scene frames, dynamic scene frames, pasteboard-sized layer composites, move surfaces, hidden-layer retargeting, independent frame IPC, stale-frame retention, or clip-based positioning. |
 | [`active/MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md`](active/MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md) | Defines the PS-style layer/mask target model required before Studio Action or agent-driven quick operations. | Use before changing mask creation, layer-mask UI, selection targets, SAM 2 action calls, shared preview/editor action flow, or Goose/assistant action integration. |
 | [`active/PAGE_CONTEXT_AGENT_PRESET_PLAN.md`](active/PAGE_CONTEXT_AGENT_PRESET_PLAN.md) | Defines one assistant runtime with page-specific presets, read scopes, and Studio Action whitelists. | Use before adding per-page assistant modes, preview/editor agent actions, Goose adapters, or agent-callable editor/canvas/model actions. |
 | [`active/UI_TYPOGRAPHY_SYSTEM_PLAN.md`](active/UI_TYPOGRAPHY_SYSTEM_PLAN.md) | Defines bilingual typography, font fallback, and dark UI type tokens. | Use before restyling the app shell, node cards, drawer, and editor panels. |
@@ -38,16 +38,23 @@ Use it as the quick project-memory map:
   modal-shell transparency.
 - `NODE_CARD_PRODUCT_BOUNDARY_PLAN.md` is a living product guardrail rather
   than a finite implementation checklist.
-- Image-editor selection state is now its own guardrail: do not treat a
-  pen/lasso/marquee solid draft as a committed selection target, do not let
-  `Ctrl+J` branch on the source tool, and do not add interaction visuals outside
-  the single `InteractionResultLayer` / Rust-owned geometry path. The top
-  selection tool strip, right-click menu, and floating draft affordance must
-  share one Make Selection command model. `Ctrl+J` must read from
-  `LayerPixelReadSource` at command time, including layer placement/scale/
-  transform; active selection is only the read constraint. The image editor's
-  interaction visuals and WGPU overlays must stay inside the editor stage; they
-  must not change `App`, `.media-viewer-backdrop`, or `.media-viewer` behavior.
+- Image-editor rendering has one authority: the active shared-canvas protocol.
+  The landed viewport keeps one resource target/host across document, camera,
+  selection, and drag revisions. `viewport_set_image_scene` atomically swaps a
+  prepared retained layer scene; `viewport_present_image_layer_scene` applies
+  a sequenced in-memory layer transform; the matching viewport-frame payload
+  carries `selectedLayerFrame` plus document/transaction/sequence identity.
+  The retained scene spans the logical pasteboard while its camera renders a
+  bounded visible window; pixels, document-normalized overlays, and the yellow
+  frame remain aligned outside the document boundary. Drag preview and commit
+  share one pasteboard-clamped delta, and the final draft remains until the
+  committed scene/frame handoff settles. One app-level
+  native file-drop listener routes exclusively to the topmost claimant; the
+  editor owns its whole modal but imports ordered, single-undo batches only on
+  its stage. The move surface, hidden-layer retarget, and separate frame IPC
+  were deleted. Native OS-drop evidence, `Ctrl+J`, Image Size, tiling, and
+  memory scaling still follow the remaining protocol gates; no old-frame,
+  draft-frame, or geometry fallback is allowed.
 - Colour-feature masking, mask/Studio Action targeting, page-context agent
   presets, and typography remain gated future work. Do not treat them as the
   next implementation task until each document's prerequisites are satisfied.
@@ -57,7 +64,6 @@ Use it as the quick project-memory map:
 | Document | Status | Why Keep It |
 | --- | --- | --- |
 | [`completed/LOCAL_REACT_FLOW_FORK_PLAN.md`](completed/LOCAL_REACT_FLOW_FORK_PLAN.md) | Complete: Studio imports graph APIs through the local `@hgripe/flow` adapter, the pinned XYFlow source is vendored, unused upstream surfaces were trimmed, and H-Gripe edge/LOD optimizations landed. | Freezes the graph ownership boundary; use before upgrading the vendored XYFlow snapshot or considering a deeper renderer. |
-| [`completed/PYTHON_TO_RUST_MIGRATION_PLAN.md`](completed/PYTHON_TO_RUST_MIGRATION_PLAN.md) | Complete after Phase 7: Python runtime and `third_party/psd_tools` removed from the core app. | Explains why new work must not reintroduce Python as a default runtime. |
 | [`completed/NODE_CARD_CORNER_BADGE_PLAN.md`](completed/NODE_CARD_CORNER_BADGE_PLAN.md) | Implemented via `NodeCardShell` / `NodeTypeBadge`. | Freezes the node-card badge geometry contract. |
 | [`completed/DUAL_DOCK_WORKSPACE_PLAN.md`](completed/DUAL_DOCK_WORKSPACE_PLAN.md) | Superseded by the unified bottom production drawer. | Historical context for why two docks became one production drawer with optional side handles. |
 | [`completed/VENDORED_E2E_INTEGRATION_PLAN.md`](completed/VENDORED_E2E_INTEGRATION_PLAN.md) | Complete: native FFmpeg, moxcms 16-bit pipeline, Rust PSD subset, and `hgripe-grade` (image/video/timeline grading, temporal denoise, `.cube` import/export) are all integrated end-to-end (#390). ONNX small-model expansion continues under its own roadmap. | Freezes which vendored libraries are runtime cores vs. build snapshots; use before forking or deep-integrating a new library. |
@@ -68,8 +74,8 @@ Use it as the quick project-memory map:
 | [`completed/PROMPT_ASSISTANT_SYSTEM_PLAN.md`](completed/PROMPT_ASSISTANT_SYSTEM_PLAN.md) | Complete: all nine implementation steps landed (PRs #521–#526), plus the draggable always-on-top eyes launcher/panel (#527–#530); the legacy `prompt` primitive was removed. | Freezes the software-level assistant boundary (panel vs. `Prompt` card vs. managers); use before changing prompt drafting, insertion, or assistant UI. |
 | [`completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md`](completed/IMAGE_TO_LAYERED_PSD_PIPELINE_PLAN.md) | Complete for the short-term path: Phases 0–5 landed, ending with the timeline clip "Split to layers" entry (#519). Object tracking / cross-frame masks stay future work. | Freezes the `LayeredImageAsset` protocol and split/review pipeline; use before extending layered assets or the split node. |
 | [`completed/PS_TOOLBAR_PARITY_PLAN.md`](completed/PS_TOOLBAR_PARITY_PLAN.md) | Complete: PS slot registry, Mask Ops group, slot-owned shortcuts, flyouts, and contextual tool options with registry tests. | Freezes Photoshop-muscle-memory toolbar behavior; use when revising toolbar slots, shortcuts, or tool options. |
-| [`completed/WGPU_SURFACE_SWAP_PLAN.md`](completed/WGPU_SURFACE_SWAP_PLAN.md) | Complete: all viewport consumers present natively via the WGPU surface swap; PNG/blob remains the browser-preview and no-adapter fallback. | Freezes the viewport presentation transport boundary; use before touching frame presentation or the host command protocol. |
-| [`completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md) | Complete: Phases 0–5 plus the surface swap, host-side overlays, scopes/safe-area, and shared `DeviceReport` wiring all landed; heavy pixels present through WGPU viewports. | Freezes the viewport host boundary (targets, transport, overlays); read together with `active/GPU_DEVICE_STRATEGY_PLAN.md`. |
+| [`completed/WGPU_SURFACE_SWAP_PLAN.md`](completed/WGPU_SURFACE_SWAP_PLAN.md) | Complete: native WGPU surface transport with PNG/blob browser/no-adapter transport. Its former image-editor single-underlay and CSS/PNG rerender notes are superseded. | Freezes only native surface transport and the scoped-hole host protocol. Image-editor scene, camera, layers, geometry, and atomic presentation follow the active shared-canvas protocol. |
+| [`completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`](completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md) | Complete historical migration of generic heavy pixels into WGPU viewports. Its former image-editor visible-window and single-underlay design is superseded. | Freezes generic viewport host/transport history only; read `active/GPU_DEVICE_STRATEGY_PLAN.md` for device strategy and the active shared-canvas protocol for every image-editor rendering decision. |
 | [`completed/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md`](completed/API_AND_LOCAL_MODEL_MANAGEMENT_PLAN.md) | Complete: migration steps 1–8 landed (#393–#397, #522–#523); managers, capability-filtered selectors, card refs, and the Prompt Assistant consume `ModelBackendRef`. | Freezes the manager/ref/capability contract; use before adding any model- or API-consuming card or capability row. |
 | [`completed/UNIFIED_PRODUCTION_DRAWER_PLAN.md`](completed/UNIFIED_PRODUCTION_DRAWER_PLAN.md) | Complete: stage-one steps 1–9 landed (PRs #294–#300), and later work added video-clip export, audio mixdown/AAC mux, clip property keyframes, direct media import, monitor frame export, and loop playback. Grade-parameter keyframe animation remains future work. | Freezes the drawer/workspace/selection hierarchy; use before adding drawer tabs, editors, or export entry points. |
 

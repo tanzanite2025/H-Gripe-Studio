@@ -21,10 +21,11 @@ use super::*;
 /// outcome in the device registry (never silent).
 #[cfg(all(windows, feature = "viewport-surface", feature = "native-ffmpeg"))]
 pub(super) fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)> {
+    const SUPERSEDED: &str = "viewport hardware render superseded by newer state";
     let Ok(id) = parse_id(viewport_id) else {
         return None;
     };
-    let (target, grade_doc, view, temporal_denoise, overlay_scene) = {
+    let (target, grade_doc, view, temporal_denoise, overlay_scene, generations) = {
         let map = viewports().lock().ok()?;
         let state = map.get(&id)?;
         (
@@ -33,6 +34,7 @@ pub(super) fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)
             state.view,
             state.temporal_denoise,
             state.overlay_scene.clone(),
+            state.generations(),
         )
     };
     let (path, time_sec) = match &target {
@@ -97,6 +99,16 @@ pub(super) fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)
         };
         let frame = session.frame_near(time_sec)?;
         let size = (frame.width(), frame.height());
+        drop(sessions);
+        let map = viewports()
+            .lock()
+            .map_err(|_| "viewport registry poisoned".to_string())?;
+        let state = map
+            .get(&id)
+            .ok_or_else(|| format!("unknown viewport id: {viewport_id}"))?;
+        if !rendered_generations_match(state.generations(), generations) {
+            return Err(SUPERSEDED.to_string());
+        }
         crate::commands::viewport_surface::present_hw_frame(
             viewport_id,
             &frame,
@@ -107,6 +119,7 @@ pub(super) fn try_present_hw_video_frame(viewport_id: &str) -> Option<(u32, u32)
     })();
     match result {
         Ok(size) => Some(size),
+        Err(reason) if reason == SUPERSEDED => None,
         Err(reason) => {
             eprintln!("[viewport] zero-copy present fell back for {viewport_id}: {reason}");
             // Never leave a possibly-broken session behind: the next opted-in
@@ -185,6 +198,8 @@ pub(super) fn render_video_path(
                 .with_clip_props(props_backend)
                 .with_stage_timings(decode_ms, Some(grade_ms)),
             view,
+            generations: ViewportGenerations::default(),
+            image_layer: ViewportImageLayerFrameMetadata::default(),
         });
     }
     let poster_dir = crate::cache_subdir(".posters")?;
@@ -205,5 +220,7 @@ pub(super) fn render_video_path(
         image: proxy,
         backend: cpu_backend().with_stage_timings(decode_ms, None),
         view,
+        generations: ViewportGenerations::default(),
+        image_layer: ViewportImageLayerFrameMetadata::default(),
     })
 }

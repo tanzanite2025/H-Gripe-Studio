@@ -63,6 +63,7 @@ import { useProjectRestoreController } from "./app/useProjectRestoreController";
 import { useProductionWorkspaceController } from "./app/useProductionWorkspaceController";
 import { useEditorLaunchController } from "./app/useEditorLaunchController";
 import { useCanvasWorkspaceController } from "./app/useCanvasWorkspaceController";
+import { nativeFileDropRouter } from "./app/nativeFileDropRouter";
 import { NODE_COLUMN_GAP } from "./editor/nodeGeometry";
 
 // Canvas file-drop ingestion: which dropped files become a media card. Images
@@ -89,6 +90,7 @@ const initialEdges: Edge[] = [
 
 function Studio({ onToggleLang }: { onToggleLang: () => void }) {
   const t = useT();
+  useEffect(() => nativeFileDropRouter.retainListener(), []);
   // Restore the last autosaved workflow from this workspace; fall back to the
   // pre-wired sample graph on a fresh / unreadable workspace.
   const initial = useMemo(() => {

@@ -136,6 +136,8 @@ export interface PointerEnv {
   /** Pointer event → image-space pixel coordinates. */
   toImage(e: React.PointerEvent): Pt;
   canStartSelectedLayerMove(pt: Pt): boolean;
+  resolveSelectedLayerMoveDelta(delta: Pt): Pt | null;
+  beginMovePreview(): void;
   /** The canvas's untransformed on-screen size (the clamp space for pan). */
   viewBase(): [number, number];
   /** The pointer's angle (degrees) about the canvas centre on screen. */
@@ -155,6 +157,7 @@ export interface PointerEnv {
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelection | null>>;
   setSelectionDraft: React.Dispatch<React.SetStateAction<SelectionDraft | null>>;
   setMoveDraft(v: Pt | null): void;
+  completeMoveDraft(delta: Pt | null): void;
   setColorSamples: React.Dispatch<React.SetStateAction<ColorSample[]>>;
   sampleUnderlay(pt: Pt, onSample?: (hex: string) => void): void;
   captureEdgeMap(): void;

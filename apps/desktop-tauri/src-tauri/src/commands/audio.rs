@@ -26,8 +26,7 @@ pub(crate) fn audio_waveform_peaks(
     bucket_count: usize,
 ) -> Result<AudioWaveformPeaksResult, String> {
     use crate::studio::{
-        decode_audio_pcm, waveform_peaks_from_interleaved_stereo_pcm, MIX_CHANNELS,
-        MIX_SAMPLE_RATE,
+        decode_audio_pcm, waveform_peaks_from_interleaved_stereo_pcm, MIX_CHANNELS, MIX_SAMPLE_RATE,
     };
 
     let trimmed = path.trim();

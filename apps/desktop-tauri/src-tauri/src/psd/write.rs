@@ -1,7 +1,7 @@
 //! Native PSD compose: place a generated image into a PSD template's
 //! placeholder as a new pixel layer and export the `<name>.psd` +
 //! `<name>_preview.png` + `<name>_metadata.json` triplet — the write half of
-//! the PSD migration (PYTHON_TO_RUST_MIGRATION_PLAN.md, "Phase 5"), mirroring
+//! the completed Rust PSD migration (Phase 5), mirroring
 //! `python/bridge/compose_psd_cli.py`.
 //!
 //! The writer splices into the template rather than re-serialising it: every

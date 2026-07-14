@@ -534,7 +534,7 @@ describe("buildProxyMask", () => {
     expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20 })).toEqual([4, 5, 13, 16]);
   });
 
-  it("can treat the background layer as an implicit source for bounds", () => {
+  it("does not invent implicit source pixels for an empty background layer", () => {
     const layer = {
       id: "background",
       name: "Background",
@@ -545,7 +545,6 @@ describe("buildProxyMask", () => {
       ops: [],
       mask: { id: "mask-background", ops: [{ type: "rect" as const, region: [4, 5, 12, 15] as [number, number, number, number] }] },
     };
-    expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20, implicitSource: true })).toEqual([4, 5, 13, 16]);
     expect(layerAlphaBounds(layer, { w: 20, h: 20 }, { proxyWidth: 20 })).toBeNull();
   });
 

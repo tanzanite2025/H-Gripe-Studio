@@ -1,165 +1,190 @@
-// Editor underlay via the viewport host (WGPU migration Phase 2, step 1).
-// Instead of calling the thumbnail bridge directly, an editor opens a viewport,
-// points it at the image *by resource reference*, and presents rendered frames.
-// The frame is a data URL for now (Phase 1 CPU transport); when the transport
-// becomes a WGPU texture the editors do not change — only this hook's
-// presentation output does.
-
 import { useEffect, useRef, useState, type RefObject } from "react";
+
 import { registerResource } from "../bridge/files";
 import type {
+  ImageLayerScenePresentation,
+  PresentedImageLayerScene,
   ViewportBackend,
+  ViewportImageScene,
   ViewportKind,
   ViewportMaskOverlay,
   ViewportOverlayScene,
+  ViewportSelectedLayerFrame,
   ViewportTarget,
 } from "../bridge/viewport";
-import { IDENTITY_VIEW, isIdentityView, type ViewportViewState } from "./view";
+import { IDENTITY_VIEW, type ViewportViewState } from "./view";
 import { measurePlacement, useViewportPlacement } from "./useViewportPlacement";
+import {
+  viewportUnderlaySourceHostKey,
+  viewportUnderlaySourceImageScene,
+  viewportUnderlaySourceSceneKey,
+  viewportUnderlaySourceTargetKey,
+  type ViewportUnderlaySource,
+} from "./viewportTargetIdentity";
 import { WgpuViewportHost } from "./WgpuViewportHost";
 
-/**
- * What the underlay presents: an image file by path (registered as an image
- * resource on open) or a reference target the host resolves itself (e.g. an
- * `image_layer` of a registered layered asset).
- */
-export type ViewportUnderlaySource = string | ViewportTarget;
-
-/** Full target identity: changes whenever the host must render new pixels. */
-function sourceTargetKey(source: ViewportUnderlaySource | undefined): string {
-  if (source === undefined) return "none";
-  if (typeof source === "string") return `path:${source}`;
-  switch (source.kind) {
-    case "image":
-      return `image:${source.resourceId}`;
-    case "image_layer":
-      return `image_layer:${source.assetId}:${source.layerId}`;
-    case "image_composite":
-      return [
-        "image_composite",
-        source.resourceId,
-        source.documentKey,
-        `${source.documentWidth}x${source.documentHeight}`,
-        `${source.frameX ?? 0},${source.frameY ?? 0}`,
-        `${source.frameWidth ?? source.documentWidth}x${source.frameHeight ?? source.documentHeight}`,
-      ].join(":");
-    case "video_clip":
-      return `video_clip:${source.timelineId}:${source.clipId}:${source.timeSec}`;
-    case "video_frame":
-      return `video_frame:${source.resourceId}:${source.timeSec}`;
-    case "node_output":
-      return `node_output:${source.nodeId}${source.outputPort ? `:${source.outputPort}` : ""}`;
-  }
-}
-
-/** Host lifetime identity: keeps expensive viewport hosts alive across cheap
- * retargets such as an image-composite documentKey changing during a drag. */
-function sourceHostKey(source: ViewportUnderlaySource | undefined): string {
-  if (source === undefined) return "none";
-  if (typeof source === "string") return `path:${source}`;
-  switch (source.kind) {
-    case "image":
-      return `image:${source.resourceId}`;
-    case "image_layer":
-      return `image_layer:${source.assetId}:${source.layerId}`;
-    case "image_composite":
-      return `image_composite:${source.resourceId}`;
-    case "video_clip":
-      return `video_clip:${source.timelineId}:${source.clipId}`;
-    case "video_frame":
-      return `video_frame:${source.resourceId}`;
-    case "node_output":
-      return `node_output:${source.nodeId}${source.outputPort ? `:${source.outputPort}` : ""}`;
-  }
-}
+export {
+  viewportUnderlaySourceSceneKey,
+  viewportUnderlaySourceTargetKey,
+} from "./viewportTargetIdentity";
+export type { ViewportUnderlaySource } from "./viewportTargetIdentity";
 
 export interface ViewportUnderlay {
-  /** Presented frame as an image source, or null (browser preview / error —
-   * or the frame is on the native surface: see `presented`). */
   underlay: string | null;
-  /** The frame is on the viewport's native surface window (WGPU surface swap
-   * Phase S2): `underlay` is null and callers let the surface show through
-   * instead of mounting an `<img>`. */
   presented: boolean;
-  /** Full-frame pixel dimensions (the identity view's frame), or null until
-   * the first frame arrives. Stable across zoom/pan re-renders so callers
-   * can keep overlay geometry in one image-pixel space. */
+  /** Full-frame dimensions, independent of the current view window. */
   dims: { w: number; h: number } | null;
-  /** The view window the presented frame was rendered for. Callers that
-   * place the frame themselves (rather than filling their stage with it)
-   * position it at this window's rect in the full frame. */
   frameView: ViewportViewState;
-  /** Backend report of the last rendered frame (fallback contract). */
   backend: ViewportBackend | null;
-  /** True once the attempt finished — with a frame, or without one (browser
-   * preview / render error), letting callers stop showing a loading state. */
   settled: boolean;
-  /** True only when the displayed frame was rendered for the current target. */
+  /** True only when the displayed frame belongs to the current target. */
   targetSettled: boolean;
-  /** Stable identity of the source target that produced the displayed frame. */
   renderedTargetKey: string | null;
-  /** The open viewport host, for explicit host calls that the presented
-   * frame cannot answer — pixel readback (`readPixels`, surface swap Phase
-   * S4). Null until open and after close. */
+  sceneSettled: boolean;
+  renderedSceneKey: string | null;
+  presentedImageLayerScene: PresentedImageLayerScene | null;
+  selectedLayerFrame: ViewportSelectedLayerFrame | null;
   host: WgpuViewportHost | null;
 }
 
-/** Decode a PNG-transport frame before committing it. The `<img>` src and
- * the window rect swap in one React commit, but the browser keeps painting
- * the old bitmap at the new rect until the new src decodes — a wrong-scale
- * flash on zoom. Pre-decoding makes the swap visually atomic. */
+interface ViewportSyncSnapshot {
+  revision: number;
+  source: ViewportUnderlaySource;
+  targetKey: string;
+  sceneKey: string | null;
+  imageScene: ViewportImageScene | null;
+  size: number;
+  view: ViewportViewState;
+  maskOverlay: ViewportMaskOverlay | null;
+  overlayScene: ViewportOverlayScene | null;
+  imageLayerPresentation: ImageLayerScenePresentation | null;
+  presentEnabled: boolean;
+}
+
+interface ViewportSyncController {
+  host: WgpuViewportHost;
+  closed: boolean;
+  requestedRevision: number;
+  appliedRevision: number;
+  finishedRenderRevision: number;
+  syncing: boolean;
+  rendering: boolean;
+  lastAppliedSnapshot: ViewportSyncSnapshot | null;
+  liveRequestedRevision: number;
+  liveCompletedRevision: number;
+  liveRunning: boolean;
+}
+
 async function frameDecoded(frame: { presented: boolean; data_url: string }): Promise<void> {
   if (frame.presented || !frame.data_url || typeof Image === "undefined") return;
-  const img = new Image();
-  img.src = frame.data_url;
-  if (typeof img.decode === "function") await img.decode().catch(() => undefined);
+  const image = new Image();
+  image.src = frame.data_url;
+  if (typeof image.decode === "function") await image.decode();
+}
+
+function sameView(a: ViewportViewState, b: ViewportViewState): boolean {
+  return a.zoom === b.zoom && a.panX === b.panX && a.panY === b.panY;
+}
+
+function sameImageLayerPresentation(
+  a: ImageLayerScenePresentation | null,
+  b: ImageLayerScenePresentation | null,
+): boolean {
+  return (
+    a === b
+    || (
+      a !== null
+      && b !== null
+      && a.selectedLayerId === b.selectedLayerId
+      && a.transactionId === b.transactionId
+      && a.baseDocumentKey === b.baseDocumentKey
+      && a.sequence === b.sequence
+      && (
+        a.moveDraft === b.moveDraft
+        || (
+          a.moveDraft !== null
+          && b.moveDraft !== null
+          && a.moveDraft.dx === b.moveDraft.dx
+          && a.moveDraft.dy === b.moveDraft.dy
+        )
+      )
+    )
+  );
+}
+
+function sameImageLayerTransaction(
+  a: ImageLayerScenePresentation | null,
+  b: ImageLayerScenePresentation,
+): boolean {
+  return (
+    a !== null
+    && a.selectedLayerId === b.selectedLayerId
+    && a.transactionId === b.transactionId
+    && a.baseDocumentKey === b.baseDocumentKey
+  );
+}
+
+function frameMatchesImageLayerPresentation(
+  frame: {
+    documentKey: string | null;
+    transactionId: string | null;
+    sequence: number | null;
+    selectedLayerFrame: ViewportSelectedLayerFrame | null;
+  },
+  imageScene: ViewportImageScene | null,
+  presentation: ImageLayerScenePresentation | null,
+): boolean {
+  if (imageScene && frame.documentKey !== imageScene.documentKey) return false;
+  if (!presentation) return true;
+  return (
+    frame.documentKey === presentation.baseDocumentKey
+    && frame.transactionId === presentation.transactionId
+    && frame.sequence === presentation.sequence
+    && (
+      frame.selectedLayerFrame === null
+      || frame.selectedLayerFrame.layerId === presentation.selectedLayerId
+    )
+  );
+}
+
+function presentedImageLayerScene(frame: {
+  documentKey: string | null;
+  transactionId: string | null;
+  sequence: number | null;
+}): PresentedImageLayerScene | null {
+  if (frame.documentKey === null && frame.transactionId === null && frame.sequence === null) {
+    return null;
+  }
+  return {
+    documentKey: frame.documentKey,
+    transactionId: frame.transactionId,
+    sequence: frame.sequence,
+  };
+}
+
+function isSupersededRenderError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("render superseded");
 }
 
 /**
- * Open a `kind` viewport targeting `source` for the lifetime of the caller
- * and present its rendered frame. The viewport is created on demand (never at
- * startup), destroyed on unmount, and re-targeted when the source changes. A
- * path source registers as an image resource on open; a target source is set
- * as-is (the caller has already registered its referents, e.g. via
- * `registerLayeredAsset`). Outside Tauri the resource registry is unavailable
- * and a path source stays null — editors keep their checkerboard fallback.
+ * Own one viewport host and synchronize every desired state change through a
+ * per-host controller. Commands are never represented as replaceable queued
+ * closures: target, size, view and overlays are all reconciled from one latest
+ * snapshot, and a setter is recorded as sent only after it succeeds.
  */
 export function useViewportUnderlay(
   kind: ViewportKind,
   source: ViewportUnderlaySource | undefined,
   size = 1280,
-  /** Presentation zoom/pan (viewport state): a change re-renders through the
-   * open viewport's cached source proxy — the source is never re-decoded. */
   view: ViewportViewState = IDENTITY_VIEW,
-  /** Mask overlay the host composites over frames (image_edit viewports):
-   * the selection tint presents at the view window's detail instead of an
-   * upscaled document-size canvas overlay. */
   maskOverlay: ViewportMaskOverlay | null = null,
-  /** Element the native surface window sits under (surface swap): when given,
-   * placement is tracked for the host's lifetime and presented frames skip
-   * the PNG transport — callers keep their DOM overlays above the hole. */
   placementRef: RefObject<HTMLElement | null> | null = null,
-  /** Present on the native surface only while true — false for states the
-   * surface cannot represent (rotated view, transparency preview): the
-   * surface hides and frames fall back to the PNG transport. */
   presentEnabled = true,
-  /** Vector overlay (selection outlines) the host strokes over frames
-   * (image_edit viewports): marching ants present at the view window's
-   * detail — one screen pixel wide at any zoom — instead of on a
-   * document-size canvas. */
   overlayScene: ViewportOverlayScene | null = null,
-  /** Re-measures the surface placement on change (CSS transforms move the
-   * placement element without firing the resize observer): callers whose
-   * stage zooms/pans with a transform pass their view state here so the
-   * surface window follows it. */
   placementKey: unknown = undefined,
-  /** Live (un-debounced) view for the surface fast path: every change
-   * re-presents the surface's cached frame texture cropped to it — a pure
-   * GPU pass, no render, no pixel IPC — so zoom/pan reflects per input tick
-   * while the debounced `view` above drives the settle re-render at full
-   * detail. Inert without a presented surface (browser preview, PNG path):
-   * the caller's CSS transform carries the motion there. */
   liveView: ViewportViewState | null = null,
+  imageLayerPresentation: ImageLayerScenePresentation | null = null,
 ): ViewportUnderlay {
   const [state, setState] = useState<Omit<ViewportUnderlay, "host">>({
     underlay: null,
@@ -170,89 +195,415 @@ export function useViewportUnderlay(
     settled: false,
     targetSettled: false,
     renderedTargetKey: null,
+    sceneSettled: false,
+    renderedSceneKey: null,
+    presentedImageLayerScene: null,
+    selectedLayerFrame: null,
   });
   const hostRef = useRef<WgpuViewportHost | null>(null);
   const [openHost, setOpenHost] = useState<WgpuViewportHost | null>(null);
-  // The view last sent to the open host, to skip no-op `set_view` commands.
-  const sentViewRef = useRef<ViewportViewState>(IDENTITY_VIEW);
+  const controllerRef = useRef<ViewportSyncController | null>(null);
+
+  const sentSizeRef = useRef<number | null>(null);
   const sentTargetKeyRef = useRef<string | null>(null);
-  // Latest requested view, so a host opened after a view change (e.g. the
-  // caller flipped targets while zoomed) renders that view, not identity.
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  // The overlay last sent to the open host, to skip no-op commands.
+  const sentImageSceneKeyRef = useRef<string | null>(null);
+  const sentViewRef = useRef<ViewportViewState>(IDENTITY_VIEW);
   const sentOverlayRef = useRef<ViewportMaskOverlay | null>(null);
-  const overlayRef = useRef(maskOverlay);
-  overlayRef.current = maskOverlay;
   const sentSceneRef = useRef<ViewportOverlayScene | null>(null);
-  const sceneRef = useRef(overlayScene);
-  sceneRef.current = overlayScene;
-  // One re-render in flight per host, with the latest request coalesced
-  // behind it. A zoom/pan drag or a brush stroke changes state per input
-  // event; issuing one overlapping `set_view`/`set_mask_overlay` +
-  // `render_frame` chain per change floods the IPC channel (on Windows every
-  // response is a PostMessage to the main thread — enough backlog fills the
-  // message queue). Instead the newest request replaces the queued one and
-  // sends when the in-flight chain finishes.
-  const renderInFlightRef = useRef(false);
-  const queuedRenderRef = useRef<(() => Promise<void>) | null>(null);
+  const sentImageLayerPresentationRef = useRef<ImageLayerScenePresentation | null>(null);
+  const sentPresentEnabledRef = useRef<boolean | null>(null);
 
-  const runCoalesced = (host: WgpuViewportHost, send: () => Promise<void>) => {
-    if (renderInFlightRef.current) {
-      queuedRenderRef.current = send;
-      return;
-    }
-    renderInFlightRef.current = true;
-    void (async () => {
-      let next: (() => Promise<void>) | null = send;
-      while (next && hostRef.current === host && host.isOpen) {
-        try {
-          await next();
-        } catch {
-          /* leave the current presentation untouched */
-        }
-        next = queuedRenderRef.current;
-        queuedRenderRef.current = null;
-      }
-      renderInFlightRef.current = false;
-    })();
-  };
-
-  // The source object identity may change every render; key the open effect
-  // on its stable identity and read the latest value through a ref.
-  const hostKey = sourceHostKey(source);
-  const targetKey = sourceTargetKey(source);
+  const hostKey = viewportUnderlaySourceHostKey(source);
+  const targetKey = viewportUnderlaySourceTargetKey(source);
+  const sceneKey = viewportUnderlaySourceSceneKey(source);
+  const imageScene = viewportUnderlaySourceImageScene(source);
   const sourceRef = useRef(source);
   sourceRef.current = source;
-
-  // Placement tracking (surface swap): inert without a placement ref — the
-  // hook then never sends placement and frames stay on the PNG transport.
-  // On open, the effect below places the surface once before the first render
-  // so a WGPU-capable viewport does not flash CPU/PNG and then re-render.
-  // The tracking hook keeps the rect current after layout changes; if a late
-  // placement is the first successful one, `onPlaced` still moves the frame.
-  const noPlacementRef = useRef<HTMLElement | null>(null);
-  const framePresentedRef = useRef(false);
-  const sentPresentEnabledRef = useRef(true);
+  const targetKeyRef = useRef(targetKey);
+  targetKeyRef.current = targetKey;
+  const sceneKeyRef = useRef(sceneKey);
+  sceneKeyRef.current = sceneKey;
+  const imageSceneRef = useRef(imageScene);
+  imageSceneRef.current = imageScene;
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const overlayRef = useRef(maskOverlay);
+  overlayRef.current = maskOverlay;
+  const sceneRef = useRef(overlayScene);
+  sceneRef.current = overlayScene;
+  const imageLayerPresentationRef = useRef(imageLayerPresentation);
+  imageLayerPresentationRef.current = imageLayerPresentation;
   const presentEnabledRef = useRef(presentEnabled);
   presentEnabledRef.current = presentEnabled;
+  const liveViewRef = useRef(liveView);
+  liveViewRef.current = liveView;
+  const framePresentedRef = useRef(false);
+
+  function controllerIsCurrent(controller: ViewportSyncController): boolean {
+    return (
+      !controller.closed
+      && controllerRef.current === controller
+      && hostRef.current === controller.host
+      && controller.host.isOpen
+    );
+  }
+
+  function failCurrentSync(controller: ViewportSyncController, revision: number): void {
+    if (!controllerIsCurrent(controller) || controller.requestedRevision !== revision) return;
+    setState((previous) => {
+      const preservesCompleteTarget = previous.renderedTargetKey === targetKeyRef.current
+        && (previous.presented || previous.underlay !== null);
+      if (preservesCompleteTarget) {
+        framePresentedRef.current = previous.presented;
+        return {
+          ...previous,
+          settled: true,
+          targetSettled: true,
+          sceneSettled: previous.renderedSceneKey === sceneKeyRef.current,
+        };
+      }
+      framePresentedRef.current = false;
+      return {
+        ...previous,
+        underlay: null,
+        presented: false,
+        backend: null,
+        settled: true,
+        targetSettled: false,
+        renderedTargetKey: null,
+        sceneSettled: false,
+        renderedSceneKey: null,
+        presentedImageLayerScene: null,
+        selectedLayerFrame: null,
+      };
+    });
+  }
+
+  function maybeStartLive(controller: ViewportSyncController): void {
+    if (!controllerIsCurrent(controller) || controller.liveRunning) return;
+    if (controller.syncing || controller.appliedRevision < controller.requestedRevision) return;
+    if (controller.liveCompletedRevision >= controller.liveRequestedRevision) return;
+    controller.liveRunning = true;
+    void (async () => {
+      try {
+        while (
+          controllerIsCurrent(controller)
+          && !controller.syncing
+          && controller.appliedRevision >= controller.requestedRevision
+          && controller.liveCompletedRevision < controller.liveRequestedRevision
+        ) {
+          const revision = controller.liveRequestedRevision;
+          const requestedView = liveViewRef.current;
+          const requestedTargetKey = targetKeyRef.current;
+          if (
+            !requestedView
+            || !framePresentedRef.current
+            || !presentEnabledRef.current
+            || sentTargetKeyRef.current !== requestedTargetKey
+          ) {
+            controller.liveCompletedRevision = revision;
+            continue;
+          }
+          const took = await controller.host.presentView(requestedView);
+          controller.liveCompletedRevision = revision;
+          if (
+            !took
+            || !controllerIsCurrent(controller)
+            || controller.liveRequestedRevision !== revision
+            || targetKeyRef.current !== requestedTargetKey
+            || !framePresentedRef.current
+          ) {
+            continue;
+          }
+          setState((previous) => (
+            previous.targetSettled && previous.renderedTargetKey === requestedTargetKey
+              ? { ...previous, frameView: requestedView }
+              : previous
+          ));
+        }
+      } finally {
+        controller.liveRunning = false;
+        if (
+          controllerIsCurrent(controller)
+          && !controller.syncing
+          && controller.appliedRevision >= controller.requestedRevision
+          && controller.liveCompletedRevision < controller.liveRequestedRevision
+        ) {
+          maybeStartLive(controller);
+        }
+      }
+    })();
+  }
+
+  function maybeStartRender(controller: ViewportSyncController): void {
+    if (!controllerIsCurrent(controller) || controller.rendering || controller.syncing) return;
+    if (controller.appliedRevision < controller.requestedRevision) return;
+    const snapshot = controller.lastAppliedSnapshot;
+    if (!snapshot || snapshot.revision <= controller.finishedRenderRevision) return;
+    controller.rendering = true;
+    void (async () => {
+      try {
+        const frame = await controller.host.renderFrame();
+        await frameDecoded(frame);
+        controller.finishedRenderRevision = Math.max(
+          controller.finishedRenderRevision,
+          snapshot.revision,
+        );
+        if (
+          !controllerIsCurrent(controller)
+          || controller.requestedRevision !== snapshot.revision
+          || controller.appliedRevision !== snapshot.revision
+          || targetKeyRef.current !== snapshot.targetKey
+        ) {
+          return;
+        }
+        if (!frameMatchesImageLayerPresentation(
+          frame,
+          snapshot.imageScene,
+          snapshot.imageLayerPresentation,
+        )) {
+          failCurrentSync(controller, snapshot.revision);
+          return;
+        }
+        const zoom = Math.max(snapshot.view.zoom, 1);
+        framePresentedRef.current = frame.presented;
+        setState({
+          underlay: frame.presented ? null : frame.data_url,
+          presented: frame.presented,
+          dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
+          frameView: snapshot.view,
+          backend: frame.backend,
+          settled: true,
+          targetSettled: true,
+          renderedTargetKey: snapshot.targetKey,
+          sceneSettled: true,
+          renderedSceneKey: snapshot.sceneKey,
+          presentedImageLayerScene: presentedImageLayerScene(frame),
+          selectedLayerFrame: frame.selectedLayerFrame,
+        });
+      } catch (error) {
+        controller.finishedRenderRevision = Math.max(
+          controller.finishedRenderRevision,
+          snapshot.revision,
+        );
+        if (!isSupersededRenderError(error)) {
+          failCurrentSync(controller, snapshot.revision);
+        }
+      } finally {
+        controller.rendering = false;
+        if (controllerIsCurrent(controller)) {
+          maybeStartRender(controller);
+          maybeStartLive(controller);
+        }
+      }
+    })();
+  }
+
+  function drainSync(controller: ViewportSyncController): void {
+    if (!controllerIsCurrent(controller) || controller.syncing) return;
+    if (controller.appliedRevision >= controller.requestedRevision) {
+      maybeStartRender(controller);
+      maybeStartLive(controller);
+      return;
+    }
+    controller.syncing = true;
+    void (async () => {
+      try {
+        while (
+          controllerIsCurrent(controller)
+          && controller.appliedRevision < controller.requestedRevision
+        ) {
+          const revision = controller.requestedRevision;
+          const requestedSource = sourceRef.current;
+          if (requestedSource === undefined) {
+            controller.appliedRevision = revision;
+            controller.finishedRenderRevision = revision;
+            failCurrentSync(controller, revision);
+            continue;
+          }
+          const snapshot: ViewportSyncSnapshot = {
+            revision,
+            source: requestedSource,
+            targetKey: targetKeyRef.current,
+            sceneKey: sceneKeyRef.current,
+            imageScene: imageSceneRef.current,
+            size: sizeRef.current,
+            view: viewRef.current,
+            maskOverlay: overlayRef.current,
+            overlayScene: sceneRef.current,
+            imageLayerPresentation: imageLayerPresentationRef.current,
+            presentEnabled: presentEnabledRef.current,
+          };
+          try {
+            let target: ViewportTarget | null = null;
+            if (sentTargetKeyRef.current !== snapshot.targetKey) {
+              if (typeof snapshot.source === "string") {
+                const resource = await registerResource(snapshot.source);
+                if (!resource) throw new Error("viewport source registration unavailable");
+                target = { kind: "image", resourceId: resource.id };
+              } else {
+                target = snapshot.source;
+              }
+            }
+            if (!controllerIsCurrent(controller)) return;
+            if (controller.requestedRevision !== revision) continue;
+
+            const pixelIdentityChanging = (
+              sentSizeRef.current !== snapshot.size
+              || sentTargetKeyRef.current !== snapshot.targetKey
+            );
+            if (pixelIdentityChanging) {
+              framePresentedRef.current = false;
+              setState((previous) => ({
+                ...previous,
+                underlay: null,
+                presented: false,
+                backend: null,
+                settled: false,
+                targetSettled: false,
+                renderedTargetKey: null,
+                sceneSettled: false,
+                renderedSceneKey: null,
+                presentedImageLayerScene: null,
+                selectedLayerFrame: null,
+              }));
+            }
+
+            if (!snapshot.presentEnabled && sentPresentEnabledRef.current !== false) {
+              await controller.host.command({ kind: "set_presented", presented: false });
+              sentPresentEnabledRef.current = false;
+            }
+            if (sentSizeRef.current !== snapshot.size) {
+              await controller.host.command({
+                kind: "resize",
+                width: snapshot.size,
+                height: snapshot.size,
+              });
+              sentSizeRef.current = snapshot.size;
+            }
+            if (sentTargetKeyRef.current !== snapshot.targetKey) {
+              if (!target) throw new Error("viewport target was not resolved");
+              await controller.host.command({ kind: "set_target", target });
+              sentTargetKeyRef.current = snapshot.targetKey;
+              // Image-composite set_target already carries and builds this
+              // exact initial scene. Only later same-resource revisions use
+              // set_image_scene.
+              sentImageSceneKeyRef.current = snapshot.imageScene
+                ? snapshot.sceneKey
+                : null;
+              sentImageLayerPresentationRef.current = null;
+            }
+            if (
+              snapshot.imageScene
+              && sentImageSceneKeyRef.current !== snapshot.sceneKey
+            ) {
+              await controller.host.command({
+                kind: "set_image_scene",
+                scene: snapshot.imageScene,
+              });
+              sentImageSceneKeyRef.current = snapshot.sceneKey;
+              sentImageLayerPresentationRef.current = null;
+            }
+            if (!sameView(sentViewRef.current, snapshot.view)) {
+              await controller.host.command({ kind: "set_view", ...snapshot.view });
+              sentViewRef.current = snapshot.view;
+            }
+            if (sentOverlayRef.current !== snapshot.maskOverlay) {
+              await controller.host.command({
+                kind: "set_mask_overlay",
+                overlay: snapshot.maskOverlay,
+              });
+              sentOverlayRef.current = snapshot.maskOverlay;
+            }
+            if (sentSceneRef.current !== snapshot.overlayScene) {
+              await controller.host.command({
+                kind: "set_overlay_scene",
+                scene: snapshot.overlayScene,
+              });
+              sentSceneRef.current = snapshot.overlayScene;
+            }
+            if (
+              snapshot.imageLayerPresentation
+              && !sameImageLayerPresentation(
+                sentImageLayerPresentationRef.current,
+                snapshot.imageLayerPresentation,
+              )
+            ) {
+              if (
+                !sameImageLayerTransaction(
+                  sentImageLayerPresentationRef.current,
+                  snapshot.imageLayerPresentation,
+                )
+                && (
+                  snapshot.imageLayerPresentation.sequence !== 0
+                  || snapshot.imageLayerPresentation.moveDraft !== null
+                )
+              ) {
+                const baseline: ImageLayerScenePresentation = {
+                  ...snapshot.imageLayerPresentation,
+                  sequence: 0,
+                  moveDraft: null,
+                };
+                await controller.host.command({
+                  kind: "present_image_layer_scene",
+                  presentation: baseline,
+                });
+                sentImageLayerPresentationRef.current = baseline;
+              }
+              await controller.host.command({
+                kind: "present_image_layer_scene",
+                presentation: snapshot.imageLayerPresentation,
+              });
+              sentImageLayerPresentationRef.current = snapshot.imageLayerPresentation;
+            }
+            if (snapshot.presentEnabled && sentPresentEnabledRef.current !== true) {
+              await controller.host.command({ kind: "set_presented", presented: true });
+              sentPresentEnabledRef.current = true;
+            }
+            controller.appliedRevision = revision;
+            controller.lastAppliedSnapshot = snapshot;
+          } catch {
+            controller.appliedRevision = revision;
+            controller.finishedRenderRevision = revision;
+            failCurrentSync(controller, revision);
+          }
+        }
+      } finally {
+        controller.syncing = false;
+        if (controllerIsCurrent(controller)) {
+          if (controller.appliedRevision < controller.requestedRevision) {
+            drainSync(controller);
+          } else {
+            maybeStartRender(controller);
+            maybeStartLive(controller);
+          }
+        }
+      }
+    })();
+  }
+
+  function requestSync(host: WgpuViewportHost | null = hostRef.current): void {
+    const controller = controllerRef.current;
+    if (!host || !controller || controller.host !== host || !controllerIsCurrent(controller)) return;
+    controller.requestedRevision += 1;
+    drainSync(controller);
+  }
+
+  function requestLive(host: WgpuViewportHost | null = hostRef.current): void {
+    const controller = controllerRef.current;
+    if (!host || !controller || controller.host !== host || !controllerIsCurrent(controller)) return;
+    controller.liveRequestedRevision += 1;
+    maybeStartLive(controller);
+  }
+
+  const noPlacementRef = useRef<HTMLElement | null>(null);
   const onPlaced = (report: { presented: boolean }) => {
     const host = hostRef.current;
     if (!report.presented || framePresentedRef.current) return;
     if (!host || !host.isOpen || !presentEnabledRef.current) return;
-    runCoalesced(host, async () => {
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (hostRef.current !== host) return;
-      framePresentedRef.current = frame.presented;
-      setState((s) => ({
-        ...s,
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        backend: frame.backend,
-        settled: true,
-      }));
-    });
+    requestSync(host);
   };
   useViewportPlacement(
     openHost,
@@ -273,48 +624,34 @@ export function useViewportUnderlay(
       settled: false,
       targetSettled: false,
       renderedTargetKey: null,
+      sceneSettled: false,
+      renderedSceneKey: null,
+      presentedImageLayerScene: null,
+      selectedLayerFrame: null,
     });
-    const src = sourceRef.current;
-    if (src === undefined) return;
+    const initialSource = sourceRef.current;
+    if (initialSource === undefined) return;
     let cancelled = false;
     let host: WgpuViewportHost | null = null;
     const settle = () => {
-      if (!cancelled) setState((s) => (s.settled ? s : { ...s, settled: true }));
+      if (!cancelled) setState((previous) => ({ ...previous, settled: true }));
     };
 
-    (async () => {
-      let target: ViewportTarget;
-      if (typeof src === "string") {
-        const res = await registerResource(src);
-        if (!res || cancelled) {
+    void (async () => {
+      // Preserve the browser-preview contract: an unresolved path does not
+      // consume a host. The desired-state pass resolves it again immediately
+      // before set_target so a later path revision cannot reuse this result.
+      if (typeof initialSource === "string") {
+        const resource = await registerResource(initialSource);
+        if (!resource || cancelled) {
           settle();
           return;
         }
-        target = { kind: "image", resourceId: res.id };
-      } else {
-        target = src;
       }
       host = await WgpuViewportHost.open(kind);
       if (cancelled) {
-        // The cleanup ran while `open` was in flight; it saw `host === null`,
-        // so this side owns the destroy.
         void host.close();
         return;
-      }
-      await host.command({ kind: "resize", width: size, height: size });
-      await host.command({ kind: "set_target", target });
-      sentTargetKeyRef.current = sourceTargetKey(src);
-      const initialView = viewRef.current;
-      if (!isIdentityView(initialView)) {
-        await host.command({ kind: "set_view", ...initialView });
-      }
-      const initialOverlay = overlayRef.current;
-      if (initialOverlay) {
-        await host.command({ kind: "set_mask_overlay", overlay: initialOverlay });
-      }
-      const initialScene = sceneRef.current;
-      if (initialScene) {
-        await host.command({ kind: "set_overlay_scene", scene: initialScene });
       }
       if (placementRef?.current && presentEnabledRef.current) {
         const placement = measurePlacement(placementRef.current, window.devicePixelRatio || 1);
@@ -323,223 +660,80 @@ export function useViewportUnderlay(
           if (cancelled) return;
         }
       }
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (cancelled) return;
+      sentSizeRef.current = null;
+      sentTargetKeyRef.current = null;
+      sentImageSceneKeyRef.current = null;
+      sentViewRef.current = IDENTITY_VIEW;
+      sentOverlayRef.current = null;
+      sentSceneRef.current = null;
+      sentImageLayerPresentationRef.current = null;
+      sentPresentEnabledRef.current = null;
+      const controller: ViewportSyncController = {
+        host,
+        closed: false,
+        requestedRevision: 0,
+        appliedRevision: 0,
+        finishedRenderRevision: 0,
+        syncing: false,
+        rendering: false,
+        lastAppliedSnapshot: null,
+        liveRequestedRevision: 0,
+        liveCompletedRevision: 0,
+        liveRunning: false,
+      };
       hostRef.current = host;
+      controllerRef.current = controller;
       setOpenHost(host);
-      sentViewRef.current = initialView;
-      sentOverlayRef.current = initialOverlay;
-      sentSceneRef.current = initialScene;
-      sentPresentEnabledRef.current = presentEnabledRef.current;
-      // A non-identity first frame is the view window; scale back to the
-      // full-frame size so `dims` is view-independent.
-      const zoom = Math.max(initialView.zoom, 1);
-      framePresentedRef.current = frame.presented;
-      setState({
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
-        frameView: initialView,
-        backend: frame.backend,
-        settled: true,
-        targetSettled: true,
-        renderedTargetKey: sourceTargetKey(src),
-      });
-    })().catch(() => {
-      // Keep nulls; editors fall back to their checkerboard.
-      settle();
-    });
+    })().catch(() => settle());
 
     return () => {
       cancelled = true;
-      hostRef.current = null;
+      const controller = controllerRef.current;
+      if (controller && controller.host === host) {
+        controller.closed = true;
+        controllerRef.current = null;
+      }
+      if (hostRef.current === host) hostRef.current = null;
       setOpenHost(null);
       void host?.close();
     };
-  }, [kind, hostKey, size]);
+  }, [kind, hostKey]);
 
-  // Retarget an open host without destroying the host.
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !host.isOpen) return;
-    if (targetKey === sentTargetKeyRef.current) return;
-    const src = sourceRef.current;
-    if (src === undefined) return;
-    let cancelled = false;
-    sentTargetKeyRef.current = targetKey;
-    setState((s) => ({
-      ...s,
-      settled: false,
-      targetSettled: false,
-    }));
-    runCoalesced(host, async () => {
-      let target: ViewportTarget;
-      if (typeof src === "string") {
-        const res = await registerResource(src);
-        if (!res || cancelled || hostRef.current !== host) return;
-        target = { kind: "image", resourceId: res.id };
-      } else {
-        target = src;
-      }
-      await host.command({ kind: "set_target", target });
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (cancelled || hostRef.current !== host) return;
-      const zoom = Math.max(sentViewRef.current.zoom, 1);
-      framePresentedRef.current = frame.presented;
-      setState((s) => ({
-        ...s,
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        dims: { w: Math.round(frame.width * zoom), h: Math.round(frame.height * zoom) },
-        frameView: sentViewRef.current,
-        backend: frame.backend,
-        settled: true,
-        targetSettled: true,
-        renderedTargetKey: targetKey,
-      }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [targetKey]);
-
-  // A presentability flip re-renders through the open host: disabling hides
-  // the surface first (so the frame falls back to the PNG transport rather
-  // than presenting into a hidden window); enabling just re-renders — the
-  // placement resend above re-shows the surface for it.
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !host.isOpen) return;
-    if (presentEnabled === sentPresentEnabledRef.current) return;
-    let cancelled = false;
-    sentPresentEnabledRef.current = presentEnabled;
-    runCoalesced(host, async () => {
-      if (!presentEnabled) {
-        await host.command({ kind: "set_presented", presented: false });
-      }
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (cancelled || hostRef.current !== host) return;
-      framePresentedRef.current = frame.presented;
-      setState((s) => ({
-        ...s,
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        backend: frame.backend,
-        settled: true,
-      }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [presentEnabled]);
-
-  // The zoom/pan fast path: a live view change re-presents the cached frame
-  // texture as a GPU crop. The result does not change `presented`/`backend`
-  // (no frame was rendered); it only moves `frameView` so the caller's
-  // window rect tracks what the surface now shows. A `false` take (no
-  // surface, no cached frame) is a no-op — never an error.
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!liveView || !host || !host.isOpen) return;
-    if (!framePresentedRef.current || !presentEnabledRef.current) return;
-    const { zoom, panX, panY } = liveView;
-    let cancelled = false;
-    runCoalesced(host, async () => {
-      const took = await host.presentView({ zoom, panX, panY });
-      if (!took || cancelled || hostRef.current !== host) return;
-      setState((s) => ({ ...s, frameView: { zoom, panX, panY } }));
-    });
-    return () => {
-      cancelled = true;
-    };
+    requestSync(openHost);
+    // The controller reads complete desired snapshots through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveView?.zoom, liveView?.panX, liveView?.panY]);
+  }, [
+    openHost,
+    size,
+    targetKey,
+    sceneKey,
+    view.zoom,
+    view.panX,
+    view.panY,
+    maskOverlay,
+    overlayScene,
+    imageLayerPresentation,
+    presentEnabled,
+  ]);
 
   useEffect(() => {
-    const host = hostRef.current;
-    const sent = sentViewRef.current;
-    if (!host || !host.isOpen) return;
-    if (view.zoom === sent.zoom && view.panX === sent.panX && view.panY === sent.panY) return;
-    if (isIdentityView(view) && isIdentityView(sent)) return;
-    let cancelled = false;
-    sentViewRef.current = view;
-    runCoalesced(host, async () => {
-      await host.command({ kind: "set_view", ...view });
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (cancelled || hostRef.current !== host) return;
-      // Keep `dims`: the view window changes size, the frame does not.
-      framePresentedRef.current = frame.presented;
-      setState((s) => ({
-        ...s,
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        frameView: view,
-        backend: frame.backend,
-        settled: true,
-      }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [view]);
+    requestLive(openHost);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openHost, liveView?.zoom, liveView?.panX, liveView?.panY]);
 
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !host.isOpen) return;
-    if (maskOverlay === sentOverlayRef.current) return;
-    let cancelled = false;
-    sentOverlayRef.current = maskOverlay;
-    runCoalesced(host, async () => {
-      await host.command({ kind: "set_mask_overlay", overlay: maskOverlay });
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (cancelled || hostRef.current !== host) return;
-      framePresentedRef.current = frame.presented;
-      setState((s) => ({
-        ...s,
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        backend: frame.backend,
-        settled: true,
-      }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [maskOverlay]);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !host.isOpen) return;
-    if (overlayScene === sentSceneRef.current) return;
-    let cancelled = false;
-    sentSceneRef.current = overlayScene;
-    runCoalesced(host, async () => {
-      await host.command({ kind: "set_overlay_scene", scene: overlayScene });
-      const frame = await host.renderFrame();
-      await frameDecoded(frame);
-      if (cancelled || hostRef.current !== host) return;
-      framePresentedRef.current = frame.presented;
-      setState((s) => ({
-        ...s,
-        underlay: frame.presented ? null : frame.data_url,
-        presented: frame.presented,
-        backend: frame.backend,
-        settled: true,
-      }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [overlayScene]);
-
+  const exactTargetPresented = state.targetSettled && state.renderedTargetKey === targetKey;
+  const exactScenePresented = state.renderedSceneKey === sceneKey;
   return {
     ...state,
-    targetSettled: state.targetSettled && state.renderedTargetKey === targetKey,
+    underlay: exactTargetPresented ? state.underlay : null,
+    presented: exactTargetPresented ? state.presented : false,
+    targetSettled: exactTargetPresented,
+    sceneSettled: exactTargetPresented && exactScenePresented,
+    presentedImageLayerScene: exactTargetPresented
+      ? state.presentedImageLayerScene
+      : null,
+    selectedLayerFrame: exactTargetPresented ? state.selectedLayerFrame : null,
     host: openHost,
   };
 }
