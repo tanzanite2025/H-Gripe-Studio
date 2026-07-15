@@ -44,8 +44,18 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "time", "sync"] }
-# Thumbnail generation for the node-graph editor (generate_thumbnail command).
-image = "0.25"
+# Shared still-image decode/encode surface. Keep the enabled codecs aligned with
+# the product contract in studio-ui/src/domain/mediaFormats.ts. HEIC/HEIF/AVIF
+# use the native FFmpeg path; formats outside this list are intentionally not
+# pulled into the offline Cargo snapshot.
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tiff",
+] }
 # Direct PNG encoder for the in-process enhance output so it can embed a source
 # ICC profile (iCCP) + DPI (pHYs), matching the Python bridge's save. Already in
 # the tree transitively via `image`; pinned here to use its API directly.
@@ -53,10 +63,12 @@ png = "0.17"
 # Data-parallelism for CPU-bound image operators (e.g. mask morphology). Runs on
 # the Compute lane's worker threads, independent of the GPU serialization gate.
 rayon = "1"
-# ONNX Runtime for Phase 2 auto-subject model inference (in-process, Compute lane).
-# `download-binaries` fetches a prebuilt CPU onnxruntime at build time so no
-# system install is required.
-ort = { version = "2.0.0-rc.10", default-features = false, features = ["download-binaries", "tls-rustls"] }
+# ONNX Runtime for native helper-model inference (in-process, Compute lane).
+# The Windows x64 runtime is version-locked under third_party/onnxruntime and
+# loaded explicitly at runtime. Builds must never download native artifacts.
+# CUDA and DirectML providers remain a later, separately tested layer over this
+# CPU baseline; `api-24` matches the vendored ONNX Runtime 1.24.2 ABI exactly.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-24"] }
 # Native in-process FFmpeg decoder (feature `native-ffmpeg`). Linked against the
 # vendored LGPL shared libav* under third_party/ffmpeg via the FFMPEG_* env in
 # `.cargo/config.toml`; `use_prebuilt_binding` ships FFmpeg 8 bindings (matching

@@ -32,6 +32,7 @@ import { psdTemplatePathWarning } from "./psdcheck";
 import { NodeCardShell } from "./NodeCardShell";
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import type { LayeredImageAsset } from "../domain/layeredImage";
+import { IMAGE_MEDIA_EXTS } from "../domain/mediaFormats";
 import type { DeviceReport } from "../runtime/deviceReport";
 import {
   imageSourceSlotPortId,
@@ -323,18 +324,7 @@ function ImageSourceTile({ nodeId, slot }: { nodeId: string; slot: ImageSourceSl
   );
 }
 
-const IMAGE_PICKER_EXTENSIONS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "bmp",
-  "tiff",
-  "heic",
-  "heif",
-  "avif",
-];
+const IMAGE_PICKER_EXTENSIONS = [...IMAGE_MEDIA_EXTS];
 
 function ImageSourceAddTile({ nodeId }: { nodeId: string }) {
   const t = useT();

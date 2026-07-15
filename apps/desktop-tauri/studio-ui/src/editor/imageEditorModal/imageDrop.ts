@@ -1,10 +1,9 @@
 import type { LayerImageSource } from "../../contracts/imageEditOps";
+import { isSupportedImagePath } from "../../domain/mediaFormats";
 
 export type ImageDimensionProbe = (
   path: string,
 ) => Promise<{ width: number; height: number } | null>;
-
-const IMAGE_PATH = /\.(png|jpe?g|webp|bmp|gif|tiff?|avif)$/i;
 
 export function isImageEditorDropOwner(target: Element | null): boolean {
   return Boolean(target?.closest(".image-editor"));
@@ -18,7 +17,7 @@ export async function resolveDroppedImageSources(
   paths: readonly string[],
   probe: ImageDimensionProbe,
 ): Promise<LayerImageSource[]> {
-  const candidates = paths.filter((path) => IMAGE_PATH.test(path));
+  const candidates = paths.filter(isSupportedImagePath);
   const resolved = await Promise.all(candidates.map(async (path) => {
     const dimensions = await probe(path);
     if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) return null;

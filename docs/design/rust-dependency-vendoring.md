@@ -14,6 +14,7 @@ so Rust crates are the only language-package surface to vendor.)
 | Registry crate snapshot | `third_party/cargo-vendor/` | Output of `cargo vendor --versioned-dirs`; contains every crates.io package resolved by `Cargo.lock`. |
 | Owned colour-management fork | `third_party/moxcms/` | Editable local fork of `moxcms`; wired through workspace `[patch.crates-io]`. |
 | Native FFmpeg binaries | `third_party/ffmpeg/` | Windows libav DLLs/headers/import libs for the optional native video backend. |
+| Native ONNX Runtime | `third_party/onnxruntime/` | Locked Windows x64 CPU runtime loaded dynamically by the desktop app. |
 
 `third_party/cargo-vendor` is a snapshot. Do not hand-edit vendored registry
 crates there. If a crate needs project-specific changes, move that crate to its
@@ -31,11 +32,57 @@ wire it with `[patch.crates-io]` like `moxcms`.
 ## What is not covered
 
 - Node/npm dependencies.
-- Runtime/model downloads.
-- Build scripts that download non-crate artifacts. In particular, the ORT
-  crate's `download-binaries` feature may still need a pre-fetched/cached ONNX
-  Runtime binary when building from a clean machine. Treat that as a separate
-  runtime artifact policy, not a Cargo crate source policy.
+- Model weights and their opt-in acquisition scripts.
+
+The ONNX Runtime binary is covered by a separate native-artifact lock at
+`third_party/onnxruntime/VENDOR.md`. Its Windows x64 CPU DLL is checked in with
+Git LFS and packaged from the repository. Cargo build scripts, Tauri hooks, and
+CI must not download it;
+`scripts/fetch-onnxruntime.ps1` is a manual maintainer refresh tool only.
+
+## Feature minimisation
+
+Vendoring mirrors the resolved dependency graph; it is not permission to keep
+every upstream feature enabled. Narrow direct dependencies at their manifest
+boundary, then regenerate `Cargo.lock` and `third_party/cargo-vendor` together.
+Never delete individual files or crate directories from the snapshot by hand.
+
+The desktop `image` dependency follows the product's still-image contract:
+
+- `png`, `jpeg`, `webp`, `gif`, `bmp`, and `tiff` are enabled explicitly.
+- HEIC, HEIF, and AVIF stills decode through the vendored native FFmpeg path.
+- DDS, EXR, Farbfeld, HDR, ICO, PNM, QOI, and TGA are not product formats and
+  must not re-enter the graph accidentally through `image` default features.
+
+Any change to that codec set must update the shared frontend format contract
+and pass the native media decode/thumbnail regression matrix.
+
+### Functional integration before removal
+
+Reduce one dependency boundary at a time. A library function is removable only
+after the replacement is on the real product path, parity/fallback tests pass,
+and a repository-wide search proves the old path has no callers. Do not equate
+"vendored" with "owned": registry snapshots stay upstream code unless a
+documented product requirement justifies an explicit fork.
+
+The desktop `ort` dependency currently earns its place through native subject
+segmentation, Subject Mask ViTMatte, and Refine Mask Edge `onnx_matting`. The
+two matting entry points share `studio/subject_matte.rs`, the warm session pool,
+managed `vitmatte.onnx` resolution and CPU-provider fallback reporting. A model
+weight is a runtime artifact and is not committed into `cargo-vendor`.
+
+The runtime boundary is now explicit: `ort` uses dynamic loading against the
+locked Windows x64 CPU runtime in `third_party/onnxruntime`, and its
+`download-binaries` plus HTTP/TLS downloader chain is disabled. A clean clone
+must materialise the LFS payload with `git lfs pull`; it must not depend on an
+undocumented machine installation or network access during build.
+
+This CPU payload is the current baseline, not a permanent feature ceiling. The
+provider-selection and device-request contract stays intact for later Windows
+NVIDIA/CUDA and AMD or Intel/DirectML stages; ROCm is not a Windows target.
+Provider-shared alone adds no capability, so each GPU stage must atomically add
+its shared and provider-specific binaries, registration path, locked payload,
+packaging contract, fallback behavior, and real-device tests.
 
 ## Update procedure
 
@@ -64,4 +111,3 @@ Use this only when deliberately upgrading Rust dependencies:
 The lockfile, vendor snapshot, and any local fork changes must land in the same
 commit so cloud-side work cannot accidentally build against different Rust
 source code.
-

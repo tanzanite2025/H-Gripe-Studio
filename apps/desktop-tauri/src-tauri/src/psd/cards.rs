@@ -257,9 +257,9 @@ pub(crate) struct RefineEdgeResult {
 
 /// Clean up a cut-out subject's matte so it drops into a PSD placeholder
 /// without white halos, fringing or jagged semi-transparent edges. This is the
-/// **Mask Edge Refine** node's backend. Runs in-process on the native `cpu`
-/// heuristic ([`crate::studio::edge_refine_cpu`]); `preset` is
-/// `clean | natural | soft | custom`.
+/// **Mask Edge Refine** node's backend. Runs in-process through the native CPU
+/// heuristic and optionally replaces the trimap band with ViTMatte via ORT;
+/// `preset` is `clean | natural | soft | custom`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_mask_edge(
@@ -283,13 +283,9 @@ pub(crate) fn refine_mask_edge(
 ) -> Result<RefineEdgeResult, String> {
     let _ = (dir, placeholder_mask);
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-    let engine = engine.unwrap_or_default();
-    let engine = engine.trim();
-    if !(engine.is_empty() || engine.eq_ignore_ascii_case("cpu")) {
-        return Err(format!(
-            "Mask Edge Refine engine `{engine}` is no longer available; only the native `cpu` engine is supported"
-        ));
-    }
+    let engine = engine
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "cpu".to_string());
     let params = crate::studio::edge_refine_cpu::CpuEdgeRefineParams {
         image_path: image.clone(),
         mask_path: mask.filter(|s| !s.trim().is_empty()),
@@ -300,10 +296,11 @@ pub(crate) fn refine_mask_edge(
         dilate_px: dilate_px.unwrap_or(0),
         feather_px: feather_px.unwrap_or(4.0),
         guided_radius: guided_radius.unwrap_or(8),
-        edge_decontaminate: edge_decontaminate.unwrap_or(false),
+        edge_decontaminate: edge_decontaminate.unwrap_or(true),
         background_blend_strength: background_blend_strength.unwrap_or(0.4),
         output_dir: output_dir.unwrap_or_default(),
         output_name: output_name.filter(|s| !s.trim().is_empty()),
+        engine_requested: engine,
         device_requested: device
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "auto".to_string()),
@@ -568,4 +565,59 @@ pub(crate) fn detect_quality_issues(
     crate::studio::detail_watchdog_cpu::try_watch(&params)?.ok_or_else(|| {
         format!("Detail Watchdog could not decode {image}: unsupported source for the native path")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgba, RgbaImage};
+
+    #[test]
+    fn refine_command_preserves_defaults_and_falls_back_without_trimap() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("hgripe_refine_command_{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("subject.png");
+        RgbaImage::from_pixel(12, 12, Rgba([90, 120, 160, 180]))
+            .save(&source)
+            .unwrap();
+
+        let result = refine_mask_edge(
+            None,
+            source.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(dir.to_string_lossy().to_string()),
+            Some("direct_refine".to_string()),
+            Some("onnx_matting".to_string()),
+            Some("cpu".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(result.edge_report.engine, "cpu");
+        assert_eq!(result.edge_report.engine_requested, "onnx_matting");
+        assert!(result.edge_report.edge_decontaminate);
+        assert!(result
+            .edge_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("trimap"));
+        assert!(std::path::Path::new(&result.refined_image).is_file());
+        assert!(std::path::Path::new(&result.refined_mask).is_file());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -1,4 +1,5 @@
 import { port, type NodeSpec } from "./types";
+import { IMAGE_MEDIA_EXTS } from "../../domain/mediaFormats";
 
 export const SOURCE_NODE_SPECS = {
   promptOptimize: {
@@ -134,7 +135,7 @@ export const SOURCE_NODE_SPECS = {
         hint: "absolute path to an image file",
         inline: true,
         pickerFilterName: "Images",
-        pickerExtensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif", "avif"],
+        pickerExtensions: [...IMAGE_MEDIA_EXTS],
       },
     ],
   },

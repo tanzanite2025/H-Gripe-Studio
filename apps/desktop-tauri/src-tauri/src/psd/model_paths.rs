@@ -1,14 +1,12 @@
 //! Persisted local-model weight paths (the "local model manager" surface).
 //!
 //! Each opt-in ML engine resolves its non-bundled weight from a dedicated env
-//! var (e.g. `HGRIPE_REALESRGAN_MODEL`) falling back to the shared cache dir
+//! var (e.g. `HGRIPE_VITMATTE_MODEL`) or the shared cache dir
 //! (`HGRIPE_MODEL_CACHE`). Those env vars are a dev/CI affordance; end users
 //! need a persisted, in-app way to point an engine at a downloaded weight.
 //! This module stores that mapping in a small JSON file next to the broker's
-//! other local config files and applies it as env vars on every spawned bridge
-//! subprocess, so the Python backends keep their existing resolution order
-//! unchanged. A real process-level env var always wins over the persisted
-//! config (the config is applied only when the var is unset).
+//! other local config files. Native Rust engines read the config directly; a
+//! real process-level env var remains the highest-priority override.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,8 +15,8 @@ use std::path::PathBuf;
 use hgripe_api::credentials_file_path;
 use serde::{Deserialize, Serialize};
 
-/// Engine id -> the env var its Python backend resolves the weight from.
-/// Covers every bridge engine the cross-card `probe_engines` report lists.
+/// Engine id -> its canonical weight environment variable. Entries for removed
+/// engines remain so existing model-path config can be preserved and edited.
 const ENGINE_ENV_VARS: [(&str, &str); 9] = [
     ("realesrgan", "HGRIPE_REALESRGAN_MODEL"),
     ("ccsr", "HGRIPE_CCSR_MODEL"),
@@ -28,8 +26,12 @@ const ENGINE_ENV_VARS: [(&str, &str); 9] = [
     ("flux_fill", "HGRIPE_FLUX_FILL_MODEL"),
     ("onnx_defect", "HGRIPE_WATCHDOG_MODEL"),
     ("onnx_harmonize", "HGRIPE_COLOR_MODEL"),
-    ("onnx_matting", "HGRIPE_MATTING_MODEL"),
+    ("onnx_matting", "HGRIPE_VITMATTE_MODEL"),
 ];
+
+/// Compatibility alias used by the deleted Python matting backend. Native
+/// ViTMatte still accepts it after the canonical variable was renamed.
+const LEGACY_MATTING_ENV: &str = "HGRIPE_MATTING_MODEL";
 
 /// Shared weight cache env var (`sr_backends.model_cache_dir`).
 const MODEL_CACHE_ENV: &str = "HGRIPE_MODEL_CACHE";
@@ -52,7 +54,7 @@ pub(crate) struct ModelPathsConfig {
 pub(crate) struct ModelPathEntry {
     /// Engine id (matches the `probe_engines` report keys).
     pub(crate) engine: String,
-    /// The env var the Python backend reads.
+    /// The env var the engine reads.
     pub(crate) env_var: String,
     /// The persisted override, if any.
     pub(crate) configured_path: Option<String>,
@@ -124,6 +126,10 @@ fn normalise(mut config: ModelPathsConfig) -> ModelPathsConfig {
     config
 }
 
+fn engine_env_vars(engine: &str, primary: &'static str) -> impl Iterator<Item = &'static str> {
+    std::iter::once(primary).chain((engine == "onnx_matting").then_some(LEGACY_MATTING_ENV))
+}
+
 fn build_report(config: ModelPathsConfig) -> ModelPathsReport {
     let entries = ENGINE_ENV_VARS
         .iter()
@@ -136,10 +142,18 @@ fn build_report(config: ModelPathsConfig) -> ModelPathsReport {
                     path.is_file() || path.is_dir()
                 })
                 .unwrap_or(false);
-            let env_value = std::env::var(env_var).ok().filter(|v| !v.trim().is_empty());
+            let active_env = engine_env_vars(engine, env_var).find_map(|candidate| {
+                std::env::var(candidate)
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| (candidate, value))
+            });
+            let (reported_env_var, env_value) = active_env
+                .map(|(candidate, value)| (candidate, Some(value)))
+                .unwrap_or((env_var, None));
             ModelPathEntry {
                 engine: engine.to_string(),
-                env_var: env_var.to_string(),
+                env_var: reported_env_var.to_string(),
                 configured_path,
                 configured_exists,
                 env_active: env_value.is_some(),
@@ -237,6 +251,29 @@ mod tests {
             ]
         );
         assert!(report.entries.iter().all(|e| !e.env_var.is_empty()));
+        let matting_env = report
+            .entries
+            .iter()
+            .find(|entry| entry.engine == "onnx_matting")
+            .unwrap()
+            .env_var
+            .as_str();
+        assert!(matches!(
+            matting_env,
+            "HGRIPE_VITMATTE_MODEL" | "HGRIPE_MATTING_MODEL"
+        ));
         assert!(!report.config_file.is_empty());
+    }
+
+    #[test]
+    fn matting_env_candidates_keep_the_legacy_alias_after_the_canonical_name() {
+        assert_eq!(
+            engine_env_vars("onnx_matting", "HGRIPE_VITMATTE_MODEL").collect::<Vec<_>>(),
+            ["HGRIPE_VITMATTE_MODEL", "HGRIPE_MATTING_MODEL"]
+        );
+        assert_eq!(
+            engine_env_vars("realesrgan", "HGRIPE_REALESRGAN_MODEL").collect::<Vec<_>>(),
+            ["HGRIPE_REALESRGAN_MODEL"]
+        );
     }
 }

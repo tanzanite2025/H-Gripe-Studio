@@ -5,6 +5,10 @@
 // timeline track is a separate, later step. Pure functions over immutable
 // arrays so the model is unit testable without React.
 
+import { IMAGE_MEDIA_EXTS } from "../domain/mediaFormats";
+
+export { IMAGE_MEDIA_EXTS } from "../domain/mediaFormats";
+
 export type MediaAssetKind = "image" | "video" | "audio";
 
 export interface MediaAsset {
@@ -22,20 +26,6 @@ export interface MediaAsset {
   /** Whether the file has a decodable audio stream. Absent until probed. */
   hasAudio?: boolean;
 }
-
-export const IMAGE_MEDIA_EXTS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "bmp",
-  "tif",
-  "tiff",
-  "heic",
-  "heif",
-  "avif",
-] as const;
 
 export const VIDEO_MEDIA_EXTS = ["mp4", "mov", "mkv", "webm", "avi", "m4v"] as const;
 

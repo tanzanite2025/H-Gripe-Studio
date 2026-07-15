@@ -105,6 +105,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # ViTMatte uses the repository-maintained ONNX Runtime DLLs.
+          lfs: true
 
       - uses: actions/setup-node@v4
         with:
@@ -125,14 +128,16 @@ jobs:
           workspaces: apps/desktop-tauri/src-tauri
 
       # Fetches into resources/models/vitmatte.onnx (sha256-checked), which
-      # resolve_model_file picks up in-repo so the gated test stops skipping.
+      # the shared ViTMatte resolver picks up so both gated tests stop skipping.
       - name: Fetch ViTMatte weight
         shell: bash
         run: bash scripts/fetch-vitmatte.sh
 
       - name: cargo test (vitmatte inference)
         working-directory: apps/desktop-tauri/src-tauri
-        run: cargo test vitmatte_inference_when_weight_present -- --nocapture
+        run: |
+          cargo test vitmatte_inference_when_weight_present -- --nocapture
+          cargo test onnx_matting_runs_when_weight_present -- --nocapture
 
   no-python-spawn:
     name: no python spawn (grep gate)

@@ -1,10 +1,9 @@
 ﻿import { tauriInvoke } from "./core";
 
 // --- Mask Edge Refine -------------------------------------------------------
-// Wraps the Rust `refine_mask_edge` command, which shells out to the torch-free
-// `edge_refine_cli.py` helper to clean a cut-out subject's matte (erode/dilate
-// morphology, guided-filter edge snapping, feather, colour decontamination) so
-// it drops into a PSD placeholder without white halos or fringing.
+// Wraps the native Rust `refine_mask_edge` command: deterministic morphology,
+// guided-filter edge snapping, feather and colour decontamination, with an
+// optional ViTMatte/ORT alpha replacement inside the trimap unknown band.
 
 /** What `refine_mask_edge` did; snake_case to match the bridge JSON. */
 export interface EdgeReport {
@@ -92,10 +91,9 @@ export interface RefineMaskEdgeRequest {
 }
 
 /**
- * Refine a cut-out subject's mask edges for PSD compositing via the backend
- * (`refine_mask_edge`). The pixel work needs the Python/Pillow pipeline, which
- * only exists in the desktop build, so outside Tauri this returns a plausible
- * mock so the editor stays runnable in browser dev.
+ * Refine a cut-out subject's mask edges for PSD compositing via the native
+ * backend (`refine_mask_edge`). Outside Tauri this returns a plausible mock so
+ * the editor stays runnable in browser development.
  */
 export async function refineMaskEdge(req: RefineMaskEdgeRequest): Promise<RefineEdgeResult> {
   const invoke = tauriInvoke();

@@ -1,7 +1,8 @@
 //! Cross-card engine capability probe (the `doctor`-style report): which
 //! `engine` values each card can run on this box. Split out of `psd.rs`;
-//! command names and result shapes are unchanged. With the Python bridge
-//! removed, only the always-on native CPU/rule baselines are reported.
+//! command names and result shapes are unchanged. Native learned engines are
+//! reported alongside the always-on CPU/rule baselines when their weights are
+//! available.
 
 use std::collections::BTreeMap;
 
@@ -22,17 +23,18 @@ pub(crate) struct WeightInfo {
 }
 
 /// Availability of one `engine` option for a card, as reported by a CLI
-/// `--probe-engines` call. `available=false` carries a human `reason` the UI
-/// shows when greying the option out.
+/// `--probe-engines` call. Lazy model backends may report their prerequisites
+/// as available while deferring session validation to first use; `reason`
+/// states that boundary and per-run telemetry remains authoritative.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct EngineAvailability {
     #[serde(default)]
     pub(crate) available: bool,
     #[serde(default)]
     pub(crate) reason: String,
-    /// Whether this engine is GPU-capable (an ML backend). The UI pairs it with
-    /// the machine [`DeviceProbe`] to warn it would fall back to CPU when no
-    /// CUDA device is present; the CPU/`rules`/`provider` baseline is `false`.
+    /// Whether this engine can use an accelerated provider in this build. The
+    /// UI pairs it with the machine [`DeviceProbe`] to report where it can run;
+    /// CPU-only learned engines and CPU/`rules`/`provider` baselines are false.
     #[serde(default)]
     pub(crate) accelerated: bool,
     /// Cached-weight inventory for this engine (`None` for the CPU/`rules`/
@@ -179,12 +181,12 @@ pub(crate) struct EngineProbeReport {
 }
 
 /// Probe the `engine` seams across the local cards (the `doctor` cross-card
-/// capability report). With the Python bridge removed, only the built-in
-/// native Rust baselines exist: each card reports its always-available
-/// CPU/rule engine and nothing else.
+/// capability report). Baselines are always available; native learned engines
+/// additionally report whether their managed weight resolves on this machine.
 #[tauri::command]
 pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, String> {
     let _ = dir;
+    let onnx_status = crate::studio::onnx_runtime_status();
 
     // (node kind, baseline engine id) for every card that exposes an `engine`
     // param. Every baseline runs in-process in Rust.
@@ -196,7 +198,7 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
         ("refineMaskEdge", "cpu"),
     ];
 
-    let cards = CARDS
+    let mut cards: Vec<CardEngineProbe> = CARDS
         .iter()
         .map(|(node_kind, baseline)| {
             let mut engines = BTreeMap::new();
@@ -218,10 +220,65 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
         })
         .collect();
 
+    if let Some(card) = cards
+        .iter_mut()
+        .find(|card| card.node_kind == "refineMaskEdge")
+    {
+        let model = crate::studio::resolve_vitmatte_model_path();
+        let weight = model.as_ref().map(|path| {
+            let size_mb = std::fs::metadata(path)
+                .ok()
+                .map(|meta| meta.len().div_ceil(1024 * 1024));
+            WeightInfo {
+                path: path.to_string_lossy().to_string(),
+                present: true,
+                size_mb,
+            }
+        });
+        card.engines.insert(
+            "onnx_matting".to_string(),
+            EngineAvailability {
+                available: model.is_some() && onnx_status.installed,
+                reason: if model.is_none() {
+                    "ViTMatte weight not found; configure onnx_matting or install vitmatte.onnx"
+                        .to_string()
+                } else if let Some(reason) = &onnx_status.reason {
+                    format!("ViTMatte weight resolved, but ONNX Runtime is unavailable: {reason}")
+                } else {
+                    "native ViTMatte weight resolved; current ORT build uses CPU and validates the session on first use"
+                        .to_string()
+                },
+                accelerated: false,
+                weight: weight.or_else(|| {
+                    Some(WeightInfo {
+                        path: "vitmatte.onnx".to_string(),
+                        present: false,
+                        size_mb: None,
+                    })
+                }),
+            },
+        );
+    }
+
     Ok(EngineProbeReport {
         cards,
         model_cache_dir: super::load_model_paths_config().model_cache_dir,
-        runtime: None,
+        runtime: Some(DeviceProbe {
+            cuda_available: false,
+            devices: Vec::new(),
+            torch: TorchInfo::default(),
+            onnxruntime: OnnxRuntimeInfo {
+                installed: onnx_status.installed,
+                version: onnx_status.version.clone(),
+                providers: onnx_status
+                    .providers
+                    .iter()
+                    .copied()
+                    .map(str::to_string)
+                    .collect(),
+                reason: onnx_status.reason.clone(),
+            },
+        }),
         wgpu: Some(BackendProbe::from_capability(
             crate::studio::grade::wgpu_capability(),
         )),
@@ -238,4 +295,39 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
             crate::studio::wgpu_device::display_adapters(),
         )),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_reports_native_vitmatte_and_ort_runtime() {
+        let report = probe_engines(None).unwrap();
+        let refine = report
+            .cards
+            .iter()
+            .find(|card| card.node_kind == "refineMaskEdge")
+            .unwrap();
+        assert!(refine.engines["cpu"].available);
+        let learned = &refine.engines["onnx_matting"];
+        let runtime = report.runtime.as_ref().unwrap();
+        assert!(!learned.accelerated);
+        assert_eq!(
+            learned.available,
+            crate::studio::resolve_vitmatte_model_path().is_some() && runtime.onnxruntime.installed
+        );
+        assert_eq!(
+            learned.weight.as_ref().unwrap().present,
+            crate::studio::resolve_vitmatte_model_path().is_some()
+        );
+
+        if runtime.onnxruntime.installed {
+            assert!(runtime.onnxruntime.providers.iter().any(|p| p == "cpu"));
+            assert!(runtime.onnxruntime.reason.is_none());
+        } else {
+            assert!(runtime.onnxruntime.providers.is_empty());
+            assert!(runtime.onnxruntime.reason.is_some());
+        }
+    }
 }

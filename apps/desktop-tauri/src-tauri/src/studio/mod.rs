@@ -151,8 +151,12 @@ pub(crate) use history::*;
 pub(crate) use image_document::*;
 pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
+pub(crate) use onnx_pool::{
+    onnx_runtime_status, set_runtime_resource_dir as set_onnx_runtime_resource_dir,
+};
 pub(crate) use persist::*;
 pub(crate) use sam2_prompt::*;
 pub(crate) use schedule::*;
+pub(crate) use subject_matte::resolve_vitmatte_model_path;
 pub(crate) use subject_model::set_resource_dir as set_subject_model_resource_dir;
 pub(crate) use timeline_export::*;

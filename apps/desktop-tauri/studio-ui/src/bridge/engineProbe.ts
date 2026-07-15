@@ -2,9 +2,8 @@
 
 // --- Engine capability probe ------------------------------------------------
 // The `doctor`-style cross-card probe behind the opt-in ML `engine` seams. The
-// inspector uses it to grey out engines whose optional deps / weights are
-// missing on this box (the CPU/`rules` baseline always stays available), and
-// the Dashboard surfaces it as a capability report.
+// backend exposes it for diagnostics and a future Inspector/settings consumer;
+// the current Inspector does not disable engine choices from this report.
 
 /** Cached-weight inventory for one engine (mirrors Rust `WeightInfo`). */
 export interface WeightInfo {
@@ -16,14 +15,16 @@ export interface WeightInfo {
   size_mb?: number | null;
 }
 
-/** Availability of one `engine` option (mirrors Rust `EngineAvailability`). */
+/**
+ * Preflight availability of one `engine` option. Lazy model sessions can still
+ * fail validation on first use, so per-run telemetry is authoritative.
+ */
 export interface EngineAvailability {
   available: boolean;
   reason: string;
   /**
-   * GPU-capable (an ML backend). Paired with the report `runtime` device probe
-   * to warn it falls back to CPU when no CUDA device is present; the
-   * CPU/`rules`/`provider` baseline is `false`.
+   * Whether this build can use an accelerated provider for the engine. CPU-only
+   * learned engines and CPU/`rules`/`provider` baselines are `false`.
    */
   accelerated?: boolean;
   /**
@@ -114,9 +115,9 @@ export interface EngineProbeReport {
 /**
  * Probe the opt-in ML `engine` seams across local cards (`probe_engines`).
  *
- * Outside the desktop shell (browser preview) there is no Python bridge, so we
- * return an empty report; the inspector then leaves every engine enabled rather
- * than greying options out from a probe that never ran.
+ * Outside the desktop shell (browser preview) there is no native capability
+ * backend, so we return an empty report; the inspector then leaves every engine
+ * enabled rather than greying options out from a probe that never ran.
  */
 export async function probeEngines(): Promise<EngineProbeReport> {
   const invoke = tauriInvoke();

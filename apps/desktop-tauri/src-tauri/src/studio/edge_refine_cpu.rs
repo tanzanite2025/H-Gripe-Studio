@@ -15,10 +15,9 @@
 //! uses (the colour pipeline's canonical ingress), mirroring the Python CLI's
 //! `_load_rgb_alpha`.
 //!
-//! A learned matting engine (`--engine` other than `cpu`) still defers to the
-//! Python bridge (`matting_backends`); so does any source the loader cannot
-//! decode, in which case [`try_refine`] returns `Ok(None)` and the caller
-//! falls back.
+//! The optional `onnx_matting` engine reuses the native ViTMatte/ORT backend
+//! from Subject Mask. It only replaces the protected trimap band; morphology,
+//! colour decontamination, output and reporting stay in this one Rust path.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +26,7 @@ use image::{GrayImage, Luma, RgbaImage};
 
 use super::image_buffer;
 use super::studio_image::{self, LoadMeta, DEFAULT_MAX_DECODE_PIXELS};
+use super::subject_matte::AlphaMatter;
 use crate::psd::{reject_unsafe_output_name, EdgeReport, RefineEdgeResult};
 
 const EPS: f32 = 1e-6;
@@ -46,6 +46,7 @@ pub(crate) struct CpuEdgeRefineParams {
     pub(crate) background_blend_strength: f64,
     pub(crate) output_dir: String,
     pub(crate) output_name: Option<String>,
+    pub(crate) engine_requested: String,
     pub(crate) device_requested: String,
 }
 
@@ -112,12 +113,11 @@ fn resolve_preset(p: &CpuEdgeRefineParams) -> Result<(String, Resolved), String>
 
 /// Run the CPU refine pipeline in-process. Returns `Ok(Some(result))` on the
 /// fast path, or `Ok(None)` when the source (or an auxiliary mask/trimap)
-/// cannot be decoded here and the caller should defer to the Python bridge,
-/// which surfaces the canonical error message.
+/// cannot be decoded by the native loader. The caller maps that to the card's
+/// stable unsupported-source error.
 pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeResult>, String> {
     let path = Path::new(&p.image_path);
     if !path.is_file() {
-        // Let the Python path surface the canonical "subject image not found".
         return Ok(None);
     }
     let (preset, r) = resolve_preset(p)?;
@@ -191,17 +191,68 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
         Ok(trimap) => trimap,
         Err(_) => return Ok(None),
     };
-    let protect = trimap.as_ref().map(|t| {
-        let unknown: Vec<f32> = t
-            .iter()
-            .map(|&v| if v > 0.25 && v < 0.75 { 1.0 } else { 0.0 })
-            .collect();
-        if unknown.iter().sum::<f32>() > EPS {
-            feather(&unknown, w, h, 1.5)
+    let protect = trimap
+        .as_ref()
+        .map(|trimap| protected_band_weights(trimap, w, h));
+
+    let engine_requested = {
+        let engine = p.engine_requested.trim().to_ascii_lowercase();
+        if engine.is_empty() {
+            "cpu".to_string()
         } else {
-            unknown
+            engine
         }
-    });
+    };
+    let device_request =
+        super::onnx_pool::OnnxDeviceRequest::from_param(p.device_requested.as_str());
+    let device_requested = device_request.as_str().to_string();
+    let mut engine = "cpu".to_string();
+    let mut engine_fallback_reason = None;
+    let mut backend_model = None;
+    let mut device = None;
+    let mut band_source = mask.clone();
+
+    match engine_requested.as_str() {
+        "cpu" => {}
+        "onnx_matting" => match trimap.as_ref() {
+            None => {
+                engine_fallback_reason =
+                    Some("no trimap reference (learned matting needs an unknown band)".to_string());
+            }
+            Some(trimap) if !trimap.iter().any(|&value| value > 0.25 && value < 0.75) => {
+                engine_fallback_reason =
+                    Some("trimap has no unknown band for learned matting".to_string());
+            }
+            Some(trimap) => match super::subject_matte::load_vitmatte() {
+                Ok(matter) => match learned_band_source(
+                    &matter,
+                    &loaded.image,
+                    &gray_from_plane(trimap, width, height),
+                ) {
+                    Ok(alpha) => {
+                        band_source = alpha;
+                        engine = "onnx_matting".to_string();
+                        backend_model = matter
+                            .model_path()
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string());
+                        let resolution = super::onnx_pool::resolve_provider(device_request);
+                        device = Some(resolution.device.to_string());
+                        engine_fallback_reason = resolution.fallback_reason;
+                    }
+                    Err(err) => {
+                        engine_fallback_reason = Some(err);
+                    }
+                },
+                Err(err) => {
+                    engine_fallback_reason = Some(err);
+                }
+            },
+        },
+        other => {
+            engine_fallback_reason = Some(format!("unknown engine {other:?}"));
+        }
+    }
 
     let coverage_before = coverage(&mask);
 
@@ -227,9 +278,7 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
     // refined as continuous alpha rather than flattened to an edge.
     let mut protected_band_px = 0i64;
     if let Some(protect) = &protect {
-        for i in 0..n {
-            refined[i] = (refined[i] * (1.0 - protect[i]) + mask[i] * protect[i]).clamp(0.0, 1.0);
-        }
+        merge_protected_band(&mut refined, &band_source, protect);
         protected_band_px = protect.iter().filter(|&&v| v > 0.05).count() as i64;
     }
 
@@ -319,15 +368,6 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
             .to_string()
     });
 
-    let device_requested = {
-        let d = p.device_requested.trim().to_ascii_lowercase();
-        if d.is_empty() {
-            "auto".to_string()
-        } else {
-            d
-        }
-    };
-
     let edge_report = EdgeReport {
         preset,
         source_mask: source_mask.to_string(),
@@ -347,11 +387,11 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
         coverage_before,
         coverage_after: coverage(&refined),
         output_size: Some([i64::from(width), i64::from(height)]),
-        engine: "cpu".to_string(),
-        engine_requested: "cpu".to_string(),
-        engine_fallback_reason: None,
-        backend_model: None,
-        device: None,
+        engine,
+        engine_requested,
+        engine_fallback_reason,
+        backend_model,
+        device,
         device_requested,
         note,
     };
@@ -361,6 +401,60 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
         refined_mask: mask_out.to_string_lossy().to_string(),
         edge_report,
     }))
+}
+
+fn gray_from_plane(plane: &[f32], width: u32, height: u32) -> GrayImage {
+    GrayImage::from_raw(width, height, to_u8_plane(plane))
+        .expect("trimap plane matches image dimensions")
+}
+
+fn learned_band_source(
+    matter: &dyn AlphaMatter,
+    image: &RgbaImage,
+    trimap: &GrayImage,
+) -> Result<Vec<f32>, String> {
+    let alpha = matter.matte(image, trimap)?;
+    if alpha.dimensions() != image.dimensions() {
+        return Err(format!(
+            "learned matte dimensions {:?} do not match source {:?}",
+            alpha.dimensions(),
+            image.dimensions()
+        ));
+    }
+    Ok(alpha
+        .pixels()
+        .map(|pixel| f32::from(pixel.0[0]) / 255.0)
+        .collect())
+}
+
+fn merge_protected_band(refined: &mut [f32], band_source: &[f32], protect: &[f32]) {
+    debug_assert_eq!(refined.len(), band_source.len());
+    debug_assert_eq!(refined.len(), protect.len());
+    for ((value, source), weight) in refined.iter_mut().zip(band_source).zip(protect) {
+        *value = (*value * (1.0 - *weight) + *source * *weight).clamp(0.0, 1.0);
+    }
+}
+
+fn protected_band_weights(trimap: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let unknown: Vec<f32> = trimap
+        .iter()
+        .map(|&value| {
+            if value > 0.25 && value < 0.75 {
+                1.0
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    if unknown.iter().sum::<f32>() <= EPS {
+        return unknown;
+    }
+
+    let mut weights = feather(&unknown, width, height, 1.5);
+    for (weight, gate) in weights.iter_mut().zip(&unknown) {
+        *weight *= *gate;
+    }
+    weights
 }
 
 /// A filesystem-safe base name derived from the image file stem (mirrors the
@@ -578,6 +672,22 @@ mod tests {
     use super::*;
     use image::Rgba;
 
+    struct ConstantMatter(u8);
+
+    impl AlphaMatter for ConstantMatter {
+        fn provider(&self) -> &str {
+            "test-matter"
+        }
+
+        fn matte(&self, image: &RgbaImage, _trimap: &GrayImage) -> Result<GrayImage, String> {
+            Ok(GrayImage::from_pixel(
+                image.width(),
+                image.height(),
+                Luma([self.0]),
+            ))
+        }
+    }
+
     fn params(image: &str, out_dir: &str) -> CpuEdgeRefineParams {
         CpuEdgeRefineParams {
             image_path: image.to_string(),
@@ -593,6 +703,7 @@ mod tests {
             background_blend_strength: 0.4,
             output_dir: out_dir.to_string(),
             output_name: None,
+            engine_requested: "cpu".to_string(),
             device_requested: "auto".to_string(),
         }
     }
@@ -727,6 +838,130 @@ mod tests {
         );
     }
 
+    #[test]
+    fn learned_matte_only_replaces_the_protected_band() {
+        let image = RgbaImage::from_pixel(3, 1, Rgba([120, 120, 120, 255]));
+        let trimap = GrayImage::from_raw(3, 1, vec![0, 128, 255]).unwrap();
+        let learned = learned_band_source(&ConstantMatter(64), &image, &trimap).unwrap();
+        let mut refined = vec![0.0, 0.5, 1.0];
+        merge_protected_band(&mut refined, &learned, &[0.0, 1.0, 0.0]);
+
+        assert_eq!(refined[0], 0.0, "definite background must stay unchanged");
+        assert!((refined[1] - 64.0 / 255.0).abs() < 1e-6);
+        assert_eq!(refined[2], 1.0, "definite foreground must stay unchanged");
+    }
+
+    #[test]
+    fn protected_band_feather_never_leaks_into_definite_trimap_regions() {
+        let weights = protected_band_weights(&[0.0, 0.5, 1.0], 3, 1);
+        assert_eq!(weights[0], 0.0);
+        assert!(weights[1] > 0.0 && weights[1] <= 1.0);
+        assert_eq!(weights[2], 0.0);
+    }
+
+    #[test]
+    fn learned_engine_without_trimap_falls_back_and_reports_reason() {
+        let dir = temp_dir("learned_without_trimap");
+        let src = dir.join("subject.png");
+        let mut image = RgbaImage::from_pixel(24, 24, Rgba([0, 0, 0, 0]));
+        for y in 6..18 {
+            for x in 6..18 {
+                image.put_pixel(x, y, Rgba([200, 80, 40, 255]));
+            }
+        }
+        image.save(&src).unwrap();
+
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "onnx_matting".to_string();
+        let result = try_refine(&p).unwrap().expect("CPU fallback");
+        assert_eq!(result.edge_report.engine, "cpu");
+        assert_eq!(result.edge_report.engine_requested, "onnx_matting");
+        assert!(result
+            .edge_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("trimap"));
+        assert!(result.edge_report.backend_model.is_none());
+        assert!(result.edge_report.device.is_none());
+    }
+
+    #[test]
+    fn unknown_engine_falls_back_without_losing_outputs() {
+        let dir = temp_dir("unknown_engine");
+        let src = dir.join("subject.png");
+        RgbaImage::from_pixel(16, 16, Rgba([100, 120, 140, 200]))
+            .save(&src)
+            .unwrap();
+
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "removed_backend".to_string();
+        let result = try_refine(&p).unwrap().expect("CPU fallback");
+        assert!(Path::new(&result.refined_image).is_file());
+        assert!(Path::new(&result.refined_mask).is_file());
+        assert_eq!(result.edge_report.engine, "cpu");
+        assert_eq!(result.edge_report.engine_requested, "removed_backend");
+        assert!(result
+            .edge_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unknown engine"));
+    }
+
+    #[test]
+    fn onnx_matting_runs_when_weight_present() {
+        let Some(model_path) = super::super::resolve_vitmatte_model_path() else {
+            eprintln!("skipping Refine ViTMatte e2e: no weight resolvable");
+            return;
+        };
+        let expected_model = model_path
+            .file_name()
+            .expect("resolved ViTMatte path has a file name")
+            .to_string_lossy()
+            .into_owned();
+
+        let dir = temp_dir("onnx_matting_e2e");
+        let src = dir.join("subject.png");
+        let mut image = RgbaImage::from_pixel(64, 64, Rgba([110, 110, 110, 255]));
+        for y in 20..44 {
+            for x in 20..44 {
+                image.put_pixel(x, y, Rgba([230, 40, 40, 255]));
+            }
+        }
+        image.save(&src).unwrap();
+
+        let trimap_path = dir.join("trimap.png");
+        let mut trimap = GrayImage::from_pixel(64, 64, Luma([0]));
+        for y in 16..48 {
+            for x in 16..48 {
+                trimap.put_pixel(x, y, Luma([128]));
+            }
+        }
+        for y in 26..38 {
+            for x in 26..38 {
+                trimap.put_pixel(x, y, Luma([255]));
+            }
+        }
+        trimap.save(&trimap_path).unwrap();
+
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.trimap_path = Some(trimap_path.to_string_lossy().to_string());
+        p.engine_requested = "onnx_matting".to_string();
+        p.device_requested = "cpu".to_string();
+        let result = try_refine(&p).unwrap().expect("native ViTMatte refine");
+        assert_eq!(result.edge_report.engine, "onnx_matting");
+        assert_eq!(result.edge_report.engine_requested, "onnx_matting");
+        assert_eq!(result.edge_report.device.as_deref(), Some("cpu"));
+        assert!(result.edge_report.engine_fallback_reason.is_none());
+        assert_eq!(
+            result.edge_report.backend_model.as_deref(),
+            Some(expected_model.as_str())
+        );
+        assert!(Path::new(&result.refined_image).is_file());
+        assert!(Path::new(&result.refined_mask).is_file());
+    }
+
     /// Background blending marks the report and shifts edge-band colour toward
     /// the target background.
     #[test]
@@ -751,8 +986,7 @@ mod tests {
         assert!(result.edge_report.background_applied);
     }
 
-    /// An unknown preset is a user error, surfaced directly (the Python CLI
-    /// raises the same).
+    /// An unknown preset is a user error surfaced directly.
     #[test]
     fn unknown_preset_errors() {
         let dir = temp_dir("preset");
@@ -766,10 +1000,10 @@ mod tests {
         assert!(err.contains("unknown preset"), "{err}");
     }
 
-    /// A missing subject image defers to the Python bridge, which surfaces the
-    /// canonical error message.
+    /// A missing subject image returns `None` for the executor to map to its
+    /// stable unsupported-source error.
     #[test]
-    fn missing_image_defers_to_python() {
+    fn missing_image_returns_none() {
         let dir = temp_dir("missing");
         let p = params("definitely_not_here_zzx.png", dir.to_str().unwrap());
         assert!(try_refine(&p).unwrap().is_none());

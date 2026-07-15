@@ -1,17 +1,19 @@
 # Refine Mask Edge card
 
 Executor: **local** (in-process native Rust, never networks).
-Backend: `refine_mask_edge` Tauri command → `studio/edge_refine_cpu.rs` (native Rust, CPU-only). The Python bridge was deleted in Phase 7 (#314).
+Backend: `refine_mask_edge` Tauri command → `studio/edge_refine_cpu.rs`
+(native Rust heuristic plus optional ViTMatte inference through the shared
+`ort` session pool). The Python bridge was deleted in Phase 7 (#314).
 
 Cleans up a cut-out subject's matte for PSD compositing: bites the fringe in,
 snaps the matte to the subject's own luminance edges, feathers the transition,
 and optionally decontaminates / re-colours the edge band so the seam matches the
 target background. This document is the card's contract: what it accepts, what
-it guarantees, and how it behaves at the edges. The pipeline is a heuristic
-morphology + guided filter (He et al.) + Gaussian feather; a learned matting
-backend is a future `engine` mode behind this same contract (the Python
-`onnx_matting` backend was deleted with the Python bridge in Phase 7, #314 —
-requesting it falls back to the `cpu` baseline).
+it guarantees, and how it behaves at the edges. The deterministic baseline is
+morphology + guided filter (He et al.) + Gaussian feather. The optional native
+`onnx_matting` engine reuses the same ViTMatte implementation and warm ORT
+session as Subject Mask, replacing only the protected trimap band. Missing
+trimap/weight, session or inference failures fall back to the `cpu` baseline.
 
 ## Inputs (ports)
 
@@ -28,15 +30,20 @@ requesting it falls back to the `cpu` baseline).
 | Param | Type | Default | Range / values | Notes |
 | --- | --- | --- | --- | --- |
 | `preset` | enum | `natural` | `clean` \| `natural` \| `soft` \| `custom` | A named preset overrides the sliders below; `custom` uses them verbatim. |
+| `engine` | enum | `cpu` | `cpu` \| `onnx_matting` | The learned engine needs a trimap unknown band and a configured `vitmatte.onnx`; otherwise it reports the reason and runs `cpu`. |
+| `device` | enum | `auto` | `auto` \| `cpu` \| `cuda` | ORT provider request for `onnx_matting`. The current bundled runtime is CPU-only, so `auto`/`cuda` report the provider fallback. |
 | `erode_px` | int | `1` | `>= 0` | Bite the fringe N px inward (Min filter). `custom` only. |
 | `dilate_px` | int | `0` | `>= 0` | Grow the matte N px outward (Max filter). `custom` only. |
 | `feather_px` | float | `4.0` | `>= 0` | Gaussian feather radius of the transition. `custom` only. |
 | `guided_radius` | int | `8` | `>= 0` (0 disables) | Guided-filter radius that snaps the matte to luminance edges. `custom` only. |
 | `edge_decontaminate` | bool | `true` | | Pull opaque subject colour into the band to kill white/coloured fringing. `custom` only. |
 | `background_blend_strength` | float | `0.4` | `0..1` | Blend the band toward `background`'s colour (only when a background is connected). `custom` only. |
-| `max_decode_pixels` | int | `96_000_000` | `>= 0` (0 disables) | Rejects an **input** (image, mask or background) larger than this before decoding (decompression-bomb guard). |
 | `output_dir` | path | run output dir | | Validated server-side. |
 | `output_name` | basename | `<image>_refined` | plain basename | Rejected if it contains `..` or a path separator (`reject_unsafe_output_name`). |
+
+The native loader applies its fixed `DEFAULT_MAX_DECODE_PIXELS` guard
+(`96_000_000`) to decoded inputs. It is reported in `edge_report`, but is not a
+node/Tauri parameter.
 
 ## Presets
 
@@ -71,10 +78,11 @@ refined; the connected `background` is resampled the same way.
 When a `trimap` is connected, an extra **unknown-band protection** step runs
 right after the feather (before the edge band is measured): inside the trimap's
 unknown level (mid-grey, `0.25 < t < 0.75`, loaded nearest-neighbour so the
-three levels survive resize) the refined matte is replaced with the upstream
-soft alpha, blended via a lightly-feathered weight so the protected region joins
-the cleaned-up definite areas without a step. This keeps genuine continuous
-alpha (hair / fur / glass) intact rather than eroding/feathering it as fringe.
+three levels survive resize) the refined matte is replaced with either the
+upstream soft alpha (`cpu`) or ViTMatte's learned alpha (`onnx_matting`). The
+replacement uses a lightly-feathered weight so the protected region joins the
+cleaned-up definite areas without a step; definite foreground/background stay
+on the deterministic path.
 
 ## Colour space & bit depth
 
@@ -101,11 +109,14 @@ original mode is recorded as `source_mode`:
 | Condition | Behaviour |
 | --- | --- |
 | Missing / blank `image` input | Rust handler errors `Mask Edge Refine needs a connected image input`. |
-| Missing image file on disk | `subject image not found: <path>`. |
+| Missing, unsupported or oversized image/mask/trimap | Both entry points return `Mask Edge Refine could not decode <image>: unsupported source for the native path`. |
 | Missing background file on disk | `background image not found: <path>`. |
 | No transitional edge (fully opaque / empty matte) | Refinement is a no-op; `edge_band_px: 0` and a `note` records why. |
-| Input larger than `max_decode_pixels` | `input image too large to decode safely: WxH ...` (before decode). |
+| Unsupported or oversized background | Returns the same native unsupported-source error above after the fixed decode guard rejects it. |
 | Unknown `preset` | `unknown preset ...; expected one of [...]`. |
+| Unknown `engine` | Falls back to `cpu` and records `unknown engine ...`. |
+| `onnx_matting` without a trimap/unknown band | Falls back to `cpu` and records the missing learned-matting input. |
+| ViTMatte weight/session/inference unavailable | Falls back to `cpu`; outputs are still produced and the reason is reported. |
 | EXIF-rotated input | Orientation normalised; `exif_transposed: true`. |
 | Unsafe `output_name` (`..`, separators) | Rejected server-side. |
 
@@ -115,8 +126,10 @@ original mode is recorded as `source_mode`:
 `erode_px`, `dilate_px`, `feather_px`, `guided_radius`, `edge_decontaminate`,
 `background_blend_strength`, `background_applied`, `trimap_applied`,
 `protected_band_px`, `edge_band_px`,
-`coverage_before`, `coverage_after`, `output_size`, and an optional `note` when
-there was no transitional edge to refine.
+`coverage_before`, `coverage_after`, `output_size`, `engine`,
+`engine_requested`, `engine_fallback_reason`, `backend_model`, `device`,
+`device_requested`, and an optional `note` when there was no transitional edge
+to refine.
 
 ## Outputs (ports)
 
@@ -133,11 +146,10 @@ there was no transitional edge to refine.
   decontamination pulls subject colour into the band, background blend, explicit
   mask precedence, the no-edge note, preset parsing, decode guard, CMYK source
   mode, invalid preset, missing image / background, output naming, and trimap
-  unknown-band protection (the protected matte tracks the original soft alpha
-  where erosion would otherwise bite it away) (run: `cargo test`).
+  unknown-band protection, fake-matter band isolation, missing-input/unknown
+  engine fallback, and a weight-gated native ViTMatte end-to-end run (run:
+  `cargo test`).
 - `src-tauri/src/studio/edge_refine.rs` — the connected-image-input guard and
   param defaults.
-
-Note: continuous-alpha ViTMatte matting still exists as the **Subject Mask**
-card's native `ort` matting path (`studio/subject_matte.rs`); this card's own
-`onnx_matting` engine was Python-only and was removed in Phase 7.
+- `src-tauri/src/psd/engines.rs` — capability reporting for the managed
+  ViTMatte weight and compiled ORT providers.

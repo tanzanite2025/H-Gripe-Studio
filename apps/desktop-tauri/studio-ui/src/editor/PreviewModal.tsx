@@ -4,6 +4,7 @@ import { useSettledView, useViewControls } from "../viewport/useViewControls";
 import { useViewportUnderlay } from "../viewport/useViewportUnderlay";
 import { ViewportBackendBadge } from "../viewport/ViewportBackendBadge";
 import { useT } from "../i18n";
+import { isSupportedImagePath } from "../domain/mediaFormats";
 
 // Shared "review gate" modal.
 //
@@ -18,8 +19,6 @@ import { useT } from "../i18n";
 // original in the webview, so the canvas/media discipline is preserved. In
 // browser preview the backend is mocked and returns an empty data URL, so we
 // degrade to a path-only card.
-
-const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
 function basename(p: string): string {
   const parts = p.split(/[/\\]/);
@@ -61,7 +60,7 @@ export function PreviewModal({ title, layers, caption, onEdit, onOpenImageEditor
 
   const layer = layers[active];
   const path = layer?.path ?? null;
-  const isImage = path ? IMAGE_RE.test(path) : false;
+  const isImage = path ? isSupportedImagePath(path) : false;
   // Source pixel dimensions for the details row, from the file header only
   // (no decode); null in browser preview where the backend is mocked.
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);

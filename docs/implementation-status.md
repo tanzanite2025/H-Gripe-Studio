@@ -29,7 +29,7 @@
 | PSD Context Analyze (`psd/analyze.rs`) | ✅ Landed | Native `VisualContext` (lighting / bounds / masks) extraction. |
 | Match Light & Color (`studio/color_match_cpu.rs`) | 🟡 Partial | Rule-based light/colour match (CPU baseline). The `engine` param / report contract keeps the seam, but the Python `onnx_harmonize` learned matcher was deleted in Phase 7; a native (`ort`) matcher is still ⛔. See §2. |
 | PSD Export (`psd/compose.rs` + `psd/write.rs` + `psd/smart.rs`) | ✅ Landed | Native writer: smart-object replacement + `.psd`/preview/metadata triplet. |
-| Refine Mask Edge (`studio/edge_refine_cpu.rs`) | 🟡 Partial | CPU clean/feather + trimap-aware hand-off (protects the matte unknown band). The Python `onnx_matting` engine was deleted in Phase 7; continuous-alpha matting lives on the Subject Mask card's native ViTMatte path, a native matting engine *on this card* is still ⛔. See §2. |
+| Refine Mask Edge (`studio/edge_refine_cpu.rs`) | ✅ Landed | CPU clean/feather baseline plus native `onnx_matting`: reuses Subject Mask's ViTMatte/ORT session and replaces only the trimap unknown band, with reported CPU fallback for missing inputs, weights or inference. |
 | Image Enhance (`studio/image_enhance_cpu.rs`) | 🟡 Partial | CPU Lanczos upscale + denoise + unsharp, incl. the in-process CMYK/ICC decode paths. The Python SR engines (`realesrgan`/`ccsr`/`supir`) were deleted in Phase 7; a native SR backend is still ⛔. See §2. |
 | Detail Watchdog (`studio/detail_watchdog_cpu.rs`) | 🟡 Partial | Always-on CPU rule layer. The Python `onnx_defect` detector was deleted in Phase 7; semantic targets (`hands`/`text`/`logo`) stay `skipped` until a native detector covers them. See §2. |
 | Detail Repaint (`studio/detail_repaint_cpu.rs`) | 🟡 Partial | Native `prepare`/`composite` (feather + Poisson seam blends) around a provider `image.edit` call. The Python local diffusers engines (`sd_inpaint`/`sdxl_inpaint`/`flux_fill`) were deleted in Phase 7; the provider path is the only repaint backend. See §2. |
@@ -40,11 +40,12 @@
 implemented on the Python bridge, and were **deleted with it**. What survives
 is the *contract*: every card keeps its `engine` param, `engine` /
 `engine_requested` / `engine_fallback_reason` report fields, and the
-`probe_engines` capability probe (which now reports only the always-on native
-CPU/`rules`/`provider` baselines). Requesting a deleted engine id falls back
-to the baseline with a recorded reason — it never hard-fails. Re-adding any of
-these as **native** backends (e.g. via `ort`, like the Subject Mask card's
-SAM 2 / ViTMatte path) is future work behind the same seams.
+`probe_engines` capability probe. Refine Mask Edge is the first deleted engine
+restored natively: `onnx_matting` now reuses the Subject Mask ViTMatte/ORT path.
+Removed engine ids do not yet share one fallback policy: Match Light & Color,
+Image Enhance and Detail Watchdog reject them, while Detail Repaint falls back
+to its provider path. Refine Mask Edge is the first to preserve outputs through
+a reported CPU fallback for missing inputs, weights, sessions or inference.
 
 | Item | Status | What's missing |
 | --- | --- | --- |
@@ -52,8 +53,8 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 | **Detail Watchdog** ML/VLM passes | ⛔ Planned (native) | Python `onnx_defect` detector deleted in Phase 7. A native detector covering `hands` / `text` / `logo` + trained weights; targets stay truthfully `skipped` until then. |
 | **Detail Repaint** local inpaint backend | ⛔ Planned (native) | Python `sd_inpaint` / `sdxl_inpaint` / `flux_fill` backends deleted in Phase 7. The provider `image.edit` path is the only repaint backend; the native Poisson/feather seam blends remain. |
 | **Match Light & Color** learned matcher | ⛔ Planned (native) | Python `onnx_harmonize` backend deleted in Phase 7. A native harmonisation backend + a trained weight. |
-| **Refine Mask Edge** learned matting | ⛔ Planned (native) | Python `onnx_matting` backend deleted in Phase 7. Continuous-alpha ViTMatte matting survives on the **Subject Mask** card's native `ort` path (`studio/subject_matte.rs`); this card's own matting engine needs a native port. |
-| **Capability probe / weight cache** | 🟡 Partial | The `probe_engines` Tauri command (`psd/engines.rs`) still aggregates a **cross-card capability report** the Inspector uses to grey out unavailable engines — post Phase 7 it reports only the always-on native baselines (`cpu` / `rules` / `provider`) with no runtime/device detail. `HGRIPE_MODEL_CACHE` + per-engine weight resolution (`psd/model_paths.rs`) remains for the native `ort` weights (SAM 2 / ViTMatte / U²-Netp). The Python-era device/precision probes (`device_probe_cli.py`, `--device`/`--precision` selectors, GPU badges) were deleted with the bridge; re-adding device detail for native `ort` engines is future work. |
+| **Refine Mask Edge** learned matting | ✅ Landed | Native `onnx_matting` shares `subject_matte.rs`, the process-wide ORT session pool and managed `vitmatte.onnx` resolution. Only the trimap unknown band takes learned alpha; the CPU pipeline and outputs remain the fallback contract. |
+| **Capability probe / weight cache** | 🟡 Partial | `probe_engines` now reports native `onnx_matting` weight presence and the compiled ORT CPU provider alongside the always-on baselines; the session is validated on first use. `HGRIPE_VITMATTE_MODEL` (plus legacy `HGRIPE_MATTING_MODEL`), persisted `onnx_matting` path, `HGRIPE_MODEL_CACHE`, configured cache and bundled resources share one resolver. Still open: an Inspector consumer, accelerated ORT providers and a replacement for the legacy Dashboard model-management surface. |
 
 ## 3. Subject Mask / Matte — [`subject-mask-matte.md`](cards/subject-mask-matte.md)
 
@@ -76,9 +77,9 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 | Executor lanes (Graph / Local / Compute / Api / Hybrid) | ✅ Landed | `StudioExecutor` + `studio_executor_for_kind` + `executor` field on node specs. |
 | Input hardening (CMYK/ICC normalise, EXIF, `--max-decode-pixels`) | ✅ Landed | Across the PSD cards. |
 | Colour pipeline: wide-gamut 16-bit working space + manual/model split — [`design/colour-pipeline.md`](design/colour-pipeline.md) | ✅ Landed | **P1–P5 landed.** CMYK decode coverage ✅ (#180–#186). Canonical surface is now **16-bit ProPhoto** for profiled CMYK (#188–#190); the card/model/output boundary colour-manages **ProPhoto → sRGB**, while plain images / naive CMYK egress as an exact bit-narrow (byte-exact contract held). **P4 (manual-path 16-bit chain) complete**: `image_buffer` carries the 16-bit `WorkingImage` natively (P4a #191), crop walks it end-to-end with 16-bit PNG-with-ICC output (P4b #192), 16-bit TIFF-with-ICC output + crop `format` param (P4c #193), subject-mask 16-bit cutout/RGBA products (P4d #194), close-out P4e reconciled the remaining manual cards' pixel work in P5. **P5 (cross-engine parity) complete**: ProPhoto-tagged manual products were colour-managed to sRGB at card ingress (#202), the enhance cpu path no longer re-embeds the stale ProPhoto profile on its sRGB output (#203). **Open decisions closed**: TRC — working space stays gamma-encoded with per-operation linear-light where the maths need it (first landing: enhance colour resample, #205); local-model bit depth — 8-bit sRGB for all current integrations. Initiative complete; the Python half of the parity contract was retired with the bridge in Phase 7 (#314) — the native path is the only implementation. |
-| **Local model management surface** | 🟡 Partial | The per-node `engine` param and the capability reporting (`probe_engines`) remain, consumed by the Inspector. The backend `get_model_paths`/`set_model_paths` commands (persisted per-engine `weights_path` overrides + shared cache dir in `model_paths.json`, resolved by `psd/model_paths.rs` with real env vars still winning) remain for the native `ort` weights. The old Dashboard **Local models** manager panel was removed with the legacy shell tabs; the Python-era `device`/`precision` knobs went with the bridge (Phase 7, #314). A settings/diagnostics surface inside the node editor is the intended replacement when needed. |
+| **Local model management surface** | 🟡 Partial | The per-node `engine` param and backend capability report (`probe_engines`) remain, but the Inspector does not currently consume that report to disable unavailable choices. The backend `get_model_paths`/`set_model_paths` commands (persisted per-engine `weights_path` overrides + shared cache dir in `model_paths.json`, resolved by `psd/model_paths.rs` with real env vars still winning) remain for native `ort` weights. The old Dashboard **Local models** panel was removed with the legacy shell tabs; a settings/diagnostics surface inside the node editor is still needed. |
 | **In-app account / config editor** | ⛔ Not planned | The desktop shell has no H-Gripe account/login surface and no Credentials / Profiles tabs. Third-party API keys and provider profiles stay as local config files + CLI until a cleaner API configuration surface is deliberately designed. |
-| Per-card `engine` seams (matcher) | 🟡 Partial | Image Enhance, Detail Watchdog, Detail Repaint, Match Light & Color and Refine Mask Edge keep their `engine` seams (param + report fields + probe), but only the native baselines exist post Phase 7 (#314) — the Python ML backends behind the seams were deleted. Native (`ort`) backends remain ⛔ (see §2). |
+| Per-card `engine` seams (matcher) | 🟡 Partial | Refine Mask Edge now has a native ORT backend behind its existing seam. Image Enhance, Detail Watchdog, Detail Repaint and Match Light & Color still expose only their native baseline/provider paths after the Python ML backends were deleted. |
 
 ## 5. Production drawer / timeline / monitor
 
@@ -95,7 +96,7 @@ SAM 2 / ViTMatte path) is future work behind the same seams.
 | --- | --- | --- |
 | Bundled CPU baseline (u²-netp ~4.6 MB) | ✅ Landed | Fetched at package time, shipped via `tauri.conf.json` `bundle.resources`. |
 | **Big-tier weights bundling** (Issue #2) | ⛔ Planned | BiRefNet lite / SAM 2 / ViTMatte downloaded post-install; not in the installer. Installer packaging story undecided. |
-| **ViTMatte real inference in CI** | 🟡 Partial | Weight-gated unit test + opt-in `tauri (vitmatte e2e)` job exists, but it's `workflow_dispatch` and skipped on normal PRs — real inference is only verified on manual trigger. |
+| **ViTMatte real inference in CI** | 🟡 Partial | Subject Mask and Refine Mask Edge both have weight-gated native inference tests; the weight-fetching job remains opt-in, so real model inference is skipped on normal PRs. |
 
 ## 7. Internationalisation (cards)
 

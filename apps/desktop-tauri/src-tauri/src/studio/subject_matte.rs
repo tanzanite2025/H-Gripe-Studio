@@ -24,15 +24,15 @@
 //!   feather. It works end-to-end before any weight is present (and keeps CI
 //!   green without the blob).
 //!
-//! The weight is never committed to git; it resolves via
-//! [`resolve_model_file`](super::subject_model::resolve_model_file) (env override
-//! → bundled `resources/models/`). `scripts/fetch-vitmatte.*` fetch it with a
+//! The weight is never committed to git; [`resolve_vitmatte_model_path`] checks
+//! canonical/legacy env overrides, persisted model config, shared caches, then
+//! bundled `resources/models/`. `scripts/fetch-vitmatte.*` fetch it with a
 //! sha256 check.
 
 use image::{imageops::FilterType, GrayImage, Luma, RgbaImage};
-use ort::value::Tensor;
+use ort::value::{Tensor, TensorElementType};
 use rayon::prelude::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::onnx_pool::{cached_session, SharedSession};
 use super::pixel_ops;
@@ -59,6 +59,8 @@ const IMAGE_STD: f32 = 0.5;
 
 const MODEL_FILE: &str = "vitmatte.onnx";
 const MODEL_ENV: &str = "HGRIPE_VITMATTE_MODEL";
+const LEGACY_MODEL_ENV: &str = "HGRIPE_MATTING_MODEL";
+const MODEL_ENGINE: &str = "onnx_matting";
 const VITMATTE_PROVIDER: &str = "vitmatte";
 const BUILTIN_PROVIDER: &str = "builtin-cpu-matte";
 
@@ -83,12 +85,60 @@ pub(super) trait AlphaMatter {
 /// Pick the alpha matter: ViTMatte when its weight resolves, else the
 /// deterministic builtin fallback so the feature always works.
 pub(super) fn matter() -> Box<dyn AlphaMatter> {
-    if let Some(path) = resolve_model_file(MODEL_ENV, MODEL_FILE) {
-        if let Ok(vitmatte) = VitMatteMatter::load(&path) {
-            return Box::new(vitmatte);
-        }
+    if let Ok(vitmatte) = load_vitmatte() {
+        return Box::new(vitmatte);
     }
     Box::new(BuiltinCpuMatter)
+}
+
+/// Resolve the ViTMatte weight without creating an ORT session. Capability
+/// probes use this to report weight presence without paying model-load cost.
+pub(crate) fn resolve_vitmatte_model_path() -> Option<PathBuf> {
+    for env_var in [MODEL_ENV, LEGACY_MODEL_ENV] {
+        if let Ok(explicit) = std::env::var(env_var) {
+            let path = PathBuf::from(explicit.trim());
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+
+    let config = crate::psd::load_model_paths_config();
+    if let Some(explicit) = config.weights.get(MODEL_ENGINE) {
+        let path = PathBuf::from(explicit.trim());
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    let env_cache = std::env::var("HGRIPE_MODEL_CACHE")
+        .ok()
+        .filter(|cache| !cache.trim().is_empty());
+    for cache in [env_cache.as_deref(), config.model_cache_dir.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter(|cache| !cache.trim().is_empty())
+    {
+        let path = Path::new(cache.trim()).join(MODEL_FILE);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    resolve_model_file(MODEL_ENV, MODEL_FILE)
+}
+
+/// Load ViTMatte without substituting the builtin matter. Callers that need to
+/// report whether the learned backend actually ran can own their fallback and
+/// preserve the resolution/session error in telemetry.
+pub(super) fn load_vitmatte() -> Result<VitMatteMatter, String> {
+    let path = resolve_vitmatte_model_path().ok_or_else(|| {
+        format!(
+            "ViTMatte model not found; configure {MODEL_ENGINE}, set {MODEL_ENV}, or install resources/models/{MODEL_FILE}"
+        )
+    })?;
+    VitMatteMatter::load(&path)
+        .map_err(|err| format!("could not load ViTMatte {}: {err}", path.display()))
 }
 
 /// Build a three-level trimap from a binary matte: erode by `band` for the
@@ -126,12 +176,21 @@ pub(super) fn trimap_from_mask(mask: &GrayImage, band: u32) -> GrayImage {
 /// (keeping the trait's `&self` signature).
 pub(super) struct VitMatteMatter {
     session: SharedSession,
+    /// Resolved weight file retained for truthful backend reporting.
+    path: PathBuf,
 }
 
 impl VitMatteMatter {
     fn load(path: &Path) -> Result<Self, String> {
         let session = cached_session(path)?;
-        Ok(Self { session })
+        Ok(Self {
+            session,
+            path: path.to_path_buf(),
+        })
+    }
+
+    pub(super) fn model_path(&self) -> &Path {
+        &self.path
     }
 }
 
@@ -145,6 +204,13 @@ impl AlphaMatter for VitMatteMatter {
         if width == 0 || height == 0 {
             return Err("Subject Mask matting needs a non-empty image".to_string());
         }
+        if trimap.dimensions() != (width, height) {
+            return Err(format!(
+                "ViTMatte trimap dimensions {:?} do not match image dimensions {:?}",
+                trimap.dimensions(),
+                (width, height)
+            ));
+        }
 
         let pixels = preprocess(image, trimap);
         let tensor = Tensor::from_array((
@@ -157,15 +223,54 @@ impl AlphaMatter for VitMatteMatter {
             .session
             .lock()
             .map_err(|_| "ViTMatte session poisoned".to_string())?;
-        let input_name = session.inputs()[0].name().to_string();
+        let input = session
+            .inputs()
+            .iter()
+            .find(|input| input.name() == "pixel_values")
+            .ok_or_else(|| {
+                let names: Vec<_> = session.inputs().iter().map(|input| input.name()).collect();
+                format!("ViTMatte model has no `pixel_values` input (found {names:?})")
+            })?;
+        if input.dtype().tensor_type() != Some(TensorElementType::Float32) {
+            return Err(format!(
+                "ViTMatte `pixel_values` must be float32, found {:?}",
+                input.dtype().tensor_type()
+            ));
+        }
+        let input_shape = input
+            .dtype()
+            .tensor_shape()
+            .ok_or_else(|| "ViTMatte `pixel_values` input is not a tensor".to_string())?;
+        validate_input_shape(input_shape, INPUT_SIZE)?;
+
         let outputs = session
-            .run(ort::inputs![input_name => tensor])
+            .run(ort::inputs!["pixel_values" => tensor])
             .map_err(|err| format!("ViTMatte inference failed: {err}"))?;
-        let (_, alphas) = outputs[0]
+        let output = outputs.get("alphas").ok_or_else(|| {
+            let names: Vec<_> = outputs.keys().collect();
+            format!("ViTMatte model has no `alphas` output (found {names:?})")
+        })?;
+        let (shape, alphas) = output
             .try_extract_tensor::<f32>()
             .map_err(|err| format!("failed to read ViTMatte output: {err}"))?;
 
-        Ok(postprocess(alphas, INPUT_SIZE, width, height))
+        postprocess(alphas, shape, INPUT_SIZE, width, height)
+    }
+}
+
+fn validate_input_shape(shape: &[i64], size: u32) -> Result<(), String> {
+    let expected = [1_i64, 4, i64::from(size), i64::from(size)];
+    let compatible = shape.len() == expected.len()
+        && shape
+            .iter()
+            .zip(expected)
+            .all(|(&actual, expected)| actual == -1 || actual == expected);
+    if compatible {
+        Ok(())
+    } else {
+        Err(format!(
+            "ViTMatte `pixel_values` shape {shape:?} is incompatible with {expected:?}"
+        ))
     }
 }
 
@@ -190,15 +295,53 @@ fn preprocess(image: &RgbaImage, trimap: &GrayImage) -> Vec<f32> {
     out
 }
 
-/// Clamp the model's `[0, 1]` alpha to 8-bit and resize back to the original
-/// image dimensions.
-fn postprocess(alphas: &[f32], size: u32, width: u32, height: u32) -> GrayImage {
-    let mut small = GrayImage::from_pixel(size, size, Luma([0]));
-    for (i, pixel) in small.pixels_mut().enumerate() {
-        let v = alphas.get(i).copied().unwrap_or(0.0);
-        pixel.0[0] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+/// Validate and clamp the model's `[0, 1]` alpha to 8-bit, then resize it back
+/// to the original image dimensions. Invalid output must reach the caller as a
+/// fallback reason rather than being padded into a plausible-looking matte.
+fn postprocess(
+    alphas: &[f32],
+    shape: &[i64],
+    size: u32,
+    width: u32,
+    height: u32,
+) -> Result<GrayImage, String> {
+    let spatial = i64::from(size);
+    let valid_shape = match shape {
+        [h, w] => *h == spatial && *w == spatial,
+        [n, h, w] => *n == 1 && *h == spatial && *w == spatial,
+        [n, c, h, w] => *n == 1 && *c == 1 && *h == spatial && *w == spatial,
+        _ => false,
+    };
+    let expected_len = (size as usize) * (size as usize);
+    if !valid_shape || alphas.len() != expected_len {
+        return Err(format!(
+            "ViTMatte `alphas` output shape {shape:?} / length {} does not match a {size}x{size} single-channel matte",
+            alphas.len()
+        ));
     }
-    image::imageops::resize(&small, width, height, FilterType::Triangle)
+    if let Some((index, value)) = alphas
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(format!(
+            "ViTMatte `alphas` output contains non-finite value {value} at index {index}"
+        ));
+    }
+
+    let pixels = alphas
+        .iter()
+        .map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    let small = GrayImage::from_raw(size, size, pixels)
+        .ok_or_else(|| "ViTMatte alpha buffer does not match its dimensions".to_string())?;
+    Ok(image::imageops::resize(
+        &small,
+        width,
+        height,
+        FilterType::Triangle,
+    ))
 }
 
 /// A deterministic, weight-free matter. The definite foreground stays fully
@@ -519,17 +662,53 @@ mod tests {
     }
 
     #[test]
+    fn strict_vitmatte_loader_reports_missing_weight() {
+        if resolve_vitmatte_model_path().is_some() {
+            eprintln!("skipping missing-weight assertion: ViTMatte weight is present");
+            return;
+        }
+        let reason = match load_vitmatte() {
+            Ok(_) => panic!("strict loader must not substitute the builtin matter"),
+            Err(reason) => reason,
+        };
+        assert!(reason.contains(MODEL_ENV), "reason={reason}");
+        assert!(reason.contains(MODEL_FILE), "reason={reason}");
+    }
+
+    #[test]
     fn postprocess_clamps_and_resizes() {
         // 2x2 alphas: top row opaque, bottom row transparent. Resize to 4x4.
         let alphas = vec![1.0, 1.0, 0.0, 0.0];
-        let alpha = postprocess(&alphas, 2, 4, 4);
+        let alpha = postprocess(&alphas, &[1, 1, 2, 2], 2, 4, 4).unwrap();
         assert_eq!(alpha.dimensions(), (4, 4));
         assert_eq!(alpha.get_pixel(0, 0).0[0], 255);
         assert_eq!(alpha.get_pixel(0, 3).0[0], 0);
     }
 
-    /// Real ViTMatte inference, only when the weight resolves (set
-    /// `HGRIPE_VITMATTE_MODEL` or bundle `resources/models/vitmatte.onnx`).
+    #[test]
+    fn postprocess_rejects_wrong_shapes_lengths_and_non_finite_values() {
+        assert!(postprocess(&[0.0; 4], &[1, 2, 2, 1], 2, 2, 2)
+            .unwrap_err()
+            .contains("shape"));
+        assert!(postprocess(&[0.0; 3], &[1, 1, 2, 2], 2, 2, 2)
+            .unwrap_err()
+            .contains("length"));
+        assert!(
+            postprocess(&[0.0, f32::NAN, 0.0, 0.0], &[1, 1, 2, 2], 2, 2, 2)
+                .unwrap_err()
+                .contains("non-finite")
+        );
+    }
+
+    #[test]
+    fn input_shape_accepts_dynamic_axes_but_rejects_wrong_channels() {
+        assert!(validate_input_shape(&[1, 4, -1, -1], INPUT_SIZE).is_ok());
+        assert!(validate_input_shape(&[1, 3, 1024, 1024], INPUT_SIZE).is_err());
+        assert!(validate_input_shape(&[4, 1024, 1024], INPUT_SIZE).is_err());
+    }
+
+    /// Real ViTMatte inference, only when the weight resolves through an env
+    /// override, persisted model config, shared cache or bundled resource.
     /// Skipped otherwise so CI without the blob still passes; the opt-in
     /// `vitmatte-e2e` CI job fetches the weight and runs this. Beyond shape, it
     /// asserts the matte honours the trimap — the definite-foreground core comes
@@ -537,12 +716,13 @@ mod tests {
     /// which is what proves the weight is actually wired through `ort`.
     #[test]
     fn vitmatte_inference_when_weight_present() {
-        let Some(path) = resolve_model_file(MODEL_ENV, MODEL_FILE) else {
+        let Some(path) = resolve_vitmatte_model_path() else {
             eprintln!("skipping vitmatte: no weight resolvable");
             return;
         };
-        let matter = VitMatteMatter::load(&path).expect("load vitmatte");
+        let matter = load_vitmatte().expect("load vitmatte");
         assert_eq!(matter.provider(), "vitmatte");
+        assert_eq!(matter.model_path(), path);
 
         // A red square subject on a grey field; the trimap fixes a definite-FG
         // core, a definite-BG exterior, and an unknown ring between.

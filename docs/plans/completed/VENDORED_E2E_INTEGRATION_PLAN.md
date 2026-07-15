@@ -5,8 +5,9 @@
 > Python 桥 / 移除 PyAV / 删除 psd_tools”类目标均已完成：native FFmpeg 是唯一
 > 视频路径，Rust PSD 子集（analyze / compose / export）是唯一 PSD 路径。
 > P3（hgripe-grade 接入）也已落地：图片 / 视频帧 / 时间线导出共用同一内核，
-> temporal denoise 已接入视频预览，.cube LUT 可导入导出。尚未完成的主要是
-> ONNX 小模型链的持续扩展。
+> temporal denoise 已接入视频预览，.cube LUT 可导入导出。ONNX 小模型链已完成
+> 主体识别、ViTMatte 和 Refine Mask Edge 的首个复用闭环；Windows x64 CPU 运行时
+> 也已转为仓库锁定、动态加载，后续主要是检测、轻量 harmonize 与 Windows GPU provider。
 
 ## 目的
 
@@ -36,7 +37,7 @@ H-Gripe Studio 已经开始把关键库 fork / vendor 到仓库内，并切断�
 | `third_party/cargo-vendor` | Cargo 依赖快照 | 不适合业务集成 | 只做离线构建和版本锁定 |
 | `crates/hgripe-api` | API 调用 crate | 是，但属于业务协议层 | 保持干净，和本地像素内核分离 |
 | `crates/hgripe-grade` | 调色 / 合成内核 | ✅ 已集成 | 统一图片和视频调色 |
-| ONNX / `ort` 模型路径 | 本地小模型辅助 | 是，选择性集成 | 抠像、matting、检测、轻量 harmonize |
+| ONNX / `ort` 模型路径 | 本地小模型辅助；Windows x64 CPU 运行时已锁定 | 是，选择性集成 | 抠像、matting、检测、轻量 harmonize；分阶段接入 Windows GPU provider |
 
 ## 1. moxcms: 必须端到端集成
 
@@ -234,6 +235,20 @@ psd engine
 - 小辅助走 Rust + ONNX。
 - 所有模型输出要回到同一套 mask / WorkingImage / grade pipeline。
 
+当前运行时交付边界：
+
+- 当前产品目标只覆盖 Windows x64；仓库锁定官方 ONNX Runtime 1.24.2 CPU
+  基线并通过 Git LFS 只维护当前需要的 `onnxruntime.dll`。
+- Rust 侧精确锁定兼容的 `ort` / `ort-sys`，使用动态加载，不保留
+  `download-binaries` 或 HTTP/TLS 下载链。
+- build、test、CI 和 Tauri 打包不得联网获取 ORT；维护者只能显式运行
+  `scripts/fetch-onnxruntime.ps1` 更新已锁定的上游产物。
+- 模型权重与 ORT 运行时分开管理；没有权重不能变成构建失败。
+- CPU-only 是本阶段基线，不是永久限制。保留 provider 选择和设备请求合同，
+  后续 Windows NVIDIA 走 CUDA，AMD/Intel 走 DirectML，ROCm 不作为 Windows 目标。
+  `provider_shared` 不能单独提供兼容性；届时必须把 shared/专用 DLL、注册、打包、
+  回退语义和真机测试作为同一个功能阶段加入。
+
 ## 7. 端到端集成优先级
 
 ### P0: 保持云端内核开发不冲突
@@ -272,9 +287,10 @@ psd engine
 
 ### P5: ONNX 小模型辅助闭环
 
-- 抠像和 matting 先闭环。
+- ✅ 抠像和 matting 已闭环：Subject Mask 与 Refine Mask Edge 复用同一 Rust ViTMatte/ORT session。
+- ✅ Windows x64 CPU ORT 已改为仓库锁定的动态运行时，构建与 CI 不再下载二进制。
 - defect/detail watchdog 再闭环。
-- 输出直接进 mask / grade / PSD / timeline。
+- ✅ 输出继续走现有 mask / grade / PSD / timeline 合同，缺权重时回落 CPU。
 
 ## 8. 判断一个库是否值得继续 fork
 

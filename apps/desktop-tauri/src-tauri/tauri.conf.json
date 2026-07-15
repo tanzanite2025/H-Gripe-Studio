@@ -39,7 +39,12 @@
     ],
     "resources": {
       "../../../h-gripe.project.json": "h-gripe.project.json",
-      "resources/models/": "resources/models/"
+      "resources/models/": "resources/models/",
+      "../../../third_party/onnxruntime/win-x64/bin/onnxruntime.dll": "runtime/onnxruntime/onnxruntime.dll",
+      "../../../third_party/onnxruntime/LICENSE": "runtime/onnxruntime/LICENSE",
+      "../../../third_party/onnxruntime/ThirdPartyNotices.txt": "runtime/onnxruntime/ThirdPartyNotices.txt",
+      "../../../third_party/onnxruntime/VERSION_NUMBER": "runtime/onnxruntime/VERSION_NUMBER",
+      "../../../third_party/onnxruntime/GIT_COMMIT_ID": "runtime/onnxruntime/GIT_COMMIT_ID"
     }
   }
 }

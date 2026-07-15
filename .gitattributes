@@ -16,6 +16,11 @@ third_party/ffmpeg/** linguist-vendored
 third_party/ffmpeg/**/*.dll filter=lfs diff=lfs merge=lfs -text
 third_party/ffmpeg/**/*.lib filter=lfs diff=lfs merge=lfs -text
 
+# Vendored ONNX Runtime (Windows x64). Keep the runtime distribution locally
+# reproducible; native binaries are stored through git-lfs.
+third_party/onnxruntime/** linguist-vendored
+third_party/onnxruntime/**/*.dll filter=lfs diff=lfs merge=lfs -text
+
 # Cargo verifies directory sources against each crate's .cargo-checksum.json.
 # Preserve vendored crate files byte-for-byte, including unusual line endings.
 third_party/cargo-vendor/** -text linguist-vendored

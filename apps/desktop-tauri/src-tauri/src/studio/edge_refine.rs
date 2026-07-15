@@ -1,7 +1,6 @@
-//! The `refineMaskEdge` node executor. The `cpu` engine runs the in-process
-//! native-Rust heuristic ([`super::edge_refine_cpu`]) — the only supported
-//! backend. It cleans up a cut-out subject's matte and exposes the refined
-//! image, the refined mask, and an edge report as flat output ports.
+//! The `refineMaskEdge` node executor. The default `cpu` engine and optional
+//! native `onnx_matting`/ViTMatte band replacement both run through
+//! [`super::edge_refine_cpu`], preserving one output and fallback contract.
 
 use std::collections::BTreeMap;
 
@@ -36,20 +35,9 @@ pub(super) fn execute_studio_refine_mask_edge(
     let background_blend_strength = number_param(node, "background_blend_strength", 0.4);
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
     let engine = optional(studio_value_to_string(node.params.get("engine")));
-    // `device` selects the ONNX execution provider for the learned matter
+    // `device` selects the ORT execution provider for the learned matter
     // (default `auto`); ignored by the CPU heuristic.
     let device = optional(studio_value_to_string(node.params.get("device")));
-
-    let engine_is_cpu = engine
-        .as_deref()
-        .map(|e| e.trim().eq_ignore_ascii_case("cpu"))
-        .unwrap_or(true);
-    if !engine_is_cpu {
-        return Err(format!(
-            "Mask Edge Refine engine `{}` is no longer available; only the native `cpu` engine is supported",
-            engine.as_deref().unwrap_or_default().trim()
-        ));
-    }
 
     let cpu_params = CpuEdgeRefineParams {
         image_path: image.clone(),
@@ -65,6 +53,7 @@ pub(super) fn execute_studio_refine_mask_edge(
         background_blend_strength,
         output_dir,
         output_name,
+        engine_requested: engine.unwrap_or_else(|| "cpu".to_string()),
         device_requested: device.unwrap_or_else(|| "auto".to_string()),
     };
     let result = edge_refine_cpu::try_refine(&cpu_params)?.ok_or_else(|| {
@@ -88,6 +77,7 @@ fn to_output_map(result: RefineEdgeResult) -> Result<BTreeMap<String, Value>, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{Rgba, RgbaImage};
 
     fn node() -> StudioGraphNode {
         StudioGraphNode {
@@ -123,5 +113,44 @@ mod tests {
         assert_eq!(number_param(&n, "guided_radius", 8.0), 8.0);
         assert!(bool_param(&n, "edge_decontaminate", true));
         assert_eq!(number_param(&n, "background_blend_strength", 0.4), 0.4);
+    }
+
+    #[test]
+    fn graph_entry_forwards_learned_engine_to_native_fallback() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("hgripe_refine_graph_{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("subject.png");
+        RgbaImage::from_pixel(12, 12, Rgba([120, 80, 40, 180]))
+            .save(&source)
+            .unwrap();
+
+        let mut n = node();
+        n.params.insert("engine".to_string(), json!("onnx_matting"));
+        n.params.insert(
+            "output_dir".to_string(),
+            json!(dir.to_string_lossy().to_string()),
+        );
+        n.params
+            .insert("output_name".to_string(), json!("graph_refine"));
+        let mut inputs = BTreeMap::new();
+        inputs.insert(
+            "image".to_string(),
+            json!(source.to_string_lossy().to_string()),
+        );
+
+        let outputs = execute_studio_refine_mask_edge(&n, &inputs).unwrap();
+        let report = outputs.get("edge_report").unwrap();
+        assert_eq!(report["engine"], "cpu");
+        assert_eq!(report["engine_requested"], "onnx_matting");
+        assert!(report["engine_fallback_reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("trimap"));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

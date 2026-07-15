@@ -381,7 +381,7 @@ pub(crate) async fn prime_ingest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 
     fn tmp_dir(tag: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -394,46 +394,65 @@ mod tests {
     }
 
     #[test]
-    fn browser_native_formats_are_inlined_verbatim() {
-        let dir = tmp_dir("dataurl_png");
-        let path = dir.join("scene.png");
-        RgbaImage::from_pixel(4, 4, Rgba([10, 20, 30, 255]))
-            .save(&path)
+    fn supported_image_formats_cross_the_native_media_pipeline() {
+        let dir = tmp_dir("supported_image_formats");
+        let source =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(8, 6, Rgba([40, 100, 180, 255])));
+        let cases = [
+            ("png", ImageFormat::Png, Some("image/png")),
+            ("jpg", ImageFormat::Jpeg, Some("image/jpeg")),
+            ("webp", ImageFormat::WebP, Some("image/webp")),
+            ("gif", ImageFormat::Gif, Some("image/gif")),
+            ("bmp", ImageFormat::Bmp, Some("image/bmp")),
+            ("tiff", ImageFormat::Tiff, None),
+        ];
+
+        for (extension, format, browser_mime) in cases {
+            let path = dir.join(format!("scene.{extension}"));
+            source.save_with_format(&path, format).unwrap();
+            let raw = std::fs::read(&path).unwrap();
+            assert_eq!(image::guess_format(&raw).unwrap(), format, "{extension}");
+
+            let dims = probe_image_dims_inner(path.to_string_lossy().as_ref()).unwrap();
+            assert_eq!((dims.width, dims.height), (8, 6), "{extension}");
+
+            let registered = register_resource_inner(path.to_string_lossy().as_ref()).unwrap();
+            assert_eq!((registered.width, registered.height), (Some(8), Some(6)));
+
+            let loaded = crate::studio::studio_image::load_rgba(
+                &path,
+                crate::studio::studio_image::DEFAULT_MAX_DECODE_PIXELS,
+            )
             .unwrap();
-        let raw = std::fs::read(&path).unwrap();
+            assert_eq!(loaded.image.dimensions(), (8, 6), "{extension}");
 
-        let url = read_image_data_url(path.to_string_lossy().to_string()).unwrap();
-        assert!(url.starts_with("data:image/png;base64,"), "{url}");
-        // A browser-native format is passed through byte-for-byte (no transcode).
-        assert_eq!(
-            url,
-            format!("data:image/png;base64,{}", base64_encode(&raw))
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn tiff_is_transcoded_to_png_for_display() {
-        // The extension is deliberately `.tiff` (not browser-native): the header
-        // is sniffed and the image is re-encoded to PNG so `<img>` can show it,
-        // instead of being rejected as an "unsupported image type".
-        let dir = tmp_dir("dataurl_tiff");
-        let path = dir.join("scene.tiff");
-        RgbaImage::from_pixel(4, 4, Rgba([200, 100, 50, 255]))
-            .save(&path)
+            let thumbnail = generate_thumbnail_inner(
+                path.to_string_lossy().as_ref(),
+                32,
+                Some(1.0),
+                ThumbnailMode::Fit,
+            )
             .unwrap();
-        assert_eq!(
-            image::guess_format(&std::fs::read(&path).unwrap()).unwrap(),
-            image::ImageFormat::Tiff
-        );
+            let thumbnail_image = image::open(&thumbnail.cache_path).unwrap();
+            assert_eq!(thumbnail.mime, "image/png", "{extension}");
+            assert_eq!(thumbnail_image.dimensions(), (32, 24), "{extension}");
+            let _ = std::fs::remove_file(&thumbnail.cache_path);
 
-        let url = read_image_data_url(path.to_string_lossy().to_string()).unwrap();
-        assert!(
-            url.starts_with("data:image/png;base64,"),
-            "a TIFF must be transcoded to a PNG data URL, got: {}",
-            &url[..url.len().min(40)]
-        );
+            let url = read_image_data_url(path.to_string_lossy().to_string()).unwrap();
+            if let Some(mime) = browser_mime {
+                assert_eq!(
+                    url,
+                    format!("data:{mime};base64,{}", base64_encode(&raw)),
+                    "{extension}"
+                );
+            } else {
+                assert!(
+                    url.starts_with("data:image/png;base64,"),
+                    "TIFF must be transcoded to PNG, got: {}",
+                    &url[..url.len().min(40)]
+                );
+            }
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

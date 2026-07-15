@@ -454,6 +454,10 @@ Goal: make each accelerated backend robust before unifying scheduling.
   resolve to CPU with distinct visible reasons; accelerated providers slot
   into the resolver when compiled in.
 - Consider DirectML only after the CUDA/CPU contract is stable.
+- Before enabling CUDA or DirectML, provider resolution must move ahead of
+  ONNX session construction and configure `SessionBuilder`; the warm-session
+  cache key must include the resolved provider/runtime flavor. Updating only
+  capability telemetry would falsely label a shared CPU session as accelerated.
 - ✅ Report model path, provider, and fallback reason — `SubjectSegmenter`
   exposes `model_path()` (the weight file(s) inference ran on; encoder +
   decoder for SAM 2) and `matte_report.model_path` carries it alongside the

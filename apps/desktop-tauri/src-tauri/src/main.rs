@@ -71,7 +71,11 @@ fn main() {
             // The auto-subject model is bundled under the resource dir; the
             // handle-free `Compute` segmenter needs it captured here to resolve
             // the weight in a packaged install.
-            studio::set_subject_model_resource_dir(resource_dir);
+            studio::set_subject_model_resource_dir(resource_dir.clone());
+            // ONNX Runtime is a packaged Windows x64 resource. Capture its root
+            // here, but load it lazily on the first capability probe/session so
+            // a missing optional runtime cannot block application startup.
+            studio::set_onnx_runtime_resource_dir(resource_dir);
             if let Some(window) = app.get_webview_window("main") {
                 window.show()?;
                 window.set_focus()?;

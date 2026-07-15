@@ -274,13 +274,12 @@ weight is opt-in so real-inference CI is gated like ViTMatte.
 ## 5. Refine Mask Edge — `refine_mask_edge`
 
 ### 5.1 Phase 1 baseline
-`python/bridge/edge_refine_cli.py` runs, on CPU only (Pillow + numpy, no OpenCV):
-erode/dilate morphology to bite off the white fringe, a numpy guided filter that
-snaps the matte to the subject's own luminance edges, a Gaussian feather, and
-edge colour decontamination. When a matting **trimap** is connected, the unknown
-band (hair / fur / glass) is *protected* from the erode/feather clean-up and
-restored from the source matte. Emits `{refined_image, refined_mask,
-edge_report}`.
+`studio/edge_refine_cpu.rs` runs in-process in Rust: erode/dilate morphology to
+bite off the white fringe, a guided filter that snaps the matte to the subject's
+own luminance edges, a Gaussian feather, and edge colour decontamination. When a
+matting **trimap** is connected, the unknown band (hair / fur / glass) is
+protected from the erode/feather clean-up and restored from the source matte.
+Emits `{refined_image, refined_mask, edge_report}`.
 
 ### 5.2 Phase 2 target
 A **learned alpha-matting** network (ViTMatte / IndexNet / MODNet-style) that
@@ -289,41 +288,36 @@ and semi-transparent edges the global guided filter flattens — while leaving t
 definite FG/BG regions to the deterministic heuristic clean-up.
 
 ### 5.3 Integration plan
-**Status: the seam + `onnx_matting` + real trained-weight inference CI have
-landed**. Mirroring the SR / Watchdog / Repaint / Match Light & Color seams:
+**Status: the native seam + `onnx_matting` + weight-gated inference test have
+landed.** Mirroring the SR / Watchdog / Repaint / Match Light & Color seams:
 
 - A new **`engine` param** (`cpu` | `onnx_matting` | …); `cpu` stays the default
   and always-available heuristic baseline.
-- `python/bridge/matting_backends/` is the registry (`known_engines` / `resolve`
-  / `probe`); ✅ `onnx_matting` is the first concrete backend: it runs an ONNX
-  matting network (lazy `onnxruntime`, weight from `HGRIPE_MATTING_MODEL` /
-  `HGRIPE_MODEL_CACHE`) over the subject + trimap and returns a refined alpha at
-  the source geometry. It accepts both the two-input (`image` + `trimap`)
-  contract and the **ViTMatte export layout** (a single 4-channel
-  `pixel_values` input: RGB + trimap concatenated), so the same sha256-checked
-  ViTMatte ONNX weight the Rust `subject_matte` lane fetches
-  (`scripts/fetch-vitmatte.sh` / `.ps1`) works as a real trained matting
-  weight.
-- ✅ Real *trained-weight* inference CI (opt-in like ViTMatte): the
-  manual-dispatch **`python bridge (vitmatte matting e2e)`** lane installs
-  `onnxruntime`, fetches the ViTMatte weight and runs the gated
-  `test_onnx_matting_real_inference_when_weight_present` e2e through the CLI
-  (skips on every normal run).
+- `studio/subject_matte.rs` owns the shared ViTMatte implementation. Both
+  Subject Mask and Refine Mask Edge reuse its 4-channel `pixel_values`
+  preprocessing and the process-wide warm `ort::Session` pool.
+- The weight resolver checks `HGRIPE_VITMATTE_MODEL`, the persisted
+  `onnx_matting` model-manager path, environment/configured shared cache, and
+  packaged/development `resources/models/vitmatte.onnx` locations.
+- Real trained-weight inference remains opt-in: both cards have gated tests;
+  without the sha256-checked weight normal CI verifies preprocessing, band
+  isolation and every fallback path without pretending model inference ran.
 - The learned alpha **replaces the source matte only inside the protected
   (unknown) band**, so the definite regions still get the morphology/guided/
   feather clean-up and the geometry / report contract is unchanged (plus
   `engine` / `engine_requested` / `engine_fallback_reason` / `backend_model`
   telemetry). A learned matter is meaningful only with a trimap, so without one
   the node records a skip reason and keeps the heuristic.
-- `--probe-engines` reports availability; `refine_mask_edge` joins the cross-card
-  `probe_engines` aggregation so the inspector greys it out when its dep/weight
-  is missing. Missing dep/weight → graceful fallback to the heuristic.
+- `probe_engines` reports the managed weight and compiled ORT providers for
+  diagnostics. The Inspector does not yet consume that report to disable a
+  missing `onnx_matting` choice. Missing weight/session/inference still produces
+  outputs through the heuristic and records the fallback reason.
 
 ### 5.4 Dependencies & risks
-`onnxruntime` + a matting weight (not bundled; the same ViTMatte ONNX weight
-as the native path in `subject_matte.rs` works). Risks: trimap quality
-dominates matting quality (the seam is gated on a connected trimap), and the
-weight is opt-in so real-inference CI is gated like ViTMatte.
+`ort` + a matting weight (not bundled). Risks: trimap quality dominates matting
+quality, and the weight is opt-in so real-inference CI remains gated. ORT's
+build-time runtime downloader is tracked separately from the functional
+integration and must not be removed until the runtime is packaged locally.
 
 ---
 
