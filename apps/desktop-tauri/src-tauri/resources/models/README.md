@@ -70,6 +70,12 @@ by the scripts below into this directory; `bundle.resources` in
   fetch script installs an unofficial third-party ONNX conversion for local
   verification; release packaging requires the review in
   [`COLOR_HARMONIZE_NOTICE.md`](COLOR_HARMONIZE_NOTICE.md).
+- **realesrgan_x4v3** is the optional native `realesrgan` super-resolution
+  weight (~4.9 MB). It is not bundled by default and is not designated
+  release-ready. The Windows fetch script installs a pinned third-party ONNX
+  re-host for local verification; release packaging requires the provenance
+  and reproducible-export review in
+  [`REALESRGAN_NOTICE.md`](REALESRGAN_NOTICE.md).
 
 ## Models
 
@@ -138,6 +144,28 @@ by the scripts below into this directory; `bundle.resources` in
 - **Bytes:** `24819882`
 - **sha256:** `5ac3c8f59ad3a58a55baae79f3886e06826e7acb932179aaed034b61d62f5997`
 
+### Real-ESRGAN general x4v3 (optional local weight)
+
+- **Local file:** `realesrgan_x4v3.onnx`
+- **Distribution source:** `Heliosoph/realesrgan-onnx` revision
+  `488e5dda07333179f229a6205d92135eea4c25e9`, source file
+  `realesr-general-x4v3.onnx`.
+- **Upstream:** `xinntao/Real-ESRGAN`, BSD-3-Clause. The re-host does not
+  document an exact source revision/checkpoint or reproducible export procedure,
+  so this is not verified artifact lineage or an official upstream ONNX export.
+  See [`REALESRGAN_NOTICE.md`](REALESRGAN_NOTICE.md).
+- **Input:** named float32 `input`, dynamic NCHW `1x3xHxW`, RGB in `[0, 1]`
+  (divide 8-bit channels by 255; no mean/std normalisation).
+- **Output:** float32 NCHW `1x3x(4H)x(4W)`, RGB nominally in `[0, 1]`.
+- **Engine contract:** the native `realesrgan` engine uses this learned 4x pass
+  only for enlargement, tiles bounded inputs with overlap, preserves alpha on
+  its independent CPU track, and resizes the learned result to the card's exact
+  resolved target. A missing/invalid weight, unavailable runtime, session or
+  inference failure, malformed tensor, or non-enlarging request preserves the
+  complete `cpu` result and reports `engine_fallback_reason`.
+- **Bytes:** `4871181`
+- **sha256:** `09b757accd747d7e423c1d352b3e8f23e77cc5742d04bae958d4eb8082b76fa4`
+
 ## Manual fetch (dev)
 
 ```sh
@@ -154,6 +182,7 @@ Windows-only optional model fetches:
 ```powershell
 .\scripts\fetch-watchdog-text.ps1
 .\scripts\fetch-color-harmonize.ps1
+.\scripts\fetch-realesrgan.ps1
 ```
 
 Or point the native model backends at local weights without bundling:
@@ -167,7 +196,38 @@ export HGRIPE_SAM2_DECODER=/path/to/sam2_tiny.decoder.onnx
 export HGRIPE_VITMATTE_MODEL=/path/to/vitmatte.onnx
 export HGRIPE_WATCHDOG_MODEL=/path/to/watchdog_defect.onnx
 export HGRIPE_COLOR_MODEL=/path/to/color_harmonize.onnx
+export HGRIPE_REALESRGAN_MODEL=/path/to/realesrgan_x4v3.onnx
 ```
+
+### Image Enhance native Real-ESRGAN backend
+
+The optional native Rust `realesrgan` engine uses the shared Windows x64 ONNX
+Runtime and warm session pool. The card's complete native CPU pipeline remains
+the fallback and the model is never downloaded at runtime. Weight resolution
+checks `HGRIPE_REALESRGAN_MODEL`, the persisted `realesrgan` override, the
+configured shared model caches, then bundled/development resource locations.
+The current ORT package has the CPU execution provider only; later Windows
+runtime flavors will add NVIDIA CUDA and AMD/Intel DirectML without changing
+this model contract.
+
+## Verify Image Enhance end-to-end (Windows)
+
+```powershell
+.\scripts\fetch-realesrgan.ps1
+cargo test -p hgripe-desktop realesrgan_inference_when_weight_present -- --nocapture
+```
+
+To verify an external weight instead of installing it in the resource directory:
+
+```powershell
+$env:HGRIPE_REALESRGAN_MODEL = 'C:\models\realesrgan_x4v3.onnx'
+cargo test -p hgripe-desktop realesrgan_inference_when_weight_present -- --nocapture
+```
+
+Without the local weight the real-inference test skips. Fetching this
+third-party re-host for local verification does not approve it for release
+bundling; complete the lineage and reproducible-export review in the NOTICE
+first.
 
 ### Match Light & Color native PCT-Net harmonizer
 

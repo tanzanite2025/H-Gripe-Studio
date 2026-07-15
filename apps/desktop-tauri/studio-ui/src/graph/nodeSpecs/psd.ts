@@ -1,4 +1,9 @@
 import { port, type NodeSpec } from "./types";
+import {
+  IMAGE_ENHANCE_DEVICE_OPTIONS,
+  IMAGE_ENHANCE_ENGINE_OPTIONS,
+  IMAGE_ENHANCE_PRECISION_OPTIONS,
+} from "../../contracts/imageEnhance";
 
 export const PSD_NODE_SPECS = {
   psdContextAnalyze: {
@@ -318,7 +323,7 @@ export const PSD_NODE_SPECS = {
     palette: "internal",
     title: "Image Enhance",
     description:
-      "Upscale (Lanczos) and sharpen (unsharp mask) a low-resolution subject so it fills a PSD placeholder crisply at print DPI. Connect placeholder bounds to auto-size, or set explicit target pixels. CPU-only in Phase 1 (no GPU super-resolution). Emits the enhanced image, the applied scale factor, and an enhance report. Presets hide the detail; pick 'custom' to expose denoise/texture/scale.",
+      "Upscale a low-resolution subject so it fills a PSD placeholder crisply at print DPI. The built-in CPU path uses Lanczos and sharpening; native Real-ESRGAN provides model-based super-resolution and currently runs on CPU in FP32. Connect placeholder bounds to auto-size, or set explicit target pixels. Emits the enhanced image, the applied scale factor, and an enhance report. Presets hide the detail; pick 'custom' to expose denoise/texture/scale.",
     category: "process",
     inputs: [
       port("image", "image", "image"),
@@ -351,30 +356,30 @@ export const PSD_NODE_SPECS = {
         key: "engine",
         label: "Engine",
         control: "select",
-        options: ["cpu", "realesrgan", "ccsr", "supir"],
+        options: [...IMAGE_ENHANCE_ENGINE_OPTIONS],
         defaultValue: "cpu",
         inline: true,
-        hint: "cpu = built-in Lanczos+sharpen (always available); realesrgan / ccsr / supir = opt-in GPU/CPU models (ccsr = faithful diffusion SR, supir = max-quality diffusion SR), each falls back to cpu when its weight/deps are missing",
+        hint: "cpu = built-in Lanczos+sharpen (always available); realesrgan = native model super-resolution, currently CPU/FP32, with fallback to cpu when its model is missing",
       },
       {
         key: "device",
         label: "Device",
         control: "select",
-        options: ["auto", "cpu", "cuda"],
+        options: [...IMAGE_ENHANCE_DEVICE_OPTIONS],
         defaultValue: "auto",
         inline: true,
-        hint: "compute device for the GPU upscalers: auto (cuda if present else cpu) | cpu | cuda (degrades to cpu without an accelerator); ignored by the cpu path",
-        visibleWhen: { param: "engine", in: ["realesrgan", "ccsr", "supir"] },
+        hint: "compute request for native Real-ESRGAN: auto | gpu | cpu. The current path is CPU-only; CUDA and DirectML are planned. Ignored by the cpu path",
+        visibleWhen: { param: "engine", in: ["realesrgan"] },
       },
       {
         key: "precision",
         label: "Precision",
         control: "select",
-        options: ["auto", "fp32", "fp16"],
+        options: [...IMAGE_ENHANCE_PRECISION_OPTIONS],
         defaultValue: "auto",
         inline: true,
-        hint: "compute precision for the GPU upscalers: auto (fp16 on cuda else fp32) | fp32 | fp16 (degrades to fp32 on a cpu run); ignored by the cpu path",
-        visibleWhen: { param: "engine", in: ["realesrgan", "ccsr", "supir"] },
+        hint: "compute precision for native Real-ESRGAN: auto currently resolves to fp32; fp16 is not available. Ignored by the cpu path",
+        visibleWhen: { param: "engine", in: ["realesrgan"] },
       },
       {
         key: "target_width",
@@ -425,7 +430,7 @@ export const PSD_NODE_SPECS = {
         max: 1,
         step: 0.05,
         defaultValue: 0.3,
-        hint: "Gaussian-blur denoise blend before upscaling",
+        hint: "edge-preserving median denoise blend before upscaling",
         visibleWhen: { param: "mode", in: ["custom"] },
       },
       {

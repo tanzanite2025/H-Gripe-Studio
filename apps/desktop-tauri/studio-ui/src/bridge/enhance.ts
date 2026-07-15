@@ -1,11 +1,15 @@
 import { tauriInvoke } from "./core";
 import { type Bounds } from "../contracts/context";
+import type {
+  ImageEnhanceDeviceRequest,
+  ImageEnhanceEngineRequest,
+  ImageEnhancePrecisionRequest,
+} from "../contracts/imageEnhance";
 
 // --- Image Enhance ----------------------------------------------------------
-// Wraps the Rust `enhance_image` command, which shells out to the torch-free
-// `image_enhance_cli.py` helper to upscale (Lanczos) and sharpen (unsharp mask)
-// a low-resolution subject to a PSD placeholder's pixel target so it stays crisp
-// at print DPI. CPU-only in Phase 1; GPU super-resolution is a future backend.
+// Wraps the native Rust `enhance_image` command. The always-available CPU
+// engine uses Lanczos + sharpening; the optional Real-ESRGAN engine currently
+// runs on CPU in FP32 and falls back to that built-in path when unavailable.
 
 /** What `enhance_image` did; snake_case to match the bridge JSON. */
 export interface EnhanceReport {
@@ -33,13 +37,13 @@ export interface EnhanceReport {
   engine_fallback_reason?: string | null;
   /** Weight file name when a model backend ran, else null. */
   backend_model?: string | null;
-  /** Compute device the model backend bound (`cpu`/`cuda`); null on cpu. */
+  /** Compute device the model backend actually bound (`cpu` today); null on the built-in path. */
   device?: string | null;
-  /** Compute device the node asked for (`auto`/`cpu`/`cuda`). */
+  /** Requested device. New nodes use `auto`/`gpu`/`cpu`; old workflows may report provider-specific values. */
   device_requested?: string;
-  /** Compute precision the model backend bound (`fp16`/`fp32`); null on cpu. */
+  /** Compute precision the model backend actually used (`fp32` today); null on the built-in path. */
   precision?: string | null;
-  /** Compute precision the node asked for (`auto`/`fp32`/`fp16`). */
+  /** Requested precision. New nodes use `auto`/`fp32`; old workflows may still report `fp16`. */
   precision_requested?: string;
   processing_time_ms: number;
 }
@@ -67,18 +71,18 @@ export interface EnhanceImageRequest {
   maxPixels?: number;
   /** Upscale factor used when no target size is given (custom only). */
   scale?: number;
-  /** Gaussian-blur denoise blend 0..1 (custom only). */
+  /** Edge-preserving median denoise blend 0..1 (custom only). */
   denoiseStrength?: number;
   /** Unsharp-mask detail strength 0..1 (custom only). */
   textureStrength?: number;
   /** Cap sharpening so logos / packaging text are not mangled. */
   preserveTextLogo?: boolean;
-  /** Upscale engine: `cpu` (default) or `realesrgan` / `ccsr` / `supir` (opt-in, falls back to cpu). */
-  engine?: string;
-  /** Compute device for the learned upscaler: `auto` (default) | `cpu` | `cuda`. */
-  device?: string;
-  /** Compute precision for the learned upscaler: `auto` (default) | `fp32` | `fp16`. */
-  precision?: string;
+  /** Upscale engine. `ccsr`/`supir` remain transport-only legacy values. */
+  engine?: ImageEnhanceEngineRequest;
+  /** Compute request. `cuda`/`directml` remain transport-only legacy values. */
+  device?: ImageEnhanceDeviceRequest;
+  /** Compute precision. `fp16` remains a transport-only legacy value and currently degrades to fp32. */
+  precision?: ImageEnhancePrecisionRequest;
   /** Directory for the written PNG. */
   outputDir?: string;
   /** Base name for the written PNG. */
@@ -86,10 +90,9 @@ export interface EnhanceImageRequest {
 }
 
 /**
- * Upscale and sharpen a subject image for PSD placement via the backend
- * (`enhance_image`). The pixel work needs the Python/Pillow pipeline, which only
- * exists in the desktop build, so outside Tauri this returns a plausible mock so
- * the editor stays runnable in browser dev.
+ * Upscale a subject image for PSD placement via the native backend
+ * (`enhance_image`). Outside Tauri this returns a plausible built-in CPU mock
+ * so the editor stays runnable in browser development.
  */
 export async function enhanceImage(req: EnhanceImageRequest): Promise<EnhanceImageResult> {
   const invoke = tauriInvoke();
@@ -105,7 +108,7 @@ export async function enhanceImage(req: EnhanceImageRequest): Promise<EnhanceIma
       custom: req.scale ?? 2.0,
     };
     const src: [number, number] = [512, 700];
-    // Resolve the target the same way the CLI does: explicit px > bounds > scale.
+    // Resolve the target the same way the native card does: explicit px > bounds > scale.
     let targetW = req.targetWidth ?? 0;
     let targetH = req.targetHeight ?? 0;
     if (targetW <= 0 && targetH <= 0 && req.targetBounds) {

@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  IMAGE_ENHANCE_DEVICE_OPTIONS,
+  IMAGE_ENHANCE_ENGINE_OPTIONS,
+  IMAGE_ENHANCE_PRECISION_OPTIONS,
+} from "../contracts/imageEnhance";
 import { LOWERED_CARD_ROWS } from "./lowering";
 import { NODE_SPECS, paletteGroups, type Executor, type NodeVisualFamily } from "./nodeSpecs";
 
@@ -104,6 +109,56 @@ describe("nodeSpecs executor tagging", () => {
         options: ["auto", "gpu", "cpu"],
         defaultValue: "auto",
       });
+    }
+  });
+
+  it("keeps both Image Enhance specs aligned with the native Real-ESRGAN contract", () => {
+    const cases = [
+      {
+        kind: "imageProcessing",
+        engineKey: "enhance.engine",
+        deviceKey: "enhance.device",
+        precisionKey: "enhance.precision",
+      },
+      {
+        kind: "imageEnhance",
+        engineKey: "engine",
+        deviceKey: "device",
+        precisionKey: "precision",
+      },
+    ] as const;
+
+    for (const { kind, engineKey, deviceKey, precisionKey } of cases) {
+      const params = NODE_SPECS[kind].params;
+      const engine = params.find((param) => param.key === engineKey);
+      const device = params.find((param) => param.key === deviceKey);
+      const precision = params.find((param) => param.key === precisionKey);
+
+      expect(engine, `${kind} engine`).toMatchObject({
+        control: "select",
+        options: [...IMAGE_ENHANCE_ENGINE_OPTIONS],
+        defaultValue: "cpu",
+      });
+      expect(device, `${kind} device`).toMatchObject({
+        control: "select",
+        options: [...IMAGE_ENHANCE_DEVICE_OPTIONS],
+        defaultValue: "auto",
+        visibleWhen: { param: engineKey, in: ["realesrgan"] },
+      });
+      expect(precision, `${kind} precision`).toMatchObject({
+        control: "select",
+        options: [...IMAGE_ENHANCE_PRECISION_OPTIONS],
+        defaultValue: "auto",
+        visibleWhen: { param: engineKey, in: ["realesrgan"] },
+      });
+      expect(`${engine?.hint} ${device?.hint} ${precision?.hint}`).not.toMatch(/ccsr|supir/i);
+    }
+
+    for (const key of ["enhance.engine", "enhance.device", "enhance.precision"]) {
+      expect(
+        NODE_SPECS.imageProcessing.params.find((param) => param.key === key),
+        `${key} must be operable on the product-facing card`,
+      ).toMatchObject({ inline: true, port: "enhance.in" });
     }
   });
 

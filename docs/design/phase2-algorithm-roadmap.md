@@ -10,8 +10,9 @@
 > status. Kept as design reference for future **native** re-implementations.
 >
 > Native implementations added after Phase 7 are marked explicitly below.
-> Refine Mask Edge, Detail Watchdog, and Match Light & Color now have native
-> ORT blocks while their deleted Python implementations remain historical only.
+> Image Enhance, Refine Mask Edge, Detail Watchdog, and Match Light & Color now
+> have native ORT blocks while their deleted Python implementations remain
+> historical only.
 
 ## 0. Context
 
@@ -22,16 +23,15 @@ and UI can be exercised without a GPU or large model downloads.
 
 | Node | Tauri command(s) | Phase 1 core (today) | Phase 2 target |
 | --- | --- | --- | --- |
-| Image Enhance (super-res) | `enhance_image` | Pillow Lanczos upscale + Gaussian-blur denoise + unsharp mask (CPU) | SupIR / CCSR / Real-ESRGAN GPU restoration |
+| Image Enhance (super-res) | `enhance_image` | Native Rust Lanczos/median/unsharp CPU fallback plus opt-in native Real-ESRGAN x4v3 ORT | Later quality tiers and Windows GPU providers |
 | Detail Watchdog | `detect_quality_issues` | Pillow+numpy rule heuristics (Laplacian variance, tile sharpness grid, alpha-rim halo, mean-colour drift) | ML/VLM semantic defect detection |
 | Detail Repaint | `prepare_repaint_regions` + `composite_repaint` | crop/mask + feathered paste around a provider `image.edit` call | dedicated GPU inpainting backend |
 | Match Light & Color | `match_light_color` | Reinhard Lab transfer / per-channel histogram match weighted to shadows/highlights, brand-colour protected (CPU) | learned image-harmonisation backend |
 | Refine Mask Edge | `refine_mask_edge` | erode/dilate morphology + numpy guided-filter edge snapping + feather + colour decontamination, trimap unknown band protected (CPU) | learned alpha-matting backend |
 
 The guiding principle for Phase 2 is **additive, opt-in backends**: the existing
-CPU path stays as the always-available default and fallback; GPU/ML strength is
-selected per run through a `profile_ref` (the mechanism already reserved in
-`image_enhance_cli.py`), never by silently changing the default behaviour.
+CPU path stays as the always-available default and fallback; local ML selection
+uses each card's `engine` parameter, never a silent default change.
 
 ---
 
@@ -59,46 +59,43 @@ detail** while preserving identity and text:
   good first integration target.
 
 ### 1.3 Integration plan
-**Status: the seam + Real-ESRGAN + the CCSR (`ccsr`) and SupIR (`supir`)
-diffusion SR backends have landed, plus the opt-in real-inference CI lane**
-(the rest of this section is the design it was built to).
-The selector is the local card's **`engine` param** (`cpu` | `realesrgan` | …),
-not `--profile-ref` — `profile_ref` is the API-card credentials concept, and
-Image Enhance is a `local` card (see `executor-split-and-psd-chain-hardening.md`).
+**Status: the native Rust/ORT `realesrgan` block and Windows weight-gated
+inference lane have landed.** The historical Python/Torch implementation above
+remains deleted; `ccsr` and `supir` are not core runtime options.
 
-- ✅ Add an `--engine <id>` argument. When non-`cpu`, the CLI dispatches to a
-  backend module under `python/bridge/sr_backends/` (`realesrgan.py`, `ccsr.py`
-  and `supir.py` landed — the diffusion pair loads a diffusers-format weight
-  snapshot from `HGRIPE_CCSR_MODEL` / `HGRIPE_SUPIR_MODEL`, sharing a warm
-  pipeline cache) selected by the registry; when `cpu`/absent the current CPU
-  path runs unchanged.
-- ✅ Backends declare weights + device requirements; weights resolve from a
-  cache dir (env `HGRIPE_MODEL_CACHE`, or `HGRIPE_REALESRGAN_MODEL`), **not**
-  bundled in the installer (keeps the Tauri bundle small — see Issue #2).
-- ✅ Capability probe (`image_enhance_cli.py --probe-engines`) reports which
-  engines are usable so the UI can grey out unavailable ones; any miss falls
-  back to CPU and records `engine_fallback_reason`. ✅ The UI greying itself:
-  the inspector's `engine` select greys unavailable options from the
-  cross-card `probe_engines` report (see §6 Capability probing).
-- ✅ Contract impact: none. Output adds optional `engine` / `engine_requested` /
-  `engine_fallback_reason` / `backend_model` telemetry fields.
-- ✅ A real-inference CI job (opt-in like the ViTMatte e2e), since the per-PR
-  matrix does not install `torch` + the weight: the manual-dispatch
-  `realesrgan-e2e` lane installs the CPU torch stack, fetches the
-  sha256-checked weight (`scripts/fetch-realesrgan.sh` / `.ps1`), and runs the
-  gated `test_realesrgan_real_inference_when_stack_present` e2e (skips on
-  every normal run). The `ccsr` / `supir` diffusion pair runs on the
-  manual-dispatch `python bridge (diffusers inference)` lane: the gated
-  `test_diffusion_sr_real_inference_with_tiny_snapshot` e2e synthesises a tiny
-  random-weight img2img snapshot in diffusers format (no download) and drives
-  the real `DiffusionPipeline.from_pretrained` → denoise loop → VAE decode
-  through the CLI.
+- The selector is the local card's `engine` parameter: visible values are
+  `cpu | realesrgan`. Old workflows containing `ccsr | supir` still load and
+  produce the complete CPU result with a migration reason.
+- `studio/image_enhance_onnx.rs` implements one concrete model contract:
+  named float32 NCHW `input` RGB `[0,1]` to named native 4x `output`. It is not a
+  generic first-input/first-output adapter.
+- Inference uses 128px core tiles with a 16px context halo. Halo pixels are
+  discarded in native output space; the assembled learned surface is resampled
+  once to the exact card target. The native 4x intermediate is limited to
+  48,000,000 pixels.
+- Decode, CMYK/ICC handling, target resolution, alpha, output naming, PNG ICC
+  and DPI remain on the existing native path. Model success replaces only the
+  CPU denoise/resample/sharpen stage; every model/runtime/session/tensor/panic
+  failure keeps the complete CPU result.
+- Weight resolution checks `HGRIPE_REALESRGAN_MODEL`, persisted `realesrgan`,
+  environment/configured caches, then packaged/development resources.
+  `probe_engines` reports weight plus ORT readiness without loading a session.
+- The current weight and ORT provider are FP32/CPU. Visible requests are
+  `auto | gpu | cpu`; legacy `cuda | directml` and `fp16` remain readable and
+  report their actual CPU/FP32 downgrade. Provider-aware session keys and the
+  cross-model accelerator gate are shared with the other native models.
+- The manual Windows CI lane downloads the byte/hash-locked optional ONNX and
+  runs `realesrgan_inference_when_weight_present` across a real tile boundary.
+  The pinned file is a third-party re-host, not bundled or release-approved;
+  reproducible export lineage remains a packaging requirement.
 
 ### 1.4 Dependencies & risks
-`torch` + CUDA, `realesrgan`/`spandrel`, model weights (hundreds of MB–GB).
-Risks: VRAM exhaustion (mitigate with tiled inference), non-determinism
-(seedable), text/logo distortion (keep the `--max-sharpen` guard concept as a
-post-pass identity check).
+The native path adds no Python, Torch, OpenCV, Paddle, `realesrgan` Python
+package or second inference runtime. It reuses repository-locked ORT plus one
+optional ~4.9 MB weight. Remaining risks are tile-boundary or text/logo
+distortion, bounded intermediate memory, and unverified third-party ONNX
+lineage; strict tensors, padded tiling, allocation limits, complete CPU
+fallback and release gating contain those risks.
 
 ---
 
@@ -374,7 +371,7 @@ build-time runtime downloads remain forbidden.
   Windows x64 ORT runtime itself is repository-maintained and packaged; no
   build-time download or arbitrary system runtime fallback is allowed.
 - **Capability probing:** the `probe_engines` Tauri command reports the native
-  `onnx_matting`, `onnx_defect`, and `onnx_harmonize` weight/runtime status plus
+  `realesrgan`, `onnx_matting`, `onnx_defect`, and `onnx_harmonize` weight/runtime status plus
   their always-on baselines. Runtime diagnostics now distinguish the selected
   runtime flavor, packaged providers, and providers usable after DLL loading;
   obsolete Python/Torch/CUDA probe fields are removed. The Inspector does not
@@ -413,18 +410,17 @@ build-time runtime downloads remain forbidden.
 
 ## 7. Remaining sequencing
 
-1. Add a native Windows super-resolution backend behind the existing CPU
-   fallback; do not restore Python/Torch runtime integration.
-2. Add a native local repaint backend only after its model/runtime and manifest
+1. Add a native local repaint backend only after its model/runtime and manifest
    contract are concrete; provider repaint remains the fallback.
-3. Extend Detail Watchdog with trained hands/logo coverage while retaining the
+2. Extend Detail Watchdog with trained hands/logo coverage while retaining the
    additive rules result.
-4. Add actual Windows ORT runtime flavors: NVIDIA CUDA and AMD/Intel DirectML,
+3. Add actual Windows ORT runtime flavors: NVIDIA CUDA and AMD/Intel DirectML,
    each with locked binaries, strict provider registration, CPU retry/fallback,
    packaging, and real hardware evidence. Provider-aware session keys,
    cross-model gating, and conservative candidate scheduling are in place; align
    the scheduler limit with the ONNX single-slot gate before either runtime ships.
 
-Native `onnx_matting`, `onnx_defect`, and `onnx_harmonize` blocks now have
-weight-gated inference paths. PCT-Net release bundling remains intentionally
-unapproved pending provenance/license review and a reproducible export story.
+Native `realesrgan`, `onnx_matting`, `onnx_defect`, and `onnx_harmonize` blocks
+now have weight-gated inference paths. Real-ESRGAN and PCT-Net release bundling
+remain intentionally unapproved pending provenance/license review and a
+reproducible export story.

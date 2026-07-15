@@ -458,6 +458,10 @@ Goal: make each accelerated backend robust before unifying scheduling.
   includes canonical model path, runtime flavor, actual provider, and device id;
   CPU fallbacks from different request spellings share one CPU session. SAM2
   resolves encoder and decoder under one plan.
+- Image Enhance `realesrgan` is now a real ONNX consumer of this contract. Its
+  visible device values are `auto | gpu | cpu`, while legacy `cuda | directml`
+  remain accepted; the current FP32/CPU runtime reports every device or
+  precision downgrade without changing the successful engine id.
 - A process-wide cross-model accelerator gate lives inside the shared ONNX
   session handle, so graph, direct-command, and hidden editor paths cannot bypass
   GPU serialization. It is the execution-safety boundary and is currently a
@@ -467,6 +471,7 @@ Goal: make each accelerated backend robust before unifying scheduling.
   candidate; it does not claim that session construction will ultimately bind
   that provider. Subject Mask always enters candidate resolution because
   resolved `edit_paths.matte_strokes` are unavailable at classification time.
+  Image Enhance enters candidate resolution only for `engine=realesrgan`;
   Crop auto-subject and Smart Layer Split remain explicit CPU candidates. The
   current CPU runtime therefore keeps every request in `CpuBound`.
 - Shared-session resolution and per-stage reports are authoritative for actual

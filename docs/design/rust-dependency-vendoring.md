@@ -67,12 +67,14 @@ documented product requirement justifies an explicit fork.
 
 The desktop `ort` dependency currently earns its place through native subject
 segmentation, Subject Mask ViTMatte, Refine Mask Edge `onnx_matting`, Detail
-Watchdog `onnx_defect`, and Match Light & Color `onnx_harmonize`. These paths
-share managed model resolution and a provider-aware warm pool keyed by
-canonical model path, runtime flavor, actual provider, and device id. SAM2
-resolves its encoder and decoder as one provider group. The runtime adds no
-Paddle, Python, Torch, OpenCV or second ONNX dependency. Model weights and label
-sidecars are runtime artifacts and are not committed into `cargo-vendor`.
+Watchdog `onnx_defect`, Match Light & Color `onnx_harmonize`, and Image Enhance
+`realesrgan`. These paths share managed model resolution and a provider-aware
+warm pool keyed by canonical model path, runtime flavor, actual provider, and
+device id. Real-ESRGAN additionally uses bounded padded tiling before its exact
+target resample; SAM2 resolves its encoder and decoder as one provider group.
+The runtime adds no Paddle, Python, Torch, OpenCV or second ONNX dependency.
+Model weights and label sidecars are runtime artifacts and are not committed
+into `cargo-vendor` or bundled by default.
 
 The runtime boundary is now explicit: `ort` uses dynamic loading against the
 locked Windows x64 CPU runtime in `third_party/onnxruntime`, and its

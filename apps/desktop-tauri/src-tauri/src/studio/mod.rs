@@ -26,10 +26,10 @@
 //! - [`psd_analyze`]: the `psdContextAnalyze` node executor (PSD context bridge).
 //! - [`color_match`]: the `matchLightColor` node executor (light/colour match).
 //! - [`edge_refine`]: the `refineMaskEdge` node executor (mask edge refine).
-//! - [`image_enhance`]: the `imageEnhance` node executor (in-process native
-//!   `cpu` engine).
-//! - [`image_enhance_cpu`]: native-Rust replica of the CLI's `--engine cpu`
-//!   pipeline, run in-process for common 8-bit inputs.
+//! - [`image_enhance`]: the `imageEnhance` node executor (native `cpu` plus
+//!   optional ORT `realesrgan`).
+//! - [`image_enhance_cpu`]: shared ingress/output and complete native CPU
+//!   fallback; [`image_enhance_onnx`] owns the strict tiled x4v3 adapter.
 //! - [`detail_watchdog`]: the `detailWatchdog` node executor (CPU quality scan).
 //! - [`psd_export`]: the `psdExport` node executor (PSD composition bridge).
 //! - [`studio_image`]: decode-guard + colour-space loaders shared by native
@@ -95,6 +95,7 @@ pub(crate) mod image_buffer;
 pub(crate) mod image_document;
 mod image_enhance;
 pub(crate) mod image_enhance_cpu;
+mod image_enhance_onnx;
 mod layer_merge;
 mod layer_split;
 mod media_index;
@@ -153,6 +154,7 @@ pub(crate) use exec::*;
 pub(crate) use grade::*;
 pub(crate) use history::*;
 pub(crate) use image_document::*;
+pub(crate) use image_enhance_onnx::resolve_realesrgan_model_path;
 pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
 pub(crate) use onnx_pool::{

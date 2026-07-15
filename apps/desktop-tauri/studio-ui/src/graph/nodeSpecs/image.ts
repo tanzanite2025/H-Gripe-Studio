@@ -1,4 +1,9 @@
 import { port, type NodeSpec } from "./types";
+import {
+  IMAGE_ENHANCE_DEVICE_OPTIONS,
+  IMAGE_ENHANCE_ENGINE_OPTIONS,
+  IMAGE_ENHANCE_PRECISION_OPTIONS,
+} from "../../contracts/imageEnhance";
 
 export const IMAGE_NODE_SPECS = {
   // Integrated production card gathering the image operations into one panel
@@ -58,9 +63,33 @@ export const IMAGE_NODE_SPECS = {
         key: "enhance.engine",
         label: "Enhance: engine",
         control: "select",
-        options: ["cpu", "realesrgan", "ccsr", "supir"],
+        options: [...IMAGE_ENHANCE_ENGINE_OPTIONS],
         defaultValue: "cpu",
-        hint: "cpu is always available; model engines fall back to cpu when weights are missing",
+        inline: true,
+        port: "enhance.in",
+        hint: "cpu is always available; native Real-ESRGAN currently runs on CPU in FP32 and falls back to cpu when its model is missing",
+      },
+      {
+        key: "enhance.device",
+        label: "Enhance: device",
+        control: "select",
+        options: [...IMAGE_ENHANCE_DEVICE_OPTIONS],
+        defaultValue: "auto",
+        inline: true,
+        port: "enhance.in",
+        hint: "compute request for native Real-ESRGAN: auto | gpu | cpu. The current path is CPU-only; CUDA and DirectML are planned",
+        visibleWhen: { param: "enhance.engine", in: ["realesrgan"] },
+      },
+      {
+        key: "enhance.precision",
+        label: "Enhance: precision",
+        control: "select",
+        options: [...IMAGE_ENHANCE_PRECISION_OPTIONS],
+        defaultValue: "auto",
+        inline: true,
+        port: "enhance.in",
+        hint: "compute precision for native Real-ESRGAN: auto currently resolves to fp32; fp16 is not available",
+        visibleWhen: { param: "enhance.engine", in: ["realesrgan"] },
       },
       {
         key: "grade.format",

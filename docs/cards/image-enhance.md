@@ -1,13 +1,15 @@
 # Image Enhance / Super Resolution card
 
 Executor: **local** (in-process native Rust, never networks).
-Backend: `enhance_image` Tauri command → `studio/image_enhance_cpu.rs` (native Rust, CPU-only). The Python bridge — and with it the opt-in torch SR engines (`realesrgan` / `ccsr` / `supir`) — was deleted in Phase 7 (#314).
+Backend: `enhance_image` Tauri command → `studio/image_enhance_cpu.rs` plus
+`studio/image_enhance_onnx.rs` (native Rust). The Python bridge and its Torch
+engines remain deleted.
 
 Upscales and restores a low-resolution subject so it fills a PSD placeholder at
 print DPI without going soft. This document is the card's contract: what it
-accepts, what it guarantees, and how it behaves at the edges. The `engine`
-param remains the seam for heavier super-resolution backends, but none is
-currently implemented — see [Engines](#engines).
+accepts, what it guarantees, and how it behaves at the edges. The default
+`cpu` engine is always available; the optional `realesrgan` engine runs a
+strict native ONNX contract and preserves the CPU path as its complete fallback.
 
 ## Inputs (ports)
 
@@ -21,16 +23,17 @@ currently implemented — see [Engines](#engines).
 | Param | Type | Default | Range / values | Notes |
 | --- | --- | --- | --- | --- |
 | `mode` | enum | `conservative` | `conservative` \| `texture_rebuild` \| `print_ready` \| `custom` | Presets set denoise/texture; `custom` uses the sliders below. |
-| `engine` | enum | `cpu` | `cpu` | Upscale backend. `cpu` is the built-in Lanczos+sharpen (always available). Legacy ML engine ids (`realesrgan` / `ccsr` / `supir`) are still accepted but **fall back to `cpu`** with an `engine_fallback_reason` — their Python backends were deleted in Phase 7. See [Engines](#engines). |
+| `engine` | enum | `cpu` | `cpu` \| `realesrgan` | Upscale backend. `cpu` is the built-in Lanczos+sharpen path; `realesrgan` is the optional native ORT model. Legacy `ccsr` / `supir` values remain readable and fall back to `cpu` with a migration reason. |
+| `device` | enum | `auto` | `auto` \| `gpu` \| `cpu` | Compute request for `realesrgan`; ignored by `cpu`. The current ORT payload is CPU-only, so `auto`/`gpu` report the provider fallback. Legacy `cuda` / `directml` values remain accepted. |
+| `precision` | enum | `auto` | `auto` \| `fp32` | Model precision request; ignored by `cpu`. The supported weight is FP32, so `auto` resolves to `fp32`. A legacy `fp16` request runs FP32 and reports that downgrade. |
 | `target_width` | int px | `0` | `>= 0` (0 = auto) | Explicit target wins over `target_bounds`. |
 | `target_height` | int px | `0` | `>= 0` (0 = auto) | |
 | `target_dpi` | int | `300` | `>= 1` | Written into the output PNG metadata only. |
 | `scale` | float | `2.0` | `> 0` | Fallback factor when no target size is resolved (`custom`). |
 | `denoise_strength` | float | `0.3` | `0..1` | Edge-preserving median blend (`custom`). |
 | `texture_strength` | float | `0.25` | `0..1` | Unsharp-mask detail (`custom`). |
-| `preserve_text_logo` | bool | `true` | | Caps `texture_strength` at `0.4` so logos/packaging text are not mangled. |
+| `preserve_text_logo` | bool | `true` | | On `cpu`, caps `texture_strength` at `0.4` so logos/packaging text are not mangled. Real-ESRGAN adds no CPU post-sharpen. |
 | `max_pixels` | int | `48_000_000` | `>= 0` (0 disables) | Caps **output** pixels; the scale is reduced to fit and `clamped` is reported. |
-| `max_decode_pixels` | int | `96_000_000` | `>= 0` (0 disables) | Rejects an **input** larger than this before decoding (decompression-bomb guard). |
 | `output_dir` | path | run output dir | | Validated server-side. |
 | `output_name` | basename | `<image>_enhanced` | plain basename | Rejected if it contains `..` or a path separator (`reject_unsafe_output_name`). |
 
@@ -55,16 +58,25 @@ Export. If the output would exceed `max_pixels`, the scale is reduced to fit and
 
 ## Pipeline
 
-Colour channels only: **denoise → resample → sharpen**. The alpha channel is
-split off first, resized on its own track, and recombined afterwards, so
-denoise/sharpen never bleed a halo across a matte edge.
+Ingress, target resolution, colour management, alpha, output naming, ICC and
+DPI are shared by both engines. The alpha channel is split before either colour
+pipeline, resized independently, and recombined only at the end; the learned
+model never receives or changes alpha.
 
-- **Upscale** (`scale > 1`): Lanczos resample, then unsharp mask.
-- **Downscale** (`scale < 1`): box filter, and the unsharp pass is **skipped**
+- **CPU upscale** (`scale > 1`): median denoise → Lanczos resample → unsharp.
+- **CPU downscale** (`scale < 1`): triangle filter; unsharp is **skipped**
   (`texture_strength` is reported as `0.0`) — sharpening a shrink only amplifies
   resampling artefacts.
-- **Denoise**: an edge-preserving median filter blended in by `denoise_strength`
+- **CPU denoise**: an edge-preserving median filter blended in by `denoise_strength`
   (a Gaussian blur would smear the very edges we are about to sharpen).
+- **Real-ESRGAN upscale**: RGB `[0,1]` NCHW inference in 128px core tiles with
+  a 16px context halo. The halo is cropped in native 4x output space, tiles are
+  assembled once, then the result is resampled in linear light to the exact
+  resolved output size. CPU denoise/unsharp are not applied, so both strengths
+  report `0.0` on model success.
+- **Real-ESRGAN bounds**: the native 4x intermediate is capped at 48,000,000
+  pixels. A non-enlarging request or larger intermediate keeps the complete CPU
+  result and records the reason.
 
 ## Colour space & bit depth
 
@@ -78,23 +90,25 @@ denoise/sharpen never bleed a halo across a matte edge.
 > the stale profile on output, #203), and the colour resample runs in linear
 > light (#205).
 
-The input is normalised to an 8-bit RGB working space and the
-original `source_mode` is recorded:
+The input is normalised to an 8-bit RGB working space according to its probed
+source type:
 
 | Source mode | Handling |
 | --- | --- |
-| `RGB` / `RGBA` / `L` / `LA` | Used directly; an embedded ICC profile is preserved on output (`icc_preserved: true`). |
+| `RGB` / `RGBA` / `L` / `LA` | Used directly; a compatible embedded ICC profile is preserved on output. |
 | `P` (palette) | Expanded to RGB(A); transparency in `info` is treated as alpha. |
-| `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert; profile not carried over (`icc_preserved: false`). |
-| `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
+| `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert; the CMYK profile is not carried onto sRGB output. |
+| single-channel 16-bit (`L16` / `I;16*`) | Data range normalised down to 8-bit before RGB conversion. |
+| other 16-bit integer RGB(A) / LA | Narrowed to 8-bit with the same high-byte behaviour as the native decoder. |
+| `Rgb32F` / `Rgba32F` | Unsupported by the card's defined 8-bit sRGB boundary; returns the native unsupported-source error. |
 
 ### `engine = cpu` in-process pipeline (Rust)
 
 The `cpu` engine runs entirely in-process: `studio/image_enhance_cpu.rs`
-implements the pipeline (Lanczos3 / box resample, unsharp, edge-preserving
+implements the pipeline (Lanczos3 / triangle resample, unsharp, edge-preserving
 median denoise, independent alpha track). It was originally built as a
 behaviour-preserving fast path mirroring the Python CLI and is now, post
-Phase 7, the only implementation.
+Phase 7, the always-available implementation and model fallback.
 
 | Source colour | In-process (Rust) | Notes |
 | --- | --- | --- |
@@ -105,7 +119,7 @@ Phase 7, the only implementation.
 | `CMYK` (Adobe JPEG) | ✅ | APP14 transform-0 JPEGs store *inverted* ink (0 = full ink); `cmyk_decode` undoes it (`255 - v`) so the samples match TIFF Separated, then the same `cmyk_transform` path applies. |
 | `CMYK` (YCCK JPEG) | ✅ | APP14 transform-2 JPEGs (`zune` reports a `YCCK` input colourspace). Instead of `zune`'s lossy YCCK→RGB (which drops the ICC), the output colourspace is pinned to `YCCK` so `zune` copies the raw Y/Cb/Cr/K planes through; `cmyk_decode` reconstructs CMYK (libjpeg's `ycck_cmyk_convert`) and undoes the inversion, keeping the ICC, then the same `cmyk_transform` path applies. |
 | `CMYK` (unmarked JPEG) | ✅ | A 4-component JPEG with no APP14 Adobe marker (`zune` defaults it to `CMYK`). Treated exactly like Adobe CMYK (`255 - v`); the same `cmyk_transform` path applies. |
-| `Rgb32F` / `Rgba32F` (float) | ⛔ decoded via the generic `image`-crate path | (the historical "defer to Python" fallback is gone) |
+| `Rgb32F` / `Rgba32F` (float) | ⛔ | No defined range mapping at the card's 8-bit sRGB boundary; the historical Python fallback is gone. |
 
 Landed: [#172](https://github.com/tanzanite2025/H-Gripe-Studio/pull/172)
 (8-bit fast path), [#174](https://github.com/tanzanite2025/H-Gripe-Studio/pull/174)
@@ -203,39 +217,63 @@ independently reviewable, CI-verifiable steps:
 | Missing / blank `image` input | Rust handler errors `Image Enhance needs a connected image input`. |
 | Missing file on disk | `base image not found: <path>`. |
 | Unknown `mode` | `unknown mode ...`. |
-| Input larger than `max_decode_pixels` | `input image too large to decode safely: WxH ...` (before decode). |
-| Cut-out subject (has alpha) | Alpha isolated; matte stays binary (no semi-transparent halo). |
+| Input larger than the fixed 96,000,000-pixel decode guard | `input image too large to decode safely: WxH ...` (before decode). |
+| `Rgb32F` / `Rgba32F` source | `Image Enhance could not process ...: unsupported source for the native path`. |
+| Cut-out subject (has alpha) | Alpha is isolated from denoise/model inference and follows only the resolved geometric resize. |
 | EXIF-rotated photo | Orientation normalised; `exif_transposed: true`. |
 | Broken EXIF block | Ignored; enhancement proceeds. |
 | Unsafe `output_name` (`..`, separators) | Rejected server-side. |
+| `realesrgan` weight/runtime/session/inference/tensor failure | Complete `cpu` image is written; reason appears in `engine_fallback_reason`. |
+| `realesrgan` requested for scale `<= 1` | Model is skipped; complete `cpu` result is written. |
+| `realesrgan` native 4x surface exceeds 48,000,000 pixels | Model is skipped before session resolution; complete `cpu` result is written. |
 
 ## Engines
 
 The `engine` param is the **local-card backend seam** from
-`docs/design/executor-split-and-psd-chain-hardening.md` (§2.5 / §3.4). Post
-Phase 7 (#314) only the `cpu` baseline exists: the Python torch SR engines
-(`realesrgan` / `ccsr` / `supir`) were deleted with the Python bridge.
-Requesting one falls back to `cpu` with an `engine_fallback_reason`, and the
-`probe_engines` capability probe reports only `cpu`. A future native SR
-backend (e.g. via `ort`) would slot back in behind this same seam.
+`docs/design/executor-split-and-psd-chain-hardening.md` (§2.5 / §3.4).
+`probe_engines` reports both the always-on CPU baseline and whether the managed
+Real-ESRGAN weight plus locked Windows ORT runtime resolve on this machine.
+Probe readiness is advisory; session validation and the per-run report remain
+the execution truth.
 
 | Engine | Deps | Weight | Behaviour |
 | --- | --- | --- | --- |
 | `cpu` (default) | none (native Rust) | none | Lanczos resample + unsharp mask + edge-preserving median denoise. Always available. |
+| `realesrgan` | repository-locked Windows ORT through Rust `ort` | optional `realesrgan_x4v3.onnx` | Deterministic Real-ESRGAN general x4v3 restoration, tiled with halo, then one exact-size resample. Current provider/precision is CPU/FP32. Missing or invalid model/runtime/inference always falls back to `cpu`. |
+
+The optional weight resolves in this order: `HGRIPE_REALESRGAN_MODEL`, the
+persisted `realesrgan` model-path override, `HGRIPE_MODEL_CACHE` / configured
+cache, then packaged/development `resources/models/realesrgan_x4v3.onnx`.
+It is not downloaded at runtime or bundled by default. The pinned verification
+artifact is a third-party re-host and is not release-approved; see
+[`../apps/desktop-tauri/src-tauri/resources/models/REALESRGAN_NOTICE.md`](../../apps/desktop-tauri/src-tauri/resources/models/REALESRGAN_NOTICE.md).
 
 ## `enhance_report` fields
 
-`mode`, `scale_factor`, `source_mode`, `output_mode`, `had_alpha`,
-`source_size`, `output_size`, `target_size`, `target_dpi`, `max_pixels`,
-`max_decode_pixels`, `clamped`, `downscaled`, `exif_transposed`,
-`icc_preserved`, `denoise_method`, `denoise_strength`, `texture_strength`,
+`mode`, `scale_factor`, `source_size`, `output_size`, `target_size`,
+`target_dpi`, `max_pixels`, `clamped`, `denoise_strength`, `texture_strength`,
 `preserve_text_logo`, `engine`, `engine_requested`, `engine_fallback_reason`,
-`backend_model`, `processing_time_ms`.
+`backend_model`, `device`, `device_requested`, `precision`,
+`precision_requested`, `processing_time_ms`.
 
 ## Tests
 
 - `src-tauri/src/studio/image_enhance_cpu.rs` — alpha isolation, CMYK /
   high-bit handling, downscale path, decode guard, target resolution, clamp,
-  logo guard, output naming, ICC preservation, and the CMYK decode/transform
-  fixtures (`tests/fixtures/cmyk_*.jpg`) (run: `cargo test`).
-- `src-tauri/src/studio/image_enhance.rs` — the connected-image-input guard.
+  logo guard, output naming, ICC preservation, engine fallback telemetry, and
+  the weight-gated real tiled inference test.
+- `src-tauri/src/studio/image_enhance_onnx.rs` — NCHW packing, tile coverage,
+  halo cropping, output shape/value validation and native-surface limits.
+- `src-tauri/src/studio/image_enhance.rs` plus `psd/cards.rs` — graph and direct
+  command entry contracts.
+
+Manual Windows verification:
+
+```powershell
+.\scripts\fetch-realesrgan.ps1
+cargo test -p hgripe-desktop realesrgan_inference_when_weight_present -- --nocapture
+```
+
+Without the weight the real-inference test skips. The manual-dispatch Windows
+CI job performs the same locked fetch and test; this validates integration but
+does not approve the third-party artifact for release bundling.

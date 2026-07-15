@@ -93,6 +93,7 @@ fn onnx_candidate_request(node: &StudioGraphNode) -> Option<OnnxDeviceRequest> {
         "detailWatchdog" if engine_param_is(node, "onnx_defect") => {
             Some(device_request_param(node))
         }
+        "imageEnhance" if engine_param_is(node, "realesrgan") => Some(device_request_param(node)),
         "subjectMask" => Some(device_request_param(node)),
         "crop"
             if studio_value_to_string(node.params.get("mode"))
@@ -331,6 +332,21 @@ mod tests {
         assert_eq!(onnx_candidate_request(&watchdog), Some(Gpu));
         assert_eq!(category_for_node(&watchdog), Some(CpuBound));
 
+        for (raw, expected) in [
+            ("", Auto),
+            ("cpu", Cpu),
+            ("cuda", Cuda),
+            ("directml", DirectMl),
+            ("gpu", Gpu),
+        ] {
+            let enhance = node(
+                "imageEnhance",
+                &[("engine", json!("realesrgan")), ("device", json!(raw))],
+            );
+            assert_eq!(onnx_candidate_request(&enhance), Some(expected), "{raw}");
+            assert_eq!(category_for_node(&enhance), Some(CpuBound), "{raw}");
+        }
+
         for (kind, engine) in [
             ("matchLightColor", "cpu"),
             ("refineMaskEdge", "cpu"),
@@ -393,6 +409,13 @@ mod tests {
         assert_eq!(onnx_candidate_request(&split), Some(Cpu));
         assert_eq!(category_for_node(&split), Some(CpuBound));
         assert_eq!(onnx_candidate_request(&node("imageEnhance", &[])), None);
+        assert_eq!(
+            onnx_candidate_request(&node(
+                "imageEnhance",
+                &[("engine", json!("cpu")), ("device", json!("gpu"))],
+            )),
+            None
+        );
     }
 
     #[test]

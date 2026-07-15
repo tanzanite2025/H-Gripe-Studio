@@ -356,20 +356,20 @@ pub(crate) struct EnhanceReport {
     /// Weight file name when a model backend ran, else `null`.
     #[serde(default)]
     pub(crate) backend_model: Option<String>,
-    /// Compute device the model backend bound (`cpu`/`cuda`); `null` on the CPU
+    /// Compute device the model backend actually bound; `null` on the built-in
     /// resize path, which runs no ML session.
     #[serde(default)]
     pub(crate) device: Option<String>,
-    /// Compute device the node asked for (`auto`/`cpu`/`cuda`); an explicit
-    /// `cuda` degrades to `cpu` when no accelerator is present.
+    /// Compute device the node asked for. Visible values are `auto`/`gpu`/`cpu`;
+    /// legacy provider-specific requests remain readable.
     #[serde(default)]
     pub(crate) device_requested: String,
-    /// Compute precision the model backend bound (`fp16`/`fp32`); `null` on the
-    /// CPU resize path, which runs no ML session.
+    /// Compute precision the model backend bound (`fp32` for the current
+    /// Real-ESRGAN weight); `null` on the built-in resize path.
     #[serde(default)]
     pub(crate) precision: Option<String>,
-    /// Compute precision the node asked for (`auto`/`fp32`/`fp16`); an explicit
-    /// `fp16` degrades to `fp32` on a CPU run.
+    /// Compute precision the node asked for. Visible values are `auto`/`fp32`;
+    /// a legacy `fp16` request degrades visibly to `fp32`.
     #[serde(default)]
     pub(crate) precision_requested: String,
     #[serde(default)]
@@ -390,8 +390,9 @@ pub(crate) struct EnhanceImageResult {
 
 /// Upscale and sharpen a low-resolution subject so it fills a PSD placeholder
 /// at the target DPI without going soft. This is the **Image Enhance / Super
-/// Resolution** node's backend. Runs in-process on the native `cpu` pipeline
-/// ([`crate::studio::image_enhance_cpu`]); `mode` is
+/// Resolution** node's backend. Runs in-process on the shared native pipeline
+/// ([`crate::studio::image_enhance_cpu`]) with optional ORT Real-ESRGAN;
+/// `mode` is
 /// `conservative | texture_rebuild | print_ready | custom`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -416,14 +417,7 @@ pub(crate) fn enhance_image(
 ) -> Result<EnhanceImageResult, String> {
     let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-    let engine = engine.unwrap_or_default();
-    let engine = engine.trim();
-    if !(engine.is_empty() || engine.eq_ignore_ascii_case("cpu")) {
-        return Err(format!(
-            "Image Enhance engine `{engine}` is no longer available; only the native `cpu` engine is supported"
-        ));
-    }
-    let params = crate::studio::image_enhance_cpu::CpuEnhanceParams {
+    let params = crate::studio::image_enhance_cpu::EnhanceParams {
         image_path: image.clone(),
         output_dir: output_dir.unwrap_or_default(),
         output_name: output_name.filter(|s| !s.trim().is_empty()),
@@ -437,6 +431,7 @@ pub(crate) fn enhance_image(
         denoise_strength: denoise_strength.unwrap_or(0.3),
         texture_strength: texture_strength.unwrap_or(0.25),
         preserve_text_logo: preserve_text_logo.unwrap_or(true),
+        engine_requested: engine.unwrap_or_else(|| "cpu".to_string()),
         device_requested: device
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "auto".to_string()),
@@ -669,6 +664,55 @@ mod tests {
             .contains("trimap"));
         assert!(std::path::Path::new(&result.refined_image).is_file());
         assert!(std::path::Path::new(&result.refined_mask).is_file());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn enhance_command_routes_non_cpu_engine_through_native_fallback_contract() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("hgripe_enhance_command_{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("subject.png");
+        RgbaImage::from_pixel(8, 8, Rgba([90, 120, 160, 180]))
+            .save(&source)
+            .unwrap();
+
+        let result = enhance_image(
+            None,
+            source.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("ccsr".to_string()),
+            Some("gpu".to_string()),
+            Some("fp16".to_string()),
+            Some(dir.to_string_lossy().to_string()),
+            Some("direct_enhance".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(result.enhance_report.engine, "cpu");
+        assert_eq!(result.enhance_report.engine_requested, "ccsr");
+        assert_eq!(result.enhance_report.device_requested, "gpu");
+        assert_eq!(result.enhance_report.precision_requested, "fp16");
+        assert!(result
+            .enhance_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("removed with the Python/Torch runtime"));
+        assert!(std::path::Path::new(&result.enhanced_image).is_file());
 
         let _ = std::fs::remove_dir_all(dir);
     }

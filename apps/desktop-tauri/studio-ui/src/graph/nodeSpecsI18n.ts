@@ -210,7 +210,15 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       },
       "enhance.engine": {
         label: "增强：引擎",
-        hint: "cpu 始终可用；模型引擎在权重缺失时回退到 cpu",
+        hint: "cpu 始终可用；原生 Real-ESRGAN 当前以 CPU/FP32 运行，模型缺失时回退到 cpu",
+      },
+      "enhance.device": {
+        label: "增强：设备",
+        hint: "原生 Real-ESRGAN 的计算请求：auto | gpu | cpu。当前路径仅使用 CPU；CUDA 与 DirectML 计划后续支持",
+      },
+      "enhance.precision": {
+        label: "增强：精度",
+        hint: "原生 Real-ESRGAN 的计算精度：auto 当前解析为 fp32；暂不支持 fp16",
       },
       "grade.format": { label: "调色：输出格式" },
       "crop.mode": { label: "裁剪：模式" },
@@ -446,7 +454,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   imageEnhance: {
     title: "图像增强",
     description:
-      "对低分辨率主体放大（Lanczos）并锐化（USM），使其以印刷 DPI 清晰填满 PSD 占位符。接入占位符边界可自动定尺，或显式设定目标像素。Phase 1 仅 CPU（无 GPU 超分）。输出增强图像、所用缩放系数与增强报告。预设会隐藏细节；选 `custom` 可展开 降噪/纹理/缩放。",
+      "放大低分辨率主体，使其以印刷 DPI 清晰填满 PSD 占位符。内置 CPU 路径使用 Lanczos 与锐化；原生 Real-ESRGAN 提供模型超分，当前以 CPU/FP32 运行。接入占位符边界可自动定尺，或显式设定目标像素。输出增强图像、所用缩放系数与增强报告。预设会隐藏细节；选 `custom` 可展开降噪/纹理/缩放。",
     params: {
       mode: {
         label: "模式",
@@ -458,21 +466,21 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       },
       engine: {
         label: "引擎",
-        hint: "cpu = 内置 Lanczos+锐化（始终可用）；realesrgan / ccsr / supir = 可选 GPU/CPU 模型（ccsr = 忠实扩散超分，supir = 极致画质扩散超分），权重/依赖缺失时回落 cpu",
+        hint: "cpu = 内置 Lanczos+锐化（始终可用）；realesrgan = 原生模型超分，当前使用 CPU/FP32，模型缺失时回退到 cpu",
       },
       device: {
         label: "设备",
-        hint: "GPU 放大器的计算设备：auto（有 CUDA 用 CUDA，否则 CPU）| cpu | cuda（无加速器时回落 CPU）；cpu 路径忽略此项",
+        hint: "原生 Real-ESRGAN 的计算请求：auto | gpu | cpu。当前路径仅使用 CPU；CUDA 与 DirectML 计划后续支持。cpu 路径忽略此项",
       },
       precision: {
         label: "精度",
-        hint: "GPU 放大器的计算精度：auto（CUDA 上 fp16，否则 fp32）| fp32 | fp16（CPU 运行时回落 fp32）；cpu 路径忽略此项",
+        hint: "原生 Real-ESRGAN 的计算精度：auto 当前解析为 fp32；暂不支持 fp16。cpu 路径忽略此项",
       },
       target_width: { label: "目标宽度", hint: "显式目标像素（0 = 由所连边界或预设缩放自动推算）" },
       target_height: { label: "目标高度", hint: "显式目标像素（0 = 由所连边界或预设缩放自动推算）" },
       target_dpi: { label: "目标 DPI", hint: "写入输出 PNG 元数据的 DPI" },
       scale: { label: "缩放", hint: "未给定目标尺寸时的放大倍数" },
-      denoise_strength: { label: "降噪", hint: "放大前的高斯模糊降噪混合" },
+      denoise_strength: { label: "降噪", hint: "放大前的边缘保留中值降噪混合" },
       texture_strength: { label: "纹理", hint: "放大后 USM 细节强度" },
       max_pixels: { label: "最大像素", hint: "限制输出像素；缩放会相应降低以适配" },
       preserve_text_logo: { label: "保护文字/logo", hint: "限制锐化，避免 logo / 包装文字被破坏" },

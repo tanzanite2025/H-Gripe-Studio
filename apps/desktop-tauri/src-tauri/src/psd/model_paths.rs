@@ -197,7 +197,7 @@ mod tests {
         let mut weights = BTreeMap::new();
         weights.insert(
             "realesrgan".to_string(),
-            "  C:\\models\\w.pth  ".to_string(),
+            "  C:\\models\\realesrgan_x4v3.onnx  ".to_string(),
         );
         weights.insert("sd_inpaint".to_string(), "   ".to_string());
         let config = normalise(ModelPathsConfig {
@@ -206,7 +206,10 @@ mod tests {
         });
         assert!(config.model_cache_dir.is_none());
         assert_eq!(config.weights.len(), 1);
-        assert_eq!(config.weights["realesrgan"], "C:\\models\\w.pth");
+        assert_eq!(
+            config.weights["realesrgan"],
+            "C:\\models\\realesrgan_x4v3.onnx"
+        );
     }
 
     #[test]

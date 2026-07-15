@@ -11,14 +11,12 @@ on:
       - 'docs/**'
   # Opt-in end-to-end checks that run real model inference: the weights are
   # never committed, so the gated tests (`vitmatte_inference_when_weight_present`,
-  # `test_realesrgan_real_inference_when_stack_present`,
-  # `test_{sd_inpaint,sdxl_inpaint,flux_fill}_real_inference_with_tiny_snapshot`,
-  # `test_diffusion_sr_real_inference_with_tiny_snapshot`,
-  # `test_onnx_matting_real_inference_when_weight_present`,
+  # `onnx_matting_runs_when_weight_present`,
+  # `realesrgan_inference_when_weight_present`,
   # `onnx_defect_inference_when_weight_present`,
   # `pctnet_inference_when_weight_present`) skip on every normal
-  # run. Trigger this manually to fetch/synthesise the weights and exercise the
-  # real inference paths.
+  # run. Trigger this manually to fetch the weights and exercise the native
+  # inference paths.
   workflow_dispatch:
 
 concurrency:
@@ -139,6 +137,43 @@ jobs:
         run: |
           cargo test vitmatte_inference_when_weight_present -- --nocapture
           cargo test onnx_matting_runs_when_weight_present -- --nocapture
+
+  realesrgan-e2e:
+    name: tauri (Real-ESRGAN e2e)
+    # Only on manual dispatch: fetches the optional ~4.9 MB FP32 ONNX and proves
+    # the native Rust/ORT Image Enhance path runs across a real tile boundary.
+    # The pinned third-party re-host is verification-only, not release approval.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Native Real-ESRGAN uses the repository-maintained ORT runtime DLL.
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/desktop-tauri/studio-ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: apps/desktop-tauri
+        run: npm --prefix studio-ui ci && npm --prefix studio-ui run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri
+
+      - name: Fetch Real-ESRGAN x4v3 ONNX
+        shell: pwsh
+        run: .\scripts\fetch-realesrgan.ps1
+
+      - name: cargo test (Real-ESRGAN inference)
+        working-directory: apps/desktop-tauri/src-tauri
+        run: cargo test realesrgan_inference_when_weight_present -- --nocapture
 
   watchdog-e2e:
     name: tauri (detail watchdog e2e)

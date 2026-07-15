@@ -8,6 +8,11 @@ import {
   refineMaskEdge,
 } from "../../bridge/tauri";
 import { type Bounds, type VisualContext } from "../../contracts/context";
+import type {
+  ImageEnhanceDeviceRequest,
+  ImageEnhanceEngineRequest,
+  ImageEnhancePrecisionRequest,
+} from "../../contracts/imageEnhance";
 import {
   findLayer,
   layeredAssetManifest,
@@ -158,10 +163,9 @@ export const IMAGE_EXECUTORS = {
       edge_report: result.edge_report,
     };
   },
-  // Upscales (Lanczos) and sharpens (unsharp mask) the upstream subject to a
-  // PSD placeholder's pixel target so it stays crisp at print DPI, via the
-  // backend `enhance_image` command (CPU-only in Phase 1). Exposes the enhanced
-  // image, the applied scale factor, and an enhance report.
+  // Upscales the upstream subject to a PSD placeholder's pixel target through
+  // the native `enhance_image` command. The built-in path uses Lanczos +
+  // sharpening; optional Real-ESRGAN currently runs on CPU in FP32.
   imageEnhance: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
     if (!image) throw new Error("Image Enhance needs a connected image input");
@@ -179,9 +183,9 @@ export const IMAGE_EXECUTORS = {
       denoiseStrength: Number(ctx.params.denoise_strength ?? 0.3),
       textureStrength: Number(ctx.params.texture_strength ?? 0.25),
       preserveTextLogo: Boolean(ctx.params.preserve_text_logo ?? true),
-      engine: String(ctx.params.engine ?? "cpu") || undefined,
-      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
-      precision: String(ctx.params.precision ?? "auto").trim() || undefined,
+      engine: (String(ctx.params.engine ?? "cpu").trim() || "cpu") as ImageEnhanceEngineRequest,
+      device: (String(ctx.params.device ?? defaultDeviceParam()).trim() || "auto") as ImageEnhanceDeviceRequest,
+      precision: (String(ctx.params.precision ?? "auto").trim() || "auto") as ImageEnhancePrecisionRequest,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });

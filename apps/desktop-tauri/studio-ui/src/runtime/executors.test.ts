@@ -660,23 +660,33 @@ describe("imageEnhance", () => {
     ).rejects.toThrow(/connected image/);
   });
 
-  it("threads the device param into the report (defaults to auto)", async () => {
+  it("threads visible and legacy device params into the report (defaults to auto)", async () => {
     const def = (await defaultExecutors.imageEnhance(
       ctx("imageEnhance", { mode: "conservative" }, { image: "/subject.png" }),
     )) as Record<string, unknown>;
     expect((def.enhance_report as { device_requested?: string }).device_requested).toBe("auto");
 
-    const cuda = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative", device: "cuda" }, { image: "/subject.png" }),
+    const gpu = (await defaultExecutors.imageEnhance(
+      ctx("imageEnhance", { mode: "conservative", device: "gpu" }, { image: "/subject.png" }),
     )) as Record<string, unknown>;
-    expect((cuda.enhance_report as { device_requested?: string }).device_requested).toBe("cuda");
+    expect((gpu.enhance_report as { device_requested?: string }).device_requested).toBe("gpu");
+
+    const directml = (await defaultExecutors.imageEnhance(
+      ctx("imageEnhance", { mode: "conservative", device: "directml" }, { image: "/subject.png" }),
+    )) as Record<string, unknown>;
+    expect((directml.enhance_report as { device_requested?: string }).device_requested).toBe("directml");
   });
 
-  it("threads the precision param into the report (defaults to auto)", async () => {
+  it("threads visible and legacy precision params into the report (defaults to auto)", async () => {
     const def = (await defaultExecutors.imageEnhance(
       ctx("imageEnhance", { mode: "conservative" }, { image: "/subject.png" }),
     )) as Record<string, unknown>;
     expect((def.enhance_report as { precision_requested?: string }).precision_requested).toBe("auto");
+
+    const fp32 = (await defaultExecutors.imageEnhance(
+      ctx("imageEnhance", { mode: "conservative", precision: "fp32" }, { image: "/subject.png" }),
+    )) as Record<string, unknown>;
+    expect((fp32.enhance_report as { precision_requested?: string }).precision_requested).toBe("fp32");
 
     const fp16 = (await defaultExecutors.imageEnhance(
       ctx("imageEnhance", { mode: "conservative", precision: "fp16" }, { image: "/subject.png" }),

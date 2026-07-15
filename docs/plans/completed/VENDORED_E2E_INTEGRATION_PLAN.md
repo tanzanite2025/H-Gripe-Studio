@@ -220,6 +220,8 @@ psd engine
 - 缺陷检测。
 - 人脸 / 手部局部问题检测。
 - 轻量色彩 harmonize。
+- 轻量、确定性的 Real-ESRGAN x4v3 超分：原生 Rust/ORT、分块推理、CPU
+  完整回退；不恢复 Python/Torch。
 
 不适合放进核心：
 

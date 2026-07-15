@@ -1,31 +1,12 @@
-//! In-process CPU image-enhancement fast path (R3 Phase 1): a native-Rust
-//! replica of `image_enhance_cli.py`'s `--engine cpu` pipeline, run inline in
-//! the `imageEnhance` executor instead of spawning the Python bridge.
+//! Shared native Image Enhance pipeline. It owns source decoding, CMYK/ICC
+//! ingress, target resolution, alpha, output metadata and the complete CPU
+//! fallback. The opt-in `realesrgan` branch replaces only the colour-pixel
+//! denoise/resample/sharpen stage through [`super::image_enhance_onnx`].
 //!
-//! It reproduces the CLI's CPU algorithm — edge-preserving median denoise on
-//! the small image, Lanczos3 upscale / box(-ish) downscale, unsharp-mask
-//! sharpen, and alpha kept on its own resize track — and emits an identical
-//! [`EnhanceReport`] (same field names / semantics), so the node's outputs and
-//! downstream consumers are unchanged.
-//!
-//! Colour management (R3 Phase 2 + CMYK c3): the fast path now also handles
-//! high-bit single-channel inputs (`I;16`-style scans are range-scaled to 8-bit
-//! by peak, matching the Python `numpy` path) and preserves an embedded ICC
-//! profile onto the output PNG for same-colour-model inputs (RGB/RGBA/L/LA),
-//! just like the Python bridge.
-//!
-//! CMYK is handled in-process for **TIFF** sources and **Adobe CMYK / YCCK
-//! JPEGs** (an APP14 marker with transform 0 or 2): the raw ink samples and
-//! embedded profile are read via [`super::cmyk_decode`] (which undoes the Adobe
-//! inversion so JPEG and TIFF samples share the 0 = no ink convention, and for
-//! YCCK reconstructs CMYK from the raw planes rather than taking zune's lossy
-//! YCCK->RGB that drops the ICC) and colour-managed to sRGB via
-//! [`super::cmyk_transform`] (the CMYK profile's A2B LUT, or PIL's naive formula
-//! when untagged), matching `image_enhance_cli.py`'s `_cmyk_to_rgb`. CMYK JPEGs
-//! without an Adobe marker still defer to `psd::enhance_image` (too rare to
-//! validate). Float inputs also still defer (no well-defined 8-bit mapping to
-//! reproduce here). For all of those, and on any decode failure, [`try_enhance`]
-//! returns `Ok(None)` and the caller falls back to Python.
+//! The CPU algorithm is edge-preserving median denoise, Lanczos3 upscale or
+//! triangle downscale, and unsharp-mask detail. Alpha stays on an independent
+//! resize track. High-bit grey is peak-normalised; CMYK TIFF and CMYK-family
+//! JPEG samples are colour-managed through the repository-owned colour path.
 
 use std::borrow::Cow;
 use std::fs::{self, File};
@@ -40,8 +21,8 @@ use super::linear;
 use super::studio_image::{self, DEFAULT_MAX_DECODE_PIXELS};
 use crate::psd::{reject_unsafe_output_name, EnhanceImageResult, EnhanceReport};
 
-/// Resolved node parameters for one enhance run, mirroring the CLI arguments.
-pub(crate) struct CpuEnhanceParams {
+/// Resolved node parameters for one native enhance run.
+pub(crate) struct EnhanceParams {
     pub(crate) image_path: String,
     pub(crate) output_dir: String,
     pub(crate) output_name: Option<String>,
@@ -55,19 +36,18 @@ pub(crate) struct CpuEnhanceParams {
     pub(crate) denoise_strength: f64,
     pub(crate) texture_strength: f64,
     pub(crate) preserve_text_logo: bool,
+    pub(crate) engine_requested: String,
     pub(crate) device_requested: String,
     pub(crate) precision_requested: String,
 }
 
-/// Run the CPU enhance pipeline in-process. Returns `Ok(Some(result))` on the
-/// fast path, or `Ok(None)` when the input cannot be reproduced faithfully
-/// in-process (an unmarked CMYK JPEG or float source, or any decode failure)
-/// and the caller should defer to the colour-managed Python bridge.
-pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageResult>, String> {
+/// Run Image Enhance in-process. Returns `Ok(Some(result))` for supported
+/// native sources, or `Ok(None)` when the source cannot be represented by the
+/// card's 8-bit sRGB model/output boundary.
+pub(crate) fn try_enhance(p: &EnhanceParams) -> Result<Option<EnhanceImageResult>, String> {
     let path = Path::new(&p.image_path);
     if !path.is_file() {
-        // Let the Python path surface the canonical "base image not found".
-        return Ok(None);
+        return Err(format!("base image not found: {}", path.display()));
     }
 
     // Inspect the source colour space (header only). Float still defers, as do
@@ -108,8 +88,7 @@ pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageRes
             clip01(p.texture_strength),
             p.scale.max(0.01),
         ),
-        // Unknown mode: let Python raise the canonical error message.
-        _ => return Ok(None),
+        _ => return Err(format!("unknown mode {mode_str:?}")),
     };
     let denoise_strength = clip01(denoise_strength);
     let mut texture_strength = clip01(texture_pref);
@@ -126,16 +105,15 @@ pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageRes
     }
     let max_pixels = p.max_pixels.max(0);
 
-    // Validate the output name up front (same guard as the Python command)
-    // before spending time decoding.
+    // Validate the output name before spending time decoding.
     reject_unsafe_output_name(p.output_name.as_deref().unwrap_or(""))?;
 
     let started = Instant::now();
 
     let (rgb, alpha) = match prepare_source(path, probe.color)? {
         Some(pair) => pair,
-        // A decode failure (or oversized guard) is authoritative on the Python
-        // path too; defer so the user sees its canonical message.
+        // The native command turns unsupported decode surfaces into one clear
+        // card-level error while preserving hard validation errors above.
         None => return Ok(None),
     };
     let (src_w, src_h) = rgb.dimensions();
@@ -149,18 +127,82 @@ pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageRes
     let out_h = (f64::from(src_h) * scale).round().max(1.0) as u32;
     let downscaling = out_w < src_w || out_h < src_h;
 
-    // CPU pipeline (colour channels only): denoise the small image, resample,
-    // then sharpen so restored detail lands on the final grid. Skip the unsharp
-    // pass when downscaling -- it would only amplify resampling artefacts.
-    let denoised = denoise(&rgb, denoise_strength as f32);
-    let resized = resample_rgb(&denoised, out_w, out_h, downscaling);
-    let applied_texture = if downscaling { 0.0 } else { texture_strength };
-    let sharpened = sharpen(&resized, applied_texture as f32);
+    let engine_requested = normalized_engine(&p.engine_requested);
+    let mut engine = "cpu".to_string();
+    let mut engine_fallback_reason = None;
+    let mut backend_model = None;
+    let mut device = None;
+    let mut precision = None;
+
+    let learned = match engine_requested.as_str() {
+        "cpu" => None,
+        "realesrgan" if out_w <= src_w && out_h <= src_h => {
+            engine_fallback_reason = Some(
+                "Real-ESRGAN only restores upscale requests; kept the complete CPU result"
+                    .to_string(),
+            );
+            None
+        }
+        "realesrgan" => {
+            let inference = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::image_enhance_onnx::upscale(&rgb, out_w, out_h, &p.device_requested)
+            }));
+            match inference {
+                Ok(Ok(result)) => Some(result),
+                Ok(Err(reason)) => {
+                    engine_fallback_reason = Some(reason);
+                    None
+                }
+                Err(_) => {
+                    engine_fallback_reason = Some(
+                        "native Real-ESRGAN inference panicked; kept the complete CPU result"
+                            .to_string(),
+                    );
+                    None
+                }
+            }
+        }
+        "ccsr" | "supir" => {
+            engine_fallback_reason = Some(format!(
+                "Image Enhance engine `{engine_requested}` was removed with the Python/Torch runtime; use `realesrgan` or `cpu`"
+            ));
+            None
+        }
+        unknown => {
+            engine_fallback_reason = Some(format!(
+                "unknown Image Enhance engine {unknown:?}; kept the complete CPU result"
+            ));
+            None
+        }
+    };
+
+    // A learned result replaces the CPU denoise/resample/sharpen chain. Any
+    // model failure keeps that complete deterministic chain unchanged.
+    let (processed_rgb, applied_denoise, applied_texture) = if let Some(result) = learned {
+        engine = "realesrgan".to_string();
+        backend_model = Some(result.backend_model);
+        device = Some(result.device);
+        precision = Some("fp32".to_string());
+        engine_fallback_reason = combine_reasons(
+            result.device_fallback_reason,
+            precision_fallback_reason(&p.precision_requested),
+        );
+        (result.rgb, 0.0, 0.0)
+    } else {
+        let denoised = denoise(&rgb, denoise_strength as f32);
+        let resized = resample_rgb(&denoised, out_w, out_h, downscaling);
+        let applied_texture = if downscaling { 0.0 } else { texture_strength };
+        (
+            sharpen(&resized, applied_texture as f32),
+            denoise_strength,
+            applied_texture,
+        )
+    };
 
     // The alpha rides its own resize track so the matte edge never picks up a
     // denoise / sharpen halo.
     let alpha_resized = resample_gray(&alpha, out_w, out_h, downscaling);
-    let out_img = combine_rgba(&sharpened, &alpha_resized);
+    let out_img = combine_rgba(&processed_rgb, &alpha_resized);
 
     let directory = Path::new(&p.output_dir);
     fs::create_dir_all(directory)
@@ -186,16 +228,16 @@ pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageRes
         target_dpi,
         max_pixels,
         clamped,
-        denoise_strength: round4(denoise_strength),
+        denoise_strength: round4(applied_denoise),
         texture_strength: round4(applied_texture),
         preserve_text_logo: p.preserve_text_logo,
-        engine: "cpu".to_string(),
-        engine_requested: "cpu".to_string(),
-        engine_fallback_reason: None,
-        backend_model: None,
-        device: None,
+        engine,
+        engine_requested,
+        engine_fallback_reason,
+        backend_model,
+        device,
         device_requested: p.device_requested.clone(),
-        precision: None,
+        precision,
         precision_requested: p.precision_requested.clone(),
         processing_time_ms: elapsed_ms,
     };
@@ -207,17 +249,43 @@ pub(crate) fn try_enhance(p: &CpuEnhanceParams) -> Result<Option<EnhanceImageRes
     }))
 }
 
-/// Whether the CPU fast path can faithfully process an input in-process. 8-bit
-/// and 16-bit RGB/RGBA/L/LA (including ICC-tagged) are handled; only CMYK and
-/// float defer, because a faithful CMYK conversion needs the raw pre-RGB
-/// samples the `image` crate discards at decode and a float source has no
-/// well-defined 8-bit mapping the Python `numpy` path reproduces here.
+fn normalized_engine(value: &str) -> String {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        "cpu".to_string()
+    } else {
+        value
+    }
+}
+
+fn precision_fallback_reason(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "auto" | "fp32" => None,
+        "fp16" => Some(
+            "the native Real-ESRGAN weight is FP32; used fp32 instead of requested fp16"
+                .to_string(),
+        ),
+        unknown => Some(format!(
+            "unknown Real-ESRGAN precision request {unknown:?}; used fp32"
+        )),
+    }
+}
+
+fn combine_reasons(first: Option<String>, second: Option<String>) -> Option<String> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(format!("{first}; {second}")),
+        (Some(reason), None) | (None, Some(reason)) => Some(reason),
+        (None, None) => None,
+    }
+}
+
+/// Whether the native card can represent this source at its 8-bit sRGB
+/// model/output boundary. CMYK is handled through the raw-sample colour path;
+/// float surfaces remain unsupported because they have no defined range map.
 fn can_handle_in_process(color: ExtendedColorType) -> bool {
     use ExtendedColorType::*;
-    // CMYK is admitted here, but only CMYK TIFF and Adobe CMYK / YCCK JPEG
-    // actually take the Rust path (see `prepare_source`); other CMYK JPEGs fall
-    // back inside that step. Float sources have no faithful in-process mapping
-    // and still defer.
+    // CMYK TIFF and CMYK-family JPEGs take the dedicated raw-sample path.
     !matches!(color, Rgb32F | Rgba32F)
 }
 
@@ -231,15 +299,14 @@ fn is_single_channel_highbit(color: ExtendedColorType) -> bool {
 
 /// Decode the source into an 8-bit working RGB image plus its alpha track,
 /// applying the colour-space-specific conversion. Returns `Ok(None)` when the
-/// decode fails (or the guard trips) so the caller defers to Python.
+/// decoder cannot produce the card's native boundary surface.
 fn prepare_source(
     path: &Path,
     color: ExtendedColorType,
 ) -> Result<Option<(RgbImage, GrayImage)>, String> {
     if matches!(color, ExtendedColorType::Cmyk8) {
-        // CMYK TIFF and Adobe CMYK / YCCK JPEG are reproduced in-process;
-        // `decode_cmyk` returns `Ok(None)` for the sources it won't take
-        // faithfully (an unmarked CMYK JPEG), deferring to the Python bridge.
+        // CMYK TIFF and marked/unmarked CMYK/YCCK JPEG are decoded from raw ink
+        // samples so the generic image decoder cannot discard their profile.
         let raw = match super::cmyk_decode::decode_cmyk(path, DEFAULT_MAX_DECODE_PIXELS) {
             Ok(Some(raw)) => raw,
             _ => return Ok(None),
@@ -489,7 +556,7 @@ fn blend(a: &RgbImage, b: &RgbImage, s: f32) -> RgbImage {
 /// Decode via the sRGB TRC, filter in `f32`, re-encode. The Python engine
 /// mirrors this in `_resample` (`linear_light.py`); alpha stays on its own
 /// track — coverage is already linear.
-fn resample_rgb(img: &RgbImage, out_w: u32, out_h: u32, downscaling: bool) -> RgbImage {
+pub(super) fn resample_rgb(img: &RgbImage, out_w: u32, out_h: u32, downscaling: bool) -> RgbImage {
     if (out_w, out_h) == img.dimensions() {
         return img.clone();
     }
@@ -601,8 +668,8 @@ mod tests {
         std::env::temp_dir().join(format!("hgripe_enhance_cpu_{nanos}_{name}"))
     }
 
-    fn params(image: &str, out_dir: &str) -> CpuEnhanceParams {
-        CpuEnhanceParams {
+    fn params(image: &str, out_dir: &str) -> EnhanceParams {
+        EnhanceParams {
             image_path: image.to_string(),
             output_dir: out_dir.to_string(),
             output_name: None,
@@ -616,15 +683,32 @@ mod tests {
             denoise_strength: 0.3,
             texture_strength: 0.25,
             preserve_text_logo: true,
+            engine_requested: "cpu".to_string(),
             device_requested: "auto".to_string(),
             precision_requested: "auto".to_string(),
         }
     }
 
     #[test]
-    fn missing_file_defers_to_python() {
+    fn missing_file_returns_the_native_card_error() {
         let p = params("does-not-exist.png", ".");
-        assert!(try_enhance(&p).unwrap().is_none());
+        let err = try_enhance(&p).unwrap_err();
+        assert!(err.contains("base image not found"), "{err}");
+    }
+
+    #[test]
+    fn unknown_mode_returns_the_native_card_error() {
+        let dir = unique_tmp("unknown_mode");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("in.png");
+        RgbaImage::from_pixel(2, 2, Rgba([10, 20, 30, 255]))
+            .save(&src)
+            .unwrap();
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.mode = Some("mystery".to_string());
+        let err = try_enhance(&p).unwrap_err();
+        assert!(err.contains("unknown mode"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -714,6 +798,177 @@ mod tests {
         p.preserve_text_logo = false;
         let uncapped = try_enhance(&p).unwrap().unwrap();
         assert_eq!(uncapped.enhance_report.texture_strength, 0.7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn removed_and_unknown_engines_keep_a_complete_cpu_result() {
+        let dir = unique_tmp("engine_fallbacks");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("in.png");
+        RgbaImage::from_pixel(8, 8, Rgba([90, 120, 150, 255]))
+            .save(&src)
+            .unwrap();
+
+        for engine in ["ccsr", "supir", "mystery_sr"] {
+            let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+            p.engine_requested = engine.to_string();
+            p.output_name = Some(format!("fallback_{engine}"));
+            let result = try_enhance(&p).unwrap().expect("complete CPU fallback");
+            assert_eq!(result.enhance_report.engine, "cpu");
+            assert_eq!(result.enhance_report.engine_requested, engine);
+            assert!(result
+                .enhance_report
+                .engine_fallback_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains(engine)));
+            assert!(Path::new(&result.enhanced_image).is_file());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn realesrgan_non_enlarging_request_skips_model_and_keeps_cpu_output() {
+        let dir = unique_tmp("realesrgan_downscale");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("in.png");
+        RgbaImage::from_pixel(12, 8, Rgba([90, 120, 150, 255]))
+            .save(&src)
+            .unwrap();
+
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "realesrgan".to_string();
+        p.target_width = 6;
+        p.target_height = 4;
+        let result = try_enhance(&p).unwrap().expect("complete CPU fallback");
+        assert_eq!(result.enhance_report.engine, "cpu");
+        assert_eq!(result.enhance_report.engine_requested, "realesrgan");
+        assert!(result
+            .enhance_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("only restores upscale"));
+        assert_eq!(result.enhance_report.output_size, Some([6, 4]));
+
+        p.target_width = 0;
+        p.target_height = 0;
+        p.mode = Some("custom".to_string());
+        p.scale = 1.001;
+        p.output_name = Some("rounded_same_size".to_string());
+        let rounded = try_enhance(&p)
+            .unwrap()
+            .expect("rounded same-size request keeps CPU output");
+        assert_eq!(rounded.enhance_report.output_size, Some([12, 8]));
+        assert!(rounded
+            .enhance_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("only restores upscale"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn realesrgan_missing_weight_keeps_cpu_output() {
+        if super::super::resolve_realesrgan_model_path().is_some() {
+            eprintln!("skipping missing-weight fallback test: realesrgan_x4v3.onnx is installed");
+            return;
+        }
+        let dir = unique_tmp("realesrgan_missing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("in.png");
+        RgbaImage::from_pixel(8, 8, Rgba([90, 120, 150, 255]))
+            .save(&src)
+            .unwrap();
+
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "realesrgan".to_string();
+        let result = try_enhance(&p).unwrap().expect("complete CPU fallback");
+        assert_eq!(result.enhance_report.engine, "cpu");
+        assert_eq!(result.enhance_report.engine_requested, "realesrgan");
+        assert!(result
+            .enhance_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("model not found"));
+        assert!(Path::new(&result.enhanced_image).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn realesrgan_inference_when_weight_present() {
+        if super::super::resolve_realesrgan_model_path().is_none() {
+            eprintln!("skipping Real-ESRGAN inference test: realesrgan_x4v3.onnx not installed");
+            return;
+        }
+        let dir = unique_tmp("realesrgan_real");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("in.png");
+        // Width crosses the native 128px tile boundary, so this gated test
+        // covers both real session execution and padded tile assembly.
+        let mut input = RgbaImage::new(132, 8);
+        for (x, y, pixel) in input.enumerate_pixels_mut() {
+            let alpha = if x < 2 && y < 2 { 0 } else { 255 };
+            *pixel = Rgba([
+                ((x * 3) % 256) as u8,
+                (y * 29) as u8,
+                (((x + y) * 5) % 256) as u8,
+                alpha,
+            ]);
+        }
+        input.save(&src).unwrap();
+
+        let mut p = params(src.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "realesrgan".to_string();
+        p.device_requested = "cpu".to_string();
+        p.target_width = 396;
+        p.target_height = 24;
+        let result = try_enhance(&p).unwrap().expect("native Real-ESRGAN result");
+        let report = &result.enhance_report;
+        assert_eq!(report.engine, "realesrgan", "{report:?}");
+        assert_eq!(report.engine_requested, "realesrgan");
+        assert_eq!(
+            report.backend_model.as_deref(),
+            Some("realesrgan_x4v3.onnx")
+        );
+        assert_eq!(report.device.as_deref(), Some("cpu"));
+        assert_eq!(report.precision.as_deref(), Some("fp32"));
+        assert!(report.engine_fallback_reason.is_none(), "{report:?}");
+        assert_eq!(report.output_size, Some([396, 24]));
+        assert_eq!(report.denoise_strength, 0.0);
+        assert_eq!(report.texture_strength, 0.0);
+
+        let output = image::open(&result.enhanced_image).unwrap().to_rgba8();
+        assert_eq!(output.dimensions(), (396, 24));
+        let expected_alpha = resample_gray(&split_rgba(&input).1, 396, 24, false);
+        assert!(output
+            .pixels()
+            .zip(expected_alpha.pixels())
+            .all(|(actual, expected)| actual.0[3] == expected.0[0]));
+        assert!(output
+            .pixels()
+            .any(|pixel| pixel.0[..3] != output.get_pixel(0, 0).0[..3]));
+
+        p.device_requested = "gpu".to_string();
+        p.precision_requested = "fp16".to_string();
+        p.output_name = Some("realesrgan_gpu_request".to_string());
+        let degraded = try_enhance(&p)
+            .unwrap()
+            .expect("CPU-provider Real-ESRGAN result");
+        assert_eq!(degraded.enhance_report.engine, "realesrgan");
+        assert_eq!(degraded.enhance_report.device.as_deref(), Some("cpu"));
+        let reason = degraded
+            .enhance_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap();
+        assert!(
+            reason.contains("GPU execution provider not built in"),
+            "{reason}"
+        );
+        assert!(reason.contains("used fp32"), "{reason}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

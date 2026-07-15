@@ -65,7 +65,16 @@ describe("lowerWorkflowGraph", () => {
     const g = graph({
       nodes: [
         { id: "src", kind: "imageSource", position: pos, params: {} },
-        { id: "proc", kind: "imageProcessing", position: pos, params: {} },
+        {
+          id: "proc",
+          kind: "imageProcessing",
+          position: pos,
+          params: {
+            "enhance.engine": "realesrgan",
+            "enhance.device": "gpu",
+            "enhance.precision": "fp32",
+          },
+        },
       ],
       edges: [
         { id: "e1", source: "src", sourcePort: "image", target: "proc", targetPort: "enhance.in" },
@@ -79,6 +88,8 @@ describe("lowerWorkflowGraph", () => {
       "imageEnhance",
       "imageSource",
     ]);
+    const enhance = lowered.nodes.find((n) => n.kind === "imageEnhance")!;
+    expect(enhance.params).toEqual({ engine: "realesrgan", device: "gpu", precision: "fp32" });
     const repaint = lowered.nodes.find((n) => n.kind === "detailRepaint")!;
     const targets = lowered.edges
       .filter((e) => e.target === repaint.id)

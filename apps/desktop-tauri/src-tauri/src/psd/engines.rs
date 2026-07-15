@@ -191,6 +191,48 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
 
     if let Some(card) = cards
         .iter_mut()
+        .find(|card| card.node_kind == "imageEnhance")
+    {
+        let model = crate::studio::resolve_realesrgan_model_path();
+        let weight = model.as_ref().map(|path| {
+            let size_mb = std::fs::metadata(path)
+                .ok()
+                .map(|meta| meta.len().div_ceil(1024 * 1024));
+            WeightInfo {
+                path: path.to_string_lossy().to_string(),
+                present: true,
+                size_mb,
+            }
+        });
+        card.engines.insert(
+            "realesrgan".to_string(),
+            EngineAvailability {
+                available: model.is_some() && onnx_status.installed,
+                reason: if model.is_none() {
+                    "Real-ESRGAN x4v3 weight not found; configure realesrgan or install realesrgan_x4v3.onnx"
+                        .to_string()
+                } else if let Some(reason) = &onnx_status.reason {
+                    format!(
+                        "Real-ESRGAN weight resolved, but ONNX Runtime is unavailable: {reason}"
+                    )
+                } else {
+                    "native Real-ESRGAN x4v3 weight resolved; current ORT build uses CPU and validates the session on first use"
+                        .to_string()
+                },
+                accelerated: false,
+                weight: weight.or_else(|| {
+                    Some(WeightInfo {
+                        path: "realesrgan_x4v3.onnx".to_string(),
+                        present: false,
+                        size_mb: None,
+                    })
+                }),
+            },
+        );
+    }
+
+    if let Some(card) = cards
+        .iter_mut()
         .find(|card| card.node_kind == "matchLightColor")
     {
         let model = crate::studio::resolve_color_model_path();
@@ -377,6 +419,24 @@ mod tests {
         assert_eq!(
             harmonizer.weight.as_ref().unwrap().present,
             crate::studio::resolve_color_model_path().is_some()
+        );
+
+        let enhance = report
+            .cards
+            .iter()
+            .find(|card| card.node_kind == "imageEnhance")
+            .unwrap();
+        assert!(enhance.engines["cpu"].available);
+        let super_resolution = &enhance.engines["realesrgan"];
+        assert!(!super_resolution.accelerated);
+        assert_eq!(
+            super_resolution.available,
+            crate::studio::resolve_realesrgan_model_path().is_some()
+                && runtime.onnxruntime.installed
+        );
+        assert_eq!(
+            super_resolution.weight.as_ref().unwrap().present,
+            crate::studio::resolve_realesrgan_model_path().is_some()
         );
 
         let refine = report

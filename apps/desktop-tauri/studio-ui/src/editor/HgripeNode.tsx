@@ -544,18 +544,31 @@ function HgripeNodeImpl({ id, data, selected }: NodeProps) {
     spec.kind === "imageSource"
       ? true
       : spec.kind === "videoSource" && Boolean(d.params.path);
+  const paramValue = (param: (typeof spec.params)[number]) =>
+    d.params[param.key] ?? param.defaultValue;
+  const paramIsVisible = (param: (typeof spec.params)[number]) => {
+    const condition = param.visibleWhen;
+    if (!condition) return true;
+    const controller = spec.params.find((candidate) => candidate.key === condition.param);
+    const value = controller ? paramValue(controller) : d.params[condition.param];
+    return condition.in.includes(String(value ?? ""));
+  };
   const inlineParams = spec.params.filter(
-    (p) => p.inline && !p.port && !(mediaSourceHasPath && p.key === "path"),
+    (p) =>
+      p.inline &&
+      !p.port &&
+      paramIsVisible(p) &&
+      !(mediaSourceHasPath && p.key === "path"),
   );
   // Inline params bound to an input port render inside that port's function
   // block, keeping the field next to the connection dot that overrides it.
-  const blockParams = spec.params.filter((p) => p.inline && p.port);
+  const blockParams = spec.params.filter((p) => p.inline && p.port && paramIsVisible(p));
   const renderInlineParam = (p: (typeof spec.params)[number]) => (
     <label key={p.key} className={`inline-field inline-field-${p.control}`}>
       <span>{p.label}</span>
       <ParamField
         spec={p}
-        value={d.params[p.key]}
+        value={paramValue(p)}
         onChange={(v) => editing?.onParamChange(id, p.key, v)}
         compact
       />
