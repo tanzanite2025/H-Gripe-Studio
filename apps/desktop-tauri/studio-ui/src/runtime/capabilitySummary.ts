@@ -18,7 +18,7 @@ export interface CapabilityLine {
 
 /**
  * Flatten an `EngineProbeReport` into display lines: machine compute
- * capability first (CUDA devices, torch, onnxruntime providers), then one line
+ * capability first (selected ONNX runtime and providers), then one line
  * per probed card summarising available vs unavailable engines. An empty
  * report (browser preview / probe never ran) yields a single warn line.
  */
@@ -26,31 +26,15 @@ export function summarizeCapabilities(report: EngineProbeReport): CapabilityLine
   const lines: CapabilityLine[] = [];
   const runtime = report.runtime;
   if (runtime) {
-    lines.push({
-      label: "cuda",
-      value: runtime.cuda_available
-        ? runtime.devices.map((d) => `${d.name} (${Math.round(d.total_memory_mb / 1024)} GB)`).join(", ") ||
-          "available"
-        : "not available",
-      tone: runtime.cuda_available ? "ok" : "warn",
-    });
-    lines.push({
-      label: "torch",
-      value: runtime.torch.installed
-        ? `${runtime.torch.version ?? "installed"}${runtime.torch.cuda ? " +cuda" : " (cpu)"}`
-        : runtime.torch.reason ?? "not installed",
-      tone: runtime.torch.installed ? "ok" : "warn",
-    });
+    const onnx = runtime.onnxruntime;
+    const packaged = onnx.packaged_providers.join(", ") || "none";
+    const usable = onnx.providers.join(", ") || "none";
     lines.push({
       label: "onnxruntime",
-      value: runtime.onnxruntime.installed
-        ? `${runtime.onnxruntime.version ?? "installed"}${
-            runtime.onnxruntime.providers.length > 0
-              ? ` — ${runtime.onnxruntime.providers.join(", ")}`
-              : ""
-          }`
-        : runtime.onnxruntime.reason ?? "not installed",
-      tone: runtime.onnxruntime.installed ? "ok" : "warn",
+      value: onnx.installed
+        ? `${onnx.version ?? "installed"} (${onnx.runtime_flavor}); packaged ${packaged}; usable ${usable}`
+        : `${onnx.runtime_flavor}; packaged ${packaged}; ${onnx.reason ?? "not loadable"}`,
+      tone: onnx.installed ? "ok" : "warn",
     });
   } else {
     lines.push({ label: "runtime", value: "probe did not run", tone: "warn" });
@@ -143,6 +127,7 @@ export function summarizeDeviceRegistry(snapshot: DeviceRegistrySnapshot): Capab
     ["grade wgpu", snapshot.grade_wgpu],
     ["viewport surface", snapshot.viewport_surface],
     ["ffmpeg", snapshot.ffmpeg],
+    ["onnx runtime", snapshot.onnx_runtime],
   ];
   for (const [label, entry] of entries) {
     lines.push({ label, value: entry.detail, tone: entry.available ? "ok" : "warn" });
@@ -166,7 +151,7 @@ export function summarizeDeviceRegistry(snapshot: DeviceRegistrySnapshot): Capab
   });
   lines.push({
     label: "onnx providers",
-    value: snapshot.onnx_providers.join(", "),
+    value: snapshot.onnx_providers.join(", ") || "none usable",
     tone: snapshot.onnx_providers.some((p) => p !== "cpu") ? "ok" : "warn",
   });
   return lines;

@@ -172,6 +172,15 @@ export const IMAGE_NODE_SPECS = {
         hint: "SAM 2 model size for point prompts — bigger is slower but cleaner; a missing weight falls back to tiny (scripts/fetch-sam2 downloads variants)",
       },
       {
+        key: "device",
+        label: "Device",
+        control: "select",
+        options: ["auto", "gpu", "cpu"],
+        defaultValue: "auto",
+        inline: true,
+        hint: "compute request for auto segmentation and ViTMatte: auto | gpu | cpu. The current ONNX Runtime path is CPU-only; CUDA and DirectML providers are planned",
+      },
+      {
         key: "wand_tolerance",
         label: "Wand tolerance",
         control: "slider",

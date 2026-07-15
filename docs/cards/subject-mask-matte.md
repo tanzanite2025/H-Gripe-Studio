@@ -156,6 +156,8 @@ combo, and the zh coverage test guards the translations.
 | Param | Type | Default | Range / values | Notes |
 | --- | --- | --- | --- | --- |
 | `mode` | enum | `hybrid` | `auto_subject` \| `auto_product` \| `auto_person` \| `auto_transparent_object` \| `manual_brush` \| `manual_pen` \| `hybrid` | Phase 1 implements `manual_*` + `hybrid` (manual layer over an empty / `previous_mask` base). The `auto_*` model modes are Phase 2: with `edit_paths.points` they run SAM 2, otherwise the salient cascade. |
+| `sam2_variant` | enum | `tiny` | `tiny` \| `small` \| `base_plus` \| `large` | SAM 2 hierarchy for point prompts; a missing non-tiny variant falls back to tiny. |
+| `device` | enum | `auto` | `auto` \| `gpu` \| `cpu` | Vendor-neutral request for auto-segmentation and ViTMatte ONNX sessions. Legacy `cuda` / `directml` workflow values remain accepted. The current Windows runtime binds CPU and reports accelerated-request fallback. |
 | `wand_tolerance` | int | `24` | `0..255` | Colour distance for the magic-wand flood fill. |
 | `feather_px` | float | `0.0` | `>= 0` | Edge feather applied last. |
 | `grow_px` | int | `0` | any | Positive dilates, negative erodes. |
@@ -187,7 +189,11 @@ combo, and the zh coverage test guards the translations.
   "edit_paths_path": "",
   "matte_report": {
     "mode": "hybrid",
-    "provider": "rust-native",
+    "provider": "vitmatte",
+    "engine": "onnxruntime",
+    "model_path": "C:/models/vitmatte.onnx",
+    "device": "cpu",
+    "device_requested": "cpu",
     "source_mode": "RGB",
     "exif_transposed": false,
     "max_decode_pixels": 96000000,
@@ -200,7 +206,7 @@ combo, and the zh coverage test guards the translations.
       { "type": "wand", "tolerance": 24 },
       { "type": "brush_subtract", "radius": 18 },
       { "type": "fill_holes" },
-      { "type": "alpha_matting", "provider": "vitmatte", "band_px": 12, "painted_strokes": 2 },
+      { "type": "alpha_matting", "provider": "vitmatte", "engine": "onnxruntime", "model_path": "C:/models/vitmatte.onnx", "device": "cpu", "device_requested": "cpu", "device_fallback_reason": null, "band_px": 12, "painted_strokes": 2 },
       { "type": "feather", "px": 2.5 }
     ],
     "triplet": { "mask": true, "alpha_image": true, "cutout_image": true },
@@ -211,13 +217,17 @@ combo, and the zh coverage test guards the translations.
 
 `matte_report` follows the same enriched-report convention as the other cards:
 `source_mode`, `exif_transposed`, `max_decode_pixels`, `image_size`,
-`processing_time_ms`, and a `triplet` completeness flag. `provider` is
-`rust-native` for the manual / hybrid lanes; for an `auto_*` base matte it is
-the segmenter that ran, in priority order: `birefnet` (high-quality model),
-`u2netp` (lightweight bundled model), or `builtin-cpu` when no model weight is
-resolvable. When the request carries `edit_paths.points`, an `auto_*` mode
-instead runs the interactive `sam2` point-prompt segmenter (the salient cascade
-is the no-points path).
+`processing_time_ms`, and a `triplet` completeness flag. The top-level provider,
+model, engine, device, request, and fallback fields always come from one stage:
+auto segmentation when it ran, otherwise alpha matting. A purely manual/hybrid
+run without either stage remains `rust-native` and omits device fields. Each
+`auto_segment` and `alpha_matting` operation also carries its complete stage
+tuple, so a two-stage run never combines the segmentation provider/model with
+the matting device. Auto segmentation tries `sam2` for point prompts, otherwise
+`u2net_human_seg` / `birefnet` / `u2netp` by mode and priority; any weight,
+session, inference, or output-contract failure reaches deterministic
+`builtin-cpu` with the original reason. ViTMatte has the same contract and
+falls back to `builtin-cpu-matte`.
 
 ### `EditPaths`
 
@@ -326,13 +336,17 @@ model id in `matte_report`.
      (`provider: u2net_human_seg`, person-tracking) before the generic
      **BiRefNet** (`provider: birefnet`, high quality) → **U²-Netp**
      (`provider: u2netp`, lightweight default) → deterministic **`builtin-cpu`**
-     fallback; every other mode uses the generic priority. No weight resolving
-     always degrades to `builtin-cpu`, so the modes always work. `matte_report`
-     carries `provider` and `detected_subjects` (`label` / `bbox` /
-     `coverage`).
+     fallback; every other mode uses the generic priority. Missing weights,
+     session-load failures, inference failures, and malformed/non-finite model
+     outputs all degrade to `builtin-cpu`, so the modes always work while the
+     original reason remains visible. `matte_report` carries `provider` and
+     `detected_subjects` (`label` / `bbox` / `coverage`). Object Select and
+     Remove stay explicit CPU paths, reuse the same learned-to-builtin retry,
+     and record failed/no-op status instead of logging a silent success.
    - *Interactive (SAM 2):* a two-stage **SAM 2** backend (encoder + prompt
      decoder, Apache-2.0; tiny is ~154 MB combined) implements the same trait
-     (`provider: sam2`). `segmenter_for_mode(mode, points, sam2_variant)` is
+      (`provider: sam2`). `segmenter_for_mode(mode, points, sam2_variant,
+      device_request)` is
      point-aware: a non-empty `edit_paths.points` routes to SAM 2, otherwise
      the salient cascade runs. The frontend `Point (SAM 2)` tool records those
      clicks into `edit_paths.points` (PR-4b), so the node's click-to-select

@@ -38,7 +38,7 @@ use image::{imageops::FilterType, GrayImage, Luma, RgbaImage};
 use ort::value::Tensor;
 use serde_json::json;
 
-use super::onnx_pool::{cached_session, SharedSession};
+use super::onnx_pool::{cached_session, OnnxDeviceRequest, OnnxProviderResolution, SharedSession};
 use super::subject_segment::{AutoMode, SegmentRequest, SegmentResult, SubjectSegmenter};
 
 const MASK_ON: u8 = 255;
@@ -166,8 +166,12 @@ pub(super) struct ModelSegmenter {
 }
 
 impl ModelSegmenter {
-    fn load(path: &Path, spec: ModelSpec) -> Result<Self, String> {
-        let session = cached_session(path)?;
+    fn load(
+        path: &Path,
+        spec: ModelSpec,
+        device_request: OnnxDeviceRequest,
+    ) -> Result<Self, String> {
+        let session = cached_session(path, device_request)?;
         Ok(Self {
             session,
             spec,
@@ -185,6 +189,10 @@ impl SubjectSegmenter for ModelSegmenter {
         Some(self.path.display().to_string())
     }
 
+    fn onnx_resolution(&self) -> Option<&OnnxProviderResolution> {
+        Some(self.session.resolution())
+    }
+
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String> {
         let (width, height) = request.image.dimensions();
         if width == 0 || height == 0 {
@@ -200,15 +208,24 @@ impl SubjectSegmenter for ModelSegmenter {
             .session
             .lock()
             .map_err(|_| "subject model session poisoned".to_string())?;
-        let input_name = session.inputs()[0].name().to_string();
+        let input_name = session
+            .inputs()
+            .first()
+            .ok_or_else(|| "subject model declares no inputs".to_string())?
+            .name()
+            .to_string();
         let outputs = session
             .run(ort::inputs![input_name => tensor])
             .map_err(|err| format!("subject model inference failed: {err}"))?;
-        let (_, saliency) = outputs[0]
+        let (output_name, output) = outputs.iter().next().ok_or_else(|| {
+            "subject model returned no outputs; expected a single-channel saliency map".to_string()
+        })?;
+        let (shape, saliency) = output
             .try_extract_tensor::<f32>()
-            .map_err(|err| format!("failed to read model output: {err}"))?;
+            .map_err(|err| format!("failed to read subject model output {output_name}: {err}"))?;
 
-        let mut mask = postprocess(saliency, size, width, height);
+        let mut mask = postprocess(saliency, shape, size, width, height)
+            .map_err(|err| format!("invalid subject model output {output_name}: {err}"))?;
         if let Some(placeholder) = request.placeholder {
             constrain_to_placeholder(&mut mask, placeholder);
         }
@@ -258,17 +275,48 @@ fn preprocess(image: &RgbaImage, spec: ModelSpec) -> Vec<f32> {
 
 /// Min-max normalise the saliency map, threshold it, and resize to the original
 /// image dimensions.
-fn postprocess(saliency: &[f32], size: u32, width: u32, height: u32) -> GrayImage {
+fn postprocess(
+    saliency: &[f32],
+    shape: &[i64],
+    size: u32,
+    width: u32,
+    height: u32,
+) -> Result<GrayImage, String> {
+    let spatial = i64::from(size);
+    let valid_shape = match shape {
+        [h, w] => *h == spatial && *w == spatial,
+        [n, h, w] => *n == 1 && *h == spatial && *w == spatial,
+        [n, c, h, w] => *n == 1 && *c == 1 && *h == spatial && *w == spatial,
+        _ => false,
+    };
+    let expected_len = (size as usize) * (size as usize);
+    if !valid_shape || saliency.len() != expected_len {
+        return Err(format!(
+            "saliency shape {shape:?} / length {} does not match a {size}x{size} single-channel map",
+            saliency.len()
+        ));
+    }
+    if let Some((index, value)) = saliency
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(format!(
+            "saliency contains non-finite value {value} at index {index}"
+        ));
+    }
+
     let mut lo = f32::INFINITY;
     let mut hi = f32::NEG_INFINITY;
-    for &v in saliency.iter().take((size * size) as usize) {
+    for &v in saliency {
         lo = lo.min(v);
         hi = hi.max(v);
     }
     let span = (hi - lo).max(f32::EPSILON);
     let mut small = GrayImage::from_pixel(size, size, Luma([MASK_OFF]));
     for (i, pixel) in small.pixels_mut().enumerate() {
-        let v = saliency.get(i).copied().unwrap_or(lo);
+        let v = saliency[i];
         let norm = ((v - lo) / span * 255.0).round().clamp(0.0, 255.0) as u8;
         pixel.0[0] = if norm >= FOREGROUND_CUTOFF {
             MASK_ON
@@ -276,7 +324,12 @@ fn postprocess(saliency: &[f32], size: u32, width: u32, height: u32) -> GrayImag
             MASK_OFF
         };
     }
-    image::imageops::resize(&small, width, height, FilterType::Triangle)
+    Ok(image::imageops::resize(
+        &small,
+        width,
+        height,
+        FilterType::Triangle,
+    ))
 }
 
 pub(super) fn constrain_to_placeholder(mask: &mut GrayImage, placeholder: &GrayImage) {
@@ -324,19 +377,41 @@ pub(super) fn coverage(mask: &GrayImage) -> f64 {
 }
 
 /// Try to build a model-backed segmenter for `mode`, preferring the highest
-/// quality wired model whose weight resolves; `None` when none do (the caller
-/// then uses the builtin CPU fallback). `auto_person` prefers the
-/// human-segmentation net before the generic salient models; other modes use
-/// the generic priority.
-pub(super) fn model_segmenter_for_mode(mode: AutoMode) -> Option<ModelSegmenter> {
+/// quality wired model whose weight resolves. Failures for higher-priority
+/// candidates are returned alongside a lower-priority success so the caller
+/// can report why that model ran; when every candidate fails, the full reason
+/// reaches the builtin CPU fallback instead of being silently discarded.
+pub(super) fn model_segmenter_for_mode(
+    mode: AutoMode,
+    device_request: OnnxDeviceRequest,
+) -> Result<(ModelSegmenter, Option<String>), String> {
+    let mut fallback_reasons = Vec::new();
     for spec in priority_for(mode) {
-        if let Some(path) = resolve_weight(spec) {
-            if let Ok(segmenter) = ModelSegmenter::load(&path, *spec) {
-                return Some(segmenter);
+        match resolve_weight(spec) {
+            Some(path) => match ModelSegmenter::load(&path, *spec, device_request) {
+                Ok(segmenter) => {
+                    let fallback_reason =
+                        (!fallback_reasons.is_empty()).then(|| fallback_reasons.join("; "));
+                    return Ok((segmenter, fallback_reason));
+                }
+                Err(err) => fallback_reasons.push(format!(
+                    "could not load {} segmentation model {}: {err}",
+                    spec.provider,
+                    path.display()
+                )),
+            },
+            None => {
+                fallback_reasons.push(format!(
+                    "{} segmentation weight {} was not resolved",
+                    spec.provider, spec.file_name
+                ));
             }
         }
     }
-    None
+    Err(format!(
+        "no usable ONNX segmentation model: {}",
+        fallback_reasons.join("; ")
+    ))
 }
 
 /// The wired-model priority list for an auto mode: `auto_person` leads with the
@@ -384,10 +459,25 @@ mod tests {
         // 2x2 saliency: top row high, bottom row low. Min-max normalise puts the
         // high cells at 255 (kept) and low at 0 (dropped); resize to 4x4.
         let saliency = vec![0.9, 0.95, 0.0, 0.05];
-        let mask = postprocess(&saliency, 2, 4, 4);
+        let mask = postprocess(&saliency, &[1, 1, 2, 2], 2, 4, 4).unwrap();
         assert_eq!(mask.dimensions(), (4, 4));
         assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
         assert_eq!(mask.get_pixel(0, 3).0[0], MASK_OFF);
+    }
+
+    #[test]
+    fn postprocess_rejects_wrong_shapes_lengths_and_non_finite_values() {
+        assert!(postprocess(&[0.0; 4], &[1, 2, 2, 1], 2, 2, 2)
+            .unwrap_err()
+            .contains("shape"));
+        assert!(postprocess(&[0.0; 3], &[1, 1, 2, 2], 2, 2, 2)
+            .unwrap_err()
+            .contains("length"));
+        assert!(
+            postprocess(&[0.0, f32::NAN, 0.0, 0.0], &[1, 1, 2, 2], 2, 2, 2)
+                .unwrap_err()
+                .contains("non-finite")
+        );
     }
 
     #[test]
@@ -399,6 +489,25 @@ mod tests {
         std::env::remove_var(U2NETP.env_var);
     }
 
+    #[test]
+    fn missing_model_candidates_return_the_full_fallback_reason() {
+        if priority_for(AutoMode::Subject)
+            .iter()
+            .any(|spec| resolve_weight(spec).is_some())
+        {
+            eprintln!("skipping missing-model reason assertion: a subject weight is present");
+            return;
+        }
+        let reason = match model_segmenter_for_mode(AutoMode::Subject, OnnxDeviceRequest::Gpu) {
+            Ok(_) => panic!("missing model weights must not produce a model segmenter"),
+            Err(reason) => reason,
+        };
+        assert!(reason.contains(BIREFNET.provider), "reason={reason}");
+        assert!(reason.contains(BIREFNET.file_name), "reason={reason}");
+        assert!(reason.contains(U2NETP.provider), "reason={reason}");
+        assert!(reason.contains(U2NETP.file_name), "reason={reason}");
+    }
+
     /// End-to-end real inference for a given model, only when its weight is
     /// resolvable. Skipped otherwise so CI without the weight still passes.
     fn inference_smoke(spec: ModelSpec) {
@@ -406,7 +515,8 @@ mod tests {
             eprintln!("skipping {}: no weight resolvable", spec.provider);
             return;
         };
-        let segmenter = ModelSegmenter::load(&path, spec).expect("load model");
+        let segmenter =
+            ModelSegmenter::load(&path, spec, OnnxDeviceRequest::Auto).expect("load model");
         assert_eq!(segmenter.provider(), spec.provider);
         // Grey scene with a bright centred block -> non-empty saliency.
         let mut image = RgbaImage::from_pixel(64, 64, image::Rgba([120, 120, 120, 255]));
@@ -476,11 +586,15 @@ mod tests {
             eprintln!("skipping warm-pool reuse: no u2netp weight resolvable");
             return;
         };
-        let first = ModelSegmenter::load(&path, U2NETP).expect("load first");
-        let second = ModelSegmenter::load(&path, U2NETP).expect("load second");
+        let first =
+            ModelSegmenter::load(&path, U2NETP, OnnxDeviceRequest::Cpu).expect("load first");
+        let second =
+            ModelSegmenter::load(&path, U2NETP, OnnxDeviceRequest::Auto).expect("load second");
         assert!(
-            std::sync::Arc::ptr_eq(&first.session, &second.session),
-            "the same weight path must hand back the same warm session"
+            first.session.shares_session_with(&second.session),
+            "requests that resolve to CPU must share the same warm session"
         );
+        assert!(first.session.resolution().fallback_reason.is_none());
+        assert!(second.session.resolution().fallback_reason.is_some());
     }
 }

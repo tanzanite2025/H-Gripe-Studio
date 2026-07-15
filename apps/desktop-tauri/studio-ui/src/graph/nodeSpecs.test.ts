@@ -91,6 +91,22 @@ describe("nodeSpecs executor tagging", () => {
     });
   });
 
+  it("uses the vendor-neutral ONNX device choices on every visible native card", () => {
+    for (const kind of [
+      "subjectMask",
+      "matchLightColor",
+      "refineMaskEdge",
+      "detailWatchdog",
+    ] as const) {
+      const device = NODE_SPECS[kind].params.find((param) => param.key === "device");
+      expect(device, kind).toMatchObject({
+        control: "select",
+        options: ["auto", "gpu", "cpu"],
+        defaultValue: "auto",
+      });
+    }
+  });
+
   it("groups the palette by production category, in flow order", () => {
     expect(paletteGroups().map((g) => g.category)).toEqual([
       "source",

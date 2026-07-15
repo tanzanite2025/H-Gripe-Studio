@@ -6,8 +6,11 @@ use serde_json::Value;
 
 use super::document::json_f32;
 use super::{MASK_OFF, MASK_ON, SELECTED_THRESHOLD};
+use crate::studio::onnx_pool::OnnxDeviceRequest;
 use crate::studio::subject_sam2::Sam2Variant;
-use crate::studio::subject_segment::{segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest};
+use crate::studio::subject_segment::{
+    select_segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest,
+};
 
 /// Fill a marquee `rect` / `ellipse` region (`[x1, y1, x2, y2]` image-space).
 pub(super) fn fill_marquee(mask: &mut GrayImage, kind: &str, region: &[f64]) {
@@ -670,14 +673,18 @@ pub(super) fn healing_brush_region(
 /// constraint plus a positive point prompt at its centre — and union the
 /// segmented object into the mask. Needs the real image, so it has no proxy
 /// preview (render lane).
-pub(super) fn object_select_region(image: &RgbaImage, mask: &mut GrayImage, region: &[f64]) {
+pub(super) fn object_select_region(
+    image: &RgbaImage,
+    mask: &mut GrayImage,
+    region: &[f64],
+) -> Result<super::StageTelemetry, String> {
     let (w, h) = image.dimensions();
     let x1 = region[0].min(region[2]).max(0.0) as u32;
     let y1 = region[1].min(region[3]).max(0.0) as u32;
     let x2 = (region[0].max(region[2]) as u32).min(w.saturating_sub(1));
     let y2 = (region[1].max(region[3]) as u32).min(h.saturating_sub(1));
     if x2 <= x1 || y2 <= y1 {
-        return;
+        return Err("Object Select region is empty or outside the image".to_string());
     }
     let mut placeholder = GrayImage::new(w, h);
     for y in y1..=y2 {
@@ -690,19 +697,26 @@ pub(super) fn object_select_region(image: &RgbaImage, mask: &mut GrayImage, regi
         y: y1 + (y2 - y1) / 2,
         positive: true,
     }];
-    let segmenter = segmenter_for_mode(AutoMode::Subject, &points, Sam2Variant::default());
-    let Ok(result) = segmenter.segment(&SegmentRequest {
+    let device_request = OnnxDeviceRequest::Cpu;
+    let selection = select_segmenter_for_mode(
+        AutoMode::Subject,
+        &points,
+        Sam2Variant::default(),
+        device_request,
+    );
+    let request = SegmentRequest {
         image,
         mode: AutoMode::Subject,
         placeholder: Some(&placeholder),
         prompt: None,
         points: &points,
-    }) else {
-        return;
     };
+    let (result, telemetry) =
+        super::run_auto_segment_with_fallback(selection, &request, device_request)?;
     for (m, s) in mask.pixels_mut().zip(result.mask.pixels()) {
         m.0[0] = m.0[0].max(s.0[0]);
     }
+    Ok(telemetry)
 }
 
 /// Remove (PS J flyout, on a mask): the stroke points seed the segmentation
@@ -714,7 +728,7 @@ pub(super) fn remove_region(
     mask: &mut GrayImage,
     points: &[(f32, f32)],
     radius: u32,
-) {
+) -> Result<super::StageTelemetry, String> {
     let (w, h) = image.dimensions();
     let prompts: Vec<PointPrompt> = points
         .iter()
@@ -726,9 +740,9 @@ pub(super) fn remove_region(
         })
         .collect();
     if prompts.is_empty() {
-        return;
+        return Err("Remove has no seed inside the image".to_string());
     }
-    let pad = 4 * radius;
+    let pad = radius.saturating_mul(4);
     let x1 = prompts
         .iter()
         .map(|p| p.x)
@@ -741,27 +755,46 @@ pub(super) fn remove_region(
         .min()
         .unwrap_or(0)
         .saturating_sub(pad);
-    let x2 = (prompts.iter().map(|p| p.x).max().unwrap_or(0) + pad).min(w.saturating_sub(1));
-    let y2 = (prompts.iter().map(|p| p.y).max().unwrap_or(0) + pad).min(h.saturating_sub(1));
+    let x2 = prompts
+        .iter()
+        .map(|p| p.x)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(pad)
+        .min(w.saturating_sub(1));
+    let y2 = prompts
+        .iter()
+        .map(|p| p.y)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(pad)
+        .min(h.saturating_sub(1));
     let mut placeholder = GrayImage::new(w, h);
     for y in y1..=y2 {
         for x in x1..=x2 {
             placeholder.put_pixel(x, y, Luma([MASK_ON]));
         }
     }
-    let segmenter = segmenter_for_mode(AutoMode::Subject, &prompts, Sam2Variant::default());
-    let Ok(result) = segmenter.segment(&SegmentRequest {
+    let device_request = OnnxDeviceRequest::Cpu;
+    let selection = select_segmenter_for_mode(
+        AutoMode::Subject,
+        &prompts,
+        Sam2Variant::default(),
+        device_request,
+    );
+    let request = SegmentRequest {
         image,
         mode: AutoMode::Subject,
         placeholder: Some(&placeholder),
         prompt: None,
         points: &prompts,
-    }) else {
-        return;
     };
+    let (result, telemetry) =
+        super::run_auto_segment_with_fallback(selection, &request, device_request)?;
     for (m, s) in mask.pixels_mut().zip(result.mask.pixels()) {
         m.0[0] = m.0[0].min(MASK_ON - s.0[0]);
     }
+    Ok(telemetry)
 }
 
 /// Content-aware move (PS J flyout, on a mask): the lassoed polygon's values

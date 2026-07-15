@@ -3,11 +3,14 @@
 //! `exec.rs` walks the topological order and `.await`s each node in turn, so
 //! the GPU has historically been serialised *by accident* — nothing declared
 //! that only one heavy job may touch the device at a time. This module makes
-//! that policy **explicit** (see `docs/cards/editor-resource-model.md`
+//! that policy **explicit** (see `docs/design/editor-resource-model.md`
 //! § "Concurrency policy"): every node kind is classified into a
-//! [`JobCategory`], and a process-wide [`StudioScheduler`] hands out permits so
-//! GPU work is gated by a `Semaphore(1)` while CPU-bound work may fan out on a
-//! bounded pool.
+//! baseline [`JobCategory`], then parameter-visible ONNX requests are resolved
+//! into conservative provider candidates. Only a candidate that the current
+//! runtime resolver considers accelerated enters the GPU lane. This preflight is
+//! advisory: graph nodes do not carry resolved inputs, model availability, or
+//! session fallback state. The shared session resolution, its internal gate,
+//! and per-stage reports remain the execution truth.
 //!
 //! This is the *skeleton* half of staged-rollout step 2: the run loop still
 //! executes nodes sequentially, so acquiring a permit around a node does not
@@ -20,7 +23,9 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
+use super::graph::{studio_value_to_string, StudioGraphNode};
 use super::node_registry::node_class;
+use super::onnx_pool::{resolve_provider, OnnxDeviceRequest};
 
 /// The resource lane a node's work runs in. Distinct from
 /// [`StudioExecutor`](super::exec::StudioExecutor) (which decides *who* runs the
@@ -35,7 +40,8 @@ pub(crate) enum JobCategory {
     /// CPU-bound native or `python/bridge` work (geometry, PSD, matting CLIs).
     /// May run in parallel up to a bounded pool.
     CpuBound,
-    /// Local GPU / model inference (native ONNX). Serialised to one at a time.
+    /// A conservative local-GPU candidate. This lane is scheduling advice, not
+    /// proof that inference actually used an accelerator.
     Gpu,
     /// Video encode (assemble / trim through the vendored libav encoder).
     /// Serialised to one at a time — encoders are memory-heavy and an encode
@@ -55,8 +61,73 @@ pub(crate) fn category_for_kind(kind: &str) -> Option<JobCategory> {
     node_class(kind).map(|class| class.category)
 }
 
-/// The number of concurrent jobs allowed in a lane, given the CPU pool size.
-/// `Gpu` is always 1 (the `Semaphore(1)` policy); light and network work are
+fn device_request_param(node: &StudioGraphNode) -> OnnxDeviceRequest {
+    OnnxDeviceRequest::from_param(&studio_value_to_string(node.params.get("device")))
+}
+
+fn engine_param_is(node: &StudioGraphNode, expected: &str) -> bool {
+    studio_value_to_string(node.params.get("engine"))
+        .trim()
+        .eq_ignore_ascii_case(expected)
+}
+
+/// Return the request a node may hand to ONNX inference, based only on params
+/// visible before execution. This is deliberately conservative:
+///
+/// - `subjectMask` may receive `edit_paths.matte_strokes` through resolved
+///   inputs, but [`StudioGraphNode`] contains params only. Its device request is
+///   therefore always sent through candidate resolution, even for a manual mode.
+/// - Crop auto-subject and Smart Layer Split call the shared segmenter with an
+///   explicit CPU request, so their candidate is always CPU.
+///
+/// The returned request is not an actual provider resolution. Session creation
+/// and per-stage reports own that truth.
+fn onnx_candidate_request(node: &StudioGraphNode) -> Option<OnnxDeviceRequest> {
+    match node.kind.as_str() {
+        "matchLightColor" if engine_param_is(node, "onnx_harmonize") => {
+            Some(device_request_param(node))
+        }
+        "refineMaskEdge" if engine_param_is(node, "onnx_matting") => {
+            Some(device_request_param(node))
+        }
+        "detailWatchdog" if engine_param_is(node, "onnx_defect") => {
+            Some(device_request_param(node))
+        }
+        "subjectMask" => Some(device_request_param(node)),
+        "crop"
+            if studio_value_to_string(node.params.get("mode"))
+                .trim()
+                .eq_ignore_ascii_case("auto_subject") =>
+        {
+            Some(OnnxDeviceRequest::Cpu)
+        }
+        "smartLayerSplit" => Some(OnnxDeviceRequest::Cpu),
+        _ => None,
+    }
+}
+
+fn resolved_candidate_category(base: JobCategory, accelerated_candidate: bool) -> JobCategory {
+    if accelerated_candidate {
+        JobCategory::Gpu
+    } else {
+        base
+    }
+}
+
+/// Conservatively classify a concrete node from a pre-execution provider
+/// candidate. `Gpu` means the current runtime resolver found an accelerated
+/// candidate, not that the later session necessarily used it. The warm session's
+/// provider resolution and per-stage report record actual use and fallback.
+pub(crate) fn category_for_node(node: &StudioGraphNode) -> Option<JobCategory> {
+    let base = category_for_kind(node.kind.as_str())?;
+    let accelerated_candidate = onnx_candidate_request(node)
+        .map(resolve_provider)
+        .is_some_and(|resolution| resolution.accelerated());
+    Some(resolved_candidate_category(base, accelerated_candidate))
+}
+
+/// The initial number of concurrent jobs allowed in a lane, given the CPU pool
+/// size. `Gpu` starts at 1 but may be resized later; light and network work are
 /// not locally gated.
 pub(crate) fn concurrency_limit(category: JobCategory, cpu_pool: usize) -> usize {
     match category {
@@ -78,9 +149,9 @@ fn default_cpu_pool() -> usize {
 /// on purpose: the lane exists to keep the device responsive, not to fan out.
 pub(crate) const MAX_GPU_JOBS: usize = 4;
 
-/// Process-wide gate for Studio compute lanes. Held as Tauri managed state so a
-/// full graph Run and (later) preview jobs contend on the *same* GPU permit
-/// rather than fighting the device independently.
+/// Process-wide advisory gate for Studio compute lanes. The ONNX warm pool also
+/// owns an independent, global single-slot accelerator gate that covers direct
+/// commands and hidden editor paths. Its width is not changed by this scheduler.
 pub(crate) struct StudioScheduler {
     gpu: Arc<Semaphore>,
     /// Current GPU lane width. Guards resizes so concurrent `set_gpu_limit`
@@ -156,9 +227,10 @@ impl StudioScheduler {
     }
 }
 
-/// Resize the GPU lane (GPU_DEVICE_STRATEGY_PLAN long-term step 5, "max
-/// concurrent GPU jobs"). Clamped to `1..=MAX_GPU_JOBS`; returns the applied
-/// width so the settings surface can reflect the clamp.
+/// Resize the advisory GPU lane (GPU_DEVICE_STRATEGY_PLAN long-term step 5,
+/// "max concurrent GPU jobs"). Clamped to `1..=MAX_GPU_JOBS`; returns the
+/// applied width so the settings surface can reflect the clamp. This does not
+/// resize the ONNX warm pool's independent single-slot accelerator gate.
 #[tauri::command]
 pub(crate) async fn set_gpu_max_jobs(
     scheduler: tauri::State<'_, StudioScheduler>,
@@ -176,6 +248,19 @@ impl Default for StudioScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{json, Value};
+    use std::collections::BTreeMap;
+
+    fn node(kind: &str, params: &[(&str, Value)]) -> StudioGraphNode {
+        StudioGraphNode {
+            id: "n".to_string(),
+            kind: kind.to_string(),
+            params: params
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), value.clone()))
+                .collect::<BTreeMap<_, _>>(),
+        }
+    }
 
     #[test]
     fn category_mirrors_executor_split() {
@@ -196,8 +281,9 @@ mod tests {
         // Video encodes hold their own single-slot lane, not the GPU permit.
         assert_eq!(category_for_kind("videoAssemble"), Some(VideoEncode));
         assert_eq!(category_for_kind("videoTrim"), Some(VideoEncode));
-        // Native compute splits: ONNX matte on the GPU, crop is CPU geometry.
-        assert_eq!(category_for_kind("subjectMask"), Some(Gpu));
+        // Native compute starts from a CPU baseline; concrete-node scheduling
+        // may promote an accelerated pre-execution ONNX candidate.
+        assert_eq!(category_for_kind("subjectMask"), Some(CpuBound));
         assert_eq!(category_for_kind("crop"), Some(CpuBound));
         assert_eq!(category_for_kind("smartLayerSplit"), Some(CpuBound));
         // Broker / hybrid calls are network-bound, not GPU.
@@ -206,6 +292,115 @@ mod tests {
         assert_eq!(category_for_kind("promptOptimize"), Some(Network));
         // Unknown kinds stay unclassified (single gate, like the executor map).
         assert_eq!(category_for_kind("nope"), None);
+    }
+
+    #[test]
+    fn onnx_candidate_requests_follow_each_nodes_parameter_path() {
+        use JobCategory::CpuBound;
+        use OnnxDeviceRequest::*;
+
+        for (raw, expected) in [
+            ("", Auto),
+            ("cpu", Cpu),
+            ("cuda", Cuda),
+            ("directml", DirectMl),
+            ("gpu", Gpu),
+        ] {
+            let candidate = node(
+                "matchLightColor",
+                &[("engine", json!("onnx_harmonize")), ("device", json!(raw))],
+            );
+            assert_eq!(onnx_candidate_request(&candidate), Some(expected), "{raw}");
+            assert_eq!(category_for_node(&candidate), Some(CpuBound), "{raw}");
+        }
+
+        let refine = node(
+            "refineMaskEdge",
+            &[
+                ("engine", json!("ONNX_MATTING")),
+                ("device", json!("directml")),
+            ],
+        );
+        assert_eq!(onnx_candidate_request(&refine), Some(DirectMl));
+        assert_eq!(category_for_node(&refine), Some(CpuBound));
+
+        let watchdog = node(
+            "detailWatchdog",
+            &[("engine", json!("onnx_defect")), ("device", json!("gpu"))],
+        );
+        assert_eq!(onnx_candidate_request(&watchdog), Some(Gpu));
+        assert_eq!(category_for_node(&watchdog), Some(CpuBound));
+
+        for (kind, engine) in [
+            ("matchLightColor", "cpu"),
+            ("refineMaskEdge", "cpu"),
+            ("detailWatchdog", "rules"),
+        ] {
+            assert_eq!(
+                onnx_candidate_request(&node(kind, &[("engine", json!(engine))])),
+                None,
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn subject_mask_is_conservative_because_resolved_edit_paths_are_not_visible() {
+        use JobCategory::CpuBound;
+        use OnnxDeviceRequest::{Auto, Cpu, Cuda};
+
+        let manual_default = node("subjectMask", &[("mode", json!("manual_brush"))]);
+        assert_eq!(onnx_candidate_request(&manual_default), Some(Auto));
+        assert_eq!(category_for_node(&manual_default), Some(CpuBound));
+
+        let manual_cuda = node(
+            "subjectMask",
+            &[
+                ("mode", json!("manual_brush")),
+                ("alpha_matting", json!(false)),
+                ("device", json!("cuda")),
+            ],
+        );
+        assert_eq!(onnx_candidate_request(&manual_cuda), Some(Cuda));
+        assert_eq!(category_for_node(&manual_cuda), Some(CpuBound));
+
+        let manual_cpu = node(
+            "subjectMask",
+            &[
+                ("mode", json!("manual_brush")),
+                ("alpha_matting", json!(false)),
+                ("device", json!("cpu")),
+            ],
+        );
+        assert_eq!(onnx_candidate_request(&manual_cpu), Some(Cpu));
+        assert_eq!(category_for_node(&manual_cpu), Some(CpuBound));
+    }
+
+    #[test]
+    fn fixed_cpu_and_non_onnx_paths_keep_the_cpu_baseline() {
+        use JobCategory::CpuBound;
+        use OnnxDeviceRequest::Cpu;
+
+        let auto_crop = node("crop", &[("mode", json!("auto_subject"))]);
+        assert_eq!(onnx_candidate_request(&auto_crop), Some(Cpu));
+        assert_eq!(category_for_node(&auto_crop), Some(CpuBound));
+
+        let manual_crop = node("crop", &[("mode", json!("manual"))]);
+        assert_eq!(onnx_candidate_request(&manual_crop), None);
+        assert_eq!(category_for_node(&manual_crop), Some(CpuBound));
+
+        let split = node("smartLayerSplit", &[]);
+        assert_eq!(onnx_candidate_request(&split), Some(Cpu));
+        assert_eq!(category_for_node(&split), Some(CpuBound));
+        assert_eq!(onnx_candidate_request(&node("imageEnhance", &[])), None);
+    }
+
+    #[test]
+    fn resolved_candidate_category_promotes_only_an_accelerated_candidate() {
+        use JobCategory::{CpuBound, Gpu};
+
+        assert_eq!(resolved_candidate_category(CpuBound, true), Gpu);
+        assert_eq!(resolved_candidate_category(CpuBound, false), CpuBound);
     }
 
     #[test]

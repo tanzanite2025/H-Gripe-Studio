@@ -375,14 +375,30 @@ build-time runtime downloads remain forbidden.
   build-time download or arbitrary system runtime fallback is allowed.
 - **Capability probing:** the `probe_engines` Tauri command reports the native
   `onnx_matting`, `onnx_defect`, and `onnx_harmonize` weight/runtime status plus
-  their always-on baselines. The Inspector does not yet consume that report to
-  disable a missing engine choice.
+  their always-on baselines. Runtime diagnostics now distinguish the selected
+  runtime flavor, packaged providers, and providers usable after DLL loading;
+  obsolete Python/Torch/CUDA probe fields are removed. The Inspector does not
+  yet consume that report to disable a missing engine choice.
 - **Device reporting:** native ONNX reports preserve `auto | cpu | gpu` and
   legacy/provider-specific `cuda | directml` requests, then record the actual
   provider device. The current ORT package has the CPU provider only, so every
   accelerated request resolves truthfully to CPU with a reason. Later Windows
   work must add NVIDIA CUDA and AMD/Intel DirectML before reporting
   acceleration; ROCm is not a Windows target.
+- **Provider/session architecture:** provider resolution runs before session
+  creation. The warm-pool key includes model path, runtime flavor, actual
+  provider, and device id; SAM2 encoder/decoder use one provider plan. The graph
+  scheduler runs a conservative, advisory provider preflight from visible params;
+  it is not the later session result. Subject Mask always enters that candidate
+  resolution because its matting strokes arrive through resolved inputs; Crop
+  auto-subject and Smart Layer Split remain explicit CPU candidates. The current
+  CPU flavor keeps every request in `CpuBound`. Shared-session resolution, its
+  process-wide single-slot accelerator gate, and per-stage reports are the
+  execution truth.
+- **Concurrency boundary:** the ONNX accelerator gate is currently global and
+  single-slot, independent of the scheduler's configurable GPU limit. That is a
+  safe CPU-era boundary, but the two policies must be aligned before the first
+  CUDA or DirectML runtime ships.
 - **Model management:** `get_model_paths` / `set_model_paths` persist per-engine
   weight overrides and the shared cache in `model_paths.json`; real process env
   values still win. The old Dashboard panel is gone, pending a settings and
@@ -403,9 +419,11 @@ build-time runtime downloads remain forbidden.
    contract are concrete; provider repaint remains the fallback.
 3. Extend Detail Watchdog with trained hands/logo coverage while retaining the
    additive rules result.
-4. Add Windows ORT acceleration as a separate provider block: NVIDIA CUDA and
-   AMD/Intel DirectML, each with locked binaries, provider-aware session keys,
-   fallback reports, packaging, and real hardware evidence.
+4. Add actual Windows ORT runtime flavors: NVIDIA CUDA and AMD/Intel DirectML,
+   each with locked binaries, strict provider registration, CPU retry/fallback,
+   packaging, and real hardware evidence. Provider-aware session keys,
+   cross-model gating, and conservative candidate scheduling are in place; align
+   the scheduler limit with the ONNX single-slot gate before either runtime ships.
 
 Native `onnx_matting`, `onnx_defect`, and `onnx_harmonize` blocks now have
 weight-gated inference paths. PCT-Net release bundling remains intentionally

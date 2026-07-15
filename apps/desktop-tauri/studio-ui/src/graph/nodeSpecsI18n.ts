@@ -369,6 +369,10 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         label: "SAM 2 型号",
         hint: "点提示使用的 SAM 2 模型规格——越大越慢但边缘越干净；缺少权重时回退到 tiny（用 scripts/fetch-sam2 下载各型号）",
       },
+      device: {
+        label: "设备",
+        hint: "自动分割与 ViTMatte 的计算请求：auto | gpu | cpu。当前 ONNX Runtime 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入",
+      },
       wand_tolerance: { label: "魔棒容差", hint: "魔棒漫水选择的颜色距离" },
       grow_px: { label: "扩张 / 收缩 px", hint: "正值膨胀蒙版，负值腐蚀蒙版" },
       fill_holes: { label: "填洞", hint: "羽化前封闭内部封闭空隙" },
@@ -417,7 +421,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       },
       device: {
         label: "设备",
-        hint: "onnx_matting 抠像的计算设备：auto（有 CUDA 用 CUDA，否则 CPU）| cpu | cuda（无加速器时回落 CPU）；cpu 启发式忽略此项",
+        hint: "原生 ViTMatte 的计算请求：auto | gpu | cpu。当前 ONNX Runtime 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入。cpu 启发式忽略此项",
       },
       erode_px: { label: "腐蚀 px", hint: "向内收边以去除白边" },
       dilate_px: { label: "膨胀 px", hint: "向外扩张蒙版" },
@@ -499,7 +503,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       },
       device: {
         label: "设备",
-        hint: "onnx_defect 的计算设备：当前 Windows ORT 仅 CPU；gpu 为后续 CUDA/DirectML 共用请求，gpu/cuda 当前会报告 CPU 回退；rules 层忽略此项",
+        hint: "onnx_defect 的计算请求：auto | gpu | cpu。当前 Windows ORT 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入。rules 层忽略此项",
       },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: { label: "输出名", hint: "问题叠加 PNG 的基础名（空 = <image>_issues）" },

@@ -8,9 +8,8 @@
 //! The registry is a shared source of diagnostic truth, not a scheduler: it
 //! does not force kernels onto one API and it never overrides per-run
 //! `DeviceReport`s, which stay the source of truth for what actually ran.
-//! Assembling a snapshot is side-effect free with one deliberate exception:
-//! probing the grade kernel initialises the process-wide grader once
-//! (cached either way, same as the capability summary); the viewport
+//! Assembling a snapshot initialises the process-wide grader and lazily loads
+//! the selected ORT runtime once (both cached either way); the viewport
 //! surface device is *never* initialised by a snapshot (`surface_device_status`
 //! reads the cached state only, preserving the lazy-init startup guard).
 
@@ -84,6 +83,8 @@ pub(crate) struct DeviceRegistrySnapshot {
     /// itself. Records on the first import attempt; reads cached state only.
     pub d3d11_wgpu_interop: RegistryEntry,
     /// onnxruntime execution providers compiled into this build.
+    pub onnx_runtime: RegistryEntry,
+    /// Providers usable for session construction after the runtime loaded.
     pub onnx_providers: Vec<String>,
 }
 
@@ -126,6 +127,29 @@ pub(crate) fn snapshot() -> DeviceRegistrySnapshot {
         Ok(records) => (records, None),
         Err(reason) => (Vec::new(), Some(reason)),
     };
+    let onnx = super::onnx_pool::onnx_runtime_status();
+    let packaged = onnx.packaged_providers.join(", ");
+    let usable = onnx.providers.join(", ");
+    let onnx_runtime = if onnx.installed {
+        RegistryEntry {
+            available: true,
+            detail: format!(
+                "ONNX Runtime {} ({}); packaged: {}; usable: {}",
+                onnx.version.as_deref().unwrap_or("unknown"),
+                onnx.runtime_flavor,
+                packaged,
+                usable
+            ),
+        }
+    } else {
+        RegistryEntry {
+            available: false,
+            detail: onnx
+                .reason
+                .clone()
+                .unwrap_or_else(|| "ONNX Runtime is not loadable".to_string()),
+        }
+    };
     DeviceRegistrySnapshot {
         adapters,
         adapters_error,
@@ -142,10 +166,8 @@ pub(crate) fn snapshot() -> DeviceRegistrySnapshot {
             super::video_engine::ffmpeg_d3d11va_capability(),
         ),
         d3d11_wgpu_interop: RegistryEntry::from_capability(d3d11_wgpu_interop_capability()),
-        onnx_providers: super::onnx_pool::compiled_providers()
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+        onnx_runtime,
+        onnx_providers: onnx.providers.into_iter().map(str::to_string).collect(),
     }
 }
 
@@ -172,10 +194,15 @@ mod tests {
             &snap.ffmpeg,
             &snap.ffmpeg_d3d11va,
             &snap.d3d11_wgpu_interop,
+            &snap.onnx_runtime,
         ] {
             assert!(!entry.detail.is_empty());
         }
-        assert!(!snap.onnx_providers.is_empty(), "cpu provider is always in");
+        if snap.onnx_runtime.available {
+            assert!(!snap.onnx_providers.is_empty());
+        } else {
+            assert!(snap.onnx_providers.is_empty());
+        }
     }
 
     #[test]

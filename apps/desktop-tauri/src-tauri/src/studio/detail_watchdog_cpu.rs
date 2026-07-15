@@ -953,6 +953,17 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.issue_type == "garbled_text"));
+
+        p.device_requested = "gpu".to_string();
+        let gpu_request = try_watch(&p).unwrap().expect("CPU-provider ONNX detector");
+        assert_eq!(gpu_request.watchdog_report.engine, "onnx_defect");
+        assert_eq!(gpu_request.watchdog_report.device.as_deref(), Some("cpu"));
+        assert!(gpu_request
+            .watchdog_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("GPU execution provider not built in"));
     }
 
     /// A flat image is globally blurry: low_resolution flagged and the red-box

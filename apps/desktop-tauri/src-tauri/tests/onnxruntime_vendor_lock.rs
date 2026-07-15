@@ -104,11 +104,26 @@ fn vendored_runtime_identity_hash_and_pe_arch_are_locked() {
         ORT_DLL_BYTES
     );
     assert_eq!(sha256(&dll), ORT_DLL_SHA256);
-    assert!(
-        !vendor
-            .join("win-x64/bin/onnxruntime_providers_shared.dll")
-            .exists(),
-        "unused provider support must arrive atomically with a real CUDA/DirectML integration"
+    let bin = vendor.join("win-x64/bin");
+    let mut dlls: Vec<String> = fs::read_dir(&bin)
+        .expect("runtime bin directory")
+        .map(|entry| entry.expect("runtime bin entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("dll"))
+        })
+        .map(|path| {
+            path.file_name()
+                .expect("DLL file name")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    dlls.sort();
+    assert_eq!(
+        dlls,
+        ["onnxruntime.dll"],
+        "the CPU runtime directory is an exact DLL allowlist; provider DLLs must arrive atomically with their runtime flavor"
     );
 
     let bytes = fs::read(&dll).expect("runtime DLL");

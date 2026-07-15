@@ -220,7 +220,12 @@ pub(crate) fn execute_studio_smart_layer_split(
 
     // Segment the subject with the shared stack: a model backend when its
     // weight resolves, else the deterministic builtin CPU fallback.
-    let segmenter = segmenter_for_mode(AutoMode::Subject, &[], Sam2Variant::default());
+    let segmenter = segmenter_for_mode(
+        AutoMode::Subject,
+        &[],
+        Sam2Variant::default(),
+        super::onnx_pool::OnnxDeviceRequest::Cpu,
+    );
     let provider = segmenter.provider().to_string();
     let segmented = segmenter.segment(&SegmentRequest {
         image: &srgb,

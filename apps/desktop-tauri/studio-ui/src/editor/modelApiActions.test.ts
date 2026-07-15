@@ -58,6 +58,7 @@ const deviceSnapshot: DeviceRegistrySnapshot = {
   ffmpeg: { available: true, detail: "software" },
   ffmpeg_hw_encoders: [],
   ffmpeg_hw_decoders: [],
+  onnx_runtime: { available: true, detail: "ONNX Runtime CPU" },
   onnx_providers: ["cpu"],
 };
 

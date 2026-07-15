@@ -1204,6 +1204,18 @@ mod tests {
             "PCT-Net returned a near-identity pixel {changed:?}"
         );
 
+        p.device_requested = "gpu".to_string();
+        p.output_name = Some("pctnet_gpu_request".to_string());
+        let gpu_request = try_match(&p).unwrap().expect("CPU-provider PCT-Net result");
+        assert_eq!(gpu_request.match_report.engine, "onnx_harmonize");
+        assert_eq!(gpu_request.match_report.device.as_deref(), Some("cpu"));
+        assert!(gpu_request
+            .match_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("GPU execution provider not built in"));
+
         p.mask_path = None;
         p.output_name = Some("pctnet_opaque_fallback".to_string());
         let fallback = try_match(&p).unwrap().expect("complete CPU fallback");

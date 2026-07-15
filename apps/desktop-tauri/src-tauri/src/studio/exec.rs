@@ -36,7 +36,7 @@ use super::run_cancel::{clear_studio_run_cancel, is_studio_run_cancelled, studio
 use super::run_events::{
     emit_studio_run_event, studio_graph_event, studio_node_event, StudioRunLogger,
 };
-use super::schedule::{category_for_kind, JobCategory, StudioScheduler};
+use super::schedule::{category_for_node, JobCategory, StudioScheduler};
 use super::subject_mask::execute_studio_subject_mask;
 use super::write_skip::studio_skippable_output_ports;
 
@@ -551,7 +551,7 @@ pub(crate) async fn run_studio_graph(
         // run loop is still sequential, so this can't change results — it makes
         // the (previously accidental) GPU serialisation explicit policy and is
         // the shared gate a parallel scheduler will contend on.
-        let category = category_for_kind(node.kind.as_str()).unwrap_or(JobCategory::CpuLight);
+        let category = category_for_node(node).unwrap_or(JobCategory::CpuLight);
         let _lane_permit = scheduler.acquire(category).await;
         // Outputs consumed exclusively by other in-process compute cards never
         // need a file on disk (the consumer loads them from the shared buffer),

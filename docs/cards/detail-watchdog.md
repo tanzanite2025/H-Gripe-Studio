@@ -34,7 +34,7 @@ missing, the node falls back to the rule-only report and records why
 | `mode` | enum | `balanced` | `strict` \| `balanced` \| `lenient` | Detection aggressiveness (thresholds below). |
 | `watch_targets` | csv | all | `face,hands,text,logo,product_edges` | Empty = all. `hands`/`text`/`logo` stay in `skipped_targets` unless an `engine` covers them. |
 | `engine` | enum | `rules` | `rules` \| `onnx_defect` | Detection engine. `rules` = built-in CPU rule layer (always on). `onnx_defect` = opt-in native ORT detector for hands/text/logo, falling back to the complete rules result when its runtime, weight, session or inference is unavailable. |
-| `device` | enum | `auto` | `auto` \| `cpu` \| `gpu` \| `cuda` | ORT provider request for `onnx_defect`. `gpu` stays vendor-neutral for future CUDA/DirectML selection. The current Windows runtime is CPU-only, so accelerated requests report the provider fallback. |
+| `device` | enum | `auto` | `auto` \| `gpu` \| `cpu` | Vendor-neutral ORT request for `onnx_defect`. Legacy `cuda` / `directml` workflow values remain accepted. The current Windows runtime is CPU-only, so accelerated requests bind the CPU session and report why. |
 | `output_dir` | path | run output dir | | Validated server-side. |
 | `output_name` | basename | `<image>_issues` | plain basename | Rejected if it contains `..` or a path separator (`reject_unsafe_output_name`). |
 
@@ -102,7 +102,8 @@ top of the rule layer), `backend_model` (the loaded weight file name, else
 ## Engine seam (opt-in ML detectors)
 
 The rule layer is the always-on baseline. Native `onnx_defect` reuses the
-process-wide ORT session pool and the managed model-path resolver. It accepts
+provider-aware process-wide ORT session pool and the managed model-path
+resolver. The resolved provider drives both the pool key and run report. It accepts
 one float32 RGB NCHW input, letterbox-resized to the model's fixed spatial
 shape (dynamic axes use 640), with optional ImageNet normalisation from the
 sidecar. It accepts either strict `boxes [N,4]` / `scores [N]` / integer

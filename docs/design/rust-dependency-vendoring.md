@@ -66,12 +66,13 @@ and a repository-wide search proves the old path has no callers. Do not equate
 documented product requirement justifies an explicit fork.
 
 The desktop `ort` dependency currently earns its place through native subject
-segmentation, Subject Mask ViTMatte, Refine Mask Edge `onnx_matting`, and Detail
-Watchdog `onnx_defect`. These paths share the warm session pool, managed model
-resolution and CPU-provider fallback reporting. The watchdog detector adds no
-Paddle, Python, Torch, OpenCV or second ONNX runtime dependency. Model weights
-and label sidecars are runtime artifacts and are not committed into
-`cargo-vendor`.
+segmentation, Subject Mask ViTMatte, Refine Mask Edge `onnx_matting`, Detail
+Watchdog `onnx_defect`, and Match Light & Color `onnx_harmonize`. These paths
+share managed model resolution and a provider-aware warm pool keyed by
+canonical model path, runtime flavor, actual provider, and device id. SAM2
+resolves its encoder and decoder as one provider group. The runtime adds no
+Paddle, Python, Torch, OpenCV or second ONNX dependency. Model weights and label
+sidecars are runtime artifacts and are not committed into `cargo-vendor`.
 
 The runtime boundary is now explicit: `ort` uses dynamic loading against the
 locked Windows x64 CPU runtime in `third_party/onnxruntime`, and its
@@ -82,9 +83,12 @@ undocumented machine installation or network access during build.
 This CPU payload is the current baseline, not a permanent feature ceiling. The
 provider-selection and device-request contract stays intact for later Windows
 NVIDIA/CUDA and AMD or Intel/DirectML stages; ROCm is not a Windows target.
-Provider-shared alone adds no capability, so each GPU stage must atomically add
-its shared and provider-specific binaries, registration path, locked payload,
-packaging contract, fallback behavior, and real-device tests.
+The CPU `win-x64/bin` directory is an exact DLL allowlist containing only
+`onnxruntime.dll`. Provider-shared alone adds no capability, so each GPU stage
+must atomically add its core/shared/provider/dependency binaries, registration
+path, locked payload, packaging contract, fallback behavior, and real-device
+tests. Official CUDA and DirectML packages carry different core DLLs and cannot
+be overlaid as one runtime flavor.
 
 ## Update procedure
 

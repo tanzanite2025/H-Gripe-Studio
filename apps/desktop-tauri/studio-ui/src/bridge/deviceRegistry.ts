@@ -3,8 +3,8 @@ import { tauriInvoke } from "./core";
 // --- Central device registry --------------------------------------------------
 // GPU_DEVICE_STRATEGY_PLAN step 13: one Rust-side snapshot of what compute
 // capability this box has — display adapters with their wgpu limits, the
-// compiled-in kernel backends, FFmpeg hardware codec names, and onnxruntime
-// execution providers. Diagnostics only: per-run DeviceReports remain the
+// compiled-in kernel backends, FFmpeg hardware codec names, and the selected
+// ONNX runtime's loadable providers. Diagnostics only: per-run DeviceReports remain the
 // source of truth for what actually ran.
 
 /** One enumerated display adapter with its key wgpu limits (mirrors Rust `AdapterRecord`). */
@@ -39,7 +39,9 @@ export interface DeviceRegistrySnapshot {
   ffmpeg_hw_encoders: string[];
   /** Hardware decoder names compiled into the vendored libav. */
   ffmpeg_hw_decoders: string[];
-  /** onnxruntime execution providers compiled into this build. */
+  /** Selected ONNX runtime payload and loadability. */
+  onnx_runtime: RegistryEntry;
+  /** ONNX execution providers usable after the runtime loaded. */
   onnx_providers: string[];
 }
 

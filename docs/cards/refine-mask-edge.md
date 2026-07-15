@@ -31,7 +31,7 @@ trimap/weight, session or inference failures fall back to the `cpu` baseline.
 | --- | --- | --- | --- | --- |
 | `preset` | enum | `natural` | `clean` \| `natural` \| `soft` \| `custom` | A named preset overrides the sliders below; `custom` uses them verbatim. |
 | `engine` | enum | `cpu` | `cpu` \| `onnx_matting` | The learned engine needs a trimap unknown band and a configured `vitmatte.onnx`; otherwise it reports the reason and runs `cpu`. |
-| `device` | enum | `auto` | `auto` \| `cpu` \| `cuda` | ORT provider request for `onnx_matting`. The current bundled runtime is CPU-only, so `auto`/`cuda` report the provider fallback. |
+| `device` | enum | `auto` | `auto` \| `gpu` \| `cpu` | Vendor-neutral ORT request for `onnx_matting`. Legacy `cuda` / `directml` workflow values remain accepted. The current runtime is CPU-only, so accelerated requests bind the CPU session and report why. |
 | `erode_px` | int | `1` | `>= 0` | Bite the fringe N px inward (Min filter). `custom` only. |
 | `dilate_px` | int | `0` | `>= 0` | Grow the matte N px outward (Max filter). `custom` only. |
 | `feather_px` | float | `4.0` | `>= 0` | Gaussian feather radius of the transition. `custom` only. |

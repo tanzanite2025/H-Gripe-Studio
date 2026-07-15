@@ -85,11 +85,12 @@ A best-effort preview of an op on a **downscaled proxy image** (or a single
 previous (debounce + abort). Must be **decoupled from the `inFlight` run lock**
 so previews never block — or get blocked by — a full Run.
 
-### 3. Render / Compute (heavy, full-resolution) — serial GPU queue + warm pool
+### 3. Render / Compute (heavy, full-resolution) — GPU candidate queue + warm pool
 Committed edits (the run-up-to-node that produces the bound result node), model
-inference, and **video export / encode**. GPU work is gated by a
-**`Semaphore(1)`** (one GPU job at a time); CPU-only geometry (crop / rotate /
-flip) may run on a `rayon` pool in parallel.
+inference, and **video export / encode**. The Studio scheduler pre-resolves
+parameter-visible ONNX requests and gates only an accelerated provider candidate;
+the current CPU runtime therefore keeps every ONNX candidate in the CPU lane.
+CPU-only geometry (crop / rotate / flip) may run on a `rayon` pool in parallel.
 
 ### 4. Media playback — Rust decode threads + frame cache
 Real-time video playback for the clip editor: dedicated decode thread(s), a
@@ -98,8 +99,15 @@ queue** so playback never stalls on an inference job (and vice-versa).
 
 ## Concurrency policy
 
-- **One GPU job at a time** (`Semaphore(1)`), shared across all compute. This is
-  made *explicit policy* rather than the current accidental serial behaviour.
+- **GPU candidate jobs are advisory.** `StudioScheduler` runs the current
+  provider resolver from node params before inputs, model availability, and
+  session fallback are known. An accelerated preflight candidate may take the
+  GPU lane, but that is not evidence that the later session actually used it.
+- **ONNX accelerated inference has an independent process-wide single-slot
+  gate** inside the shared session handle. It also covers direct commands and
+  hidden editor paths, and is not resized by the scheduler's configurable GPU
+  limit. The two limits must be aligned before the first CUDA or DirectML
+  runtime ships.
 - **CPU geometry + decode may parallelise** on a bounded thread pool.
 - **Preview is single-slot, latest-wins**; **render is a FIFO queue**;
   **playback owns its own threads**; **interactive never queues**.
@@ -128,9 +136,15 @@ too. This section is now a changelog of the rollout.
 2. ✅ **Rust orchestration skeleton** (PR #146) — the purely-serial `.await`
    loop in `exec.rs` is replaced by a lane scheduler carrying *(category,
    concurrency limit)* + a GPU `Semaphore(1)`; results stay deterministic.
-3. ✅ **ONNX warm pool** (PR #147) — `studio/onnx_pool.rs` caches `ort::Session`
-   in process-global managed state; `subject_model` / `subject_sam2` /
-   `subject_matte` reuse it, killing per-call model reload.
+3. ✅ **ONNX warm pool** (PR #147, provider-aware follow-up) -
+   `studio/onnx_pool.rs` caches `ort::Session` by canonical model path, runtime
+   flavor, actual provider, and device id. Subject models, SAM2, ViTMatte,
+   Watchdog, and PCT-Net reuse it; SAM2 resolves encoder/decoder as one provider
+   group. A process-wide single-slot accelerator gate also covers direct-command
+   paths. Graph scheduling sends visible requests through a conservative
+   pre-execution provider resolution; the CPU-only runtime keeps them in the CPU
+   lane. Shared-session resolution and per-stage reports remain the source of
+   truth for the provider that actually ran.
 4. ✅→❌ **torch long-lived Python worker** (PR #148) — `studio/torch_worker.rs`
    kept a torch worker alive for `image_enhance` (realesrgan) and
    `detail_repaint` (sd_inpaint). **Deleted in Phase 7 (#314)** together with

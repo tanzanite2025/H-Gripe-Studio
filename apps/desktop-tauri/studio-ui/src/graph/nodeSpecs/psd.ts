@@ -225,10 +225,10 @@ export const PSD_NODE_SPECS = {
         key: "device",
         label: "Device",
         control: "select",
-        options: ["auto", "cpu", "cuda"],
+        options: ["auto", "gpu", "cpu"],
         defaultValue: "auto",
         inline: true,
-        hint: "compute device for the onnx_matting matter: auto (cuda if present else cpu) | cpu | cuda (degrades to cpu without an accelerator); ignored by the cpu heuristic",
+        hint: "compute request for native ViTMatte: auto | gpu | cpu. The current ONNX Runtime path is CPU-only; CUDA and DirectML providers are planned. Ignored by the cpu heuristic",
         visibleWhen: { param: "engine", in: ["onnx_matting"] },
       },
       {

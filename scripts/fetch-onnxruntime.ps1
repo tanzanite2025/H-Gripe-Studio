@@ -84,11 +84,17 @@ try {
     Copy-Item -LiteralPath $runtimeSource -Destination (
         Join-Path $runtimeDestinationDir 'onnxruntime.dll') -Force
 
-    # The CPU runtime does not load this companion. Remove a stale copy from
-    # older snapshots so the maintained payload cannot imply GPU capability.
-    $unusedProvider = Join-Path $runtimeDestinationDir 'onnxruntime_providers_shared.dll'
-    if (Test-Path -LiteralPath $unusedProvider) {
-        Remove-Item -LiteralPath $unusedProvider -Force
+    # The CPU payload has an exact DLL allowlist. Remove every stale provider or
+    # dependency DLL from older snapshots so this directory cannot imply GPU
+    # capability without the corresponding locked runtime flavor.
+    Get-ChildItem -LiteralPath $runtimeDestinationDir -File -Filter '*.dll' |
+        Where-Object { $_.Name -ne 'onnxruntime.dll' } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+
+    $runtimeDlls = @(Get-ChildItem -LiteralPath $runtimeDestinationDir -File -Filter '*.dll' |
+            Select-Object -ExpandProperty Name)
+    if ($runtimeDlls.Count -ne 1 -or $runtimeDlls[0] -ne 'onnxruntime.dll') {
+        throw "CPU runtime DLL allowlist mismatch: $($runtimeDlls -join ', ')"
     }
 
     foreach ($name in $metadataNames) {

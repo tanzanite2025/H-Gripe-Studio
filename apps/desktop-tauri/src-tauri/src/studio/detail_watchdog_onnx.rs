@@ -15,7 +15,7 @@ use image::{imageops::FilterType, RgbaImage};
 use ort::value::{DynValue, Tensor, TensorElementType};
 use serde_json::Value;
 
-use super::onnx_pool::{cached_session, resolve_provider, OnnxDeviceRequest};
+use super::onnx_pool::{cached_session, OnnxDeviceRequest};
 use crate::contracts::QualityIssue;
 
 const MODEL_FILE: &str = "watchdog_defect.onnx";
@@ -124,8 +124,9 @@ pub(crate) fn detect(
         )
     })?;
     let sidecar = read_sidecar(&path);
-    let session = cached_session(&path)?;
-    let mut session = session
+    let device_request = OnnxDeviceRequest::from_param(device_requested);
+    let shared = cached_session(&path, device_request)?;
+    let mut session = shared
         .lock()
         .map_err(|_| "watchdog defect ONNX session poisoned".to_string())?;
 
@@ -203,7 +204,7 @@ pub(crate) fn detect(
         .filter(|target| TARGETS.contains(&target.as_str()) && watch.contains(*target))
         .cloned()
         .collect();
-    let resolution = resolve_provider(OnnxDeviceRequest::from_param(device_requested));
+    let resolution = shared.resolution().clone();
     let backend_model = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

@@ -223,7 +223,7 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
                 engine_fallback_reason =
                     Some("trimap has no unknown band for learned matting".to_string());
             }
-            Some(trimap) => match super::subject_matte::load_vitmatte() {
+            Some(trimap) => match super::subject_matte::load_vitmatte(device_request) {
                 Ok(matter) => match learned_band_source(
                     &matter,
                     &loaded.image,
@@ -236,9 +236,9 @@ pub(crate) fn try_refine(p: &CpuEdgeRefineParams) -> Result<Option<RefineEdgeRes
                             .model_path()
                             .file_name()
                             .map(|name| name.to_string_lossy().to_string());
-                        let resolution = super::onnx_pool::resolve_provider(device_request);
+                        let resolution = matter.onnx_resolution();
                         device = Some(resolution.device.to_string());
-                        engine_fallback_reason = resolution.fallback_reason;
+                        engine_fallback_reason = resolution.fallback_reason.clone();
                     }
                     Err(err) => {
                         engine_fallback_reason = Some(err);
@@ -960,6 +960,20 @@ mod tests {
         );
         assert!(Path::new(&result.refined_image).is_file());
         assert!(Path::new(&result.refined_mask).is_file());
+
+        p.device_requested = "gpu".to_string();
+        p.output_name = Some("vitmatte_gpu_request".to_string());
+        let gpu_request = try_refine(&p)
+            .unwrap()
+            .expect("CPU-provider ViTMatte refine");
+        assert_eq!(gpu_request.edge_report.engine, "onnx_matting");
+        assert_eq!(gpu_request.edge_report.device.as_deref(), Some("cpu"));
+        assert!(gpu_request
+            .edge_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("GPU execution provider not built in"));
     }
 
     /// Background blending marks the report and shifts edge-band colour toward

@@ -34,7 +34,7 @@ use ort::value::{Tensor, TensorElementType};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
-use super::onnx_pool::{cached_session, SharedSession};
+use super::onnx_pool::{cached_session, OnnxDeviceRequest, OnnxProviderResolution, SharedSession};
 use super::pixel_ops;
 use super::subject_model::resolve_model_file;
 
@@ -77,18 +77,38 @@ const GUIDED_EPS: f32 = 1e-4;
 pub(super) trait AlphaMatter {
     /// The id recorded in `matte_report` for the matting op.
     fn provider(&self) -> &str;
+    fn model_path(&self) -> Option<&Path> {
+        None
+    }
+    fn onnx_resolution(&self) -> Option<&OnnxProviderResolution> {
+        None
+    }
     /// Produce a full-resolution continuous-alpha matte from the image and its
     /// trimap (both at the original image size).
     fn matte(&self, image: &RgbaImage, trimap: &GrayImage) -> Result<GrayImage, String>;
 }
 
-/// Pick the alpha matter: ViTMatte when its weight resolves, else the
-/// deterministic builtin fallback so the feature always works.
-pub(super) fn matter() -> Box<dyn AlphaMatter> {
-    if let Ok(vitmatte) = load_vitmatte() {
-        return Box::new(vitmatte);
+/// The selected matting backend and the reason ViTMatte could not be selected,
+/// when the deterministic CPU implementation is the fallback.
+pub(super) struct MatterSelection {
+    pub(super) matter: Box<dyn AlphaMatter>,
+    pub(super) fallback_reason: Option<String>,
+}
+
+/// Pick the alpha matter: ViTMatte when its weight and session load, else the
+/// deterministic builtin fallback. The load error stays attached for stage
+/// telemetry instead of being discarded.
+pub(super) fn matter(device_request: OnnxDeviceRequest) -> MatterSelection {
+    match load_vitmatte(device_request) {
+        Ok(vitmatte) => MatterSelection {
+            matter: Box::new(vitmatte),
+            fallback_reason: None,
+        },
+        Err(reason) => MatterSelection {
+            matter: Box::new(BuiltinCpuMatter),
+            fallback_reason: Some(format!("{reason}; using deterministic builtin CPU matter")),
+        },
     }
-    Box::new(BuiltinCpuMatter)
 }
 
 /// Resolve the ViTMatte weight without creating an ORT session. Capability
@@ -131,13 +151,13 @@ pub(crate) fn resolve_vitmatte_model_path() -> Option<PathBuf> {
 /// Load ViTMatte without substituting the builtin matter. Callers that need to
 /// report whether the learned backend actually ran can own their fallback and
 /// preserve the resolution/session error in telemetry.
-pub(super) fn load_vitmatte() -> Result<VitMatteMatter, String> {
+pub(super) fn load_vitmatte(device_request: OnnxDeviceRequest) -> Result<VitMatteMatter, String> {
     let path = resolve_vitmatte_model_path().ok_or_else(|| {
         format!(
             "ViTMatte model not found; configure {MODEL_ENGINE}, set {MODEL_ENV}, or install resources/models/{MODEL_FILE}"
         )
     })?;
-    VitMatteMatter::load(&path)
+    VitMatteMatter::load(&path, device_request)
         .map_err(|err| format!("could not load ViTMatte {}: {err}", path.display()))
 }
 
@@ -181,8 +201,8 @@ pub(super) struct VitMatteMatter {
 }
 
 impl VitMatteMatter {
-    fn load(path: &Path) -> Result<Self, String> {
-        let session = cached_session(path)?;
+    fn load(path: &Path, device_request: OnnxDeviceRequest) -> Result<Self, String> {
+        let session = cached_session(path, device_request)?;
         Ok(Self {
             session,
             path: path.to_path_buf(),
@@ -192,11 +212,23 @@ impl VitMatteMatter {
     pub(super) fn model_path(&self) -> &Path {
         &self.path
     }
+
+    pub(super) fn onnx_resolution(&self) -> &OnnxProviderResolution {
+        self.session.resolution()
+    }
 }
 
 impl AlphaMatter for VitMatteMatter {
     fn provider(&self) -> &str {
         VITMATTE_PROVIDER
+    }
+
+    fn model_path(&self) -> Option<&Path> {
+        Some(&self.path)
+    }
+
+    fn onnx_resolution(&self) -> Option<&OnnxProviderResolution> {
+        Some(self.session.resolution())
     }
 
     fn matte(&self, image: &RgbaImage, trimap: &GrayImage) -> Result<GrayImage, String> {
@@ -667,12 +699,24 @@ mod tests {
             eprintln!("skipping missing-weight assertion: ViTMatte weight is present");
             return;
         }
-        let reason = match load_vitmatte() {
+        let reason = match load_vitmatte(OnnxDeviceRequest::Cpu) {
             Ok(_) => panic!("strict loader must not substitute the builtin matter"),
             Err(reason) => reason,
         };
         assert!(reason.contains(MODEL_ENV), "reason={reason}");
         assert!(reason.contains(MODEL_FILE), "reason={reason}");
+
+        let selection = matter(OnnxDeviceRequest::Gpu);
+        assert_eq!(selection.matter.provider(), BUILTIN_PROVIDER);
+        let fallback = selection
+            .fallback_reason
+            .expect("missing ViTMatte load reason must reach the builtin selection");
+        assert!(fallback.contains(MODEL_ENV), "fallback={fallback}");
+        assert!(fallback.contains(MODEL_FILE), "fallback={fallback}");
+        assert!(
+            fallback.contains("builtin CPU matter"),
+            "fallback={fallback}"
+        );
     }
 
     #[test]
@@ -720,7 +764,7 @@ mod tests {
             eprintln!("skipping vitmatte: no weight resolvable");
             return;
         };
-        let matter = load_vitmatte().expect("load vitmatte");
+        let matter = load_vitmatte(OnnxDeviceRequest::Cpu).expect("load vitmatte");
         assert_eq!(matter.provider(), "vitmatte");
         assert_eq!(matter.model_path(), path);
 

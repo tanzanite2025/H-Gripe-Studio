@@ -18,6 +18,8 @@ use std::collections::VecDeque;
 use image::{GrayImage, Luma, RgbaImage};
 use serde_json::{json, Value};
 
+use super::onnx_pool::{OnnxDeviceRequest, OnnxProviderResolution};
+
 const MASK_ON: u8 = 255;
 const MASK_OFF: u8 = 0;
 /// A pixel counts as selected once it is at least half-opaque (mirrors
@@ -108,7 +110,20 @@ pub(super) trait SubjectSegmenter {
     fn model_path(&self) -> Option<String> {
         None
     }
+    /// Actual ORT provider resolution bound to this segmenter's warm session.
+    /// Weight-free and non-ORT segmenters return `None`.
+    fn onnx_resolution(&self) -> Option<&OnnxProviderResolution> {
+        None
+    }
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String>;
+}
+
+/// The selected segmentation backend plus every reason a preferred backend was
+/// skipped. Keeping the reason beside the trait object lets `subject_mask`
+/// preserve load failures and still retry execution with the builtin backend.
+pub(super) struct SegmenterSelection {
+    pub(super) segmenter: Box<dyn SubjectSegmenter>,
+    pub(super) fallback_reason: Option<String>,
 }
 
 /// Choose the segmenter for an auto mode. When the request carries at least one
@@ -123,16 +138,55 @@ pub(super) fn segmenter_for_mode(
     mode: AutoMode,
     points: &[PointPrompt],
     sam2_variant: super::subject_sam2::Sam2Variant,
+    device_request: OnnxDeviceRequest,
 ) -> Box<dyn SubjectSegmenter> {
+    select_segmenter_for_mode(mode, points, sam2_variant, device_request).segmenter
+}
+
+/// Provider-aware selector used by Subject Mask's report-producing path. The
+/// compatibility wrapper above keeps older CPU-only editor commands simple,
+/// while this form carries load/session failures into stage telemetry.
+pub(super) fn select_segmenter_for_mode(
+    mode: AutoMode,
+    points: &[PointPrompt],
+    sam2_variant: super::subject_sam2::Sam2Variant,
+    device_request: OnnxDeviceRequest,
+) -> SegmenterSelection {
+    let mut fallback_reasons = Vec::new();
     if points.iter().any(|p| p.positive) {
-        if let Some(sam2) = super::subject_sam2::Sam2Segmenter::resolve_and_load(sam2_variant) {
-            return Box::new(sam2);
+        match super::subject_sam2::Sam2Segmenter::resolve_and_load(sam2_variant, device_request) {
+            Ok((sam2, reason)) => {
+                fallback_reasons.extend(reason);
+                return SegmenterSelection {
+                    segmenter: Box::new(sam2),
+                    fallback_reason: joined_reasons(fallback_reasons),
+                };
+            }
+            Err(reason) => fallback_reasons.push(reason),
         }
     }
-    if let Some(model) = super::subject_model::model_segmenter_for_mode(mode) {
-        return Box::new(model);
+
+    match super::subject_model::model_segmenter_for_mode(mode, device_request) {
+        Ok((model, reason)) => {
+            fallback_reasons.extend(reason);
+            SegmenterSelection {
+                segmenter: Box::new(model),
+                fallback_reason: joined_reasons(fallback_reasons),
+            }
+        }
+        Err(reason) => {
+            fallback_reasons.push(reason);
+            fallback_reasons.push("using deterministic builtin CPU segmenter".to_string());
+            SegmenterSelection {
+                segmenter: Box::new(BuiltinCpuSegmenter),
+                fallback_reason: joined_reasons(fallback_reasons),
+            }
+        }
     }
-    Box::new(BuiltinCpuSegmenter)
+}
+
+fn joined_reasons(reasons: Vec<String>) -> Option<String> {
+    (!reasons.is_empty()).then(|| reasons.join("; "))
 }
 
 /// A deterministic, weight-free segmenter: estimate the background colour from
@@ -400,15 +454,20 @@ mod tests {
     #[test]
     fn builtin_selects_foreground_block() {
         let image = scene_with_block();
-        let result = segmenter_for_mode(AutoMode::Subject, &[], Default::default())
-            .segment(&SegmentRequest {
-                image: &image,
-                mode: AutoMode::Subject,
-                placeholder: None,
-                prompt: None,
-                points: &[],
-            })
-            .unwrap();
+        let result = segmenter_for_mode(
+            AutoMode::Subject,
+            &[],
+            Default::default(),
+            OnnxDeviceRequest::Auto,
+        )
+        .segment(&SegmentRequest {
+            image: &image,
+            mode: AutoMode::Subject,
+            placeholder: None,
+            prompt: None,
+            points: &[],
+        })
+        .unwrap();
         // Inside the block selected, outside (background) not.
         assert_eq!(result.mask.get_pixel(4, 4).0[0], MASK_ON);
         assert_eq!(result.mask.get_pixel(0, 0).0[0], MASK_OFF);
@@ -523,7 +582,12 @@ mod tests {
             y: 5,
             positive: false,
         }];
-        let seg = segmenter_for_mode(AutoMode::Subject, &negatives, Default::default());
+        let seg = segmenter_for_mode(
+            AutoMode::Subject,
+            &negatives,
+            Default::default(),
+            OnnxDeviceRequest::Auto,
+        );
         assert_eq!(seg.provider(), "builtin-cpu");
     }
 

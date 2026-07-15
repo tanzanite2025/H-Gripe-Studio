@@ -34,51 +34,32 @@ export interface EngineAvailability {
   weight?: WeightInfo | null;
 }
 
-/** Per-card engine probe (mirrors Rust `CardEngineProbe`). */
+/** Per-card native engine probe (mirrors Rust `CardEngineProbe`). */
 export interface CardEngineProbe {
   /** Node kind whose `engine` param these cover, e.g. `imageEnhance`. */
   node_kind: string;
-  /** Bridge CLI that produced the probe. */
-  cli: string;
   /** Engine id -> availability (e.g. `cpu`/`realesrgan`, `rules`/`onnx_defect`). */
   engines: Record<string, EngineAvailability>;
   /** Why the probe could not run, when `engines` is empty. */
   error?: string | null;
 }
 
-/** One CUDA device from the device probe (mirrors Rust `DeviceInfo`). */
-export interface DeviceInfo {
-  index: number;
-  name: string;
-  total_memory_mb: number;
-}
-
-/** `torch` presence + CUDA flag (mirrors Rust `TorchInfo`). */
-export interface TorchInfo {
-  installed: boolean;
-  version?: string | null;
-  cuda?: boolean | null;
-  reason?: string | null;
-}
-
-/** `onnxruntime` presence + execution providers (mirrors Rust `OnnxRuntimeInfo`). */
+/** Selected `onnxruntime` flavor and provider readiness. */
 export interface OnnxRuntimeInfo {
   installed: boolean;
   version?: string | null;
+  runtime_flavor: string;
+  packaged_providers: string[];
   providers: string[];
   reason?: string | null;
 }
 
 /**
- * Machine compute capability (mirrors Rust `DeviceProbe`): which accelerator
- * the opt-in GPU engines would actually run on. The per-card probes say *which*
- * engines could run; this says *where*, so the inspector can warn that a GPU
- * engine falls back to CPU on a box with no CUDA device.
+ * Machine ONNX capability (mirrors Rust `DeviceProbe`). Per-card probes say
+ * which engines have weights; this records the runtime payload and providers
+ * that became usable after loading it.
  */
 export interface DeviceProbe {
-  cuda_available: boolean;
-  devices: DeviceInfo[];
-  torch: TorchInfo;
   onnxruntime: OnnxRuntimeInfo;
 }
 

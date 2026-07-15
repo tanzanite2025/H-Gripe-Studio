@@ -1284,8 +1284,8 @@ export const messages = {
   "models.probeEngines": { en: "Check engines", zh: "检查引擎" },
   "models.probing": { en: "probing…", zh: "探测中…" },
   "models.capabilityHint": {
-    en: "Run the engine probe for a diagnostic snapshot: CUDA devices, torch/onnxruntime, and per-card engine availability. Per-run device reports remain the source of truth.",
-    zh: "运行引擎探测以获取诊断快照：CUDA 设备、torch/onnxruntime、各卡片引擎可用性。以每次运行的设备报告为准。",
+    en: "Run the engine probe for a diagnostic snapshot: selected ONNX Runtime flavor, packaged/loadable providers, and per-card engine availability. Per-run device reports remain the source of truth.",
+    zh: "运行引擎探测以获取诊断快照：选定的 ONNX Runtime 类型、已打包/可加载的 provider，以及各卡片引擎可用性。以每次运行的设备报告为准。",
   },
   "models.reachable": { en: "endpoint reachable", zh: "端点可达" },
   "models.unreachable": { en: "endpoint unreachable", zh: "端点不可达" },

@@ -107,7 +107,12 @@ pub(super) fn execute_studio_crop(
     // The base box, before the optional aspect-ratio adjustment.
     let mut bbox = if mode == "auto_subject" {
         let auto = AutoMode::from_mode("auto_subject").unwrap_or(AutoMode::Subject);
-        let segmenter = segmenter_for_mode(auto, &[], Default::default());
+        let segmenter = segmenter_for_mode(
+            auto,
+            &[],
+            Default::default(),
+            super::onnx_pool::OnnxDeviceRequest::Cpu,
+        );
         let srgb = image.to_srgb_rgba8();
         let result = segmenter.segment(&SegmentRequest {
             image: &srgb,

@@ -19,7 +19,7 @@
 // | viewport frames (`ViewportBackend`)      | requested (auto|gpu|cpu)           | actual (wgpu|gpu|cpu)       | fallback_reason          |
 
 /** What the caller asked for (`device`/`viewport` request vocabulary). */
-export type DeviceRequest = "auto" | "cpu" | "cuda" | "gpu";
+export type DeviceRequest = "auto" | "cpu" | "cuda" | "directml" | "gpu";
 
 /** What actually ran, in one cross-kernel vocabulary. */
 export type DeviceUsed =
@@ -57,7 +57,7 @@ export interface DeviceReport {
   };
 }
 
-const REQUESTS: DeviceRequest[] = ["auto", "cpu", "cuda", "gpu"];
+const REQUESTS: DeviceRequest[] = ["auto", "cpu", "cuda", "directml", "gpu"];
 const USED: DeviceUsed[] = [
   "cpu",
   "cuda",
@@ -167,7 +167,7 @@ export function deviceReportFromPluginReport(report: PluginDeviceReportLike): De
   const precision = asText(report.precision);
   const precisionRequested = asText(report.precision_requested);
   const notes: string[] = [];
-  if ((requested === "cuda" || requested === "gpu") && !accelerated) {
+  if ((requested === "cuda" || requested === "directml" || requested === "gpu") && !accelerated) {
     notes.push(`plugin ran on ${used} for a ${requested} request`);
   }
   if (precisionRequested && precision && precisionRequested !== precision) {

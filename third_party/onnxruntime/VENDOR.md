@@ -36,10 +36,12 @@ The DLL is stored with Git LFS. After cloning, run `git lfs pull` before an
 offline build if normal LFS checkout did not materialise it. A text LFS pointer
 is not a usable runtime.
 
-The payload deliberately contains only the core DLL needed by the current CPU
-baseline plus `LICENSE`, `ThirdPartyNotices.txt`, `VERSION_NUMBER`, and
-`GIT_COMMIT_ID`. Provider-shared and provider-specific GPU DLLs are not shipped.
-Model weights are separate runtime artifacts and are not part of this lock.
+`win-x64/bin` is an exact DLL allowlist containing only `onnxruntime.dll` for
+the current CPU flavor. The root also carries `LICENSE`,
+`ThirdPartyNotices.txt`, `VERSION_NUMBER`, and `GIT_COMMIT_ID`.
+Provider-shared, provider-specific, and accelerator dependency DLLs are not
+shipped. Model weights are separate runtime artifacts and are not part of this
+lock.
 
 ## Refresh procedure
 
@@ -75,9 +77,12 @@ Windows product target.
 
 Do not vendor `onnxruntime_providers_shared.dll` on its own in anticipation of
 those stages: it provides no GPU capability or forward-compatibility by itself.
-Each provider must atomically add its provider-shared and provider-specific
-binaries, registration path, locked license/version metadata, fallback
-behavior, packaging, and real-GPU tests.
+Each provider must atomically add its core, provider-shared, provider-specific,
+and dependency binaries, registration path, locked license/version metadata,
+fallback behavior, packaging, and real-GPU tests. The official CUDA and
+DirectML distributions contain different `onnxruntime.dll` builds, so they
+cannot be copied over one another. A combined installer requires either a
+locked joint build or a startup-selected runtime flavor with restart semantics.
 
 ## Forbidden
 

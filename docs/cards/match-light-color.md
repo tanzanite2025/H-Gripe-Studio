@@ -122,9 +122,12 @@ path, environment/configured shared caches, and finally packaged/development
 resource locations. The model reuses the process-wide warm ORT session pool.
 
 The current Windows x64 ORT 1.24.2 package binds the CPU execution provider
-only. A later Windows provider stage must add NVIDIA CUDA and AMD/Intel DirectML
-with real provider/session binding, packaging, fallback reports, and hardware
-tests. ROCm is not a Windows target.
+only. Provider resolution already drives session creation, and the warm-pool key
+includes runtime flavor, actual provider, and device id; accelerated requests
+therefore share the real CPU fallback session without being reported as GPU. A
+later Windows provider stage must add NVIDIA CUDA and AMD/Intel DirectML locked
+runtimes, strict registration, CPU retry, packaging, and hardware tests before
+either device can be reported as active. ROCm is not a Windows target.
 
 ### Fallback contract
 

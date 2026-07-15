@@ -102,7 +102,12 @@ pub(crate) fn sam2_prompt_mask(
         .collect();
 
     let variant_requested = Sam2Variant::from_param(variant.as_deref().unwrap_or(""));
-    let segmenter = segmenter_for_mode(AutoMode::Subject, &prompts, variant_requested);
+    let segmenter = segmenter_for_mode(
+        AutoMode::Subject,
+        &prompts,
+        variant_requested,
+        super::onnx_pool::OnnxDeviceRequest::Cpu,
+    );
     let result = segmenter.segment(&SegmentRequest {
         image: &rgba,
         mode: AutoMode::Subject,

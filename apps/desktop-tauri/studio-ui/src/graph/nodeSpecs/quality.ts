@@ -50,10 +50,10 @@ export const QUALITY_NODE_SPECS = {
         key: "device",
         label: "Device",
         control: "select",
-        options: ["auto", "cpu", "gpu", "cuda"],
+        options: ["auto", "gpu", "cpu"],
         defaultValue: "auto",
         inline: true,
-        hint: "compute device for onnx_defect: current Windows ORT is CPU-only; gpu stays vendor-neutral for future CUDA/DirectML, and gpu/cuda currently report CPU fallback; ignored by rules",
+        hint: "compute request for onnx_defect: auto | gpu | cpu. The current Windows ORT path is CPU-only; CUDA and DirectML providers are planned. Ignored by rules",
         visibleWhen: { param: "engine", in: ["onnx_defect"] },
       },
       {

@@ -15,6 +15,7 @@ pub(crate) enum DeviceRequest {
     Auto,
     Cpu,
     Cuda,
+    DirectMl,
     Gpu,
 }
 
@@ -24,6 +25,7 @@ impl DeviceRequest {
             Self::Auto => "auto",
             Self::Cpu => "cpu",
             Self::Cuda => "cuda",
+            Self::DirectMl => "directml",
             Self::Gpu => "gpu",
         }
     }
@@ -78,6 +80,7 @@ mod tests {
         assert_eq!(DeviceRequest::Auto.as_str(), "auto");
         assert_eq!(DeviceRequest::Cpu.as_str(), "cpu");
         assert_eq!(DeviceRequest::Cuda.as_str(), "cuda");
+        assert_eq!(DeviceRequest::DirectMl.as_str(), "directml");
         assert_eq!(DeviceRequest::Gpu.as_str(), "gpu");
         assert_eq!(DeviceUsed::FfmpegSw.as_str(), "ffmpeg_sw");
         assert_eq!(DeviceUsed::FfmpegHw.as_str(), "ffmpeg_hw");

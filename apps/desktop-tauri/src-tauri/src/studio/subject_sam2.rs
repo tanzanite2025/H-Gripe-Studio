@@ -22,13 +22,13 @@
 //! (env override → bundled `resources/models/`). `scripts/fetch-sam2.*` fetch
 //! them with a sha256 check.
 
-use std::cmp::Ordering;
-
 use image::{imageops::FilterType, GrayImage, Luma, RgbaImage};
 use ort::value::Tensor;
 use serde_json::json;
 
-use super::onnx_pool::{cached_session, SharedSession};
+use super::onnx_pool::{
+    cached_session_group, OnnxDeviceRequest, OnnxProviderResolution, SharedSession,
+};
 use super::subject_model::{
     constrain_to_placeholder, coverage, resolve_model_file, selection_bbox,
 };
@@ -123,30 +123,76 @@ pub(super) struct Sam2Segmenter {
 
 impl Sam2Segmenter {
     /// Build a SAM 2 segmenter for a variant when *both* its encoder and
-    /// decoder weights resolve; `None` otherwise. A non-tiny request whose
-    /// weight is missing falls back to `tiny` before giving up, so selecting a
-    /// not-yet-downloaded variant degrades to the always-suggested weight
-    /// instead of dropping to the salient / builtin pipeline. The env
+    /// decoder weights resolve. A non-tiny request that cannot load falls back
+    /// to `tiny`, retaining the original failure for telemetry. If neither
+    /// variant loads, the combined error reaches the salient / builtin cascade
+    /// instead of being silently discarded. The env
     /// overrides (`HGRIPE_SAM2_ENCODER` / `HGRIPE_SAM2_DECODER`) point at
     /// explicit files and win for whichever variant is requested. Both
     /// sessions come from the warm pool, so repeated runs reuse the parsed
     /// weights instead of reloading them each time.
-    pub(super) fn resolve_and_load(variant: Sam2Variant) -> Option<Self> {
-        if let Some(segmenter) = Self::load_variant(variant) {
-            return Some(segmenter);
+    pub(super) fn resolve_and_load(
+        variant: Sam2Variant,
+        device_request: OnnxDeviceRequest,
+    ) -> Result<(Self, Option<String>), String> {
+        match Self::load_variant(variant, device_request) {
+            Ok(segmenter) => Ok((segmenter, None)),
+            Err(reason) if variant != Sam2Variant::Tiny => {
+                match Self::load_variant(Sam2Variant::Tiny, device_request) {
+                    Ok(segmenter) => Ok((
+                        segmenter,
+                        Some(format!(
+                            "SAM2 {} variant unavailable ({reason}); using SAM2 tiny",
+                            variant.id()
+                        )),
+                    )),
+                    Err(tiny_reason) => Err(format!(
+                        "SAM2 {} variant unavailable ({reason}); SAM2 tiny fallback unavailable ({tiny_reason})",
+                        variant.id()
+                    )),
+                }
+            }
+            Err(reason) => Err(reason),
         }
-        (variant != Sam2Variant::Tiny)
-            .then(|| Self::load_variant(Sam2Variant::Tiny))
-            .flatten()
     }
 
-    fn load_variant(variant: Sam2Variant) -> Option<Self> {
-        let encoder = resolve_model_file(ENCODER_ENV, variant.encoder_file())?;
-        let decoder = resolve_model_file(DECODER_ENV, variant.decoder_file())?;
+    fn load_variant(
+        variant: Sam2Variant,
+        device_request: OnnxDeviceRequest,
+    ) -> Result<Self, String> {
+        let encoder = resolve_model_file(ENCODER_ENV, variant.encoder_file()).ok_or_else(|| {
+            format!(
+                "SAM2 {} encoder weight {} was not resolved",
+                variant.id(),
+                variant.encoder_file()
+            )
+        })?;
+        let decoder = resolve_model_file(DECODER_ENV, variant.decoder_file()).ok_or_else(|| {
+            format!(
+                "SAM2 {} decoder weight {} was not resolved",
+                variant.id(),
+                variant.decoder_file()
+            )
+        })?;
         let weight_paths = format!("{}; {}", encoder.display(), decoder.display());
-        Some(Self {
-            encoder: cached_session(&encoder).ok()?,
-            decoder: cached_session(&decoder).ok()?,
+        let mut sessions =
+            cached_session_group(&[encoder.as_path(), decoder.as_path()], device_request).map_err(
+                |err| {
+                    format!(
+                        "could not load SAM2 {} session group {weight_paths}: {err}",
+                        variant.id()
+                    )
+                },
+            )?;
+        let decoder_session = sessions
+            .pop()
+            .ok_or_else(|| format!("SAM2 {} session group omitted the decoder", variant.id()))?;
+        let encoder_session = sessions
+            .pop()
+            .ok_or_else(|| format!("SAM2 {} session group omitted the encoder", variant.id()))?;
+        Ok(Self {
+            encoder: encoder_session,
+            decoder: decoder_session,
             variant,
             weight_paths,
         })
@@ -160,6 +206,10 @@ impl SubjectSegmenter for Sam2Segmenter {
 
     fn model_path(&self) -> Option<String> {
         Some(self.weight_paths.clone())
+    }
+
+    fn onnx_resolution(&self) -> Option<&OnnxProviderResolution> {
+        Some(self.encoder.resolution())
     }
 
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String> {
@@ -181,16 +231,35 @@ impl SubjectSegmenter for Sam2Segmenter {
                 .encoder
                 .lock()
                 .map_err(|_| "SAM2 encoder session poisoned".to_string())?;
-            let input_name = encoder.inputs()[0].name().to_string();
+            let input_name = encoder
+                .inputs()
+                .first()
+                .ok_or_else(|| "SAM2 encoder declares no inputs".to_string())?
+                .name()
+                .to_string();
             let outputs = encoder
                 .run(ort::inputs![input_name => image_tensor])
                 .map_err(|err| format!("SAM2 image encoding failed: {err}"))?;
             // Copy the borrowed outputs into owned tensors before `outputs`
             // (and the lock) drop, so the decoder can consume them.
             let take = |name: &str| -> Result<Tensor<f32>, String> {
-                let (shape, data) = outputs[name]
+                let output = outputs.get(name).ok_or_else(|| {
+                    let names = outputs.keys().collect::<Vec<_>>();
+                    format!("SAM2 encoder has no `{name}` output (found {names:?})")
+                })?;
+                let (shape, data) = output
                     .try_extract_tensor::<f32>()
                     .map_err(|err| format!("failed to read SAM2 encoder output {name}: {err}"))?;
+                if let Some((index, value)) = data
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .find(|(_, value)| !value.is_finite())
+                {
+                    return Err(format!(
+                        "SAM2 encoder output {name} contains non-finite value {value} at index {index}"
+                    ));
+                }
                 Tensor::from_array((shape.to_vec(), data.to_vec()))
                     .map_err(|err| format!("failed to rebuild SAM2 tensor {name}: {err}"))
             };
@@ -245,13 +314,21 @@ impl SubjectSegmenter for Sam2Segmenter {
                     "has_mask_input" => has_mask_input,
                 ])
                 .map_err(|err| format!("SAM2 mask decoding failed: {err}"))?;
-            let (mask_shape, mask_data) = outputs["masks"]
+            let masks = outputs.get("masks").ok_or_else(|| {
+                let names = outputs.keys().collect::<Vec<_>>();
+                format!("SAM2 decoder has no `masks` output (found {names:?})")
+            })?;
+            let (mask_shape, mask_data) = masks
                 .try_extract_tensor::<f32>()
                 .map_err(|err| format!("failed to read SAM2 masks: {err}"))?;
-            let (_, iou) = outputs["iou_predictions"]
+            let iou_predictions = outputs.get("iou_predictions").ok_or_else(|| {
+                let names = outputs.keys().collect::<Vec<_>>();
+                format!("SAM2 decoder has no `iou_predictions` output (found {names:?})")
+            })?;
+            let (iou_shape, iou) = iou_predictions
                 .try_extract_tensor::<f32>()
                 .map_err(|err| format!("failed to read SAM2 iou_predictions: {err}"))?;
-            best_mask(mask_shape, mask_data, iou, width, height)?
+            best_mask(mask_shape, mask_data, iou_shape, iou, width, height)?
         };
 
         if let Some(placeholder) = request.placeholder {
@@ -317,38 +394,71 @@ fn preprocess(image: &RgbaImage) -> Vec<f32> {
 fn best_mask(
     mask_shape: &[i64],
     mask_data: &[f32],
+    iou_shape: &[i64],
     iou: &[f32],
     width: u32,
     height: u32,
 ) -> Result<GrayImage, String> {
-    if mask_shape.len() != 4 {
-        return Err(format!("unexpected SAM2 masks rank {}", mask_shape.len()));
+    let [batch, raw_num_masks, raw_height, raw_width] = mask_shape else {
+        return Err(format!("unexpected SAM2 masks shape {mask_shape:?}"));
+    };
+    if *batch != 1 || *raw_num_masks <= 0 || *raw_height <= 0 || *raw_width <= 0 {
+        return Err(format!("unexpected SAM2 masks shape {mask_shape:?}"));
     }
-    let num_masks = mask_shape[1].max(0) as usize;
-    let mh = mask_shape[2].max(0) as u32;
-    let mw = mask_shape[3].max(0) as u32;
-    let plane = (mh * mw) as usize;
-    if num_masks == 0 || plane == 0 {
-        return Err("SAM2 produced an empty mask".to_string());
+    let num_masks = usize::try_from(*raw_num_masks)
+        .map_err(|_| format!("invalid SAM2 mask count {raw_num_masks}"))?;
+    let mh =
+        u32::try_from(*raw_height).map_err(|_| format!("invalid SAM2 mask height {raw_height}"))?;
+    let mw =
+        u32::try_from(*raw_width).map_err(|_| format!("invalid SAM2 mask width {raw_width}"))?;
+    let plane = usize::try_from(mh)
+        .ok()
+        .and_then(|height| {
+            usize::try_from(mw)
+                .ok()
+                .and_then(|width| height.checked_mul(width))
+        })
+        .ok_or_else(|| format!("SAM2 mask dimensions {mh}x{mw} overflow"))?;
+    let expected_masks = num_masks
+        .checked_mul(plane)
+        .ok_or_else(|| "SAM2 mask tensor length overflow".to_string())?;
+    if mask_data.len() != expected_masks {
+        return Err(format!(
+            "SAM2 masks shape {mask_shape:?} needs {expected_masks} values, found {}",
+            mask_data.len()
+        ));
+    }
+    let valid_iou_shape = match iou_shape {
+        [count] => *count == *raw_num_masks,
+        [n, count] => *n == 1 && *count == *raw_num_masks,
+        _ => false,
+    };
+    if !valid_iou_shape || iou.len() != num_masks {
+        return Err(format!(
+            "SAM2 iou_predictions shape {iou_shape:?} / length {} does not match {num_masks} masks",
+            iou.len()
+        ));
+    }
+    if let Some((index, value)) = mask_data
+        .iter()
+        .chain(iou.iter())
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(format!(
+            "SAM2 decoder output contains non-finite value {value} at combined index {index}"
+        ));
     }
 
     let best = (0..num_masks)
-        .max_by(|&a, &b| {
-            iou.get(a)
-                .copied()
-                .unwrap_or(f32::NEG_INFINITY)
-                .partial_cmp(&iou.get(b).copied().unwrap_or(f32::NEG_INFINITY))
-                .unwrap_or(Ordering::Equal)
-        })
+        .max_by(|&a, &b| iou[a].total_cmp(&iou[b]))
         .unwrap_or(0);
     let offset = best * plane;
 
     let mut small = GrayImage::from_pixel(mw, mh, Luma([MASK_OFF]));
     for (i, pixel) in small.pixels_mut().enumerate() {
-        let logit = mask_data
-            .get(offset + i)
-            .copied()
-            .unwrap_or(f32::NEG_INFINITY);
+        let logit = mask_data[offset + i];
         pixel.0[0] = if logit > MASK_LOGIT_CUTOFF {
             MASK_ON
         } else {
@@ -379,8 +489,9 @@ mod tests {
             5.0, 5.0, -5.0, -5.0, // candidate 1 (top row foreground)
         ];
         let shape = [1_i64, 2, 2, 2];
+        let iou_shape = [1_i64, 2];
         let iou = [0.1_f32, 0.9];
-        let mask = best_mask(&shape, &masks, &iou, 4, 4).unwrap();
+        let mask = best_mask(&shape, &masks, &iou_shape, &iou, 4, 4).unwrap();
         assert_eq!(mask.dimensions(), (4, 4));
         assert_eq!(mask.get_pixel(0, 0).0[0], MASK_ON);
         assert_eq!(mask.get_pixel(3, 3).0[0], MASK_OFF);
@@ -407,7 +518,30 @@ mod tests {
 
     #[test]
     fn best_mask_rejects_empty() {
-        assert!(best_mask(&[1, 0, 0, 0], &[], &[], 4, 4).is_err());
+        assert!(best_mask(&[1, 0, 0, 0], &[], &[1, 0], &[], 4, 4).is_err());
+    }
+
+    #[test]
+    fn best_mask_rejects_malformed_and_non_finite_outputs() {
+        assert!(best_mask(&[1, 1, 2], &[0.0; 4], &[1, 1], &[0.5], 4, 4)
+            .unwrap_err()
+            .contains("masks shape"));
+        assert!(best_mask(&[1, 1, 2, 2], &[0.0; 3], &[1, 1], &[0.5], 4, 4)
+            .unwrap_err()
+            .contains("needs 4 values"));
+        assert!(best_mask(&[1, 1, 2, 2], &[0.0; 4], &[1, 2], &[0.5], 4, 4)
+            .unwrap_err()
+            .contains("iou_predictions"));
+        assert!(best_mask(
+            &[1, 1, 2, 2],
+            &[0.0, f32::NAN, 0.0, 0.0],
+            &[1, 1],
+            &[0.5],
+            4,
+            4,
+        )
+        .unwrap_err()
+        .contains("non-finite"));
     }
 
     #[test]
@@ -442,14 +576,36 @@ mod tests {
         assert!((data[plane] - (0.0 - MEAN[1]) / STD[1]).abs() < 1e-3);
     }
 
+    #[test]
+    fn missing_group_returns_a_descriptive_load_error() {
+        if resolve_model_file(ENCODER_ENV, Sam2Variant::Tiny.encoder_file()).is_some()
+            && resolve_model_file(DECODER_ENV, Sam2Variant::Tiny.decoder_file()).is_some()
+        {
+            eprintln!("skipping missing-group reason assertion: SAM2 tiny weights are present");
+            return;
+        }
+        let reason =
+            match Sam2Segmenter::resolve_and_load(Sam2Variant::Tiny, OnnxDeviceRequest::Gpu) {
+                Ok(_) => panic!("missing SAM2 group must not produce a segmenter"),
+                Err(reason) => reason,
+            };
+        assert!(reason.contains("SAM2 tiny"), "reason={reason}");
+        assert!(reason.contains("weight"), "reason={reason}");
+        assert!(reason.contains("not resolved"), "reason={reason}");
+    }
+
     /// Real two-stage inference, only when both weights resolve. Skipped
     /// otherwise so CI without the weights still passes.
     #[test]
     fn sam2_inference_when_weights_present() {
-        let Some(segmenter) = Sam2Segmenter::resolve_and_load(Sam2Variant::Tiny) else {
-            eprintln!("skipping sam2: encoder/decoder weights not resolvable");
-            return;
-        };
+        let segmenter =
+            match Sam2Segmenter::resolve_and_load(Sam2Variant::Tiny, OnnxDeviceRequest::Cpu) {
+                Ok((segmenter, _)) => segmenter,
+                Err(reason) => {
+                    eprintln!("skipping sam2: {reason}");
+                    return;
+                }
+            };
         assert_eq!(segmenter.provider(), "sam2");
         // Grey scene with a bright centred block; a point inside it should
         // yield a non-empty, full-resolution mask.

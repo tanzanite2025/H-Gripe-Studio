@@ -14,7 +14,7 @@ use image::imageops::FilterType;
 use image::{GrayImage, Luma, Rgb, RgbImage, RgbaImage};
 use ort::value::{Tensor, TensorElementType};
 
-use super::onnx_pool::{cached_session, resolve_provider, OnnxDeviceRequest};
+use super::onnx_pool::{cached_session, OnnxDeviceRequest, OnnxProviderResolution};
 
 const MODEL_FILE: &str = "color_harmonize.onnx";
 const MODEL_ENV: &str = "HGRIPE_COLOR_MODEL";
@@ -98,7 +98,9 @@ pub(crate) fn harmonize(
             "PCT-Net harmonization model not found; configure {MODEL_ENGINE}, set {MODEL_ENV}, or install resources/models/{MODEL_FILE}"
         )
     })?;
-    let shared = cached_session(&path)?;
+    let normalized_device = device_requested.trim().to_ascii_lowercase();
+    let device_request = OnnxDeviceRequest::from_param(&normalized_device);
+    let shared = cached_session(&path, device_request)?;
     {
         let session = shared
             .lock()
@@ -157,18 +159,7 @@ pub(crate) fn harmonize(
     drop(outputs);
     drop(session);
 
-    let normalized_device = device_requested.trim().to_ascii_lowercase();
-    let mut resolution = resolve_provider(OnnxDeviceRequest::from_param(&normalized_device));
-    if !normalized_device.is_empty()
-        && !matches!(
-            normalized_device.as_str(),
-            "auto" | "cpu" | "cuda" | "directml" | "gpu"
-        )
-    {
-        resolution.fallback_reason = Some(format!(
-            "unknown ONNX device request {normalized_device:?}; used the CPU execution provider"
-        ));
-    }
+    let resolution = annotate_unknown_device(shared.resolution().clone(), &normalized_device);
     let backend_model = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -179,6 +170,25 @@ pub(crate) fn harmonize(
         device: resolution.device.to_string(),
         device_fallback_reason: resolution.fallback_reason,
     })
+}
+
+fn annotate_unknown_device(
+    mut resolution: OnnxProviderResolution,
+    normalized_device: &str,
+) -> OnnxProviderResolution {
+    if !normalized_device.is_empty()
+        && !matches!(
+            normalized_device,
+            "auto" | "cpu" | "cuda" | "directml" | "gpu"
+        )
+    {
+        let unknown = format!("unknown ONNX device request {normalized_device:?}; treated as auto");
+        resolution.fallback_reason = Some(match resolution.fallback_reason.take() {
+            Some(reason) => format!("{unknown}; {reason}"),
+            None => unknown,
+        });
+    }
+    resolution
 }
 
 fn env_file(name: &str) -> Option<PathBuf> {
@@ -477,6 +487,26 @@ fn decode_output(
 mod tests {
     use super::*;
     use image::Rgba;
+
+    #[test]
+    fn unknown_device_is_treated_as_auto_without_claiming_cpu_use() {
+        let resolution = crate::studio::onnx_pool::resolve_provider(OnnxDeviceRequest::Auto);
+        let annotated = annotate_unknown_device(resolution, "metal");
+        let reason = annotated.fallback_reason.unwrap();
+        assert!(reason.contains("treated as auto"), "reason={reason}");
+        assert!(reason.contains("no CUDA/DirectML"), "reason={reason}");
+        assert!(!reason.contains("used the CPU"), "reason={reason}");
+
+        let known = annotate_unknown_device(
+            crate::studio::onnx_pool::resolve_provider(OnnxDeviceRequest::Gpu),
+            "gpu",
+        );
+        assert!(!known
+            .fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("unknown ONNX device"));
+    }
 
     #[test]
     fn preprocessing_fixes_the_low_resolution_branch_and_sanitizes_hidden_rgb() {

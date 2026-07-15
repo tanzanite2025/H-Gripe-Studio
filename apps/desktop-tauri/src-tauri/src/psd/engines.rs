@@ -22,8 +22,8 @@ pub(crate) struct WeightInfo {
     pub(crate) size_mb: Option<u64>,
 }
 
-/// Availability of one `engine` option for a card, as reported by a CLI
-/// `--probe-engines` call. Lazy model backends may report their prerequisites
+/// Availability of one `engine` option for a card, as reported by the native
+/// `probe_engines` command. Lazy model backends may report their prerequisites
 /// as available while deferring session validation to first use; `reason`
 /// states that boundary and per-run telemetry remains authoritative.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -43,16 +43,14 @@ pub(crate) struct EngineAvailability {
     pub(crate) weight: Option<WeightInfo>,
 }
 
-/// Engine capability probe for one card (node kind): which `engine` values its
-/// CLI can actually run right now. `error` is set (engines empty) when the probe
+/// Engine capability probe for one card (node kind): which `engine` values the
+/// native backend can run right now. `error` is set (engines empty) when the probe
 /// itself could not run, so the UI degrades to "all enabled" rather than hiding
 /// the always-available CPU path.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct CardEngineProbe {
     /// The node kind whose `engine` param these cover (e.g. `imageEnhance`).
     pub(crate) node_kind: String,
-    /// The bridge CLI that produced the probe.
-    pub(crate) cli: String,
     /// Engine id -> availability (e.g. `cpu`/`realesrgan`, `rules`/`onnx_defect`).
     pub(crate) engines: BTreeMap<String, EngineAvailability>,
     /// Why the probe could not run, when `engines` is empty.
@@ -60,31 +58,7 @@ pub(crate) struct CardEngineProbe {
     pub(crate) error: Option<String>,
 }
 
-/// One CUDA device reported by the machine device probe.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct DeviceInfo {
-    #[serde(default)]
-    pub(crate) index: u32,
-    #[serde(default)]
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) total_memory_mb: u64,
-}
-
-/// `torch` presence + CUDA flag from the device probe (filled when importable).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct TorchInfo {
-    #[serde(default)]
-    pub(crate) installed: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) cuda: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) reason: Option<String>,
-}
-
-/// `onnxruntime` presence + the execution providers available on this box.
+/// Selected `onnxruntime` flavor and provider readiness on this box.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct OnnxRuntimeInfo {
     #[serde(default)]
@@ -92,24 +66,21 @@ pub(crate) struct OnnxRuntimeInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) version: Option<String>,
     #[serde(default)]
+    pub(crate) runtime_flavor: String,
+    /// Providers whose binaries belong to the selected runtime payload.
+    #[serde(default)]
+    pub(crate) packaged_providers: Vec<String>,
+    /// Providers usable for session construction after the runtime loaded.
+    #[serde(default)]
     pub(crate) providers: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
 }
 
-/// Machine compute capability (which accelerator the opt-in GPU engines would
-/// actually run on): CUDA device names / VRAM via `torch` and the ONNX Runtime
-/// execution providers. The per-card probes only say *which* engines could run;
-/// this says *where*, so the UI can warn that a GPU engine falls back to CPU on
-/// a box with no CUDA device. Machine-global, so it is probed once.
+/// Machine ONNX capability. Per-card probes say which engines have weights;
+/// this records the selected runtime payload and loadable session providers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct DeviceProbe {
-    #[serde(default)]
-    pub(crate) cuda_available: bool,
-    #[serde(default)]
-    pub(crate) devices: Vec<DeviceInfo>,
-    #[serde(default)]
-    pub(crate) torch: TorchInfo,
     #[serde(default)]
     pub(crate) onnxruntime: OnnxRuntimeInfo,
 }
@@ -151,8 +122,7 @@ pub(crate) struct EngineProbeReport {
     /// The shared weight cache (`HGRIPE_MODEL_CACHE` or the bundled dir).
     #[serde(default)]
     pub(crate) model_cache_dir: Option<String>,
-    /// Machine compute capability (CUDA devices / ONNX Runtime providers),
-    /// probed once; `None` when the device probe itself could not run.
+    /// Machine ONNX runtime/provider capability, probed once.
     #[serde(default)]
     pub(crate) runtime: Option<DeviceProbe>,
     /// Grade kernel wgpu adapter status (initialises the shared grader once;
@@ -213,7 +183,6 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
             );
             CardEngineProbe {
                 node_kind: node_kind.to_string(),
-                cli: String::new(),
                 engines,
                 error: None,
             }
@@ -346,12 +315,16 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
         cards,
         model_cache_dir: super::load_model_paths_config().model_cache_dir,
         runtime: Some(DeviceProbe {
-            cuda_available: false,
-            devices: Vec::new(),
-            torch: TorchInfo::default(),
             onnxruntime: OnnxRuntimeInfo {
                 installed: onnx_status.installed,
                 version: onnx_status.version.clone(),
+                runtime_flavor: onnx_status.runtime_flavor.to_string(),
+                packaged_providers: onnx_status
+                    .packaged_providers
+                    .iter()
+                    .copied()
+                    .map(str::to_string)
+                    .collect(),
                 providers: onnx_status
                     .providers
                     .iter()
@@ -394,6 +367,8 @@ mod tests {
         assert!(color.engines["cpu"].available);
         let harmonizer = &color.engines["onnx_harmonize"];
         let runtime = report.runtime.as_ref().unwrap();
+        assert_eq!(runtime.onnxruntime.runtime_flavor, "windows-x64-cpu");
+        assert_eq!(runtime.onnxruntime.packaged_providers, ["cpu"]);
         assert!(!harmonizer.accelerated);
         assert_eq!(
             harmonizer.available,

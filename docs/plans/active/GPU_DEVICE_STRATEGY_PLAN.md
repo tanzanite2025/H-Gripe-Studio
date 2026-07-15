@@ -266,7 +266,7 @@ runtime probe and fallback.
 Every accelerated operation should expose the same user-facing truth:
 
 ```text
-requested device: auto | cpu | cuda | gpu
+requested device: auto | cpu | cuda | directml | gpu
 actual device: cpu | cuda | wgpu | directml | ffmpeg_sw | ffmpeg_hw | provider
 fallback reason: optional text
 ```
@@ -312,7 +312,7 @@ Output:
 Adopt common names where possible:
 
 ```ts
-type DeviceRequest = "auto" | "cpu" | "cuda" | "gpu";
+type DeviceRequest = "auto" | "cpu" | "cuda" | "directml" | "gpu";
 
 type DeviceUsed =
   | "cpu"
@@ -390,9 +390,10 @@ Rules:
 
 ✅ (existing probes) `summarizeCapabilities` in
 `studio-ui/src/runtime/capabilitySummary.ts` flattens the engine probe report
-(CUDA devices, torch, onnxruntime providers, model cache, per-card engine
-availability) into diagnostic lines, surfaced in the Model Manager's local
-tab behind a manual "Check engines" button. wgpu adapter status and FFmpeg
+(selected ONNX runtime flavor, packaged/loadable providers, model cache, and
+per-card engine availability) into diagnostic lines, surfaced in the Model
+Manager's local tab behind a manual "Check engines" button. Obsolete Python
+Torch/CUDA probe fields are gone. wgpu adapter status and FFmpeg
 vendored/hardware status join the same summary once their probes exist.
 
 Add or refine a single capability summary that aggregates existing probes:
@@ -451,18 +452,37 @@ Goal: make each accelerated backend robust before unifying scheduling.
   contract: `cpu` -> CPU only (honoured, no reason); `cuda` -> CUDA else CPU
   fallback with reason; `auto` -> preferred accelerator else CPU fallback
   with reason. The current build carries the CPU provider only, so cuda/auto
-  resolve to CPU with distinct visible reasons; accelerated providers slot
-  into the resolver when compiled in.
-- Consider DirectML only after the CUDA/CPU contract is stable.
-- Before enabling CUDA or DirectML, provider resolution must move ahead of
-  ONNX session construction and configure `SessionBuilder`; the warm-session
-  cache key must include the resolved provider/runtime flavor. Updating only
-  capability telemetry would falsely label a shared CPU session as accelerated.
+  resolve to CPU with distinct visible reasons. Legacy `directml` requests are
+  also preserved, while visible card controls stay vendor-neutral.
+- Provider resolution now runs before session construction. The warm-pool key
+  includes canonical model path, runtime flavor, actual provider, and device id;
+  CPU fallbacks from different request spellings share one CPU session. SAM2
+  resolves encoder and decoder under one plan.
+- A process-wide cross-model accelerator gate lives inside the shared ONNX
+  session handle, so graph, direct-command, and hidden editor paths cannot bypass
+  GPU serialization. It is the execution-safety boundary and is currently a
+  global single slot.
+- Graph scheduling is a conservative, advisory provider preflight. It resolves
+  the requested device from visible node params and promotes only an accelerated
+  candidate; it does not claim that session construction will ultimately bind
+  that provider. Subject Mask always enters candidate resolution because
+  resolved `edit_paths.matte_strokes` are unavailable at classification time.
+  Crop auto-subject and Smart Layer Split remain explicit CPU candidates. The
+  current CPU runtime therefore keeps every request in `CpuBound`.
+- Shared-session resolution and per-stage reports are authoritative for actual
+  provider use and fallback. The ONNX single-slot gate is independent of the
+  scheduler's configurable GPU limit; align those policies before shipping the
+  first CUDA or DirectML runtime.
+- DirectML is a required Windows AMD/Intel stage after the architecture gate,
+  not an optional CUDA-only follow-up. Actual CUDA and DirectML runtime payloads,
+  strict EP registration, CPU retry, packaging, and hardware proof remain open.
 - ✅ Report model path, provider, and fallback reason — `SubjectSegmenter`
   exposes `model_path()` (the weight file(s) inference ran on; encoder +
   decoder for SAM 2) and `matte_report.model_path` carries it alongside the
-  existing `provider` / `engine_fallback_reason`; absent for weight-free
-  lanes (manual/hybrid and the builtin fallback).
+  existing `provider` / `engine_fallback_reason`. The top-level tuple comes
+  from auto segmentation when present, otherwise alpha matting; model path is
+  absent only when that summary stage is weight-free (pure manual/hybrid or a
+  builtin fallback). Per-stage operations retain their own complete tuples.
 
 ### External Model Plugins
 
@@ -529,12 +549,17 @@ network api
 
 This extends the existing executor lane idea rather than replacing it.
 
-Done: `JobCategory` in `studio/schedule.rs` is the resource-class vocabulary,
-mapped from the list above onto the lanes the app actually has today:
+Done: `JobCategory` in `studio/schedule.rs` is the resource-class vocabulary.
+Static node classes provide the baseline, then `category_for_node` performs a
+conservative pre-execution provider resolution from parameter-visible device
+requests. It is advisory and intentionally distinct from the later session
+result:
 
 - interactive ui → the frontend / `CpuLight` graph logic (never gated)
 - preview gpu → the shared viewport surface device (its own lazy-init path)
-- full-res render gpu / model inference gpu → `Gpu` (`Semaphore(1)`)
+- full-res render gpu / an accelerated ONNX provider candidate -> `Gpu`; CPU
+  candidates stay `CpuBound`. The current runtime resolves `auto`, `gpu`, `cuda`,
+  and `directml` to CPU, so all current ONNX work stays in `CpuBound`.
 - video decode → the playback engine's dedicated decode thread (latest-wins,
   its own lane distinct from the scheduler)
 - video encode → `VideoEncode` (`Semaphore(1)`, its own permit so an
@@ -543,15 +568,18 @@ mapped from the list above onto the lanes the app actually has today:
 - audio cpu / file io → `CpuBound` (bounded pool)
 - network api → `Network` (ungated locally, bounded by the provider)
 
-New classes join by extending `JobCategory` + `node_class`, not by a parallel
-mechanism.
+New classes join by extending `JobCategory` + `node_class`; parameter-dependent
+backends additionally expose their candidate request for preflight resolution.
+The shared session's resolution and per-stage report, not the scheduler category,
+state what ran.
 
 ### Long-Term Step 3: GPU Queue Policy
 
 Possible policy:
 
-- ✅ one full-resolution GPU compute job at a time — the `Gpu` lane is
-  `Semaphore(1)` in `StudioScheduler`.
+- ✅ the `Gpu` candidate lane starts at one permit and is configurable through
+  `StudioScheduler`; actual ONNX accelerator inference is separately serialized
+  by the warm pool's global single-slot gate.
 - ✅ previews are latest-wins and cancellable — the grade preview renders
   through `latestWinsGate` (`useGradeViewport.ts`): at most one render in
   flight and one queued, a stacked slider drag supersedes the queued render
@@ -626,7 +654,9 @@ Only after the manager exists, consider a settings surface:
   re-applied on app start). The Rust `StudioScheduler`'s GPU semaphore is
   resizable (`set_gpu_limit`, clamped `1..=MAX_GPU_JOBS`): widening adds
   permits immediately, narrowing retires permits as running jobs finish —
-  work is never interrupted.
+  work is never interrupted. This setting currently resizes only the advisory
+  scheduler lane; it does not resize the ONNX warm pool's independent global
+  single-slot gate. Reconcile the two before the first GPU ORT runtime ships.
 - ✅ prefer preview speed vs export fidelity — a "Preview quality" select next
   to the other controls (`runtime/previewQuality.ts`, localStorage-backed).
   It only picks the grade preview proxy's long-edge size (speed = the

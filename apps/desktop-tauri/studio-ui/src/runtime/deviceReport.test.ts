@@ -79,6 +79,20 @@ describe("deviceReportFromEngineReport", () => {
     expect(report?.used).toBe("unknown");
     expect(report?.accelerated).toBe(false);
   });
+
+  it("preserves a legacy DirectML request while reporting the actual CPU fallback", () => {
+    const report = deviceReportFromEngineReport({
+      engine: "onnx_matting",
+      engine_requested: "onnx_matting",
+      device: "cpu",
+      device_requested: "directml",
+      engine_fallback_reason: "DirectML execution provider not built in",
+    });
+    expect(report?.requested).toBe("directml");
+    expect(report?.used).toBe("cpu");
+    expect(report?.accelerated).toBe(false);
+    expect(report?.fallbackReason).toContain("not built in");
+  });
 });
 
 describe("deviceReportFromViewportBackend", () => {
