@@ -3,5 +3,6 @@
 # tracked so `tauri-build` can resolve the `bundle.resources` mapping and the
 # release fetch step has a place to drop the weight.
 *.onnx
+*.onnx.labels.json
 !.gitignore
 !README.md

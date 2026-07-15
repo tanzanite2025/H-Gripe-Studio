@@ -3,12 +3,10 @@ import { type Bounds, type VisualContext } from "../contracts/context";
 import { type QualityReport } from "../contracts/quality";
 
 // --- Detail Watchdog --------------------------------------------------------
-// Wraps the Rust `detect_quality_issues` command, which shells out to the
-// torch-free `detail_watchdog_cli.py` helper to scan a candidate image for
-// local breakdowns (global/region blur, alpha-rim halos, colour mismatch,
-// below-target resolution) and emit a {@link QualityReport}. Phase 1 is
-// detect-only (no automatic repaint) and CPU-only (Pillow + numpy, no ML), so
-// semantic targets that need a GPU/VLM (hands/text/logo) are reported skipped.
+// Wraps the native Rust `detect_quality_issues` command. The CPU rule layer
+// always scans global/region blur, alpha-rim halos, colour mismatch and target
+// resolution; opt-in `onnx_defect` adds sidecar-mapped hands/text/logo findings
+// through the shared ORT runtime. Detection remains report-only.
 
 /** Diagnostics for a Detail Watchdog run; snake_case to match the bridge JSON. */
 export interface WatchdogReport {
@@ -16,7 +14,7 @@ export interface WatchdogReport {
   mode: string;
   /** Targets that actually ran. */
   watch_targets: string[];
-  /** Requested targets skipped in Phase 1 (need the GPU/VLM backend). */
+  /** Requested semantic targets not covered by the loaded detector. */
   skipped_targets: string[];
   /** `[width, height]` of the analysed image. */
   image_size?: [number, number];
@@ -63,7 +61,7 @@ export interface DetectQualityRequest {
   mode?: string;
   /** Detection engine: `rules` (default CPU layer) or an opt-in ML detector id. */
   engine?: string;
-  /** Compute device for the learned detector: `auto` (default) | `cpu` | `cuda`. */
+  /** Compute device: `auto` (default) | `cpu` | vendor-neutral `gpu` | `cuda`. */
   device?: string;
   /** Directory for the written overlay PNG. */
   outputDir?: string;

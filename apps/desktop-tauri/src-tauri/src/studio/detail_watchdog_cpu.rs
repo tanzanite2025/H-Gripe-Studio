@@ -1,6 +1,6 @@
 //! In-process CPU quality watchdog fast path: a native-Rust replica of
-//! `detail_watchdog_cli.py`'s rule layer (`rules` engine), run inline in the
-//! `detailWatchdog` executor instead of spawning the Python bridge.
+//! the deleted `detail_watchdog_cli.py` rule layer (`rules` engine), run inline
+//! in the `detailWatchdog` executor.
 //!
 //! It reproduces the CLI's Phase-1 detect-and-report heuristics step by step —
 //! global Laplacian-variance blur / below-placeholder size (`low_resolution`),
@@ -17,10 +17,10 @@
 //! wide-gamut colour management are the same ones every other native card
 //! uses, mirroring the CLI's `_load_rgb_alpha` + `wide_gamut.managed_to_srgb`.
 //!
-//! A learned detector (`--engine` other than `rules`) still defers to the
-//! Python bridge (`detector_backends`); so does any source the loader cannot
-//! decode, in which case [`try_watch`] returns `Ok(None)` and the caller
-//! falls back.
+//! The native [`super::detail_watchdog_onnx`] pass can add semantic findings on
+//! the same decoded pixels. Any missing/invalid weight, runtime, session, or
+//! output leaves the complete rule result intact and records a fallback reason.
+//! Sources the shared loader cannot decode return `Ok(None)` to the caller.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -36,7 +36,7 @@ const EPS: f64 = 1e-6;
 
 const ALL_TARGETS: [&str; 5] = ["face", "hands", "text", "logo", "product_edges"];
 /// Watch targets the CPU rule layer cannot honestly detect on its own; the
-/// opt-in ML detector (Python path) graduates the ones it covers.
+/// opt-in native ML detector graduates the ones its sidecar covers.
 const UNSUPPORTED_TARGETS: [&str; 3] = ["hands", "text", "logo"];
 
 /// Per-mode detection thresholds (mirrors the CLI's `_MODES` table).
@@ -84,13 +84,13 @@ pub(crate) struct CpuDetailWatchdogParams {
     pub(crate) mode: Option<String>,
     pub(crate) output_dir: String,
     pub(crate) output_name: Option<String>,
+    pub(crate) engine_requested: String,
     pub(crate) device_requested: String,
 }
 
-/// Run the rule-layer watchdog in-process. Returns `Ok(Some(result))` on the
-/// fast path, or `Ok(None)` when a source cannot be decoded here and the
-/// caller should defer to the Python bridge, which surfaces the canonical
-/// error message.
+/// Run the rule layer and optional native detector in-process. Returns
+/// `Ok(Some(result))` after a successful native decode, or `Ok(None)` when the
+/// source cannot be decoded by the shared loader.
 pub(crate) fn try_watch(
     p: &CpuDetailWatchdogParams,
 ) -> Result<Option<DetectQualityResult>, String> {
@@ -187,9 +187,59 @@ pub(crate) fn try_watch(
         issues.push(issue);
     }
 
+    let engine_requested = {
+        let engine = p.engine_requested.trim().to_ascii_lowercase();
+        if engine.is_empty() {
+            "rules".to_string()
+        } else {
+            engine
+        }
+    };
+    let device_requested = super::onnx_pool::OnnxDeviceRequest::from_param(&p.device_requested)
+        .as_str()
+        .to_string();
+
+    let mut covered_targets = BTreeSet::new();
+    let mut engine = "rules".to_string();
+    let mut engine_fallback_reason = None;
+    let mut detectors = Vec::new();
+    let mut backend_model = None;
+    let mut device = None;
+    match engine_requested.as_str() {
+        "rules" => {}
+        "onnx_defect" => {
+            let inference = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::detail_watchdog_onnx::detect(&loaded.image, &watch_set, &device_requested)
+            }));
+            match inference {
+                Ok(Ok(result)) => {
+                    issues.extend(result.issues);
+                    covered_targets = result.covered_targets;
+                    engine = "onnx_defect".to_string();
+                    detectors.push("onnx_defect".to_string());
+                    backend_model = Some(result.backend_model);
+                    device = Some(result.device);
+                    engine_fallback_reason = result.device_fallback_reason;
+                }
+                Ok(Err(reason)) => engine_fallback_reason = Some(reason),
+                Err(_) => {
+                    engine_fallback_reason = Some(
+                        "native onnx_defect detector panicked; kept the rules result".to_string(),
+                    )
+                }
+            }
+        }
+        unknown => {
+            engine_fallback_reason = Some(format!("unknown engine {unknown:?}"));
+        }
+    }
+
     let skipped: Vec<String> = watch_set
         .iter()
-        .filter(|t| UNSUPPORTED_TARGETS.contains(&t.as_str()))
+        .filter(|target| {
+            UNSUPPORTED_TARGETS.contains(&target.as_str())
+                && !covered_targets.contains(target.as_str())
+        })
         .cloned()
         .collect();
 
@@ -223,15 +273,6 @@ pub(crate) fn try_watch(
         Some(overlay_path.to_string_lossy().to_string())
     };
 
-    let device_requested = {
-        let d = p.device_requested.trim().to_ascii_lowercase();
-        if d.is_empty() {
-            "auto".to_string()
-        } else {
-            d
-        }
-    };
-
     Ok(Some(DetectQualityResult {
         // Phase 1 is detect-only: the candidate is returned unchanged.
         fixed_image: image_path.to_string(),
@@ -253,12 +294,12 @@ pub(crate) fn try_watch(
             // The optional mask is advisory in Phase 1; detection runs on the
             // image's own alpha rim, so the supplied matte is not consumed.
             mask_consumed: false,
-            engine: "rules".to_string(),
-            engine_requested: "rules".to_string(),
-            engine_fallback_reason: None,
-            detectors: Vec::new(),
-            backend_model: None,
-            device: None,
+            engine,
+            engine_requested,
+            engine_fallback_reason,
+            detectors,
+            backend_model,
+            device,
             device_requested,
         },
     }))
@@ -715,6 +756,60 @@ mod tests {
     use super::*;
     use image::Rgba;
 
+    fn draw_test_text(image: &mut RgbaImage, text: &str, x: u32, y: u32, scale: u32) {
+        fn glyph(ch: char) -> [&'static str; 7] {
+            match ch {
+                'D' => [
+                    "11110", "10001", "10001", "10001", "10001", "10001", "11110",
+                ],
+                'E' => [
+                    "11111", "10000", "10000", "11110", "10000", "10000", "11111",
+                ],
+                'H' => [
+                    "10001", "10001", "10001", "11111", "10001", "10001", "10001",
+                ],
+                'L' => [
+                    "10000", "10000", "10000", "10000", "10000", "10000", "11111",
+                ],
+                'O' => [
+                    "01110", "10001", "10001", "10001", "10001", "10001", "01110",
+                ],
+                'R' => [
+                    "11110", "10001", "10001", "11110", "10100", "10010", "10001",
+                ],
+                'W' => [
+                    "10001", "10001", "10001", "10101", "10101", "10101", "01010",
+                ],
+                _ => ["00000"; 7],
+            }
+        }
+
+        let mut cursor = x;
+        for ch in text.chars() {
+            if ch == ' ' {
+                cursor += scale * 3;
+                continue;
+            }
+            for (row, bits) in glyph(ch).iter().enumerate() {
+                for (column, bit) in bits.bytes().enumerate() {
+                    if bit != b'1' {
+                        continue;
+                    }
+                    for dy in 0..scale {
+                        for dx in 0..scale {
+                            let px = cursor + column as u32 * scale + dx;
+                            let py = y + row as u32 * scale + dy;
+                            if px < image.width() && py < image.height() {
+                                image.put_pixel(px, py, Rgba([10, 10, 10, 255]));
+                            }
+                        }
+                    }
+                }
+            }
+            cursor += scale * 6;
+        }
+    }
+
     fn params(image: &str, out_dir: &str) -> CpuDetailWatchdogParams {
         CpuDetailWatchdogParams {
             image_path: image.to_string(),
@@ -724,6 +819,7 @@ mod tests {
             mode: None,
             output_dir: out_dir.to_string(),
             output_name: None,
+            engine_requested: "rules".to_string(),
             device_requested: "auto".to_string(),
         }
     }
@@ -761,6 +857,102 @@ mod tests {
         assert!(report.global_sharpness > 80.0);
         assert_eq!(report.image_size, Some([64, 64]));
         assert!(!report.mask_consumed);
+    }
+
+    #[test]
+    fn unknown_engine_keeps_the_complete_rules_result() {
+        let dir = temp_dir("unknown_engine");
+        let path = dir.join("candidate.png");
+        RgbaImage::from_pixel(32, 32, Rgba([128, 128, 128, 255]))
+            .save(&path)
+            .unwrap();
+        let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "removed_backend".to_string();
+
+        let result = try_watch(&p).unwrap().expect("rules fallback");
+        assert_eq!(result.watchdog_report.engine, "rules");
+        assert_eq!(result.watchdog_report.engine_requested, "removed_backend");
+        assert!(result
+            .watchdog_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unknown engine"));
+        assert_eq!(
+            result.watchdog_report.skipped_targets,
+            ["hands", "logo", "text"]
+        );
+        assert!(result
+            .quality_report
+            .issues
+            .iter()
+            .any(|issue| issue.issue_type == "low_resolution"));
+    }
+
+    #[test]
+    fn missing_onnx_weight_keeps_the_complete_rules_result() {
+        if super::super::resolve_watchdog_model_path().is_some() {
+            eprintln!("skipping missing-weight fallback: watchdog weight is present");
+            return;
+        }
+        let dir = temp_dir("missing_onnx");
+        let path = dir.join("candidate.png");
+        RgbaImage::from_pixel(32, 32, Rgba([128, 128, 128, 255]))
+            .save(&path)
+            .unwrap();
+        let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "onnx_defect".to_string();
+
+        let result = try_watch(&p).unwrap().expect("rules fallback");
+        assert_eq!(result.watchdog_report.engine, "rules");
+        assert_eq!(result.watchdog_report.engine_requested, "onnx_defect");
+        assert!(result.watchdog_report.engine_fallback_reason.is_some());
+        assert!(result.watchdog_report.detectors.is_empty());
+        assert!(result.watchdog_report.backend_model.is_none());
+        assert!(result.watchdog_report.device.is_none());
+        assert!(result
+            .quality_report
+            .issues
+            .iter()
+            .any(|issue| issue.issue_type == "low_resolution"));
+    }
+
+    #[test]
+    fn onnx_defect_inference_when_weight_present() {
+        let Some(model) = super::super::resolve_watchdog_model_path() else {
+            eprintln!("skipping watchdog ONNX e2e: no weight resolvable");
+            return;
+        };
+        let dir = temp_dir("onnx_e2e");
+        let path = dir.join("candidate.png");
+        let mut image = RgbaImage::from_pixel(640, 240, Rgba([245, 245, 240, 255]));
+        draw_test_text(&mut image, "HELLO WORLD", 40, 35, 8);
+        draw_test_text(&mut image, "WORLD HELLO", 40, 135, 8);
+        image.save(&path).unwrap();
+        let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
+        p.engine_requested = "onnx_defect".to_string();
+        p.watch_targets = Some("hands,text,logo".to_string());
+        p.device_requested = "cpu".to_string();
+
+        let result = try_watch(&p).unwrap().expect("native ONNX detector");
+        let report = result.watchdog_report;
+        assert_eq!(report.engine, "onnx_defect");
+        assert_eq!(report.detectors, ["onnx_defect"]);
+        assert_eq!(report.device.as_deref(), Some("cpu"));
+        assert!(report.engine_fallback_reason.is_none());
+        assert_eq!(
+            report.backend_model.as_deref(),
+            model
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .as_deref()
+        );
+        assert!(report.skipped_targets.len() < 3);
+        assert!(result
+            .quality_report
+            .issues
+            .iter()
+            .any(|issue| issue.issue_type == "garbled_text"));
     }
 
     /// A flat image is globally blurry: low_resolution flagged and the red-box
@@ -888,7 +1080,7 @@ mod tests {
         assert!(err.contains("unknown mode"), "{err}");
 
         let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
-        p.watch_targets = Some("face,dragons".to_string());
+        p.watch_targets = Some("face,unknown_target".to_string());
         let err = try_watch(&p).unwrap_err();
         assert!(err.contains("unknown watch target"), "{err}");
     }
@@ -908,10 +1100,10 @@ mod tests {
         assert!(err.contains("invalid visual_context JSON"), "{err}");
     }
 
-    /// A missing candidate image defers to the Python bridge, which surfaces
-    /// the canonical error message.
+    /// A missing candidate image cannot enter the native decode path; callers
+    /// surface the canonical unsupported/missing-source error.
     #[test]
-    fn missing_image_defers_to_python() {
+    fn missing_image_returns_no_native_result() {
         let dir = temp_dir("missing");
         let p = params("definitely_not_here_zzx.png", dir.to_str().unwrap());
         assert!(try_watch(&p).unwrap().is_none());

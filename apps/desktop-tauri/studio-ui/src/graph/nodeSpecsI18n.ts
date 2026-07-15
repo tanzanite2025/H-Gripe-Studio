@@ -499,11 +499,11 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       },
       engine: {
         label: "引擎",
-        hint: "rules = 内置 CPU 规则层（始终可用）；onnx_defect = 可选 ML 检测器，覆盖 手/文字/logo，权重/依赖缺失时回落 rules",
+        hint: "rules = 内置 CPU 规则层（始终可用）；onnx_defect = 原生 ORT 检测器，覆盖 手/文字/logo，运行时、权重或推理不可用时保留完整 rules 输出",
       },
       device: {
         label: "设备",
-        hint: "onnx_defect 检测器的计算设备：auto（有 CUDA 用 CUDA，否则 CPU）| cpu | cuda（无加速器时回落 CPU）；rules 层忽略此项",
+        hint: "onnx_defect 的计算设备：当前 Windows ORT 仅 CPU；gpu 为后续 CUDA/DirectML 共用请求，gpu/cuda 当前会报告 CPU 回退；rules 层忽略此项",
       },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: { label: "输出名", hint: "问题叠加 PNG 的基础名（空 = <image>_issues）" },

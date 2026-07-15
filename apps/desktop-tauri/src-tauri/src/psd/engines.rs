@@ -260,6 +260,48 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
         );
     }
 
+    if let Some(card) = cards
+        .iter_mut()
+        .find(|card| card.node_kind == "detailWatchdog")
+    {
+        let model = crate::studio::resolve_watchdog_model_path();
+        let weight = model.as_ref().map(|path| {
+            let size_mb = std::fs::metadata(path)
+                .ok()
+                .map(|meta| meta.len().div_ceil(1024 * 1024));
+            WeightInfo {
+                path: path.to_string_lossy().to_string(),
+                present: true,
+                size_mb,
+            }
+        });
+        card.engines.insert(
+            "onnx_defect".to_string(),
+            EngineAvailability {
+                available: model.is_some() && onnx_status.installed,
+                reason: if model.is_none() {
+                    "Detail Watchdog weight not found; configure onnx_defect or install watchdog_defect.onnx"
+                        .to_string()
+                } else if let Some(reason) = &onnx_status.reason {
+                    format!(
+                        "Detail Watchdog weight resolved, but ONNX Runtime is unavailable: {reason}"
+                    )
+                } else {
+                    "native Detail Watchdog weight resolved; current ORT build uses CPU and validates the session on first use"
+                        .to_string()
+                },
+                accelerated: false,
+                weight: weight.or_else(|| {
+                    Some(WeightInfo {
+                        path: "watchdog_defect.onnx".to_string(),
+                        present: false,
+                        size_mb: None,
+                    })
+                }),
+            },
+        );
+    }
+
     Ok(EngineProbeReport {
         cards,
         model_cache_dir: super::load_model_paths_config().model_cache_dir,
@@ -302,7 +344,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn probe_reports_native_vitmatte_and_ort_runtime() {
+    fn probe_reports_native_onnx_engines_and_ort_runtime() {
         let report = probe_engines(None).unwrap();
         let refine = report
             .cards
@@ -320,6 +362,23 @@ mod tests {
         assert_eq!(
             learned.weight.as_ref().unwrap().present,
             crate::studio::resolve_vitmatte_model_path().is_some()
+        );
+
+        let watchdog = report
+            .cards
+            .iter()
+            .find(|card| card.node_kind == "detailWatchdog")
+            .unwrap();
+        assert!(watchdog.engines["rules"].available);
+        let detector = &watchdog.engines["onnx_defect"];
+        assert!(!detector.accelerated);
+        assert_eq!(
+            detector.available,
+            crate::studio::resolve_watchdog_model_path().is_some() && runtime.onnxruntime.installed
+        );
+        assert_eq!(
+            detector.weight.as_ref().unwrap().present,
+            crate::studio::resolve_watchdog_model_path().is_some()
         );
 
         if runtime.onnxruntime.installed {

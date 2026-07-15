@@ -66,10 +66,12 @@ and a repository-wide search proves the old path has no callers. Do not equate
 documented product requirement justifies an explicit fork.
 
 The desktop `ort` dependency currently earns its place through native subject
-segmentation, Subject Mask ViTMatte, and Refine Mask Edge `onnx_matting`. The
-two matting entry points share `studio/subject_matte.rs`, the warm session pool,
-managed `vitmatte.onnx` resolution and CPU-provider fallback reporting. A model
-weight is a runtime artifact and is not committed into `cargo-vendor`.
+segmentation, Subject Mask ViTMatte, Refine Mask Edge `onnx_matting`, and Detail
+Watchdog `onnx_defect`. These paths share the warm session pool, managed model
+resolution and CPU-provider fallback reporting. The watchdog detector adds no
+Paddle, Python, Torch, OpenCV or second ONNX runtime dependency. Model weights
+and label sidecars are runtime artifacts and are not committed into
+`cargo-vendor`.
 
 The runtime boundary is now explicit: `ort` uses dynamic loading against the
 locked Windows x64 CPU runtime in `third_party/onnxruntime`, and its

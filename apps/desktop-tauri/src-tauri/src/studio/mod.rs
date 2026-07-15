@@ -76,6 +76,7 @@ mod detail_repaint;
 pub(crate) mod detail_repaint_cpu;
 mod detail_watchdog;
 pub(crate) mod detail_watchdog_cpu;
+mod detail_watchdog_onnx;
 mod device_registry;
 mod device_report;
 mod edge_refine;
@@ -144,6 +145,7 @@ pub(crate) use clip_props::{ClipPropsEvaluator, ResolvedClipProps};
 #[cfg(test)]
 pub(crate) use clip_props_raster::apply_clip_props_srgb_proxy;
 pub(crate) use clip_props_raster::{apply_clip_props_srgb_proxy_preferred, ClipPropsBackend};
+pub(crate) use detail_watchdog_onnx::resolve_watchdog_model_path;
 pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;

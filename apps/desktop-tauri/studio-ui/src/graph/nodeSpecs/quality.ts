@@ -7,7 +7,7 @@ export const QUALITY_NODE_SPECS = {
     executor: "local",
     title: "Detail Watchdog",
     description:
-      "Scan a candidate image for local breakdowns (global/region blur, alpha-rim halos, colour mismatch vs the connected background, below-target resolution) and emit a QualityReport so the workflow can decide whether to re-run or hand-fix. Detect-only in Phase 1 (no automatic repaint): 'fixed_image' is the unchanged input. CPU-only (no ML) — semantic targets needing a GPU/VLM (hands/text/logo) are reported skipped. Connect a VisualContext and/or placeholder bounds for the resolution and colour checks.",
+      "Scan a candidate image for local breakdowns and emit a QualityReport. Detect-only: 'fixed_image' is unchanged. Native CPU rules always cover blur, alpha-rim halos, colour mismatch and target resolution; optional onnx_defect adds sidecar-mapped hands/text/logo findings and keeps the full rules report on fallback. Connect a VisualContext and/or placeholder bounds for resolution and colour checks.",
     category: "review",
     inputs: [
       port("image", "image", "image"),
@@ -44,16 +44,16 @@ export const QUALITY_NODE_SPECS = {
         options: ["rules", "onnx_defect"],
         defaultValue: "rules",
         inline: true,
-        hint: "rules = built-in CPU rule layer (always available); onnx_defect = opt-in ML detector for hands/text/logo, falls back to rules when its weight/deps are missing",
+        hint: "rules = built-in CPU rule layer (always available); onnx_defect = native ORT detector for hands/text/logo, preserving rules output when its runtime, weight or inference is unavailable",
       },
       {
         key: "device",
         label: "Device",
         control: "select",
-        options: ["auto", "cpu", "cuda"],
+        options: ["auto", "cpu", "gpu", "cuda"],
         defaultValue: "auto",
         inline: true,
-        hint: "compute device for the onnx_defect detector: auto (cuda if present else cpu) | cpu | cuda (degrades to cpu without an accelerator); ignored by the rules layer",
+        hint: "compute device for onnx_defect: current Windows ORT is CPU-only; gpu stays vendor-neutral for future CUDA/DirectML, and gpu/cuda currently report CPU fallback; ignored by rules",
         visibleWhen: { param: "engine", in: ["onnx_defect"] },
       },
       {

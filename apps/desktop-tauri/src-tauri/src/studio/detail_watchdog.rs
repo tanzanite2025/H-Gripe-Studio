@@ -1,9 +1,8 @@
-//! The `detailWatchdog` node executor. The `rules` engine runs the in-process
-//! native-Rust rule layer ([`super::detail_watchdog_cpu`]) — the only
-//! supported backend. It scans a candidate image for local breakdowns (blur,
-//! halos, colour mismatch, missing resolution) and exposes the (Phase 1
-//! unchanged) image, the quality report, and the issue overlay as flat output
-//! ports.
+//! The `detailWatchdog` node executor. Its native rule layer always scans for
+//! local breakdowns (blur, halos, colour mismatch, missing resolution). The
+//! opt-in `onnx_defect` engine adds learned hands/text/logo findings in-process
+//! and degrades to the complete rule report when its weight/runtime cannot run.
+//! The image remains unchanged; reports and issue overlays are flat outputs.
 
 use std::collections::BTreeMap;
 
@@ -15,7 +14,7 @@ use super::graph::{
 };
 use crate::psd::DetectQualityResult;
 
-/// Encode an optional connected JSON input ({...}) as a string for the CLI.
+/// Encode an optional connected JSON input ({...}) for the native runner.
 fn encode_input(inputs: &BTreeMap<String, Value>, key: &str) -> Result<Option<String>, String> {
     match inputs.get(key) {
         Some(value) if !value.is_null() => {
@@ -44,24 +43,13 @@ pub(super) fn execute_studio_detail_watchdog(
     let output_dir = resolve_output_dir(node)?;
     let watch_targets = optional(studio_value_to_string(node.params.get("watch_targets")));
     let mode = optional(studio_value_to_string(node.params.get("mode")));
-    // `engine` selects the opt-in ML detector (default `rules`); the bridge
-    // falls back to the always-on rule layer when it is unavailable.
+    // `engine` selects the opt-in ML detector (default `rules`). The native
+    // runner keeps the always-on rule report when the detector is unavailable.
     let engine = optional(studio_value_to_string(node.params.get("engine")));
     // `device` selects the ONNX execution provider for the learned detector
     // (default `auto`); ignored by the always-on CPU rule layer.
     let device = optional(studio_value_to_string(node.params.get("device")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
-
-    let engine_is_rules = engine
-        .as_deref()
-        .map(|e| e.trim().eq_ignore_ascii_case("rules"))
-        .unwrap_or(true);
-    if !engine_is_rules {
-        return Err(format!(
-            "Detail Watchdog engine `{}` is no longer available; only the native `rules` engine is supported",
-            engine.as_deref().unwrap_or_default().trim()
-        ));
-    }
 
     let cpu_params = CpuDetailWatchdogParams {
         image_path: image.clone(),
@@ -71,6 +59,7 @@ pub(super) fn execute_studio_detail_watchdog(
         mode,
         output_dir,
         output_name,
+        engine_requested: engine.unwrap_or_else(|| "rules".to_string()),
         device_requested: device.unwrap_or_else(|| "auto".to_string()),
     };
     let result = detail_watchdog_cpu::try_watch(&cpu_params)?.ok_or_else(|| {
@@ -98,6 +87,7 @@ fn to_output_map(result: DetectQualityResult) -> Result<BTreeMap<String, Value>,
 mod tests {
     use super::*;
     use crate::psd::WatchdogReport;
+    use image::{Rgba, RgbaImage};
 
     fn node() -> StudioGraphNode {
         StudioGraphNode {
@@ -205,5 +195,44 @@ mod tests {
         assert_eq!(report.engine, "");
         assert!(report.detectors.is_empty());
         assert!(report.engine_fallback_reason.is_none());
+    }
+
+    #[test]
+    fn graph_entry_preserves_outputs_when_engine_is_unknown() {
+        let dir = std::env::temp_dir().join("hgripe_watchdog_graph_fallback");
+        std::fs::create_dir_all(&dir).unwrap();
+        let image_path = dir.join("candidate.png");
+        let mut image = RgbaImage::new(32, 32);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let value = if (x + y) % 2 == 0 { 255 } else { 0 };
+            *pixel = Rgba([value, value, value, 255]);
+        }
+        image.save(&image_path).unwrap();
+
+        let mut graph_node = node();
+        graph_node
+            .params
+            .insert("engine".to_string(), json!("removed_backend"));
+        graph_node.params.insert(
+            "output_dir".to_string(),
+            json!(dir.to_string_lossy().to_string()),
+        );
+        let mut inputs = BTreeMap::new();
+        inputs.insert(
+            "image".to_string(),
+            json!(image_path.to_string_lossy().to_string()),
+        );
+
+        let outputs = execute_studio_detail_watchdog(&graph_node, &inputs).unwrap();
+        assert_eq!(outputs["fixed_image"], inputs["image"]);
+        assert_eq!(outputs["watchdog_report"]["engine"], "rules");
+        assert_eq!(
+            outputs["watchdog_report"]["engine_requested"],
+            "removed_backend"
+        );
+        assert!(outputs["watchdog_report"]["engine_fallback_reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unknown engine"));
     }
 }

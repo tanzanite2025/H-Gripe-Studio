@@ -90,8 +90,8 @@ pub(crate) struct MatchReport {
     /// CPU heuristic path, which runs no ML session.
     #[serde(default)]
     pub(crate) device: Option<String>,
-    /// Compute device the node asked for (`auto`/`cpu`/`cuda`); an explicit
-    /// `cuda` degrades to `cpu` when no accelerator provider is present.
+    /// Compute device the node asked for (`auto`/`cpu`/`gpu`/`cuda`); `gpu`
+    /// remains vendor-neutral for later CUDA/DirectML provider selection.
     #[serde(default)]
     pub(crate) device_requested: String,
 }
@@ -524,9 +524,9 @@ pub(crate) struct DetectQualityResult {
 /// Scan a candidate image for local quality breakdowns (blur, halos, colour
 /// mismatch, missing resolution) and emit a [`QualityReport`]. This is the
 /// **Detail Watchdog** node's backend. Detect + report only (no automatic
-/// repaint); runs in-process on the native `rules` engine
-/// ([`crate::studio::detail_watchdog_cpu`]). `mode` is
-/// `strict | balanced | lenient`.
+/// repaint); the native `rules` layer always runs and `onnx_defect` can append
+/// learned findings in-process ([`crate::studio::detail_watchdog_cpu`]).
+/// `mode` is `strict | balanced | lenient`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn detect_quality_issues(
@@ -543,13 +543,6 @@ pub(crate) fn detect_quality_issues(
 ) -> Result<DetectQualityResult, String> {
     let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-    let engine = engine.unwrap_or_default();
-    let engine = engine.trim();
-    if !(engine.is_empty() || engine.eq_ignore_ascii_case("rules")) {
-        return Err(format!(
-            "Detail Watchdog engine `{engine}` is no longer available; only the native `rules` engine is supported"
-        ));
-    }
     let params = crate::studio::detail_watchdog_cpu::CpuDetailWatchdogParams {
         image_path: image.clone(),
         visual_context: visual_context.filter(|s| !s.trim().is_empty()),
@@ -558,6 +551,9 @@ pub(crate) fn detect_quality_issues(
         mode,
         output_dir: output_dir.unwrap_or_default(),
         output_name: output_name.filter(|s| !s.trim().is_empty()),
+        engine_requested: engine
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "rules".to_string()),
         device_requested: device
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "auto".to_string()),

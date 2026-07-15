@@ -120,6 +120,12 @@ bash scripts/fetch-sam2.sh            # sam2 encoder + decoder (or .ps1)
 bash scripts/fetch-vitmatte.sh        # vitmatte continuous-alpha (or .ps1)
 ```
 
+Windows Detail Watchdog text slice:
+
+```powershell
+.\scripts\fetch-watchdog-text.ps1
+```
+
 Or point the segmenter at any local weight without bundling:
 
 ```sh
@@ -132,14 +138,40 @@ export HGRIPE_VITMATTE_MODEL=/path/to/vitmatte.onnx
 export HGRIPE_WATCHDOG_MODEL=/path/to/watchdog_defect.onnx
 ```
 
-### Detail Watchdog ML detector (deleted with the Python bridge)
+### Detail Watchdog native ONNX detector
 
-The Detail Watchdog node always runs its native CPU rule layer. The old
-`onnx_defect` learned detector (which graduated the `hands` / `text` / `logo`
-watch targets into real findings) was a Python-bridge backend and was deleted
-in Phase 7 (#314); those targets are recorded as `skipped` until a native
-detector lands. The `probe_engines` Tauri command reports which engines are
-usable (for the UI to grey out) — today only the always-on `rules` baseline.
+The Detail Watchdog node always runs its native CPU rule layer. Its opt-in
+native Rust `onnx_defect` pass reuses the vendored Windows x64 ORT runtime and
+warm session pool. Missing/invalid weights, runtime/session failures, malformed
+outputs and inference errors preserve the complete rules result and are
+reported in `engine_fallback_reason`.
+
+`watchdog_defect.onnx.labels.json` declares the weight's class map and optional
+normalisation. The Windows fetch script installs the Apache-2.0 PP-OCRv3 text
+detector plus this sidecar:
+
+```json
+{"labels":{"0":"text"},"normalize":"imagenet"}
+```
+
+That trained slice graduates `text` only. `hands` and `logo` stay in
+`skipped_targets` until compatible trained weights and label mappings cover
+them. Weight resolution checks `HGRIPE_WATCHDOG_MODEL`, persisted
+`onnx_defect`, the environment/configured shared caches, then bundled resource
+locations. `probe_engines` reports both weight and ORT runtime availability.
+
+## Verify Detail Watchdog end-to-end (Windows)
+
+```powershell
+.\scripts\fetch-watchdog-text.ps1
+cargo test -p hgripe-desktop onnx_defect_inference_when_weight_present -- --nocapture
+```
+
+Without the local weight this real-inference test skips; pure Rust unit tests
+still cover letterbox/ImageNet preprocessing, probability-map connected
+components, output validation and rules-preserving fallback. The manual
+`tauri (detail watchdog e2e)` CI job performs the same Windows fetch and
+requires a real `garbled_text` detection.
 
 ## Verify ViTMatte end-to-end
 
