@@ -77,4 +77,21 @@ describe("buildRunReport", () => {
     expect(lines).toContain('backend card::enhance: local model "realesrgan-x4" (device cuda)');
     expect(lines).toContain('backend card::repair: api profile "openai-main"');
   });
+
+  it("ignores stale backend refs that the node cannot execute", () => {
+    const lines = report(
+      graph([
+        {
+          id: "match",
+          kind: "matchLightColor",
+          params: {
+            local_model_ref: "legacy-color-model",
+            api_profile_ref: "legacy-api",
+            device: "cuda",
+          },
+        },
+      ]),
+    );
+    expect(lines).toEqual(["scope full canvas: 1 node(s) to execute"]);
+  });
 });

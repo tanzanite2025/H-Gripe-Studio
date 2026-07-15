@@ -15,7 +15,8 @@ on:
   # `test_{sd_inpaint,sdxl_inpaint,flux_fill}_real_inference_with_tiny_snapshot`,
   # `test_diffusion_sr_real_inference_with_tiny_snapshot`,
   # `test_onnx_matting_real_inference_when_weight_present`,
-  # `onnx_defect_inference_when_weight_present`) skip on every normal
+  # `onnx_defect_inference_when_weight_present`,
+  # `pctnet_inference_when_weight_present`) skip on every normal
   # run. Trigger this manually to fetch/synthesise the weights and exercise the
   # real inference paths.
   workflow_dispatch:
@@ -173,6 +174,43 @@ jobs:
       - name: cargo test (trained text detector)
         working-directory: apps/desktop-tauri/src-tauri
         run: cargo test onnx_defect_inference_when_weight_present -- --nocapture
+
+  harmonize-e2e:
+    name: tauri (PCT-Net harmonize e2e)
+    # Only on manual dispatch. The fetched file is an unofficial third-party
+    # ONNX conversion used for integration verification, not a default bundle
+    # or a release-readiness approval.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Native PCT-Net uses the repository-maintained ORT CPU runtime.
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/desktop-tauri/studio-ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: apps/desktop-tauri
+        run: npm --prefix studio-ui ci && npm --prefix studio-ui run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri
+
+      - name: Fetch unofficial PCT-Net ONNX conversion
+        shell: pwsh
+        run: .\scripts\fetch-color-harmonize.ps1
+
+      - name: cargo test (PCT-Net harmonize inference)
+        working-directory: apps/desktop-tauri/src-tauri
+        run: cargo test pctnet_inference_when_weight_present -- --nocapture
 
   no-python-spawn:
     name: no python spawn (grep gate)

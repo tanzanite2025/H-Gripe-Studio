@@ -18,9 +18,11 @@
 //! (the colour pipeline's canonical ingress), mirroring the CLI's
 //! `_load_rgb_alpha` + `wide_gamut.managed_to_srgb`.
 //!
-//! A learned matcher (`--engine` other than `cpu`) still defers to the Python
-//! bridge (`color_backends`); so does any source the loader cannot decode, in
-//! which case [`try_match`] returns `Ok(None)` and the caller falls back.
+//! The opt-in `onnx_harmonize` engine reuses this path as its complete CPU
+//! fallback. The heuristic is computed first; only a validated native PCT-Net
+//! result replaces it. Missing weights, runtime/session failures, malformed
+//! tensors and inference panics therefore still produce a valid matched image
+//! with a visible `engine_fallback_reason`.
 
 use std::path::{Path, PathBuf};
 
@@ -51,6 +53,7 @@ pub(crate) struct CpuColorMatchParams {
     pub(crate) protect_brand_color: bool,
     pub(crate) output_dir: String,
     pub(crate) output_name: Option<String>,
+    pub(crate) engine_requested: String,
     pub(crate) device_requested: String,
 }
 
@@ -62,10 +65,13 @@ struct Planes {
     rgb: Vec<f64>,
     /// 0..1.
     alpha: Vec<f64>,
+    /// Retained only for a bounded PCT-Net attempt; CPU-only and oversized
+    /// paths release the decoder surface after extracting the working planes.
+    rgba: Option<RgbaImage>,
     meta: LoadMeta,
 }
 
-fn load_planes(path: &Path) -> Result<Planes, String> {
+fn load_planes(path: &Path, retain_onnx_surface: bool) -> Result<Planes, String> {
     let loaded = studio_image::load_rgba(path, DEFAULT_MAX_DECODE_PIXELS)?;
     let (width, height) = loaded.image.dimensions();
     let n = (width as usize) * (height as usize);
@@ -77,24 +83,26 @@ fn load_planes(path: &Path) -> Result<Planes, String> {
         rgb[i * 3 + 2] = f64::from(px.0[2]);
         alpha[i] = f64::from(px.0[3]) / 255.0;
     }
+    let rgba = (retain_onnx_surface
+        && super::color_match_onnx::validate_surface_size(width, height, "image").is_ok())
+    .then_some(loaded.image);
     Ok(Planes {
         width,
         height,
         rgb,
         alpha,
+        rgba,
         meta: loaded.meta,
     })
 }
 
 /// Run the CPU match pipeline in-process. Returns `Ok(Some(result))` on the
-/// fast path, or `Ok(None)` when a source cannot be decoded here and the
-/// caller should defer to the Python bridge, which surfaces the canonical
-/// error message.
+/// fast path, or `Ok(None)` when a source cannot be decoded by the native
+/// loader. Both public callers surface that as an unsupported-source error.
 pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResult>, String> {
     let image_path = p.image_path.trim();
     if image_path.is_empty() || !Path::new(image_path).is_file() {
-        // Let the Python path surface the canonical "subject image not found".
-        return Ok(None);
+        return Err(format!("subject image not found: {image_path}"));
     }
     let mode = p
         .mode
@@ -116,8 +124,32 @@ pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResu
     let strength = p.strength.clamp(0.0, 1.0);
     let shadow_strength = p.shadow_strength.clamp(0.0, 1.0);
     let highlight_strength = p.highlight_strength.clamp(0.0, 1.0);
+    let engine_requested = {
+        let engine = p.engine_requested.trim().to_ascii_lowercase();
+        if engine.is_empty() {
+            "cpu".to_string()
+        } else {
+            engine
+        }
+    };
+    let device_requested = {
+        let device = p.device_requested.trim().to_ascii_lowercase();
+        if device.is_empty() {
+            "auto".to_string()
+        } else {
+            device
+        }
+    };
+    let has_background_reference = p
+        .background_path
+        .as_deref()
+        .is_some_and(|path| !path.trim().is_empty());
+    let retain_onnx_surfaces = engine_requested == "onnx_harmonize"
+        && mode != "prompt_only"
+        && strength > 0.0
+        && has_background_reference;
 
-    let subject = match load_planes(Path::new(image_path)) {
+    let subject = match load_planes(Path::new(image_path), retain_onnx_surfaces) {
         Ok(planes) => planes,
         Err(_) => return Ok(None),
     };
@@ -134,6 +166,11 @@ pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResu
         .iter()
         .map(|&a| if a > 0.0 { 1.0 } else { 0.0 })
         .collect();
+    // PCT-Net needs the actual soft foreground matte, not just the final
+    // correction gate. This also lets an explicit mask expose background
+    // context when the connected subject is an opaque RGB/JPEG image.
+    let mut model_matte =
+        (retain_onnx_surfaces && subject.rgba.is_some()).then(|| subject.alpha.clone());
     if let Some(mask_path) = p
         .mask_path
         .as_deref()
@@ -149,12 +186,23 @@ pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResu
         } else {
             mask
         };
-        for (r, px) in region.iter_mut().zip(mask.pixels()) {
-            *r *= f64::from(px.0[0]) / 255.0;
+        if let Some(matte) = model_matte.as_mut() {
+            for ((r, matte), px) in region.iter_mut().zip(matte).zip(mask.pixels()) {
+                let selected = f64::from(px.0[0]) / 255.0;
+                *r *= selected;
+                *matte *= selected;
+            }
+        } else {
+            for (r, px) in region.iter_mut().zip(mask.pixels()) {
+                *r *= f64::from(px.0[0]) / 255.0;
+            }
         }
     }
     if region.iter().sum::<f64>() < EPS {
         region = vec![1.0; n];
+        if model_matte.is_some() {
+            model_matte = Some(vec![1.0; n]);
+        }
     }
 
     // The (optional) background reference: only its opaque pixels describe the
@@ -164,7 +212,7 @@ pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResu
             if !Path::new(bg).is_file() {
                 return Err(format!("background image not found: {bg}"));
             }
-            match load_planes(Path::new(bg)) {
+            match load_planes(Path::new(bg), retain_onnx_surfaces) {
                 Ok(planes) => Some(planes),
                 Err(_) => return Ok(None),
             }
@@ -214,100 +262,187 @@ pub(crate) fn try_match(p: &CpuColorMatchParams) -> Result<Option<ColorMatchResu
         before: before.clone(),
         after: before,
         engine: "cpu".to_string(),
-        engine_requested: "cpu".to_string(),
-        device_requested: {
-            let d = p.device_requested.trim().to_ascii_lowercase();
-            if d.is_empty() {
-                "auto".to_string()
-            } else {
-                d
-            }
-        },
+        engine_requested: engine_requested.clone(),
+        device_requested: device_requested.clone(),
         ..MatchReport::default()
     };
 
-    let out_rgb: Vec<f64> = if !pixels_change || background.is_none() {
-        // prompt_only, zero strength, or nothing to match against: pass the
-        // subject through untouched so the node is still wired-up correctly.
-        if mode != "prompt_only" && background.is_none() {
-            report.note =
-                Some("no background image connected; passed subject through unchanged".to_string());
+    let mut out_rgb: Vec<f64> = match (pixels_change, background.as_ref()) {
+        (false, _) | (true, None) => {
+            // prompt_only, zero strength, or nothing to match against: pass the
+            // subject through untouched so the node is still wired-up correctly.
+            if mode != "prompt_only" && background.is_none() {
+                report.note = Some(
+                    "no background image connected; passed subject through unchanged".to_string(),
+                );
+            }
+            subject.rgb.clone()
         }
-        subject.rgb.clone()
-    } else {
-        let bg = background.as_ref().expect("checked above");
-        let bg_region = background_region
-            .as_deref()
-            .expect("paired with background");
-        let subj_lab = rgb_to_lab(&subject.rgb);
-        let bg_lab = rgb_to_lab(&bg.rgb);
-        let weight: Vec<f64> = tone_protection_weight(
-            &subj_lab,
-            strength,
-            shadow_strength,
-            highlight_strength,
-            p.protect_brand_color,
-        )
-        .iter()
-        .zip(&region)
-        .map(|(&w, &r)| w * r)
-        .collect();
+        (true, Some(bg)) => {
+            let bg_region = background_region
+                .as_deref()
+                .expect("paired with background");
+            let subj_lab = rgb_to_lab(&subject.rgb);
+            let bg_lab = rgb_to_lab(&bg.rgb);
+            let weight: Vec<f64> = tone_protection_weight(
+                &subj_lab,
+                strength,
+                shadow_strength,
+                highlight_strength,
+                p.protect_brand_color,
+            )
+            .iter()
+            .zip(&region)
+            .map(|(&w, &r)| w * r)
+            .collect();
 
-        let mut result_lab = if mode == "color_transfer" || mode == "hybrid" {
-            let (transferred, stats) =
-                color_transfer(&subj_lab, &bg_lab, &region, bg_region, p.protect_saturation);
-            report.src_mean_lab = Some(stats.src_mean.to_vec());
-            report.dst_mean_lab = Some(stats.dst_mean.to_vec());
-            report.src_std_lab = Some(stats.src_std.to_vec());
-            report.dst_std_lab = Some(stats.dst_std.to_vec());
-            blend(&subj_lab, &transferred, &weight)
-        } else {
-            subj_lab.clone()
-        };
-
-        if mode == "histogram_match" || mode == "hybrid" {
-            // Gentler second pass for hybrid so the transfer stays dominant.
-            let hist_weight: Vec<f64> = weight
-                .iter()
-                .map(|&w| w * if mode == "hybrid" { 0.5 } else { 1.0 })
-                .collect();
-            let base = if mode == "hybrid" {
-                result_lab.clone()
+            let mut result_lab = if mode == "color_transfer" || mode == "hybrid" {
+                let (transferred, stats) =
+                    color_transfer(&subj_lab, &bg_lab, &region, bg_region, p.protect_saturation);
+                report.src_mean_lab = Some(stats.src_mean.to_vec());
+                report.dst_mean_lab = Some(stats.dst_mean.to_vec());
+                report.src_std_lab = Some(stats.src_std.to_vec());
+                report.dst_std_lab = Some(stats.dst_std.to_vec());
+                blend(&subj_lab, &transferred, &weight)
             } else {
                 subj_lab.clone()
             };
-            let mut matched = base.clone();
-            for ch in 0..3 {
-                if p.protect_saturation && ch > 0 {
-                    continue;
+
+            if mode == "histogram_match" || mode == "hybrid" {
+                // Gentler second pass for hybrid so the transfer stays dominant.
+                let hist_weight: Vec<f64> = weight
+                    .iter()
+                    .map(|&w| w * if mode == "hybrid" { 0.5 } else { 1.0 })
+                    .collect();
+                let base = if mode == "hybrid" {
+                    result_lab.clone()
+                } else {
+                    subj_lab.clone()
+                };
+                let mut matched = base.clone();
+                for ch in 0..3 {
+                    if p.protect_saturation && ch > 0 {
+                        continue;
+                    }
+                    let src: Vec<i64> = base
+                        .iter()
+                        .skip(ch)
+                        .step_by(3)
+                        .map(|&v| v.round() as i64)
+                        .collect();
+                    let reference: Vec<i64> = bg_lab
+                        .iter()
+                        .skip(ch)
+                        .step_by(3)
+                        .zip(bg_region)
+                        .filter(|(_, &sel)| sel > 0.5)
+                        .map(|(&v, _)| v.round() as i64)
+                        .collect();
+                    let mapped = histogram_match(&src, &reference);
+                    for (i, v) in mapped.into_iter().enumerate() {
+                        matched[i * 3 + ch] = v;
+                    }
                 }
-                let src: Vec<i64> = base
+                result_lab = blend(&base, &matched, &hist_weight);
+            }
+
+            let out = lab_to_rgb(&result_lab);
+            report.applied = true;
+            report.after = appearance(&out, &region);
+            out
+        }
+    };
+
+    match engine_requested.as_str() {
+        "cpu" => {}
+        "onnx_harmonize" if mode == "prompt_only" => {
+            report.engine_fallback_reason = Some(
+                "prompt_only mode does not change pixels; kept the CPU pass-through".to_string(),
+            );
+        }
+        "onnx_harmonize" if strength <= 0.0 => {
+            report.engine_fallback_reason =
+                Some("strength is zero; kept the CPU pass-through".to_string());
+        }
+        "onnx_harmonize" if background.is_none() => {
+            report.engine_fallback_reason =
+                Some("no background reference; kept the CPU pass-through".to_string());
+        }
+        "onnx_harmonize" => {
+            let bg = background.as_ref().expect("guarded above");
+            let inference = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::color_match_onnx::validate_surface_size(
+                    subject.width,
+                    subject.height,
+                    "subject",
+                )?;
+                super::color_match_onnx::validate_surface_size(bg.width, bg.height, "background")?;
+                let subject_rgba = subject.rgba.as_ref().ok_or_else(|| {
+                    "PCT-Net subject surface was not retained; kept the complete CPU result"
+                        .to_string()
+                })?;
+                let background_rgba = bg.rgba.as_ref().ok_or_else(|| {
+                    "PCT-Net background surface was not retained; kept the complete CPU result"
+                        .to_string()
+                })?;
+                let model_matte = model_matte.as_deref().ok_or_else(|| {
+                    "PCT-Net matte was not retained; kept the complete CPU result".to_string()
+                })?;
+                super::color_match_onnx::harmonize(
+                    subject_rgba,
+                    background_rgba,
+                    model_matte,
+                    &device_requested,
+                )
+            }));
+            match inference {
+                Ok(Ok(result)) => {
+                    let mut candidate = result.rgb;
+                    let subject_lab = rgb_to_lab(&subject.rgb);
+                    if p.protect_saturation {
+                        let mut candidate_lab = rgb_to_lab(&candidate);
+                        for pixel in 0..n {
+                            candidate_lab[pixel * 3 + 1] = subject_lab[pixel * 3 + 1];
+                            candidate_lab[pixel * 3 + 2] = subject_lab[pixel * 3 + 2];
+                        }
+                        candidate = lab_to_rgb(&candidate_lab);
+                    }
+                    let weight: Vec<f64> = tone_protection_weight(
+                        &subject_lab,
+                        strength,
+                        shadow_strength,
+                        highlight_strength,
+                        p.protect_brand_color,
+                    )
                     .iter()
-                    .skip(ch)
-                    .step_by(3)
-                    .map(|&v| v.round() as i64)
+                    .zip(&region)
+                    .map(|(&weight, &selected)| weight * selected)
                     .collect();
-                let reference: Vec<i64> = bg_lab
-                    .iter()
-                    .skip(ch)
-                    .step_by(3)
-                    .zip(bg_region)
-                    .filter(|(_, &sel)| sel > 0.5)
-                    .map(|(&v, _)| v.round() as i64)
-                    .collect();
-                let mapped = histogram_match(&src, &reference);
-                for (i, v) in mapped.into_iter().enumerate() {
-                    matched[i * 3 + ch] = v;
+                    out_rgb = blend(&subject.rgb, &candidate, &weight);
+                    report.applied = true;
+                    report.after = appearance(&out_rgb, &region);
+                    report.src_mean_lab = None;
+                    report.dst_mean_lab = None;
+                    report.src_std_lab = None;
+                    report.dst_std_lab = None;
+                    report.engine = "onnx_harmonize".to_string();
+                    report.backend_model = Some(result.backend_model);
+                    report.device = Some(result.device);
+                    report.engine_fallback_reason = result.device_fallback_reason;
+                }
+                Ok(Err(reason)) => report.engine_fallback_reason = Some(reason),
+                Err(_) => {
+                    report.engine_fallback_reason = Some(
+                        "native onnx_harmonize inference panicked; kept the complete CPU result"
+                            .to_string(),
+                    );
                 }
             }
-            result_lab = blend(&base, &matched, &hist_weight);
         }
-
-        let out = lab_to_rgb(&result_lab);
-        report.applied = true;
-        report.after = appearance(&out, &region);
-        out
-    };
+        unknown => {
+            report.engine_fallback_reason = Some(format!("unknown engine {unknown:?}"));
+        }
+    }
 
     // Recombine the (untouched) alpha and write the matched RGBA PNG.
     // prompt_only still writes a copy so downstream always gets a path.
@@ -765,6 +900,7 @@ mod tests {
             protect_brand_color: true,
             output_dir: out_dir.to_string(),
             output_name: None,
+            engine_requested: "cpu".to_string(),
             device_requested: "auto".to_string(),
         }
     }
@@ -940,13 +1076,145 @@ mod tests {
         assert!(err.contains("background image not found"), "{err}");
     }
 
-    /// A missing subject image defers to the Python bridge, which surfaces the
-    /// canonical error message.
+    /// A missing subject is a canonical input error, not an unsupported-codec
+    /// fallback.
     #[test]
-    fn missing_image_defers_to_python() {
+    fn missing_image_errors() {
         let dir = temp_dir("missing");
         let p = params("definitely_not_here_zzx.png", dir.to_str().unwrap());
-        assert!(try_match(&p).unwrap().is_none());
+        let error = try_match(&p).unwrap_err();
+        assert!(error.contains("subject image not found"), "{error}");
+    }
+
+    #[test]
+    fn unknown_engine_keeps_the_complete_cpu_match_and_reports_fallback() {
+        let dir = temp_dir("unknown_engine");
+        let subj = dir.join("subject.png");
+        let bg = dir.join("background.png");
+        save_solid(&subj, [40, 70, 180, 255], 16);
+        save_solid(&bg, [200, 130, 60, 255], 16);
+        let mut p = params(subj.to_str().unwrap(), dir.to_str().unwrap());
+        p.background_path = Some(bg.to_string_lossy().to_string());
+        p.engine_requested = "mystery_matcher".to_string();
+
+        let result = try_match(&p).unwrap().expect("CPU fallback result");
+        assert!(result.match_report.applied);
+        assert_eq!(result.match_report.engine, "cpu");
+        assert_eq!(result.match_report.engine_requested, "mystery_matcher");
+        assert!(result
+            .match_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("unknown engine"));
+    }
+
+    #[test]
+    fn decoder_surface_is_retained_only_for_a_bounded_learned_attempt() {
+        let dir = temp_dir("surface_retention");
+        let small = dir.join("small.png");
+        let oversized = dir.join("oversized.png");
+        save_solid(&small, [10, 20, 30, 255], 8);
+        RgbaImage::from_pixel(4097, 1, Rgba([10, 20, 30, 255]))
+            .save(&oversized)
+            .unwrap();
+
+        assert!(load_planes(&small, false).unwrap().rgba.is_none());
+        assert!(load_planes(&small, true).unwrap().rgba.is_some());
+        assert!(load_planes(&oversized, true).unwrap().rgba.is_none());
+    }
+
+    #[test]
+    fn oversized_background_falls_back_before_building_onnx_inputs() {
+        let dir = temp_dir("oversized_background");
+        let subject = dir.join("subject.png");
+        let background = dir.join("background.png");
+        save_solid(&subject, [40, 70, 180, 255], 8);
+        RgbaImage::from_pixel(4097, 1, Rgba([200, 130, 60, 255]))
+            .save(&background)
+            .unwrap();
+
+        let mut p = params(subject.to_str().unwrap(), dir.to_str().unwrap());
+        p.background_path = Some(background.to_string_lossy().to_string());
+        p.engine_requested = "onnx_harmonize".to_string();
+        let result = try_match(&p).unwrap().expect("complete CPU fallback");
+
+        assert_eq!(result.match_report.engine, "cpu");
+        assert!(result
+            .match_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("background 4097x1 exceeds"));
+    }
+
+    #[test]
+    fn pctnet_inference_when_weight_present() {
+        if super::super::resolve_color_model_path().is_none() {
+            eprintln!("skipping PCT-Net inference test: color_harmonize.onnx not installed");
+            return;
+        }
+
+        let dir = temp_dir("pctnet_real");
+        let subj = dir.join("subject.png");
+        let bg = dir.join("background.png");
+        let mask_path = dir.join("region.png");
+        // An opaque RGB-like subject proves the connected mask is also the
+        // model matte; without it PCT-Net would see no background context.
+        let subject = RgbaImage::from_pixel(64, 64, Rgba([38, 64, 204, 255]));
+        let mut mask = image::GrayImage::new(64, 64);
+        for y in 0..64 {
+            for x in 0..32 {
+                mask.put_pixel(x, y, image::Luma([255]));
+            }
+        }
+        subject.save(&subj).unwrap();
+        mask.save(&mask_path).unwrap();
+        save_solid(&bg, [199, 140, 77, 255], 64);
+
+        let mut p = params(subj.to_str().unwrap(), dir.to_str().unwrap());
+        p.background_path = Some(bg.to_string_lossy().to_string());
+        p.mask_path = Some(mask_path.to_string_lossy().to_string());
+        p.engine_requested = "onnx_harmonize".to_string();
+        p.device_requested = "cpu".to_string();
+        p.strength = 1.0;
+        p.protect_brand_color = false;
+        let result = try_match(&p).unwrap().expect("native PCT-Net result");
+        let report = &result.match_report;
+        assert_eq!(report.engine, "onnx_harmonize", "{report:?}");
+        assert_eq!(report.device.as_deref(), Some("cpu"));
+        assert!(report.engine_fallback_reason.is_none(), "{report:?}");
+        assert_eq!(
+            report.backend_model.as_deref(),
+            Some("color_harmonize.onnx")
+        );
+
+        let output = image::open(&result.matched_image).unwrap().to_rgba8();
+        assert_eq!(output.dimensions(), (64, 64));
+        assert_eq!(output.get_pixel(48, 32).0, [38, 64, 204, 255]);
+        let changed = output.get_pixel(16, 32).0;
+        assert_eq!(changed[3], 255);
+        let delta = changed[..3]
+            .iter()
+            .zip([38_u8, 64, 204])
+            .map(|(&actual, original)| actual.abs_diff(original) as u32)
+            .sum::<u32>();
+        assert!(
+            delta > 12,
+            "PCT-Net returned a near-identity pixel {changed:?}"
+        );
+
+        p.mask_path = None;
+        p.output_name = Some("pctnet_opaque_fallback".to_string());
+        let fallback = try_match(&p).unwrap().expect("complete CPU fallback");
+        assert_eq!(fallback.match_report.engine, "cpu");
+        assert_eq!(fallback.match_report.engine_requested, "onnx_harmonize");
+        assert!(fallback
+            .match_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("exposes background context"));
     }
 
     /// Histogram matching maps a channel's CDF onto the reference exactly for

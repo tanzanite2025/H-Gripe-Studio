@@ -8,6 +8,10 @@
 > now served by the native Rust cards; see
 > [`../implementation-status.md`](../implementation-status.md) §2 for the live
 > status. Kept as design reference for future **native** re-implementations.
+>
+> Native implementations added after Phase 7 are marked explicitly below.
+> Refine Mask Edge, Detail Watchdog, and Match Light & Color now have native
+> ORT blocks while their deleted Python implementations remain historical only.
 
 ## 0. Context
 
@@ -233,41 +237,82 @@ drift inside masked region (low denoise strength + tight masks), seam visibility
 ## 4. Match Light & Color — `match_light_color`
 
 ### 4.1 Phase 1 baseline
-`python/bridge/color_match_cli.py` runs, on CPU only: a Reinhard Lab statistics
-transfer / per-channel histogram match (`color_transfer` | `histogram_match` |
-`hybrid`), weighted toward shadows/highlights, sparing high-chroma (brand)
-pixels, and acting only inside the subject's alpha. `prompt_only` emits just the
-prompt suffix. Emits `{matched_image, prompt_suffix, match_report}`.
+`studio/color_match_cpu.rs` now runs this baseline in-process in native Rust: a
+Reinhard Lab statistics transfer / per-channel histogram match
+(`color_transfer` | `histogram_match` | `hybrid`), weighted toward
+shadows/highlights, sparing high-chroma brand pixels, and acting only inside the
+subject alpha and optional correction mask. `prompt_only` emits the prompt
+suffix and an unchanged image. The Python bridge no longer exists.
 
 ### 4.2 Phase 2 target
-A **learned image-harmonisation** network (foreground harmonisation, e.g.
-PCT-Net / Harmonizer-style) that predicts a per-pixel light/colour correction
-consistent with the background while preserving brand colours and material cues
-better than the global Lab/histogram statistics.
+A **learned image-harmonisation** network that predicts a per-pixel light and
+colour correction consistent with the background while preserving brand
+colours and material cues better than global Lab/histogram statistics. The
+native PCT-Net ViT implementation described below now provides this opt-in
+path.
 
 ### 4.3 Integration plan
-**Status: the seam + `onnx_harmonize` have landed** (the trained weight is the
-remaining piece). Mirroring the SR / Watchdog / Repaint seams:
+**Status: the native `onnx_harmonize` PCT-Net block and a weight-gated Windows
+inference lane have landed.**
 
-- A new **`engine` param** (`cpu` | `onnx_harmonize` | …); `cpu` stays the
-  default and always-available heuristic baseline.
-- `python/bridge/color_backends/` is the registry (`known_engines` / `resolve` /
-  `probe`); 🟡 `onnx_harmonize` is the first concrete backend: it composites the
-  subject over the resized background for context, runs an ONNX harmoniser
-  (lazy `onnxruntime`, weight from `HGRIPE_COLOR_MODEL` / `HGRIPE_MODEL_CACHE`),
-  and returns the harmonised RGB at the source geometry.
-- The learned correction is applied **inside the subject alpha, scaled by
-  `strength`**, so it honours the same region/strength contract as the
-  heuristic, and emits into the **same** `match_report` (plus `engine` /
-  `engine_requested` / `engine_fallback_reason` / `backend_model` telemetry).
-- `--probe-engines` reports availability; `match_light_color` joins the
-  cross-card `probe_engines` aggregation so the inspector greys it out when its
-  dep/weight is missing. Missing dep/weight → graceful fallback to the heuristic.
+- The **`engine` param** is `cpu | onnx_harmonize`; `cpu` remains the default
+  and always-available heuristic baseline.
+- `studio/color_match_onnx.rs` is a concrete PCT-Net contract. It feeds four
+  named float32 NCHW inputs: `image_lr` `1x3x256x256`, `image_fullres`
+  `1x3xHxW`, `mask_lr` `1x1x256x256`, and `mask_fullres` `1x1xHxW`. The named
+  `output` is full-resolution RGB `1x3xHxW`. The low-resolution branch stays
+  fixed at 256x256 even though the exported axes are dynamic.
+- The subject/background composite uses the effective soft matte (subject alpha
+  multiplied by the optional correction mask) at both resolutions. This lets
+  opaque RGB/JPEG subjects expose the background when a mask is connected.
+  The model requires at least one percent exposed background; a fully opaque
+  unmasked subject keeps the CPU result because its composite contains no
+  reference context.
+  PCT-Net's composited output is converted back to straight RGB through that
+  same matte before the original alpha is restored, avoiding a second
+  background mix on soft edges. The learned candidate then passes through the
+  existing strength, shadow/highlight, saturation, and brand-colour
+  protections.
+- The complete CPU match is computed first. Model resolution, runtime/session,
+  tensor validation, inference, or panic failures keep that CPU result and are
+  reported in `engine_fallback_reason`. `prompt_only`, zero strength, no
+  background, and unknown engine ids also preserve valid CPU outputs.
+- The model resolver checks `HGRIPE_COLOR_MODEL`, persisted `onnx_harmonize`,
+  environment/configured shared caches, and packaged/development resources.
+  `probe_engines` reports weight and ORT availability without loading the model
+  session.
+- Learned inference requires both subject and background source surfaces to stay
+  within a 4096-pixel edge and 4194304 total pixels. ONNX-only RGBA/matte
+  buffers are retained only after that check; larger inputs keep the complete
+  CPU match without those extra surfaces.
+- The supported local file is `color_harmonize.onnx` (`24819882` bytes,
+  SHA-256
+  `5ac3c8f59ad3a58a55baae79f3886e06826e7acb932179aaed034b61d62f5997`).
+  It is an unofficial conversion from `pccaza/harmonizer-onnx` commit
+  `046a31654875432fe303d5342aa036782270c520` (conversion repository MIT), based
+  on official PCT-Net work (MPL-2.0). Our upstream review reference is
+  `rakutentech/PCT-Net-Image-Harmonization` commit
+  `1572176ed1a72217dad7395391615329b98d30c7`; the converter did not identify its
+  exact upstream revision/checkpoint or export procedure, so lineage remains
+  unverified. It is not an official Rakuten/PCT-Net ONNX export, is not
+  release-ready by default, and is not bundled by default.
+- The manual Windows CI job fetches the byte/hash-locked artifact and runs
+  `pctnet_inference_when_weight_present`; normal PR runs skip real model
+  inference when no local weight resolves.
 
 ### 4.4 Dependencies & risks
-`onnxruntime` + a harmonisation weight (not bundled). Risks: identity / brand-
-colour drift (mitigated by the alpha-masked, strength-scaled blend), and the
-weight is opt-in so real-inference CI is gated like ViTMatte.
+The native path reuses the repository-maintained Windows x64 ORT 1.24.2 runtime
+and process-wide warm session pool; no Python, torch, OpenCV, or Paddle runtime
+returns. The current ORT package has the CPU provider only. A later Windows
+provider block must add NVIDIA CUDA and AMD/Intel DirectML with real session
+binding, packaging, truthful fallback, and hardware tests. ROCm is not a
+Windows target.
+
+The weight remains optional and unbundled. Distribution requires a fresh
+provenance/license review and preferably an internally reproducible export from
+the pinned official source. Runtime risks are identity or brand-colour drift,
+bounded full-resolution memory use, and malformed third-party model tensors;
+the strict contract and complete CPU fallback contain these failures.
 
 ---
 
@@ -315,76 +360,53 @@ landed.** Mirroring the SR / Watchdog / Repaint / Match Light & Color seams:
 
 ### 5.4 Dependencies & risks
 `ort` + a matting weight (not bundled). Risks: trimap quality dominates matting
-quality, and the weight is opt-in so real-inference CI remains gated. ORT's
-build-time runtime downloader is tracked separately from the functional
-integration and must not be removed until the runtime is packaged locally.
+quality, and the weight is opt-in so real-inference CI remains gated. The
+Windows x64 ORT CPU runtime is repository-maintained and packaged locally;
+build-time runtime downloads remain forbidden.
 
 ---
 
 ## 6. Cross-cutting concerns
 
-- **Packaging (ties to Issue #2):** model weights are **not** bundled in the
-  installer. Backends resolve weights from `HGRIPE_MODEL_CACHE` (downloaded /
-  configured post-install). The bundled `python/bridge` + `custom_nodes` +
-  `third_party` subtree stays the lightweight CPU baseline.
-- **Capability probing:** ✅ each local card's CLI exposes `--probe-engines`, and
-  the `probe_engines` Tauri command aggregates them into a **cross-card capability
-  report** (the `doctor`-style probe). The inspector
-  uses it to **grey out engines** whose deps/weights are missing on this box (the
-  CPU/`rules` baseline stays enabled, so the node always falls back to CPU). ✅
-  the report also carries **GPU/CUDA device detail** (the machine `runtime`
-  probe — the inspector's per-engine "runs on
-  GPU / falls back to CPU" badge) and a **cached-weight inventory** per engine
-  (each ML engine's non-bundled `weight` path / `present` / `size_mb`, so it is
-  clear what is downloaded vs still missing). The ONNX
-  engines honour that badge: a shared `sr_backends.onnx_providers()` selects
-  `CUDAExecutionProvider` first when ONNX Runtime exposes it (CPU always last),
-  mirroring the torch backends' "cuda if available else cpu" auto behaviour
-  instead of the old hard-coded CPU provider. ✅ explicit per-node `device`
-  selection has landed for the Image Enhance engine: the `--device`
-  (`auto`/`cpu`/`cuda`) param threads into `RealEsrganBackend.upscale` via the
-  shared `sr_backends.resolve_device()` helper, and the enhance report records
-  both `device_requested` and the `device` the run *actually* used (an explicit
-  `cuda` degrades to `cpu` on a box with no CUDA device, reported truthfully).
-  The seam now also covers the **ONNX** engines: the shared
-  `sr_backends.onnx_providers(available, device=…)` honours the same
-  `auto`/`cpu`/`cuda` selection (an explicit `cpu` pins the CPU provider; `cuda`
-  degrades to CPU when ORT exposes no accelerator) and `provider_device()` maps
-  the bound provider back to a `cpu`/`cuda` label for the report. **Refine Mask
-  Edge** (`onnx_matting`), **Match Light & Color** (`onnx_harmonize`) and
-  **Detail Watchdog** (`onnx_defect`) are wired end-to-end (their `--device`
-  threads into the session and the edge / match / watchdog report records
-  `device_requested` + `device`) — every ONNX engine now honours `--device`,
-  wired end-to-end through the Tauri commands / Graph executor and the inspector
-  UI. A per-node **`precision`** (`auto`/`fp32`/`fp16`) selection has now landed
-  for the **torch** backends (Image Enhance `realesrgan` + Detail Repaint
-  `sd_inpaint`): a shared `sr_backends.resolve_precision()` resolves `auto`→
-  `fp16` on CUDA / `fp32` on CPU, an explicit `fp16` degrades truthfully to
-  `fp32` on a CPU run, the backends bind `torch.half()` accordingly, and the
-  enhance / repaint reports record `precision_requested` + the `precision` the
-  run *actually* used. The ONNX engines keep no `precision` knob (their
-  precision is fixed at export). The "local model manager" backend has landed
-  (`get_model_paths`/`set_model_paths` persist per-engine `weights_path`
-  overrides + the shared cache dir in `model_paths.json`, applied as env vars on
-  every bridge subprocess with real env vars still winning); its old Dashboard
-  panel was removed with the legacy shell tabs, pending a settings surface
-  inside the node editor.
-- **Determinism & safety:** seedable backends; keep the text/logo guards; require
-  rule+ML agreement before any *automatic* (non-user-confirmed) repaint.
-- **Contracts are stable:** every Phase 2 backend emits the existing
-  `QualityReport` / `RepaintReport` / enhance JSON shapes. Phase 2 is selected
-  per run via `profile_ref`; the CPU path remains the default and fallback.
+- **Packaging (ties to Issue #2):** optional model weights are not bundled by
+  default. Native engines resolve them from explicit env values, persisted
+  model paths, `HGRIPE_MODEL_CACHE`, or packaged/development resources. The
+  Windows x64 ORT runtime itself is repository-maintained and packaged; no
+  build-time download or arbitrary system runtime fallback is allowed.
+- **Capability probing:** the `probe_engines` Tauri command reports the native
+  `onnx_matting`, `onnx_defect`, and `onnx_harmonize` weight/runtime status plus
+  their always-on baselines. The Inspector does not yet consume that report to
+  disable a missing engine choice.
+- **Device reporting:** native ONNX reports preserve `auto | cpu | gpu` and
+  legacy/provider-specific `cuda | directml` requests, then record the actual
+  provider device. The current ORT package has the CPU provider only, so every
+  accelerated request resolves truthfully to CPU with a reason. Later Windows
+  work must add NVIDIA CUDA and AMD/Intel DirectML before reporting
+  acceleration; ROCm is not a Windows target.
+- **Model management:** `get_model_paths` / `set_model_paths` persist per-engine
+  weight overrides and the shared cache in `model_paths.json`; real process env
+  values still win. The old Dashboard panel is gone, pending a settings and
+  diagnostics surface inside the node editor.
+- **Determinism and safety:** keep text/logo and identity protections, strict
+  tensor contracts, bounded allocation, and complete baseline fallback. The
+  third-party harmonizer weight additionally requires provenance and license
+  review before any release bundling.
+- **Contracts are stable:** local Phase 2 selection uses each card's `engine`
+  param and existing report fields. CPU/rules/provider remains the default and
+  complete fallback; Python runtimes and subprocess backends remain deleted.
 
-## 7. Suggested sequencing
+## 7. Remaining sequencing
 
-1. **SR first (highest visible win, lowest risk):** Real-ESRGAN backend behind
-   `profile_ref` + capability probe + CPU fallback.
-2. **Repaint local backend:** reuse the existing manifest; add SD/SDXL inpaint.
-3. **Watchdog ML passes:** OCR/logo + face/hand, then a VLM pass; graduate the
-   currently-`skipped` semantic targets.
-4. **SupIR/CCSR** as premium SR profiles once the backend dispatch + weight cache
-   are proven by Real-ESRGAN.
+1. Add a native Windows super-resolution backend behind the existing CPU
+   fallback; do not restore Python/Torch runtime integration.
+2. Add a native local repaint backend only after its model/runtime and manifest
+   contract are concrete; provider repaint remains the fallback.
+3. Extend Detail Watchdog with trained hands/logo coverage while retaining the
+   additive rules result.
+4. Add Windows ORT acceleration as a separate provider block: NVIDIA CUDA and
+   AMD/Intel DirectML, each with locked binaries, provider-aware session keys,
+   fallback reports, packaging, and real hardware evidence.
 
-The per-card `engine` seams (1–3 above plus Match Light & Color and Refine Mask
-Edge) have all landed; what remains across the board is the trained weights, the
-premium backends, and the opt-in real-inference CI.
+Native `onnx_matting`, `onnx_defect`, and `onnx_harmonize` blocks now have
+weight-gated inference paths. PCT-Net release bundling remains intentionally
+unapproved pending provenance/license review and a reproducible export story.

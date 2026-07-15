@@ -69,6 +69,7 @@ mod clip_props_raster;
 mod color;
 mod color_match;
 pub(crate) mod color_match_cpu;
+mod color_match_onnx;
 mod crop;
 #[cfg(all(windows, feature = "native-ffmpeg", feature = "viewport-surface"))]
 pub(crate) mod d3d11_wgpu;
@@ -145,6 +146,7 @@ pub(crate) use clip_props::{ClipPropsEvaluator, ResolvedClipProps};
 #[cfg(test)]
 pub(crate) use clip_props_raster::apply_clip_props_srgb_proxy;
 pub(crate) use clip_props_raster::{apply_clip_props_srgb_proxy_preferred, ClipPropsBackend};
+pub(crate) use color_match_onnx::resolve_color_model_path;
 pub(crate) use detail_watchdog_onnx::resolve_watchdog_model_path;
 pub(crate) use device_registry::*;
 pub(crate) use exec::*;

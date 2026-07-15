@@ -222,6 +222,46 @@ pub(crate) fn probe_engines(dir: Option<String>) -> Result<EngineProbeReport, St
 
     if let Some(card) = cards
         .iter_mut()
+        .find(|card| card.node_kind == "matchLightColor")
+    {
+        let model = crate::studio::resolve_color_model_path();
+        let weight = model.as_ref().map(|path| {
+            let size_mb = std::fs::metadata(path)
+                .ok()
+                .map(|meta| meta.len().div_ceil(1024 * 1024));
+            WeightInfo {
+                path: path.to_string_lossy().to_string(),
+                present: true,
+                size_mb,
+            }
+        });
+        card.engines.insert(
+            "onnx_harmonize".to_string(),
+            EngineAvailability {
+                available: model.is_some() && onnx_status.installed,
+                reason: if model.is_none() {
+                    "PCT-Net weight not found; configure onnx_harmonize or install color_harmonize.onnx"
+                        .to_string()
+                } else if let Some(reason) = &onnx_status.reason {
+                    format!("PCT-Net weight resolved, but ONNX Runtime is unavailable: {reason}")
+                } else {
+                    "native PCT-Net weight resolved; current ORT build uses CPU and validates the session on first use"
+                        .to_string()
+                },
+                accelerated: false,
+                weight: weight.or_else(|| {
+                    Some(WeightInfo {
+                        path: "color_harmonize.onnx".to_string(),
+                        present: false,
+                        size_mb: None,
+                    })
+                }),
+            },
+        );
+    }
+
+    if let Some(card) = cards
+        .iter_mut()
         .find(|card| card.node_kind == "refineMaskEdge")
     {
         let model = crate::studio::resolve_vitmatte_model_path();
@@ -346,6 +386,24 @@ mod tests {
     #[test]
     fn probe_reports_native_onnx_engines_and_ort_runtime() {
         let report = probe_engines(None).unwrap();
+        let color = report
+            .cards
+            .iter()
+            .find(|card| card.node_kind == "matchLightColor")
+            .unwrap();
+        assert!(color.engines["cpu"].available);
+        let harmonizer = &color.engines["onnx_harmonize"];
+        let runtime = report.runtime.as_ref().unwrap();
+        assert!(!harmonizer.accelerated);
+        assert_eq!(
+            harmonizer.available,
+            crate::studio::resolve_color_model_path().is_some() && runtime.onnxruntime.installed
+        );
+        assert_eq!(
+            harmonizer.weight.as_ref().unwrap().present,
+            crate::studio::resolve_color_model_path().is_some()
+        );
+
         let refine = report
             .cards
             .iter()
@@ -353,7 +411,6 @@ mod tests {
             .unwrap();
         assert!(refine.engines["cpu"].available);
         let learned = &refine.engines["onnx_matting"];
-        let runtime = report.runtime.as_ref().unwrap();
         assert!(!learned.accelerated);
         assert_eq!(
             learned.available,

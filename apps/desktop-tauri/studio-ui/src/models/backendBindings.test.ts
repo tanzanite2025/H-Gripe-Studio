@@ -77,6 +77,13 @@ describe("validateBackendRefs", () => {
     expect(issues[0].message).toContain("matte.refine");
   });
 
+  it("ignores legacy Match Light & Color model refs until registry paths reach Rust", () => {
+    const g = graph([
+      { id: "match", kind: "matchLightColor", params: { local_model_ref: "gone" } },
+    ]);
+    expect(validateBackendRefs(g, registry)).toEqual([]);
+  });
+
   it("checks only the active row bindings on integrated cards", () => {
     // repair.engine defaults to "provider", so only the API binding is active:
     // the dangling local ref must not be flagged, the dangling API ref must be.

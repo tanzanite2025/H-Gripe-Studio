@@ -65,6 +65,11 @@ by the scripts below into this directory; `bundle.resources` in
   bundled by default. Place it here to bundle for a release, or point
   `HGRIPE_VITMATTE_MODEL` at a local copy for dev; used only when the node's
   **Alpha matting** toggle is on.
+- **color_harmonize** is an optional local PCT-Net harmonizer weight (~24.8 MB).
+  It is not bundled by default and is not designated release-ready. The Windows
+  fetch script installs an unofficial third-party ONNX conversion for local
+  verification; release packaging requires the review in
+  [`COLOR_HARMONIZE_NOTICE.md`](COLOR_HARMONIZE_NOTICE.md).
 
 ## Models
 
@@ -109,6 +114,30 @@ by the scripts below into this directory; `bundle.resources` in
   thresholded at logit `0`, and resized to the original image.
   - **sha256:** `f5a4bd656c143899fb7f52d64ed81e6f6aeb37d477a0b6da50146ac7cf2187bf`
 
+### PCT-Net ViT harmonizer (optional local weight)
+
+- **Local file:** `color_harmonize.onnx`
+- **Conversion source:** `pccaza/harmonizer-onnx` commit
+  `046a31654875432fe303d5342aa036782270c520`, conversion repository licensed
+  MIT (Copyright (c) 2025 PC).
+- **Official upstream review reference:**
+  `rakutentech/PCT-Net-Image-Harmonization` commit
+  `1572176ed1a72217dad7395391615329b98d30c7`, licensed MPL-2.0. The converter
+  did not identify its exact upstream revision/checkpoint or export procedure,
+  so this reference is not verified artifact lineage.
+- **Provenance:** this is an unofficial third-party ONNX conversion, not an
+  official Rakuten or PCT-Net ONNX export. It is not bundled by default and is
+  not a release-readiness claim. See
+  [`COLOR_HARMONIZE_NOTICE.md`](COLOR_HARMONIZE_NOTICE.md).
+- **Inputs:** four named float32 NCHW tensors in `[0, 1]`:
+  `image_lr` `1x3x256x256`, `image_fullres` `1x3xHxW`, `mask_lr`
+  `1x1x256x256`, and `mask_fullres` `1x1xHxW`. The low-resolution branch is
+  fixed at 256x256 even though the exported axes are dynamic.
+- **Output:** named float32 `output` tensor `1x3xHxW`, at the subject's full
+  resolution.
+- **Bytes:** `24819882`
+- **sha256:** `5ac3c8f59ad3a58a55baae79f3886e06826e7acb932179aaed034b61d62f5997`
+
 ## Manual fetch (dev)
 
 ```sh
@@ -120,13 +149,14 @@ bash scripts/fetch-sam2.sh            # sam2 encoder + decoder (or .ps1)
 bash scripts/fetch-vitmatte.sh        # vitmatte continuous-alpha (or .ps1)
 ```
 
-Windows Detail Watchdog text slice:
+Windows-only optional model fetches:
 
 ```powershell
 .\scripts\fetch-watchdog-text.ps1
+.\scripts\fetch-color-harmonize.ps1
 ```
 
-Or point the segmenter at any local weight without bundling:
+Or point the native model backends at local weights without bundling:
 
 ```sh
 export HGRIPE_SUBJECT_MODEL=/path/to/u2netp.onnx
@@ -136,7 +166,46 @@ export HGRIPE_SAM2_ENCODER=/path/to/sam2_tiny.encoder.onnx
 export HGRIPE_SAM2_DECODER=/path/to/sam2_tiny.decoder.onnx
 export HGRIPE_VITMATTE_MODEL=/path/to/vitmatte.onnx
 export HGRIPE_WATCHDOG_MODEL=/path/to/watchdog_defect.onnx
+export HGRIPE_COLOR_MODEL=/path/to/color_harmonize.onnx
 ```
+
+### Match Light & Color native PCT-Net harmonizer
+
+The opt-in native Rust `onnx_harmonize` engine uses the shared Windows x64 ORT
+runtime and warm session pool. It builds the composite image and foreground
+matte (subject alpha multiplied by the optional connected mask) at both
+256x256 and full resolution, runs the strict four-input PCT-Net contract above,
+and converts its background-composited output back to straight RGB before
+restoring the original alpha. Both subject and background source surfaces are
+limited to a 4096-pixel edge and 4194304 total pixels for learned inference, so
+the extra ONNX surfaces stay bounded alongside the complete CPU fallback.
+The matte must expose at least one percent background context; a fully opaque
+subject without a connected mask keeps the CPU result because PCT-Net could not
+see the reference background.
+The existing Lab/histogram CPU match is computed first and remains the complete
+fallback for a missing or invalid weight, unavailable runtime, session or
+inference failure, malformed tensor, panic, `prompt_only`, zero strength, or a
+missing background. Every fallback is reported in `engine_fallback_reason`.
+
+Weight resolution checks `HGRIPE_COLOR_MODEL`, persisted `onnx_harmonize`, the
+environment/configured shared caches, then bundled resource locations.
+`probe_engines` reports both the weight and ORT runtime status. The current ORT
+package has the CPU execution provider only. A later Windows provider stage
+must add NVIDIA CUDA and AMD/Intel DirectML with real provider binding and
+tests; ROCm is not a Windows target.
+
+## Verify Match Light & Color end-to-end (Windows)
+
+```powershell
+.\scripts\fetch-color-harmonize.ps1
+cargo test -p hgripe-desktop pctnet_inference_when_weight_present -- --nocapture
+```
+
+Without the local weight the real-inference test skips. The manual
+`tauri (PCT-Net harmonize e2e)` CI job performs the same locked fetch and test.
+Fetching the artifact for local verification does not approve it for release
+bundling; complete the provenance and reproducible-export review in the NOTICE
+first.
 
 ### Detail Watchdog native ONNX detector
 

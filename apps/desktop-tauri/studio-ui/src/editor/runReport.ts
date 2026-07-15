@@ -9,6 +9,7 @@
 
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
+import { backendCapability, localModelCapability } from "../models/backendBindings";
 
 /** Lowered row-leaf id -> its semantic row name (`card::row` -> `row`). */
 function rowOfLeaf(leafId: string, cardId: string): string {
@@ -69,8 +70,12 @@ export function buildRunReport(opts: {
   // params are already un-prefixed): which API profile / local model each node
   // will ask for, plus its device/precision policies where present.
   for (const node of lowered.nodes) {
-    const api = asRef(node.params["api_profile_ref"]);
-    const local = asRef(node.params["local_model_ref"]);
+    const api = backendCapability(node.kind, node.params)
+      ? asRef(node.params["api_profile_ref"])
+      : null;
+    const local = localModelCapability(node.kind, node.params)
+      ? asRef(node.params["local_model_ref"])
+      : null;
     if (!api && !local) continue;
     const parts: string[] = [];
     if (api) parts.push(`api profile "${api}"`);

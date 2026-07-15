@@ -165,17 +165,13 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "将生成主体的光照与色彩向 PSD 背景靠拢，让合成不再显得「贴上去」：Reinhard Lab 迁移 / 直方图匹配，并向阴影与高光加权，同时保护品牌色。输出匹配后图像、匹配报告与提示词后缀。",
     params: {
       mode: { label: "模式" },
-      local_model_ref: {
-        label: "本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
-      },
       engine: {
         label: "引擎",
-        hint: "cpu = 内置 Lab 迁移 / 直方图匹配（始终可用）；onnx_harmonize = 可选学习型协调器，权重/依赖缺失时回落 cpu",
+        hint: "cpu = 内置 Lab 迁移 / 直方图匹配（始终可用）；onnx_harmonize = 通过 ONNX Runtime 原生运行 PCT-Net，权重、运行时或推理不可用时回落 cpu",
       },
       device: {
         label: "设备",
-        hint: "onnx_harmonize 协调器的计算设备：auto（有 CUDA 用 CUDA，否则 CPU）| cpu | cuda（无加速器时回落 CPU）；cpu 启发式忽略此项",
+        hint: "原生 PCT-Net 的计算请求：auto | gpu | cpu。当前 ONNX Runtime 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入。cpu 启发式忽略此项",
       },
       strength: { label: "强度" },
       shadow_strength: { label: "阴影强度", hint: "阴影区的额外校正权重" },

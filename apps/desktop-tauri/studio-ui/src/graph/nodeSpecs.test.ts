@@ -71,6 +71,26 @@ describe("nodeSpecs executor tagging", () => {
     }
   });
 
+  it("keeps Match Light & Color engine and device choices aligned with the native contract", () => {
+    const params = NODE_SPECS.matchLightColor.params;
+    const engine = params.find((param) => param.key === "engine");
+    const device = params.find((param) => param.key === "device");
+    expect(params.find((param) => param.key === "local_model_ref")).toBeUndefined();
+
+    expect(engine).toMatchObject({
+      control: "select",
+      options: ["cpu", "onnx_harmonize"],
+      defaultValue: "cpu",
+      visibleWhen: { param: "mode", in: ["color_transfer", "histogram_match", "hybrid"] },
+    });
+    expect(device).toMatchObject({
+      control: "select",
+      options: ["auto", "gpu", "cpu"],
+      defaultValue: "auto",
+      visibleWhen: { param: "engine", in: ["onnx_harmonize"] },
+    });
+  });
+
   it("groups the palette by production category, in flow order", () => {
     expect(paletteGroups().map((g) => g.category)).toEqual([
       "source",

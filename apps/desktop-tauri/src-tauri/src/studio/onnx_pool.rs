@@ -228,6 +228,7 @@ pub(crate) enum OnnxDeviceRequest {
     Auto,
     Cpu,
     Cuda,
+    DirectMl,
     Gpu,
 }
 
@@ -236,6 +237,7 @@ impl OnnxDeviceRequest {
         match value.trim().to_ascii_lowercase().as_str() {
             "cpu" => Self::Cpu,
             "cuda" => Self::Cuda,
+            "directml" => Self::DirectMl,
             "gpu" => Self::Gpu,
             _ => Self::Auto,
         }
@@ -246,6 +248,7 @@ impl OnnxDeviceRequest {
             Self::Auto => "auto",
             Self::Cpu => "cpu",
             Self::Cuda => "cuda",
+            Self::DirectMl => "directml",
             Self::Gpu => "gpu",
         }
     }
@@ -265,12 +268,12 @@ pub(crate) struct OnnxProviderResolution {
 /// Resolve a device request against the providers this build carries. The
 /// vendored onnxruntime is compiled with the CPU execution provider only, so
 /// today every request resolves to CPU — but an explicit `cpu` request is a
-/// choice (no reason), while `cuda`, generic `gpu`, and `auto` fall back with
-/// distinct, visible reasons. When accelerated providers are compiled in they slot in
+/// choice (no reason), while `cuda`, `directml`, generic `gpu`, and `auto` fall
+/// back with distinct, visible reasons. When accelerated providers are compiled in they slot in
 /// here, preserving the request semantics:
-/// `cpu` -> CPU only; `cuda` -> CUDA else CPU + reason; `auto` -> preferred
-/// accelerator else CPU + reason; `gpu` stays vendor-neutral so a later
-/// Windows build may choose CUDA or DirectML.
+/// `cpu` -> CPU only; `cuda` / `directml` -> that provider else CPU + reason;
+/// `auto` -> preferred accelerator else CPU + reason; `gpu` stays
+/// vendor-neutral so a later Windows build may choose CUDA or DirectML.
 pub(crate) fn resolve_provider(request: OnnxDeviceRequest) -> OnnxProviderResolution {
     match request {
         OnnxDeviceRequest::Cpu => OnnxProviderResolution {
@@ -281,6 +284,13 @@ pub(crate) fn resolve_provider(request: OnnxDeviceRequest) -> OnnxProviderResolu
             device: DeviceUsed::Cpu.as_str(),
             fallback_reason: Some(
                 "CUDA execution provider not built in (onnxruntime compiled with CPU provider only)"
+                    .to_string(),
+            ),
+        },
+        OnnxDeviceRequest::DirectMl => OnnxProviderResolution {
+            device: DeviceUsed::Cpu.as_str(),
+            fallback_reason: Some(
+                "DirectML execution provider not built in (onnxruntime compiled with CPU provider only)"
                     .to_string(),
             ),
         },
@@ -375,7 +385,7 @@ mod tests {
     #[test]
     fn provider_resolution_honours_the_request_contract() {
         // cpu -> CPU only, no reason (an honoured choice, not a fallback);
-        // cuda / gpu / auto -> CPU with visible, distinct fallback reasons.
+        // cuda / directml / gpu / auto -> CPU with visible fallback reasons.
         let cpu = resolve_provider(OnnxDeviceRequest::Cpu);
         assert_eq!(cpu.device, "cpu");
         assert!(cpu.fallback_reason.is_none());
@@ -383,6 +393,14 @@ mod tests {
         let cuda = resolve_provider(OnnxDeviceRequest::Cuda);
         assert_eq!(cuda.device, "cpu");
         assert!(cuda.fallback_reason.as_deref().unwrap().contains("CUDA"));
+
+        let directml = resolve_provider(OnnxDeviceRequest::DirectMl);
+        assert_eq!(directml.device, "cpu");
+        assert!(directml
+            .fallback_reason
+            .as_deref()
+            .unwrap()
+            .contains("DirectML"));
 
         let gpu = resolve_provider(OnnxDeviceRequest::Gpu);
         assert_eq!(gpu.device, "cpu");
@@ -402,6 +420,10 @@ mod tests {
             OnnxDeviceRequest::Cuda
         );
         assert_eq!(OnnxDeviceRequest::from_param("gpu"), OnnxDeviceRequest::Gpu);
+        assert_eq!(
+            OnnxDeviceRequest::from_param("directml"),
+            OnnxDeviceRequest::DirectMl
+        );
         assert_eq!(OnnxDeviceRequest::from_param(""), OnnxDeviceRequest::Auto);
         assert_eq!(
             OnnxDeviceRequest::from_param("anything"),

@@ -1,8 +1,7 @@
-//! The `matchLightColor` node executor. The `cpu` engine runs the in-process
-//! native-Rust heuristic ([`super::color_match_cpu`]) — the only supported
-//! backend. It nudges a connected subject image toward a PSD background and
-//! exposes the matched image, the match report, and a prompt suffix as flat
-//! output ports.
+//! The `matchLightColor` node executor. The native CPU heuristic is the default
+//! and complete fallback; opt-in `onnx_harmonize` runs PCT-Net through the
+//! shared Windows ORT runtime. Both expose the same matched image, report and
+//! prompt-suffix ports.
 
 use std::collections::BTreeMap;
 
@@ -43,23 +42,12 @@ pub(super) fn execute_studio_match_light_color(
     let highlight_strength = number_param(node, "highlight_strength", 0.0);
     let protect_saturation = bool_param(node, "protect_saturation", false);
     let protect_brand_color = bool_param(node, "protect_brand_color", true);
-    // `engine` must be the native `cpu` heuristic (the default).
+    // The CPU heuristic remains the default and complete fallback.
     let engine = optional(studio_value_to_string(node.params.get("engine")));
     // `device` selects the ONNX execution provider for the learned matcher
     // (default `auto`); ignored by the CPU heuristic.
     let device = optional(studio_value_to_string(node.params.get("device")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
-
-    let engine_is_cpu = engine
-        .as_deref()
-        .map(|e| e.trim().eq_ignore_ascii_case("cpu"))
-        .unwrap_or(true);
-    if !engine_is_cpu {
-        return Err(format!(
-            "Light & Color Match engine `{}` is no longer available; only the native `cpu` engine is supported",
-            engine.as_deref().unwrap_or_default().trim()
-        ));
-    }
 
     let cpu_params = CpuColorMatchParams {
         image_path: image.clone(),
@@ -74,6 +62,7 @@ pub(super) fn execute_studio_match_light_color(
         protect_brand_color,
         output_dir,
         output_name,
+        engine_requested: engine.unwrap_or_else(|| "cpu".to_string()),
         device_requested: device.unwrap_or_else(|| "auto".to_string()),
     };
     let result = color_match_cpu::try_match(&cpu_params)?.ok_or_else(|| {
@@ -99,6 +88,8 @@ fn to_output_map(result: ColorMatchResult) -> Result<BTreeMap<String, Value>, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{Rgba, RgbaImage};
+    use std::path::Path;
 
     fn node() -> StudioGraphNode {
         StudioGraphNode {
@@ -130,5 +121,38 @@ mod tests {
         assert_eq!(number_param(&node, "strength", 0.6), 0.6);
         assert!(!bool_param(&node, "protect_saturation", false));
         assert!(bool_param(&node, "protect_brand_color", true));
+    }
+
+    #[test]
+    fn learned_engine_without_background_keeps_a_complete_cpu_result() {
+        let dir = std::env::temp_dir().join("hgripe_color_match_graph_onnx_fallback");
+        std::fs::create_dir_all(&dir).unwrap();
+        let image = dir.join("subject.png");
+        RgbaImage::from_pixel(8, 8, Rgba([20, 80, 160, 255]))
+            .save(&image)
+            .unwrap();
+
+        let mut node = node();
+        node.params
+            .insert("engine".to_string(), json!("onnx_harmonize"));
+        node.params.insert(
+            "output_dir".to_string(),
+            json!(dir.to_string_lossy().to_string()),
+        );
+        let mut inputs = BTreeMap::new();
+        inputs.insert(
+            "image".to_string(),
+            json!(image.to_string_lossy().to_string()),
+        );
+
+        let outputs = execute_studio_match_light_color(&node, &inputs).unwrap();
+        let report = outputs["match_report"].as_object().unwrap();
+        assert_eq!(report["engine"], "cpu");
+        assert_eq!(report["engine_requested"], "onnx_harmonize");
+        assert!(report["engine_fallback_reason"]
+            .as_str()
+            .unwrap()
+            .contains("no background"));
+        assert!(Path::new(outputs["matched_image"].as_str().unwrap()).is_file());
     }
 }

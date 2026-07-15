@@ -86,12 +86,13 @@ pub(crate) struct MatchReport {
     /// Weight file name when a learned backend ran, else `null`.
     #[serde(default)]
     pub(crate) backend_model: Option<String>,
-    /// Compute device the learned backend bound (`cpu`/`cuda`); `null` on the
-    /// CPU heuristic path, which runs no ML session.
+    /// Compute device the learned backend bound (`cpu`, later `cuda` or
+    /// `directml`); `null` on the CPU heuristic path, which runs no ML session.
     #[serde(default)]
     pub(crate) device: Option<String>,
-    /// Compute device the node asked for (`auto`/`cpu`/`gpu`/`cuda`); `gpu`
-    /// remains vendor-neutral for later CUDA/DirectML provider selection.
+    /// Compute device the node asked for (`auto`/`cpu`/`gpu`, with legacy
+    /// `cuda`/`directml` accepted); `gpu` remains vendor-neutral for later
+    /// CUDA/DirectML provider selection.
     #[serde(default)]
     pub(crate) device_requested: String,
 }
@@ -112,8 +113,8 @@ pub(crate) struct ColorMatchResult {
 /// the composite stops looking pasted-on. This is the **Light & Color Match**
 /// node's backend: it consumes the upstream image, the background preview, and
 /// optionally the serialized `VisualContext` JSON from PSD Context Analyze.
-/// Runs in-process on the native `cpu` heuristic
-/// ([`crate::studio::color_match_cpu`]); `mode` is
+/// Runs in-process on the native `cpu` heuristic, with opt-in native PCT-Net
+/// (`onnx_harmonize`) and complete CPU fallback; `mode` is
 /// `prompt_only | color_transfer | histogram_match | hybrid`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -136,13 +137,14 @@ pub(crate) fn match_light_color(
 ) -> Result<ColorMatchResult, String> {
     let _ = dir;
     reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-    let engine = engine.unwrap_or_default();
-    let engine = engine.trim();
-    if !(engine.is_empty() || engine.eq_ignore_ascii_case("cpu")) {
-        return Err(format!(
-            "Light & Color Match engine `{engine}` is no longer available; only the native `cpu` engine is supported"
-        ));
-    }
+    let engine = engine.unwrap_or_else(|| "cpu".to_string());
+    let output_dir = match output_dir.filter(|value| !value.trim().is_empty()) {
+        Some(path) => path,
+        None => crate::runtime_paths()?
+            .output_dir
+            .to_string_lossy()
+            .to_string(),
+    };
     let params = crate::studio::color_match_cpu::CpuColorMatchParams {
         image_path: image.clone(),
         background_path: background.filter(|s| !s.trim().is_empty()),
@@ -153,9 +155,10 @@ pub(crate) fn match_light_color(
         shadow_strength: shadow_strength.unwrap_or(0.0),
         highlight_strength: highlight_strength.unwrap_or(0.0),
         protect_saturation: protect_saturation.unwrap_or(false),
-        protect_brand_color: protect_brand_color.unwrap_or(false),
-        output_dir: output_dir.unwrap_or_default(),
+        protect_brand_color: protect_brand_color.unwrap_or(true),
+        output_dir,
         output_name: output_name.filter(|s| !s.trim().is_empty()),
+        engine_requested: engine,
         device_requested: device
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "auto".to_string()),
@@ -567,6 +570,59 @@ pub(crate) fn detect_quality_issues(
 mod tests {
     use super::*;
     use image::{Rgba, RgbaImage};
+
+    #[test]
+    fn match_command_uses_native_learned_dispatch_and_shared_defaults() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("hgripe_match_command_{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("subject.png");
+        RgbaImage::from_pixel(12, 12, Rgba([90, 120, 160, 255]))
+            .save(&source)
+            .unwrap();
+
+        let result = match_light_color(
+            None,
+            source.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("onnx_harmonize".to_string()),
+            Some("gpu".to_string()),
+            None,
+            Some(format!("direct_match_{nanos}")),
+        )
+        .unwrap();
+
+        assert_eq!(result.match_report.engine, "cpu");
+        assert_eq!(result.match_report.engine_requested, "onnx_harmonize");
+        assert_eq!(result.match_report.device_requested, "gpu");
+        assert!(result.match_report.protect_brand_color);
+        assert!(result
+            .match_report
+            .engine_fallback_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no background"));
+        let matched = std::path::Path::new(&result.matched_image);
+        assert!(matched.is_file());
+        assert_eq!(
+            matched.parent().unwrap(),
+            crate::runtime_paths().unwrap().output_dir
+        );
+
+        let _ = std::fs::remove_file(matched);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn refine_command_preserves_defaults_and_falls_back_without_trimap() {

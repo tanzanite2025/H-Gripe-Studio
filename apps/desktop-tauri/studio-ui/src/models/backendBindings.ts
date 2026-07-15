@@ -38,7 +38,6 @@ export function localModelCapability(
   if (kind === "subjectMask") return "mask.subject";
   if (kind === "refineMaskEdge") return "matte.refine";
   if (kind === "imageEnhance") return "image.upscale";
-  if (kind === "matchLightColor") return "image.enhance";
   if (
     kind === "detailRepaint" &&
     ["sd_inpaint", "sdxl_inpaint", "flux_fill"].includes(String(params.engine ?? ""))
