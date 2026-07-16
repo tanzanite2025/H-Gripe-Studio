@@ -3,6 +3,7 @@ members = [
     "crates/hgripe-api",
     "crates/hgripe-grade",
     "crates/hgripe-raw",
+    "crates/hgripe-raw-evidence",
     "apps/desktop-tauri/src-tauri",
     "third_party/moxcms",
 ]

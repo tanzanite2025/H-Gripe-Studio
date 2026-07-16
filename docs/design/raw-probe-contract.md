@@ -147,7 +147,9 @@ cargo test -p hgripe-raw
 R0-B must consume this exact report rather than define a candidate-specific
 shape. Its first deliverable is a Windows-local, license-safe corpus manifest
 and evidence record for the required DNG, CR2/CR3, NEF, ARW, RAF, ORF, and RW2
-families. The owned DNG probe is the baseline runner.
+families. The owned DNG probe is the baseline runner. The implemented manifest,
+process-isolation, metrics, and gate contract are defined in
+`raw-r0-windows-evidence.md`.
 
 No external decoder enters the workspace, offline Cargo snapshot, installer,
 extension registry, or product loader during corpus preparation. Candidate

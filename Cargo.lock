@@ -1568,6 +1568,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hgripe-raw-evidence"
+version = "0.1.0"
+dependencies = [
+ "hgripe-raw",
+ "serde",
+ "serde_json",
+ "sha2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

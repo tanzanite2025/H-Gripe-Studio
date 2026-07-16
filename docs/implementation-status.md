@@ -45,6 +45,21 @@ standalone, unintegrated crate:
 - the desktop crate has no dependency on `hgripe-raw`, so this is not product
   RAW import support.
 
+R0-B1 evidence infrastructure has also landed without product integration:
+
+- `hgripe-raw-evidence` validates local rights-aware corpus manifests, hashes,
+  safe relative paths, expected facts, and all required camera-family slots;
+- every owned-probe case runs in a separate Windows process and records the
+  runner binary identity, bounded process evidence, timings, peak working set,
+  R0-A report, and failure;
+- manifest hashing/parsing and camera-file hashing/probing use single bound
+  snapshots/handles; Windows paths, child records, and evidence publication are
+  checked against alias, escape, tampering, timeout, and overwrite races;
+- the schema distinguishes metadata success from sensor unpack. The owned
+  runner reports unpack as not attempted and cannot mark the R0-B gate ready;
+- generated DNG, Windows containment, integrity, and CLI tests pass, but no
+  real camera corpus or external candidate decoder is present.
+
 Remaining implementation gaps include:
 
 - no DNG/CR2/CR3/NEF/ARW/RAF/ORF/RW2 registration or decoder;
@@ -54,12 +69,13 @@ Remaining implementation gaps include:
 - HEIC/AVIF narrowed to untagged RGBA8;
 - fixed Rec.709 assumptions inside parts of the grade kernel.
 
-The next approved work is R0-B corpus and evidence preparation on Windows x64.
-It must consume `design/raw-probe-contract.md`, begin with a local license-safe
-camera corpus manifest, and keep candidate runners outside product runtime
-registration. It does not authorise a RAW dependency, maintained vendor tree,
-product extension, or claimed import support. Any source adoption occurs only
-after the R0-C ownership record.
+The next approved work is R0-B2 on Windows x64: acquire or identify a
+license-safe local real-camera corpus, populate the manifest defined by
+`design/raw-r0-windows-evidence.md`, establish independent trusted sensor
+sample references, and capture the clean release owned baseline. It does not
+authorise a RAW dependency, maintained vendor tree, product extension, or
+claimed import support. Candidate comparison follows the corpus baseline, and
+source adoption occurs only after the R0-C ownership record.
 
 ## API Runtime
 

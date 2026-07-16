@@ -87,6 +87,9 @@ jobs:
       - name: cargo test (RAW metadata probe)
         run: cargo test -p hgripe-raw
 
+      - name: cargo test (RAW Windows evidence)
+        run: cargo test -p hgripe-raw-evidence
+
   no-python-spawn:
     name: no python spawn (grep gate)
     # The runtime is native-only, so no Rust source may spawn a Python

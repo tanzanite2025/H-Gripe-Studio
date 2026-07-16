@@ -66,6 +66,13 @@ each candidate can expose. R0-C
 records the ownership decision, license, update model, binary size, memory,
 failure isolation, and camera coverage.
 
+The owned `hgripe-raw-evidence` R0-B1 harness adds no decoder. It uses the
+existing offline `sha2`, `serde_json`, and `windows-sys` packages for file and
+runner identity, evidence JSON, handle-bound Windows path checks, Job Object
+limits, peak-memory reporting, atomic no-replace evidence publication, and
+manifest enforcement. It is not linked by the desktop crate. Real corpus files
+and generated evidence remain local and ignored by Git.
+
 Dependency ownership after selection is deliberately narrow:
 
 - the external decoder may unpack proprietary containers and report metadata;

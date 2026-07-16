@@ -30,6 +30,8 @@ H-Gripe Studio (Tauri desktop)
     studio-ui/     React + TS front end: the React Flow node editor (the whole UI)
     src-tauri/     Rust backend: Tauri commands, Studio graph runner, PSD chain
   crates/hgripe-api/  API broker: provider adapters, retry/cache, task state, history
+  crates/hgripe-raw/  bounded, metadata-only classic TIFF/DNG probe
+  crates/hgripe-raw-evidence/  Windows-local R0 corpus and evidence runner
   docs/cards/         per-card contracts (inputs, params, outputs, boundaries)
   docs/design/        architecture & design notes (executor split, resource model, roadmap)
   docs/plans/         active and completed planning docs for project history

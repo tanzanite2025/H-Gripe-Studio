@@ -234,6 +234,22 @@ and an evidence-record format that consumes the R0-A schema. Corpus preparation
 does not authorise adding a candidate to the product workspace, loader,
 installer, or extension registry.
 
+**R0-B1 implemented 2026-07-16.** The standalone `hgripe-raw-evidence` crate
+now validates versioned local manifests, rights metadata, relative paths,
+SHA-256, and required-family coverage. Its owned DNG runner isolates each case
+in a bounded Windows Job Object and records timings, Windows peak working set,
+executable/source identity, R0-A output, expectations, and structured failures.
+Manifest/file reads are snapshot-bound, parent-side record validation prevents
+child evidence substitution, and evidence publication is atomic/no-replace. It
+explicitly records sensor unpack as not attempted, so its `gate_ready` result
+is false.
+See `../../design/raw-r0-windows-evidence.md`.
+
+R0-B2 is the current next step: assemble the licensed local real-camera corpus,
+populate its manifest with independently trusted sensor sample references, and
+capture the release owned baseline. No real camera corpus or external candidate
+source is present in the repository yet.
+
 Build disposable Windows x64 runners outside product runtime registration. They
 probe the owned Rust path and external candidates against a representative
 local corpus before any dependency is vendored.

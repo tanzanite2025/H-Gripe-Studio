@@ -13,7 +13,7 @@ Use it as the quick project-memory map:
 
 | Document | Purpose | Next Use |
 | --- | --- | --- |
-| [`active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md`](active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md) | Defines the Windows x64 professional camera-RAW architecture: immutable RAW sources, the single unbounded scene-linear working space, Rust-first owned development, colour-managed display/export, dependency evidence gate, and the boundary between calibration data and removed creative LUT features. R0-A is implemented by the standalone contract in [`../design/raw-probe-contract.md`](../design/raw-probe-contract.md). | Read before adding RAW extensions, decoder dependencies, ICC/DCP parsing, scene-linear surfaces, demosaic/develop controls, monitor transforms, or RAW export. Continue with R0-B Windows corpus/evidence preparation; do not vendor a decoder or expose RAW import before R0-C passes. |
+| [`active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md`](active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md) | Defines the Windows x64 professional camera-RAW architecture, R0-A probe contract, and R0-B evidence gate. R0-A is implemented in [`../design/raw-probe-contract.md`](../design/raw-probe-contract.md); the R0-B1 harness is implemented in [`../design/raw-r0-windows-evidence.md`](../design/raw-r0-windows-evidence.md). | Read before adding RAW extensions, decoder dependencies, ICC/DCP parsing, scene-linear surfaces, demosaic/develop controls, monitor transforms, or RAW export. Continue with the licensed local real-camera corpus, independent sensor references, and owned baseline in R0-B2; do not vendor a decoder or expose RAW import before R0-C passes. |
 | [`active/NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](active/NODE_CARD_PRODUCT_BOUNDARY_PLAN.md) | Defines which concepts are allowed to become visible node cards, and which low-level primitives must live inside owning cards or canvas tools. | Use before adding/revising palette nodes, card bodies, preview/edit entry points, right-click actions, or runtime graph primitives. |
 | [`active/CLIP_KEYFRAME_MOTION_PIPELINE_PLAN.md`](active/CLIP_KEYFRAME_MOTION_PIPELINE_PLAN.md) | Defines the performance-first clip keyframe/motion pipeline. Implementation Phases 1-5 have landed (#612, #616-#618): Rust/TS evaluation, export and preview property compositing, easing, timeline keyframe lane, hit targets, and reporting. Kept active only until native FFmpeg-backed evidence is captured. | Use before touching clip property evaluation, `timeline_export` frame passes, preview compositing of transform/crop/opacity, or before deciding whether the plan can be archived after repo-maintained FFmpeg LFS is restored. |
 | [`active/COLOR_FEATURE_MASKING_PREPROCESS_PLAN.md`](active/COLOR_FEATURE_MASKING_PREPROCESS_PLAN.md) | Defines the future colour-space / feature-map preprocess layer for mask and matte work. | Do not implement before the Image Processing card, row ports, shared preview/editor entry points, backend selectors, and preview gate are structurally settled. |
@@ -60,11 +60,11 @@ Use it as the quick project-memory map:
 - Colour-feature masking, mask/Studio Action targeting, page-context agent
   presets, and typography remain gated future work. Do not treat them as the
   next implementation task until each document's prerequisites are satisfied.
-- Professional RAW development is now an active product direction. R0-A has
-  landed as an owned Rust probe contract plus a generated DNG metadata
-  reference, without product-loader integration. R0-B Windows corpus/evidence
-  preparation is next, and no RAW dependency or product extension is approved
-  before the R0-C ownership record.
+- Professional RAW development is now an active product direction. R0-A and
+  the R0-B1 Windows evidence harness have landed without product-loader
+  integration. R0-B2 must now assemble the rights-cleared local camera corpus,
+  independent sensor references, and owned baseline; no RAW dependency or
+  product extension is approved before the R0-C ownership record.
 
 ## Completed / Historical Plans
 
