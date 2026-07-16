@@ -1,14 +1,18 @@
 #[path = "../../hgripe-raw/tests/support/dng_fixture.rs"]
 mod dng_fixture;
 
-use dng_fixture::{minimal_dng, ByteOrder};
+use dng_fixture::{minimal_dng, ByteOrder, SENSOR_SAMPLES};
 use hgripe_raw::{RawContainer, RawDimensions};
 use hgripe_raw_evidence::{
-    load_manifest_snapshot, probe_owned_case, resolve_case_path, validate_manifest,
-    write_evidence_bundle, RawCorpusCase, RawCorpusFamily, RawCorpusManifest, RawCorpusOrigin,
-    RawCorpusProvenance, RawEvidenceBundle, RawEvidenceOutcome, RawManifestIssueSeverity,
-    RawProbeExpectation, RawRedistributionPolicy, RawSensorUnpackEvidence,
-    RAW_CORPUS_MANIFEST_SCHEMA_VERSION,
+    canonical_sensor_digest_u16_le, load_manifest_snapshot, probe_owned_case, resolve_case_path,
+    validate_manifest, write_evidence_bundle, RawCorpusCase, RawCorpusFamily, RawCorpusManifest,
+    RawCorpusOrigin, RawCorpusProvenance, RawEvidenceBundle, RawEvidenceOutcome,
+    RawManifestIssueSeverity, RawProbeExpectation, RawRedistributionPolicy,
+    RawSensorFrameSelection, RawSensorReference, RawSensorReferenceBasis,
+    RawSensorReferenceDimensions, RawSensorReferenceDomain, RawSensorReferenceProducer,
+    RawSensorSampleEncoding, RawSensorSampleOrder, RawSensorUnpackEvidence,
+    RAW_CORPUS_MANIFEST_SCHEMA_VERSION, RAW_EVIDENCE_SCHEMA_VERSION, RAW_SENSOR_ARTIFACT_MAX_BYTES,
+    RAW_SENSOR_ARTIFACT_OBSERVATION_TIMEOUT_MS, RAW_SENSOR_REFERENCE_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -43,6 +47,22 @@ fn validates_incremental_manifest_and_reports_missing_coverage() {
             .count(),
         9
     );
+}
+
+#[test]
+fn rejects_legacy_manifest_schema_after_sensor_contract_upgrade() {
+    let mut manifest = manifest_with_case(sample_case(
+        RawCorpusFamily::DngUncompressedBayer,
+        "cases/minimal.dng",
+        &"0".repeat(64),
+    ));
+    manifest.schema_version = 1;
+    let validation = validate_manifest(&manifest);
+    assert!(!validation.valid);
+    assert!(validation
+        .issues
+        .iter()
+        .any(|issue| issue.code == "unsupported_schema_version"));
 }
 
 #[test]
@@ -94,7 +114,13 @@ fn rejects_unsafe_duplicate_and_unlicensed_manifest_entries() {
     first.provenance.rights_reference.clear();
     first.expected.cfa_repeat_rows = Some(2);
     first.expected.cfa_repeat_columns = None;
-    first.expected.sensor_sample_count = Some(36);
+    first.expected.sensor_reference = Some(test_sensor_reference());
+    first
+        .expected
+        .sensor_reference
+        .as_mut()
+        .unwrap()
+        .sample_count = 35;
     let mut second = first.clone();
     second.relative_path = first.relative_path.clone();
     let manifest = RawCorpusManifest {
@@ -117,7 +143,7 @@ fn rejects_unsafe_duplicate_and_unlicensed_manifest_entries() {
         "invalid_sha256",
         "missing_rights_reference",
         "invalid_cfa_expectation",
-        "invalid_sensor_expectation",
+        "contradictory_sensor_reference_count",
         "duplicate_case_id",
         "duplicate_relative_path",
     ] {
@@ -133,9 +159,7 @@ fn manifest_snapshot_hashes_the_exact_deserialized_bytes() {
         "cases/minimal.dng",
         &"0".repeat(64),
     );
-    case.expected.sensor_sample_count = Some(36);
-    case.expected.sensor_sample_digest_sha256 = Some("a".repeat(64));
-    case.expected.sensor_reference = Some("independent generated fixture".into());
+    case.expected.sensor_reference = Some(test_sensor_reference());
     let manifest = manifest_with_case(case);
     let bytes = serde_json::to_vec_pretty(&manifest).unwrap();
     let path = temp.path().join("manifest.json");
@@ -146,7 +170,7 @@ fn manifest_snapshot_hashes_the_exact_deserialized_bytes() {
     assert_eq!(snapshot.sha256, format!("{:x}", Sha256::digest(&bytes)));
     let serialized: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(
-        serialized["cases"][0]["expected"]["sensor_sample_count"],
+        serialized["cases"][0]["expected"]["sensor_reference"]["sample_count"],
         "36"
     );
 
@@ -154,6 +178,111 @@ fn manifest_snapshot_hashes_the_exact_deserialized_bytes() {
     json["unexpected"] = serde_json::json!(true);
     fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     assert!(load_manifest_snapshot(&path).is_err());
+}
+
+#[test]
+fn rejects_noncanonical_sensor_reference_contracts() {
+    let mut case = sample_case(
+        RawCorpusFamily::DngUncompressedBayer,
+        "cases/minimal.dng",
+        &"0".repeat(64),
+    );
+    case.provenance.origin = RawCorpusOrigin::RedistributableFixture;
+    case.expected.dimensions = Some(RawDimensions {
+        width: 6,
+        height: 6,
+    });
+
+    let mut wrong_schema = test_sensor_reference();
+    wrong_schema.schema_version += 1;
+    assert_sensor_reference_issue(&case, wrong_schema, "unsupported_sensor_reference_schema");
+
+    let mut ambiguous_frame = test_sensor_reference();
+    ambiguous_frame.full_resolution_raw_frame_count = 2;
+    assert_sensor_reference_issue(&case, ambiguous_frame, "ambiguous_sensor_reference_frame");
+
+    let mut wrong_count = test_sensor_reference();
+    wrong_count.sample_count = 35;
+    assert_sensor_reference_issue(&case, wrong_count, "contradictory_sensor_reference_count");
+
+    let mut wrong_dimensions = test_sensor_reference();
+    wrong_dimensions.dimensions.width = 5;
+    wrong_dimensions.sample_count = 30;
+    assert_sensor_reference_issue(
+        &case,
+        wrong_dimensions,
+        "contradictory_sensor_reference_dimensions",
+    );
+
+    let mut wrong_samples_per_pixel = test_sensor_reference();
+    wrong_samples_per_pixel.samples_per_pixel = 2;
+    wrong_samples_per_pixel.sample_count = 72;
+    assert_sensor_reference_issue(
+        &case,
+        wrong_samples_per_pixel,
+        "unsupported_sensor_reference_samples_per_pixel",
+    );
+
+    let mut wrong_digest = test_sensor_reference();
+    wrong_digest.sample_digest_sha256 = "A".repeat(64);
+    assert_sensor_reference_issue(&case, wrong_digest, "invalid_sensor_reference_digest");
+
+    let mut wrong_tool = test_sensor_reference();
+    wrong_tool.producer.tool_id = "not a stable id".into();
+    assert_sensor_reference_issue(&case, wrong_tool, "invalid_sensor_reference_tool_id");
+
+    let mut noncanonical_implementation = test_sensor_reference();
+    noncanonical_implementation.producer.implementation_id = "LibRaw".into();
+    assert_sensor_reference_issue(
+        &case,
+        noncanonical_implementation,
+        "invalid_sensor_reference_implementation_id",
+    );
+
+    let mut wrong_artifact = test_sensor_reference();
+    wrong_artifact.producer.tool_artifact_sha256 = "invalid".into();
+    assert_sensor_reference_issue(
+        &case,
+        wrong_artifact,
+        "invalid_sensor_reference_tool_artifact",
+    );
+
+    let mut wrong_record_artifact = test_sensor_reference();
+    wrong_record_artifact.producer.record_artifact_sha256 = "invalid".into();
+    assert_sensor_reference_issue(
+        &case,
+        wrong_record_artifact,
+        "invalid_sensor_reference_record_artifact",
+    );
+
+    let mut oversized = test_sensor_reference();
+    oversized.dimensions.width = 65_536;
+    oversized.dimensions.height = 16_385;
+    oversized.sample_count =
+        u64::from(oversized.dimensions.width) * u64::from(oversized.dimensions.height);
+    assert_sensor_reference_issue(&case, oversized, "sensor_reference_artifact_too_large");
+
+    let mut wrong_basis_case = case.clone();
+    wrong_basis_case.provenance.origin = RawCorpusOrigin::OwnedCapture;
+    assert_sensor_reference_issue(
+        &wrong_basis_case,
+        test_sensor_reference(),
+        "contradictory_sensor_reference_basis",
+    );
+}
+
+#[test]
+fn sensor_reference_dimensions_reject_unknown_json_fields() {
+    let mut case = sample_case(
+        RawCorpusFamily::DngUncompressedBayer,
+        "cases/minimal.dng",
+        &"0".repeat(64),
+    );
+    case.expected.sensor_reference = Some(test_sensor_reference());
+    let mut value = serde_json::to_value(manifest_with_case(case)).unwrap();
+    value["cases"][0]["expected"]["sensor_reference"]["dimensions"]["unexpected"] =
+        serde_json::json!(true);
+    assert!(serde_json::from_value::<RawCorpusManifest>(value).is_err());
 }
 
 #[test]
@@ -405,9 +534,24 @@ fn cli_validates_and_collects_isolated_owned_evidence() {
     );
     let bundle: RawEvidenceBundle =
         serde_json::from_slice(&fs::read(&evidence_path).unwrap()).unwrap();
+    assert_eq!(bundle.schema_version, RAW_EVIDENCE_SCHEMA_VERSION);
+    assert_eq!(
+        bundle.manifest_schema_version,
+        RAW_CORPUS_MANIFEST_SCHEMA_VERSION
+    );
     assert_eq!(bundle.cases.len(), 1);
     assert_eq!(bundle.runner.id, "owned_dng_metadata_probe");
     assert_eq!(bundle.runner.executable_sha256.len(), 64);
+    assert_eq!(
+        bundle.runner.sensor_artifact_limit_bytes,
+        RAW_SENSOR_ARTIFACT_MAX_BYTES
+    );
+    assert_eq!(
+        bundle.runner.sensor_artifact_observation_timeout_ms,
+        RAW_SENSOR_ARTIFACT_OBSERVATION_TIMEOUT_MS
+    );
+    assert!(bundle.runner.sensor_decoder_implementation_id.is_none());
+    assert!(bundle.runner.sensor_decoder_artifact_sha256.is_none());
     assert!(!bundle.runner.source_revision.is_empty());
     assert_ne!(bundle.runner.source_revision, "unknown");
     assert!(!bundle.summary.gate_ready);
@@ -422,6 +566,13 @@ fn cli_validates_and_collects_isolated_owned_evidence() {
         RawEvidenceOutcome::ProbeSucceeded { .. }
     ));
     assert!(bundle.cases[0].child_process.is_some());
+    assert!(
+        !bundle.cases[0]
+            .child_process
+            .as_ref()
+            .unwrap()
+            .sensor_artifact_limit_exceeded
+    );
 
     let json: serde_json::Value =
         serde_json::from_slice(&fs::read(&evidence_path).unwrap()).unwrap();
@@ -430,6 +581,10 @@ fn cli_validates_and_collects_isolated_owned_evidence() {
     assert!(json["cases"][0]["metrics"]["peak_working_set_bytes"].is_string());
     assert_eq!(
         json["cases"][0]["metrics"]["sensor_unpack_us"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        json["cases"][0]["metrics"]["sensor_artifact_observation_us"],
         serde_json::Value::Null
     );
     assert_eq!(
@@ -581,11 +736,55 @@ fn write_fixture_case(
         compression_description: Some("uncompressed".into()),
         cfa_repeat_rows: Some(2),
         cfa_repeat_columns: Some(2),
-        sensor_sample_count: None,
-        sensor_sample_digest_sha256: None,
         sensor_reference: None,
     };
     (case, path)
+}
+
+fn test_sensor_reference() -> RawSensorReference {
+    RawSensorReference {
+        schema_version: RAW_SENSOR_REFERENCE_SCHEMA_VERSION,
+        domain: RawSensorReferenceDomain::FullSensorRaster,
+        frame: RawSensorFrameSelection::OnlyFullResolutionRawFrame,
+        full_resolution_raw_frame_count: 1,
+        sample_order: RawSensorSampleOrder::RowMajorInterleaved,
+        sample_encoding: RawSensorSampleEncoding::UnsignedU16LittleEndian,
+        dimensions: RawSensorReferenceDimensions {
+            width: 6,
+            height: 6,
+        },
+        samples_per_pixel: 1,
+        sample_count: 36,
+        sample_digest_sha256: canonical_sensor_digest_u16_le(&SENSOR_SAMPLES),
+        producer: RawSensorReferenceProducer {
+            basis: RawSensorReferenceBasis::KnownGeneratedFixture,
+            implementation_id: "hgripe-generated-dng-fixture".into(),
+            implementation_revision: "1".into(),
+            tool_id: "hgripe-generated-dng-fixture".into(),
+            tool_version: "1".into(),
+            tool_artifact_sha256: "d".repeat(64),
+            record_reference: "crates/hgripe-raw/tests/support/dng_fixture.rs".into(),
+            record_artifact_sha256: "e".repeat(64),
+        },
+    }
+}
+
+fn assert_sensor_reference_issue(
+    case: &RawCorpusCase,
+    reference: RawSensorReference,
+    expected_code: &str,
+) {
+    let mut case = case.clone();
+    case.expected.sensor_reference = Some(reference);
+    let validation = validate_manifest(&manifest_with_case(case));
+    assert!(
+        validation
+            .issues
+            .iter()
+            .any(|issue| issue.code == expected_code),
+        "missing issue {expected_code}: {:?}",
+        validation.issues
+    );
 }
 
 struct TestDir {

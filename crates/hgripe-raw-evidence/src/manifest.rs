@@ -1,7 +1,10 @@
 use crate::{
-    RawCorpusCoverage, RawCorpusFamily, RawCorpusManifest, RawManifestIssue,
-    RawManifestIssueSeverity, RawManifestValidation, RAW_CORPUS_MANIFEST_SCHEMA_VERSION,
+    RawCorpusCoverage, RawCorpusFamily, RawCorpusManifest, RawCorpusOrigin, RawManifestIssue,
+    RawManifestIssueSeverity, RawManifestValidation, RawSensorReference, RawSensorReferenceBasis,
+    RAW_CORPUS_MANIFEST_SCHEMA_VERSION, RAW_SENSOR_ARTIFACT_MAX_BYTES,
+    RAW_SENSOR_REFERENCE_SCHEMA_VERSION,
 };
+use hgripe_raw::RawDimensions;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fmt;
@@ -188,37 +191,14 @@ pub fn validate_manifest(manifest: &RawCorpusManifest) -> RawManifestValidation 
                 "CFA repeat rows and columns must both be present and between 1 and 64".into(),
             ),
         }
-        match (
-            case.expected.sensor_sample_count,
-            case.expected.sensor_sample_digest_sha256.as_deref(),
-            case.expected.sensor_reference.as_deref(),
-        ) {
-            (None, None, None) => {}
-            (Some(count), Some(digest), Some(reference))
-                if count > 0
-                    && is_lower_hex_sha256(digest)
-                    && !reference.trim().is_empty()
-                    && reference.len() <= 1024 =>
-            {
-                if case.expected.dimensions.is_some_and(|dimensions| {
-                    u64::from(dimensions.width).checked_mul(u64::from(dimensions.height))
-                        != Some(count)
-                }) {
-                    error(
-                        &mut issues,
-                        "contradictory_sensor_expectation",
-                        case_id.clone(),
-                        "sensor_sample_count must match expected dimensions for one-sample CFA data"
-                            .into(),
-                    );
-                }
-            }
-            _ => error(
+        if let Some(reference) = &case.expected.sensor_reference {
+            validate_sensor_reference(
                 &mut issues,
-                "invalid_sensor_expectation",
                 case_id.clone(),
-                "sensor count, lowercase SHA-256, and a 1..1024 character independent reference must all be present or all omitted".into(),
-            ),
+                case.expected.dimensions,
+                case.provenance.origin,
+                reference,
+            );
         }
         if case.family == RawCorpusFamily::DngUncompressedBayer
             && case.expected.compression_code.is_some_and(|code| code != 1)
@@ -334,12 +314,7 @@ fn validate_identifier(
     field: &str,
     value: &str,
 ) {
-    let valid = !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
-    if !valid {
+    if !is_valid_identifier(value) {
         error(
             issues,
             code,
@@ -347,6 +322,18 @@ fn validate_identifier(
             format!("{field} must contain 1 through 128 ASCII letters, digits, '.', '_' or '-'"),
         );
     }
+}
+
+fn is_valid_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn is_canonical_implementation_id(value: &str) -> bool {
+    is_valid_identifier(value) && !value.bytes().any(|byte| byte.is_ascii_uppercase())
 }
 
 fn validate_relative_path(
@@ -409,6 +396,179 @@ fn is_lower_hex_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_sensor_reference(
+    issues: &mut Vec<RawManifestIssue>,
+    case_id: Option<String>,
+    expected_dimensions: Option<RawDimensions>,
+    origin: RawCorpusOrigin,
+    reference: &RawSensorReference,
+) {
+    if reference.schema_version != RAW_SENSOR_REFERENCE_SCHEMA_VERSION {
+        error(
+            issues,
+            "unsupported_sensor_reference_schema",
+            case_id.clone(),
+            format!(
+                "sensor reference schema_version {} does not match {}",
+                reference.schema_version, RAW_SENSOR_REFERENCE_SCHEMA_VERSION
+            ),
+        );
+    }
+    if reference.full_resolution_raw_frame_count != 1 {
+        error(
+            issues,
+            "ambiguous_sensor_reference_frame",
+            case_id.clone(),
+            "sensor reference schema 1 requires exactly one full-resolution RAW frame".into(),
+        );
+    }
+    if reference.dimensions.width == 0 || reference.dimensions.height == 0 {
+        error(
+            issues,
+            "invalid_sensor_reference_dimensions",
+            case_id.clone(),
+            "sensor reference dimensions must be non-zero".into(),
+        );
+    }
+    if reference.samples_per_pixel != 1 {
+        error(
+            issues,
+            "unsupported_sensor_reference_samples_per_pixel",
+            case_id.clone(),
+            "sensor reference schema 1 supports one CFA sample per pixel only".into(),
+        );
+    }
+    let expected_count = u64::from(reference.dimensions.width)
+        .checked_mul(u64::from(reference.dimensions.height))
+        .and_then(|pixels| pixels.checked_mul(u64::from(reference.samples_per_pixel)));
+    if expected_count != Some(reference.sample_count) || reference.sample_count == 0 {
+        error(
+            issues,
+            "contradictory_sensor_reference_count",
+            case_id.clone(),
+            "sensor reference sample_count must equal width * height * samples_per_pixel".into(),
+        );
+    }
+    if reference
+        .sample_count
+        .checked_mul(2)
+        .is_none_or(|bytes| bytes > RAW_SENSOR_ARTIFACT_MAX_BYTES)
+    {
+        error(
+            issues,
+            "sensor_reference_artifact_too_large",
+            case_id.clone(),
+            format!(
+                "sensor reference canonical bytes must not exceed {RAW_SENSOR_ARTIFACT_MAX_BYTES}"
+            ),
+        );
+    }
+    if expected_dimensions.is_some_and(|dimensions| {
+        dimensions.width != reference.dimensions.width
+            || dimensions.height != reference.dimensions.height
+    }) {
+        error(
+            issues,
+            "contradictory_sensor_reference_dimensions",
+            case_id.clone(),
+            "sensor reference dimensions must match expected dimensions".into(),
+        );
+    }
+    if !is_lower_hex_sha256(&reference.sample_digest_sha256) {
+        error(
+            issues,
+            "invalid_sensor_reference_digest",
+            case_id.clone(),
+            "sensor reference digest must be lowercase SHA-256".into(),
+        );
+    }
+    if !is_valid_identifier(&reference.producer.tool_id) {
+        error(
+            issues,
+            "invalid_sensor_reference_tool_id",
+            case_id.clone(),
+            "sensor reference tool_id must be a stable ASCII identifier".into(),
+        );
+    }
+    if !is_canonical_implementation_id(&reference.producer.implementation_id) {
+        error(
+            issues,
+            "invalid_sensor_reference_implementation_id",
+            case_id.clone(),
+            "sensor reference implementation_id must be a canonical lowercase ASCII identifier"
+                .into(),
+        );
+    }
+    validate_bounded_text(
+        issues,
+        "invalid_sensor_reference_implementation_revision",
+        case_id.clone(),
+        "sensor reference implementation_revision",
+        &reference.producer.implementation_revision,
+        128,
+    );
+    validate_bounded_text(
+        issues,
+        "invalid_sensor_reference_tool_version",
+        case_id.clone(),
+        "sensor reference tool_version",
+        &reference.producer.tool_version,
+        128,
+    );
+    if !is_lower_hex_sha256(&reference.producer.tool_artifact_sha256) {
+        error(
+            issues,
+            "invalid_sensor_reference_tool_artifact",
+            case_id.clone(),
+            "sensor reference tool_artifact_sha256 must be lowercase SHA-256".into(),
+        );
+    }
+    validate_bounded_text(
+        issues,
+        "invalid_sensor_reference_record",
+        case_id.clone(),
+        "sensor reference record_reference",
+        &reference.producer.record_reference,
+        1024,
+    );
+    if !is_lower_hex_sha256(&reference.producer.record_artifact_sha256) {
+        error(
+            issues,
+            "invalid_sensor_reference_record_artifact",
+            case_id.clone(),
+            "sensor reference record_artifact_sha256 must be lowercase SHA-256".into(),
+        );
+    }
+    if reference.producer.basis == RawSensorReferenceBasis::KnownGeneratedFixture
+        && origin != RawCorpusOrigin::RedistributableFixture
+    {
+        error(
+            issues,
+            "contradictory_sensor_reference_basis",
+            case_id,
+            "known_generated_fixture references require redistributable_fixture provenance".into(),
+        );
+    }
+}
+
+fn validate_bounded_text(
+    issues: &mut Vec<RawManifestIssue>,
+    code: &str,
+    case_id: Option<String>,
+    field: &str,
+    value: &str,
+    limit: usize,
+) {
+    if value.trim().is_empty() || value.len() > limit {
+        error(
+            issues,
+            code,
+            case_id,
+            format!("{field} must contain 1 through {limit} characters"),
+        );
+    }
 }
 
 fn error(issues: &mut Vec<RawManifestIssue>, code: &str, case_id: Option<String>, message: String) {

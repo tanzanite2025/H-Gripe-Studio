@@ -1,8 +1,12 @@
 use hgripe_raw::{RawContainer, RawDimensions, RawProbeError, RawProbeReport};
 use serde::{Deserialize, Serialize};
 
-pub const RAW_CORPUS_MANIFEST_SCHEMA_VERSION: u32 = 1;
-pub const RAW_EVIDENCE_SCHEMA_VERSION: u32 = 1;
+pub const RAW_CORPUS_MANIFEST_SCHEMA_VERSION: u32 = 2;
+pub const RAW_EVIDENCE_SCHEMA_VERSION: u32 = 2;
+pub const RAW_SENSOR_REFERENCE_SCHEMA_VERSION: u32 = 1;
+pub const RAW_BLIND_CHILD_CASE_SCHEMA_VERSION: u32 = 1;
+pub const RAW_SENSOR_ARTIFACT_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const RAW_SENSOR_ARTIFACT_OBSERVATION_TIMEOUT_MS: u64 = 120_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,10 +93,76 @@ pub struct RawProbeExpectation {
     pub compression_description: Option<String>,
     pub cfa_repeat_rows: Option<u32>,
     pub cfa_repeat_columns: Option<u32>,
-    #[serde(with = "decimal_u64_option")]
-    pub sensor_sample_count: Option<u64>,
-    pub sensor_sample_digest_sha256: Option<String>,
-    pub sensor_reference: Option<String>,
+    pub sensor_reference: Option<RawSensorReference>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawSensorReferenceDomain {
+    FullSensorRaster,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawSensorFrameSelection {
+    OnlyFullResolutionRawFrame,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawSensorSampleOrder {
+    RowMajorInterleaved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawSensorSampleEncoding {
+    UnsignedU16LittleEndian,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawSensorReferenceBasis {
+    KnownGeneratedFixture,
+    IndependentDecoder,
+    VendorReference,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawSensorReferenceProducer {
+    pub basis: RawSensorReferenceBasis,
+    pub implementation_id: String,
+    pub implementation_revision: String,
+    pub tool_id: String,
+    pub tool_version: String,
+    pub tool_artifact_sha256: String,
+    pub record_reference: String,
+    pub record_artifact_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawSensorReferenceDimensions {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawSensorReference {
+    pub schema_version: u32,
+    pub domain: RawSensorReferenceDomain,
+    pub frame: RawSensorFrameSelection,
+    pub full_resolution_raw_frame_count: u32,
+    pub sample_order: RawSensorSampleOrder,
+    pub sample_encoding: RawSensorSampleEncoding,
+    pub dimensions: RawSensorReferenceDimensions,
+    pub samples_per_pixel: u16,
+    #[serde(with = "decimal_u64")]
+    pub sample_count: u64,
+    pub sample_digest_sha256: String,
+    pub producer: RawSensorReferenceProducer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,6 +176,46 @@ pub struct RawCorpusCase {
     pub provenance: RawCorpusProvenance,
     #[serde(default)]
     pub expected: RawProbeExpectation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBlindChildCase {
+    pub schema_version: u32,
+    pub id: String,
+    pub family: RawCorpusFamily,
+    pub relative_path: String,
+    pub sha256: String,
+}
+
+impl RawBlindChildCase {
+    pub fn from_manifest_case(case: &RawCorpusCase) -> Self {
+        Self {
+            schema_version: RAW_BLIND_CHILD_CASE_SCHEMA_VERSION,
+            id: case.id.clone(),
+            family: case.family,
+            relative_path: case.relative_path.clone(),
+            sha256: case.sha256.clone(),
+        }
+    }
+
+    pub fn to_probe_case(&self) -> RawCorpusCase {
+        RawCorpusCase {
+            id: self.id.clone(),
+            family: self.family,
+            variant: "blind child case".into(),
+            relative_path: self.relative_path.clone(),
+            sha256: self.sha256.clone(),
+            provenance: RawCorpusProvenance {
+                origin: RawCorpusOrigin::LocalEvaluationOnly,
+                rights_reference: "parent-owned blind child snapshot".into(),
+                source_uri: None,
+                redistribution: RawRedistributionPolicy::Prohibited,
+                contains_personal_metadata: false,
+            },
+            expected: RawProbeExpectation::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +278,13 @@ pub struct RawRunnerIdentity {
     #[serde(with = "decimal_u64")]
     pub child_output_limit_bytes: u64,
     pub supported_families: Vec<RawCorpusFamily>,
+    pub sensor_decoder_implementation_id: Option<String>,
+    pub sensor_decoder_implementation_revision: Option<String>,
+    pub sensor_decoder_artifact_sha256: Option<String>,
+    #[serde(with = "decimal_u64")]
+    pub sensor_artifact_limit_bytes: u64,
+    #[serde(with = "decimal_u64")]
+    pub sensor_artifact_observation_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +310,8 @@ pub struct RawEvidenceMetrics {
     pub metadata_probe_us: Option<u64>,
     #[serde(with = "decimal_u64_option")]
     pub sensor_unpack_us: Option<u64>,
+    #[serde(with = "decimal_u64_option")]
+    pub sensor_artifact_observation_us: Option<u64>,
     #[serde(with = "decimal_u64")]
     pub total_us: u64,
     #[serde(with = "decimal_u64_option")]
@@ -212,6 +331,7 @@ pub struct RawChildProcessMetrics {
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
     pub timed_out: bool,
+    pub sensor_artifact_limit_exceeded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,9 +344,11 @@ pub enum RawSensorUnpackEvidence {
         reason: String,
     },
     Succeeded {
+        full_resolution_raw_frame_count: u32,
         #[serde(with = "decimal_u64")]
         sample_count: u64,
         sample_digest_sha256: String,
+        artifact_parent_observed: bool,
     },
 }
 

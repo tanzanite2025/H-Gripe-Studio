@@ -73,6 +73,13 @@ limits, peak-memory reporting, atomic no-replace evidence publication, and
 manifest enforcement. It is not linked by the desktop crate. Real corpus files
 and generated evidence remain local and ignored by Git.
 
+R0-B2a adds no decoder or package. It uses the existing `sha2` dependency to
+define SHA-256 over an already-unpacked canonical little-endian `u16` sensor
+stream. The helper cannot open or decode a camera file. The evidence schema
+records producer and candidate decoder lineage/artifacts, and the blind child
+protocol avoids directly supplying the expected digest; actual independence
+still requires the R0-B2/R0-C source and rights audit.
+
 Dependency ownership after selection is deliberately narrow:
 
 - the external decoder may unpack proprietary containers and report metadata;

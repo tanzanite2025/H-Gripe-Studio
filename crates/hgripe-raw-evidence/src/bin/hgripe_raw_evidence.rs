@@ -1,6 +1,7 @@
 use hgripe_raw_evidence::{
-    child_command_name, collect_owned_evidence, find_case, load_manifest, load_manifest_snapshot,
-    probe_owned_case, validate_manifest, write_evidence_bundle,
+    child_command_name, collect_owned_evidence, load_manifest, probe_owned_case, validate_manifest,
+    write_evidence_bundle, RawBlindChildCase, RawCorpusManifest,
+    RAW_BLIND_CHILD_CASE_SCHEMA_VERSION, RAW_CORPUS_MANIFEST_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -8,6 +9,9 @@ use std::env;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+const CHILD_HANDSHAKE_ENV: &str = "HG_R0_CHILD_HANDSHAKE";
+const MAX_CHILD_CASE_JSON_BYTES: u64 = 1024 * 1024;
 
 fn main() -> ExitCode {
     match run(env::args().skip(1).collect()) {
@@ -74,32 +78,47 @@ fn run_owned(args: Vec<String>) -> Result<ExitCode, String> {
 }
 
 fn run_child(args: Vec<String>) -> Result<ExitCode, String> {
-    let [manifest_path, corpus_root, case_id, expected_manifest_sha256] = args.as_slice() else {
+    let [corpus_root] = args.as_slice() else {
         return Err("invalid internal child arguments".into());
     };
-    if env::var_os("HG_R0_CHILD_HANDSHAKE").is_some() {
-        let mut release = [0_u8; 2];
-        std::io::stdin()
-            .lock()
-            .read_exact(&mut release)
-            .map_err(|error| format!("cannot receive parent release handshake: {error}"))?;
-        if release != *b"R0" {
-            return Err("invalid parent release handshake".into());
-        }
+    match env::var(CHILD_HANDSHAKE_ENV) {
+        Ok(value) if value == "1" => {}
+        _ => return Err("internal child requires a parent handshake".into()),
     }
-    let manifest_path = PathBuf::from(manifest_path);
-    let snapshot = load_manifest_snapshot(&manifest_path).map_err(|error| error.to_string())?;
-    if snapshot.sha256 != *expected_manifest_sha256 {
-        return Err("corpus manifest snapshot does not match the parent digest".into());
+    let mut stdin = std::io::stdin().lock();
+    let mut release = [0_u8; 2];
+    stdin
+        .read_exact(&mut release)
+        .map_err(|error| format!("cannot receive parent release handshake: {error}"))?;
+    if release != *b"R0" {
+        return Err("invalid parent release handshake".into());
     }
-    let manifest = snapshot.manifest;
+    let mut payload = Vec::new();
+    stdin
+        .take(MAX_CHILD_CASE_JSON_BYTES + 1)
+        .read_to_end(&mut payload)
+        .map_err(|error| format!("cannot receive child case snapshot: {error}"))?;
+    if u64::try_from(payload.len()).unwrap_or(u64::MAX) > MAX_CHILD_CASE_JSON_BYTES {
+        return Err(format!(
+            "child case snapshot exceeds {MAX_CHILD_CASE_JSON_BYTES} bytes"
+        ));
+    }
+    let snapshot: RawBlindChildCase = serde_json::from_slice(&payload)
+        .map_err(|error| format!("invalid child case snapshot: {error}"))?;
+    if snapshot.schema_version != RAW_BLIND_CHILD_CASE_SCHEMA_VERSION {
+        return Err("internal child received an unsupported snapshot schema".into());
+    }
+    let case = snapshot.to_probe_case();
+    let manifest = RawCorpusManifest {
+        schema_version: RAW_CORPUS_MANIFEST_SCHEMA_VERSION,
+        corpus_id: "internal-child-case".into(),
+        cases: vec![case.clone()],
+    };
     let validation = validate_manifest(&manifest);
     if !validation.valid {
-        return Err("internal child received an invalid manifest".into());
+        return Err("internal child received an invalid case snapshot".into());
     }
-    let case = find_case(&manifest, case_id)
-        .ok_or_else(|| format!("manifest case '{case_id}' was not found"))?;
-    let record = probe_owned_case(case, PathBuf::from(corpus_root).as_path());
+    let record = probe_owned_case(&case, PathBuf::from(corpus_root).as_path());
     serde_json::to_writer(std::io::stdout().lock(), &record).map_err(|error| error.to_string())?;
     Ok(ExitCode::SUCCESS)
 }
