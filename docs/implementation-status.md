@@ -33,7 +33,19 @@ The target architecture is defined by
 - colour-managed Windows preview and tagged RGB handoff files;
 - no local inference, CMYK/YCCK authoring/printing, or creative LUT feature.
 
-This target has not landed. Current implementation gaps include:
+The product target has not landed. Its R0-A metadata foundation has landed as a
+standalone, unintegrated crate:
+
+- `hgripe-raw` defines probe schema version 1 and structured errors;
+- its owned classic-TIFF/DNG parser supports both byte orders, bounded
+  IFD/SubIFD traversal, checked ranges, exact rational metadata, CFA/level/crop
+  validation, and raw/preview references without decoding payloads;
+- a generated 6x6 RGGB DNG fixture and 31 valid/malformed-input tests pass
+  offline; CI runs the crate explicitly;
+- the desktop crate has no dependency on `hgripe-raw`, so this is not product
+  RAW import support.
+
+Remaining implementation gaps include:
 
 - no DNG/CR2/CR3/NEF/ARW/RAF/ORF/RW2 registration or decoder;
 - no `RawSource`, `RawFrame`, or `RawDevelopDoc` contract;
@@ -42,10 +54,12 @@ This target has not landed. Current implementation gaps include:
 - HEIC/AVIF narrowed to untagged RGBA8;
 - fixed Rec.709 assumptions inside parts of the grade kernel.
 
-The next approved work is R0 only: a disposable Windows x64 decoder/metadata
-comparison against a representative local camera corpus. No RAW dependency,
-vendor tree, product extension, or claimed import support is approved before
-that evidence record.
+The next approved work is R0-B corpus and evidence preparation on Windows x64.
+It must consume `design/raw-probe-contract.md`, begin with a local license-safe
+camera corpus manifest, and keep candidate runners outside product runtime
+registration. It does not authorise a RAW dependency, maintained vendor tree,
+product extension, or claimed import support. Any source adoption occurs only
+after the R0-C ownership record.
 
 ## API Runtime
 

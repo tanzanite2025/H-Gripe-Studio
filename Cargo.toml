@@ -2,6 +2,7 @@
 members = [
     "crates/hgripe-api",
     "crates/hgripe-grade",
+    "crates/hgripe-raw",
     "apps/desktop-tauri/src-tauri",
     "third_party/moxcms",
 ]

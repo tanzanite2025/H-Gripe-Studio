@@ -51,15 +51,20 @@ surfaces, source compatibility, or interoperable RGB export.
 ## Camera RAW Dependency Gate
 
 Camera RAW requires broad vendor-container parsing, but no candidate decoder is
-approved yet. Follow R0 in
+approved yet. The selection order is owned Rust, an auditable/prunable Rust
+codebase, and only then a native C/C++ decoder when coverage evidence requires
+it. Follow R0 in
 `../plans/active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md` before changing Cargo,
 the offline snapshot, native payloads, CI, packaging, file-extension lists, or
 resource registration.
 
-The R0 comparison must prove on Windows x64 that a candidate can expose raw
-sensor samples and professional-development metadata across DNG, CR2/CR3, NEF,
-ARW, RAF, ORF, and RW2. It must also record license, update model, binary size,
-memory, failure isolation, and camera coverage.
+R0-A is implemented by the standalone `hgripe-raw` crate and
+`raw-probe-contract.md`: a neutral schema plus a bounds-checked Rust DNG
+reference with no decoder dependency or product-loader integration. R0-B then
+proves on Windows x64 how much of DNG, CR2/CR3, NEF, ARW, RAF, ORF, and RW2
+each candidate can expose. R0-C
+records the ownership decision, license, update model, binary size, memory,
+failure isolation, and camera coverage.
 
 Dependency ownership after selection is deliberately narrow:
 
@@ -71,6 +76,21 @@ Dependency ownership after selection is deliberately narrow:
   editable image or professional colour result;
 - no decoder tree is vendored before the evidence record names the retained
   source surface and the upstream features/files that remain necessary.
+
+If external code is selected, "vendored" means locally owned rather than merely
+cached:
+
+- copy a reviewed source snapshot into `third_party`; do not use a Git submodule
+  or live crates.io/Git resolution;
+- record upstream URL, exact revision/release, license, local changes, and
+  upgrade procedure in `VENDOR.md`;
+- physically remove unused CLI tools, final RGB post-processing, encoders,
+  unsupported targets, downloads, and unrelated features;
+- expose it only through an H-Gripe-owned Rust adapter with a stable contract;
+- keep builds and tests offline and package only runtime artifacts the retained
+  path actually loads;
+- treat every upstream update as a manual port and reapply all removals,
+  hardening, and evidence tests.
 
 ## API-First Boundary
 

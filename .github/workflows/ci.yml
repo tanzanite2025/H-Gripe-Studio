@@ -84,6 +84,9 @@ jobs:
         working-directory: apps/desktop-tauri/src-tauri
         run: cargo test --no-default-features
 
+      - name: cargo test (RAW metadata probe)
+        run: cargo test -p hgripe-raw
+
   no-python-spawn:
     name: no python spawn (grep gate)
     # The runtime is native-only, so no Rust source may spawn a Python

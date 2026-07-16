@@ -16,6 +16,8 @@ export handoff. It must be read with:
 
 - `../../design/colour-pipeline.md` for the colour-space contract;
 - `../../design/grade-kernel.md` for shared f32 adjustment math;
+- `../../design/raw-probe-contract.md` for the implemented R0-A probe schema,
+  safety budgets, and non-integration boundary;
 - `IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md` for tiles, viewport state,
   layer placement, drag, and presentation ownership;
 - `../../design/rust-dependency-vendoring.md` for dependency ownership.
@@ -106,9 +108,22 @@ must be fixed by real-camera goldens before those controls become user-visible.
 
 ## Decoder Ownership
 
-A broad RAW container decoder is necessary; hand-writing CR3, NEF, ARW, RAF,
-and every vendor compression format is not a useful product investment.
-However, the selected dependency must not own final colour rendering.
+The implementation policy is Rust-first:
+
+1. Implement product-specific contracts and feasible processing stages in
+   owned Rust.
+2. Reuse already-maintained Rust primitives when their retained surface is
+   sufficient.
+3. For proprietary container/compression coverage that is not practical to
+   recreate, prefer a Rust codebase that can be copied, audited, hardened, and
+   physically reduced to the required parsers.
+4. Consider a C/C++ decoder only when the evidence gate proves that Rust options
+   cannot meet required camera coverage or correctness.
+
+H-Gripe will not hand-write every undocumented vendor compression format merely
+to avoid a dependency. It will own every stage where product quality and colour
+science are the differentiator, and it will keep any unavoidable container
+decoder behind a narrow boundary.
 
 - The decoder boundary is unpacked sensor samples plus metadata, not an 8-bit
   RGB convenience image.
@@ -118,13 +133,21 @@ However, the selected dependency must not own final colour rendering.
   the editable full-resolution source.
 - No candidate is added to the workspace, offline vendor tree, installer, or CI
   until the R0 evidence gate below passes.
+- A selected dependency is never consumed as a live upstream crate, Git
+  submodule, runtime download, or subprocess. Its reviewed source snapshot is
+  copied under `third_party`, disconnected from automatic upstream updates,
+  physically pruned, documented in `VENDOR.md`, and exposed through an
+  H-Gripe-owned Rust adapter.
+- Upstream upgrades are deliberate source ports that reapply local removals and
+  tests. They are not version bumps.
 
 Current candidates:
 
 | Candidate | Strength | Blocking concern |
 | --- | --- | --- |
-| LibRaw | Mature camera/container coverage and metadata extraction | Native C++ payload; built-in post-processing is not the professional renderer and must stay outside the product contract |
+| Owned Rust DNG/TIFF path | No new runtime dependency; establishes the H-Gripe contracts and reference safety behavior | Does not provide broad proprietary camera/compression coverage |
 | `rawler` / DNGLab | Rust-native and broad published format list | Upstream describes it as alpha, API-unstable, Windows-untested, and unsuitable for hostile files |
+| LibRaw | Mature camera/container coverage and metadata extraction | Last-resort native C++ payload; built-in post-processing is not the professional renderer and must stay outside the product contract |
 | Windows Imaging Component | No bundled decoder when a codec exists | Machine-dependent coverage and results cannot define a reliable product contract |
 
 ## ICC And Calibration Boundary
@@ -171,11 +194,49 @@ Current candidates:
 
 ## Delivery Phases
 
-### R0 - Evidence And Dependency Gate (first step)
+### R0 - Rust Contract And Dependency Gate
 
-Build a disposable Windows x64 comparison harness outside product runtime
-registration. It probes candidates against a representative local corpus and
-records facts before any dependency is vendored.
+R0 is deliberately split so the first step neither downloads nor adopts a RAW
+library.
+
+#### R0-A - Owned Rust Probe Contract (first step)
+
+Define a candidate-neutral Rust/JSON probe contract for:
+
+- container/make/model and source identity;
+- sensor dimensions, active area, orientation, bit depth, and compression;
+- Bayer/X-Trans layout;
+- black/white levels, masked areas, and as-shot neutral;
+- camera colour matrices/profile references;
+- embedded preview/thumbnail offsets and dimensions;
+- diagnostics, elapsed time, and estimated allocations.
+
+Build a bounds-checked DNG/TIFF metadata probe using already-maintained Rust
+primitives or a small owned parser. Use an H-Gripe-generated minimal DNG fixture
+whose tags and sensor samples are fully known. R0-A does not demosaic, create an
+RGB image, register RAW extensions, touch the product loader, or add a
+dependency. Its output fixes the neutral contract that every later candidate
+must satisfy.
+
+**Implemented 2026-07-16.** The standalone `hgripe-raw` crate now owns schema
+version 1 and a bounds-checked classic-TIFF/DNG probe. It supports both byte
+orders, traverses bounded IFD/SubIFD graphs, validates metadata and payload
+references without reading sample values, and uses a generated 6x6 RGGB DNG
+fixture. Its offline suite has 31 valid/malformed-input and JSON contract tests.
+The desktop crate does not depend on it, and no RAW extension or decoder
+dependency was added. `../../design/raw-probe-contract.md` is the detailed
+authority for this landed boundary.
+
+#### R0-B - Windows Candidate Evidence
+
+**Current next phase.** Begin with a Windows-local, license-safe corpus manifest
+and an evidence-record format that consumes the R0-A schema. Corpus preparation
+does not authorise adding a candidate to the product workspace, loader,
+installer, or extension registry.
+
+Build disposable Windows x64 runners outside product runtime registration. They
+probe the owned Rust path and external candidates against a representative
+local corpus before any dependency is vendored.
 
 Required corpus families:
 
@@ -186,20 +247,28 @@ Required corpus families:
 - Fujifilm RAF with X-Trans;
 - Olympus ORF and Panasonic RW2.
 
-The harness must report, without producing a final RGB render:
+Every runner must report the R0-A contract without producing a final RGB render,
+plus:
 
-- make/model, dimensions, active area, orientation, bit depth and compression;
-- CFA/X-Trans layout;
-- black/white levels and masked areas;
-- as-shot neutral/white balance;
-- colour matrices and available DCP/embedded profile metadata;
-- embedded preview and thumbnail locations;
 - decode time, peak memory, binary/runtime payload size, license, and failure.
 
-R0 passes only when one candidate provides the raw samples and metadata needed
-by the owned pipeline on Windows x64 with acceptable failure isolation. Its
-output is a written decision record. R0 does not add file extensions to the
-product UI and does not claim RAW import support.
+#### R0-C - Ownership Decision
+
+Prefer the owned Rust path wherever it meets the contract. If proprietary
+coverage requires external code, select the smallest candidate that exposes raw
+samples and metadata with acceptable Windows x64 failure isolation. Before it
+enters the main workspace:
+
+- record the exact source release/commit, license, camera coverage, and failed
+  alternatives;
+- copy source into `third_party` and add `VENDOR.md`;
+- remove CLI applications, final RGB post-processing, unsupported targets,
+  unused encoders/exporters, network/download hooks, and unrelated formats;
+- expose only the H-Gripe-owned Rust adapter and lock its feature surface;
+- add offline builds, malformed-input tests, and upstream-port instructions.
+
+R0 passes only after this written decision record. It does not add file
+extensions to the product UI and does not claim RAW import support.
 
 ### R1 - Stable RawSource And RawFrame Contract
 
