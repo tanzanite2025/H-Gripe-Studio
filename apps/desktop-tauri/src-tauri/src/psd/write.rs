@@ -260,9 +260,11 @@ fn load_rgba(path: &str) -> Result<(RgbaImage, &'static str), String> {
         image::DynamicImage::ImageLumaA8(img) => {
             (image::DynamicImage::ImageLumaA8(img).to_rgba8(), "LA")
         }
-        _ => return Err(format!(
-            "image {path} is not a supported 8-bit PNG for native PSD compose"
-        )),
+        _ => {
+            return Err(format!(
+                "image {path} is not a supported 8-bit PNG for native PSD compose"
+            ))
+        }
     };
     Ok((rgba, mode))
 }
@@ -305,9 +307,11 @@ fn load_mask(path: &str) -> Result<(GrayImage, &'static str), String> {
             }
             (out, "RGBA")
         }
-        _ => return Err(format!(
-            "mask {path} is not a supported 8-bit PNG for native PSD compose"
-        )),
+        _ => {
+            return Err(format!(
+                "mask {path} is not a supported 8-bit PNG for native PSD compose"
+            ))
+        }
     };
     Ok((mask, mode))
 }
