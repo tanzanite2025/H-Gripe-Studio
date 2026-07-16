@@ -109,6 +109,11 @@ pub fn validate_manifest(manifest: &RawCorpusManifest) -> RawManifestValidation 
     let mut ids = HashSet::new();
     let mut paths = HashSet::new();
     let mut families = HashSet::new();
+    let source_path_keys = manifest
+        .cases
+        .iter()
+        .map(|case| windows_path_key(&case.relative_path))
+        .collect::<HashSet<_>>();
     for case in &manifest.cases {
         let case_id = Some(case.id.clone());
         validate_identifier(
@@ -199,6 +204,17 @@ pub fn validate_manifest(manifest: &RawCorpusManifest) -> RawManifestValidation 
                 case.provenance.origin,
                 reference,
             );
+            if source_path_keys
+                .contains(&windows_path_key(&reference.producer.record_relative_path))
+            {
+                error(
+                    &mut issues,
+                    "sensor_reference_record_is_source_file",
+                    case_id.clone(),
+                    "sensor reference record_relative_path must not identify a corpus source file"
+                        .into(),
+                );
+            }
         }
         if case.family == RawCorpusFamily::DngUncompressedBayer
             && case.expected.compression_code.is_some_and(|code| code != 1)
@@ -421,7 +437,7 @@ fn validate_sensor_reference(
             issues,
             "ambiguous_sensor_reference_frame",
             case_id.clone(),
-            "sensor reference schema 1 requires exactly one full-resolution RAW frame".into(),
+            "sensor reference schema 2 requires exactly one full-resolution RAW frame".into(),
         );
     }
     if reference.dimensions.width == 0 || reference.dimensions.height == 0 {
@@ -437,7 +453,7 @@ fn validate_sensor_reference(
             issues,
             "unsupported_sensor_reference_samples_per_pixel",
             case_id.clone(),
-            "sensor reference schema 1 supports one CFA sample per pixel only".into(),
+            "sensor reference schema 2 supports one CFA sample per pixel only".into(),
         );
     }
     let expected_count = u64::from(reference.dimensions.width)
@@ -533,6 +549,15 @@ fn validate_sensor_reference(
         &reference.producer.record_reference,
         1024,
     );
+    if !is_safe_windows_relative_path(&reference.producer.record_relative_path) {
+        error(
+            issues,
+            "unsafe_sensor_reference_record_path",
+            case_id.clone(),
+            "sensor reference record_relative_path must use safe Windows '/'-separated relative components"
+                .into(),
+        );
+    }
     if !is_lower_hex_sha256(&reference.producer.record_artifact_sha256) {
         error(
             issues,

@@ -3,12 +3,14 @@
 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 compile_error!("hgripe-raw-evidence supports Windows x64 only");
 
+mod intake;
 mod manifest;
 mod model;
 mod runner;
 mod sensor_reference;
 mod windows_support;
 
+pub use intake::{fingerprint_case, verify_corpus};
 pub use manifest::{
     load_manifest, load_manifest_snapshot, validate_manifest, ManifestLoadError,
     RawManifestSnapshot,

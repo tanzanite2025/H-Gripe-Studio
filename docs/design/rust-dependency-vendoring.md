@@ -80,6 +80,12 @@ records producer and candidate decoder lineage/artifacts, and the blind child
 protocol avoids directly supplying the expected digest; actual independence
 still requires the R0-B2/R0-C source and rights audit.
 
+R0-B2b also adds no package or decoder. Its preflight and fingerprint commands
+reuse `sha2`, `serde_json`, and `windows-sys` already present in the maintained
+offline snapshot. They open only explicit corpus-root-relative files, verify
+final Windows handles, and hash bounded bytes; they do not inspect payloads to
+infer formats, rights, privacy, or sensor facts.
+
 Dependency ownership after selection is deliberately narrow:
 
 - the external decoder may unpack proprietary containers and report metadata;

@@ -245,7 +245,7 @@ explicitly records sensor unpack as not attempted, so its `gate_ready` result
 is false.
 See `../../design/raw-r0-windows-evidence.md`.
 
-**R0-B2a implemented 2026-07-16.** Manifest/evidence schema 2 now fixes a
+**R0-B2a implemented 2026-07-16.** Manifest/evidence schema 3 now fixes a
 candidate-neutral sensor reference: the complete sensor raster from the only
 full-resolution RAW frame, before crop, orientation, normalization,
 corrections, or demosaic;
@@ -257,10 +257,19 @@ retained output-file handle, and the gate rejects matching candidate lineage.
 This blocks direct protocol self-certification but does not automatically prove
 independence. It defines comparison only and adds no sensor decoder.
 
-R0-B2b is the current next code step: add read-only corpus preflight and
-explicit-path fingerprinting. Actual R0-B2 completion still requires the
-licensed local real-camera corpus, independent canonical sensor references,
-and a clean release owned baseline. No real camera corpus or external candidate
+**R0-B2b implemented 2026-07-17.** `verify-corpus` now checks manifest validity,
+required-family coverage, source final-handle containment/size/hash, canonical
+sensor-reference presence, and immutable reference-record path/size/hash without
+running a decoder or writing evidence. `fingerprint` hashes one explicit relative
+path while requiring the operator to supply family, rights, redistribution,
+privacy, ID, variant, and source URI; RAW expected facts remain unresolved.
+Evidence collection embeds the same preflight report, and `gate_ready` hard-
+requires `corpus_ready` for the exact manifest snapshot; incomplete corpora can
+still produce non-gating owned baselines for diagnosis.
+
+Actual R0-B2 completion still requires the licensed local real-camera corpus,
+independent canonical sensor/reference records, a `corpus_ready` preflight, and
+a clean release owned baseline. No real camera corpus or external candidate
 source is present in the repository yet.
 
 Build disposable Windows x64 runners outside product runtime registration. They

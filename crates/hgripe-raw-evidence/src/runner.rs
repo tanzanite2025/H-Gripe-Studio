@@ -4,11 +4,12 @@ use crate::windows_support::{
     peak_current_working_set_bytes, ChildJob,
 };
 use crate::{
-    load_manifest_snapshot, validate_manifest, RawBlindChildCase, RawChildProcessMetrics,
-    RawCorpusCase, RawCorpusFamily, RawCorpusManifest, RawEvidenceBundle, RawEvidenceCaseRecord,
-    RawEvidenceMetrics, RawEvidenceOutcome, RawEvidenceSummary, RawExpectationCheck,
-    RawManifestValidation, RawRunnerIdentity, RawSensorUnpackEvidence, RAW_EVIDENCE_SCHEMA_VERSION,
-    RAW_SENSOR_ARTIFACT_MAX_BYTES, RAW_SENSOR_ARTIFACT_OBSERVATION_TIMEOUT_MS,
+    load_manifest_snapshot, validate_manifest, verify_corpus, RawBlindChildCase,
+    RawChildProcessMetrics, RawCorpusCase, RawCorpusFamily, RawCorpusManifest, RawEvidenceBundle,
+    RawEvidenceCaseRecord, RawEvidenceMetrics, RawEvidenceOutcome, RawEvidenceSummary,
+    RawExpectationCheck, RawManifestValidation, RawRunnerIdentity, RawSensorUnpackEvidence,
+    RAW_EVIDENCE_SCHEMA_VERSION, RAW_SENSOR_ARTIFACT_MAX_BYTES,
+    RAW_SENSOR_ARTIFACT_OBSERVATION_TIMEOUT_MS,
 };
 use hgripe_raw::{probe_dng, RawContainer, RawProbeReport};
 use sha2::{Digest, Sha256};
@@ -245,6 +246,12 @@ pub fn collect_owned_evidence(
     let corpus_root = corpus_root
         .canonicalize()
         .map_err(|error| EvidenceRunError::Io(format!("cannot resolve corpus root: {error}")))?;
+    let corpus_preflight = verify_corpus(&manifest_path, &corpus_root)?;
+    if corpus_preflight.manifest_sha256 != manifest_sha256 {
+        return Err(EvidenceRunError::Io(
+            "corpus manifest changed before evidence collection".into(),
+        ));
+    }
     let executable = std::env::current_exe()
         .map_err(|error| EvidenceRunError::Environment(error.to_string()))?;
     let runner = build_runner_identity()?;
@@ -333,7 +340,12 @@ pub fn collect_owned_evidence(
         .duration_since(UNIX_EPOCH)
         .map_err(|error| EvidenceRunError::Environment(error.to_string()))?
         .as_secs();
-    let summary = summarize_evidence(&validation.coverage, &runner, &records);
+    let summary = summarize_evidence_with_preflight(
+        &validation.coverage,
+        &runner,
+        &records,
+        corpus_preflight.corpus_ready,
+    );
     Ok(RawEvidenceBundle {
         schema_version: RAW_EVIDENCE_SCHEMA_VERSION,
         manifest_schema_version: manifest.schema_version,
@@ -341,6 +353,7 @@ pub fn collect_owned_evidence(
         corpus_id: manifest.corpus_id,
         generated_unix_seconds,
         coverage: validation.coverage,
+        corpus_preflight,
         runner,
         summary,
         cases: records,
@@ -884,10 +897,11 @@ fn child_failure_record(
     }
 }
 
-fn summarize_evidence(
+fn summarize_evidence_with_preflight(
     coverage: &crate::RawCorpusCoverage,
     runner: &RawRunnerIdentity,
     records: &[RawEvidenceCaseRecord],
+    corpus_preflight_ready: bool,
 ) -> RawEvidenceSummary {
     let runner_eligible = runner.build_profile == "release"
         && runner.source_dirty == Some(false)
@@ -950,6 +964,7 @@ fn summarize_evidence(
         }
     }
     summary.gate_ready = summary.runner_eligible
+        && corpus_preflight_ready
         && coverage.complete
         && summary.total_cases > 0
         && summary.metadata_probe_succeeded == summary.total_cases
@@ -964,6 +979,15 @@ fn summarize_evidence(
             .iter()
             .all(|record| record_is_gate_complete(record, runner));
     summary
+}
+
+#[cfg(test)]
+fn summarize_evidence(
+    coverage: &crate::RawCorpusCoverage,
+    runner: &RawRunnerIdentity,
+    records: &[RawEvidenceCaseRecord],
+) -> RawEvidenceSummary {
+    summarize_evidence_with_preflight(coverage, runner, records, true)
 }
 
 fn sensor_unpack_is_complete(
@@ -1051,6 +1075,7 @@ fn sensor_reference_contract_is_complete(reference: &crate::RawSensorReference) 
         && is_lower_hex_digest(&reference.producer.tool_artifact_sha256, 64)
         && !reference.producer.record_reference.trim().is_empty()
         && reference.producer.record_reference.len() <= 1024
+        && is_safe_windows_relative_path(&reference.producer.record_relative_path)
         && is_lower_hex_digest(&reference.producer.record_artifact_sha256, 64)
 }
 
@@ -1121,6 +1146,9 @@ fn sensor_reference_is_independent(
             .implementation_id
             .eq_ignore_ascii_case(candidate_implementation_id)
         && producer.tool_id != runner.id
+        && !producer
+            .record_relative_path
+            .eq_ignore_ascii_case(&record.relative_path)
         && producer.tool_artifact_sha256 != runner.executable_sha256
         && producer.tool_artifact_sha256 != candidate_artifact_sha256
         && match producer.basis {
@@ -2030,6 +2058,9 @@ mod tests {
         let runner = eligible_runner();
         let complete = complete_gate_records(&base);
         assert!(summarize_evidence(&coverage, &runner, &complete).gate_ready);
+        assert!(
+            !summarize_evidence_with_preflight(&coverage, &runner, &complete, false,).gate_ready
+        );
 
         let mut missing_peak = complete.clone();
         missing_peak[0]
@@ -2355,6 +2386,7 @@ mod tests {
                 tool_version: "1".into(),
                 tool_artifact_sha256: "c".repeat(64),
                 record_reference: "generated fixture constants".into(),
+                record_relative_path: "references/generated-fixture.json".into(),
                 record_artifact_sha256: "d".repeat(64),
             },
         }

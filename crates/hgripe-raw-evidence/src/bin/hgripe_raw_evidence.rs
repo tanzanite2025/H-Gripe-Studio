@@ -1,7 +1,8 @@
 use hgripe_raw_evidence::{
-    child_command_name, collect_owned_evidence, load_manifest, probe_owned_case, validate_manifest,
-    write_evidence_bundle, RawBlindChildCase, RawCorpusManifest,
-    RAW_BLIND_CHILD_CASE_SCHEMA_VERSION, RAW_CORPUS_MANIFEST_SCHEMA_VERSION,
+    child_command_name, collect_owned_evidence, fingerprint_case, load_manifest, probe_owned_case,
+    validate_manifest, verify_corpus, write_evidence_bundle, RawBlindChildCase, RawCorpusManifest,
+    RawCorpusProvenance, RawFingerprintRequest, RAW_BLIND_CHILD_CASE_SCHEMA_VERSION,
+    RAW_CORPUS_MANIFEST_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -31,6 +32,8 @@ fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let command = args.remove(0);
     match command.as_str() {
         "validate" => run_validate(args),
+        "verify-corpus" => run_verify_corpus(args),
+        "fingerprint" => run_fingerprint(args),
         "run-owned" => run_owned(args),
         command if command == child_command_name() => run_child(args),
         _ => Err(format!(
@@ -52,6 +55,72 @@ fn run_validate(args: Vec<String>) -> Result<ExitCode, String> {
     } else {
         ExitCode::from(2)
     })
+}
+
+fn run_verify_corpus(args: Vec<String>) -> Result<ExitCode, String> {
+    let [manifest_path, corpus_root] = args.as_slice() else {
+        return Err(
+            "usage: hgripe-raw-evidence verify-corpus <manifest.json> <corpus-root>".into(),
+        );
+    };
+    let report = verify_corpus(
+        PathBuf::from(manifest_path).as_path(),
+        PathBuf::from(corpus_root).as_path(),
+    )
+    .map_err(|error| error.to_string())?;
+    print_json_pretty(&report)?;
+    Ok(if report.corpus_ready {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(3)
+    })
+}
+
+fn run_fingerprint(args: Vec<String>) -> Result<ExitCode, String> {
+    let [corpus_root, relative_path, id, family, variant, origin, rights_reference, redistribution, contains_personal_metadata, source_uri] =
+        args.as_slice()
+    else {
+        return Err(
+            "usage: hgripe-raw-evidence fingerprint <corpus-root> <relative-path> <id> <family> <variant> <origin> <rights-reference> <redistribution> <contains-personal-metadata> <source-uri-or-dash>"
+                .into(),
+        );
+    };
+    let request = RawFingerprintRequest {
+        id: id.clone(),
+        family: parse_json_enum(family, "RAW family")?,
+        variant: variant.clone(),
+        relative_path: relative_path.clone(),
+        provenance: RawCorpusProvenance {
+            origin: parse_json_enum(origin, "corpus origin")?,
+            rights_reference: rights_reference.clone(),
+            source_uri: (source_uri != "-").then(|| source_uri.clone()),
+            redistribution: parse_json_enum(redistribution, "redistribution policy")?,
+            contains_personal_metadata: parse_bool(
+                contains_personal_metadata,
+                "contains-personal-metadata",
+            )?,
+        },
+    };
+    let draft = fingerprint_case(PathBuf::from(corpus_root).as_path(), request)
+        .map_err(|error| error.to_string())?;
+    print_json_pretty(&draft)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn parse_json_enum<T>(value: &str, field: &str) -> Result<T, String>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_value(serde_json::Value::String(value.into()))
+        .map_err(|_| format!("invalid {field} '{value}'"))
+}
+
+fn parse_bool(value: &str, field: &str) -> Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!("{field} must be true or false")),
+    }
 }
 
 fn run_owned(args: Vec<String>) -> Result<ExitCode, String> {
@@ -135,6 +204,8 @@ fn print_help() {
         "hgripe-raw-evidence\n\n\
          Commands:\n\
            validate <manifest.json>\n\
+           verify-corpus <manifest.json> <corpus-root>\n\
+           fingerprint <corpus-root> <relative-path> <id> <family> <variant> <origin> <rights-reference> <redistribution> <contains-personal-metadata> <source-uri-or-dash>\n\
            run-owned <manifest.json> <corpus-root> <output.json>\n\n\
          The owned runner probes DNG metadata only. It does not unpack sensor samples."
     );

@@ -66,6 +66,39 @@ fn rejects_legacy_manifest_schema_after_sensor_contract_upgrade() {
 }
 
 #[test]
+fn legacy_schema_two_json_parses_only_to_report_the_version_error() {
+    let temp = TestDir::new();
+    let mut case = sample_case(
+        RawCorpusFamily::DngUncompressedBayer,
+        "cases/minimal.dng",
+        &"0".repeat(64),
+    );
+    case.provenance.origin = RawCorpusOrigin::RedistributableFixture;
+    case.expected.sensor_reference = Some(test_sensor_reference());
+    let mut value = serde_json::to_value(manifest_with_case(case)).unwrap();
+    value["schema_version"] = serde_json::json!(2);
+    value["cases"][0]["expected"]["sensor_reference"]["schema_version"] = serde_json::json!(1);
+    value["cases"][0]["expected"]["sensor_reference"]["producer"]
+        .as_object_mut()
+        .unwrap()
+        .remove("record_relative_path");
+    let path = temp.path().join("legacy-schema-2.json");
+    fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+    let snapshot = load_manifest_snapshot(&path).unwrap();
+    let validation = validate_manifest(&snapshot.manifest);
+    assert!(!validation.valid);
+    assert!(validation
+        .issues
+        .iter()
+        .any(|issue| issue.code == "unsupported_schema_version"));
+    assert!(validation
+        .issues
+        .iter()
+        .any(|issue| issue.code == "unsupported_sensor_reference_schema"));
+}
+
+#[test]
 fn complete_manifest_covers_every_required_family() {
     let cases = RawCorpusFamily::REQUIRED
         .into_iter()
@@ -253,6 +286,22 @@ fn rejects_noncanonical_sensor_reference_contracts() {
         &case,
         wrong_record_artifact,
         "invalid_sensor_reference_record_artifact",
+    );
+
+    let mut unsafe_record_path = test_sensor_reference();
+    unsafe_record_path.producer.record_relative_path = "../reference.json".into();
+    assert_sensor_reference_issue(
+        &case,
+        unsafe_record_path,
+        "unsafe_sensor_reference_record_path",
+    );
+
+    let mut source_record_path = test_sensor_reference();
+    source_record_path.producer.record_relative_path = case.relative_path.clone();
+    assert_sensor_reference_issue(
+        &case,
+        source_record_path,
+        "sensor_reference_record_is_source_file",
     );
 
     let mut oversized = test_sensor_reference();
@@ -519,6 +568,50 @@ fn cli_validates_and_collects_isolated_owned_evidence() {
     assert_eq!(validation["valid"], true);
     assert_eq!(validation["coverage"]["complete"], false);
 
+    let preflight_output = Command::new(executable)
+        .arg("verify-corpus")
+        .arg(&manifest_path)
+        .arg(temp.path())
+        .output()
+        .unwrap();
+    assert_eq!(preflight_output.status.code(), Some(3));
+    let preflight: serde_json::Value = serde_json::from_slice(&preflight_output.stdout).unwrap();
+    assert_eq!(preflight["corpus_ready"], false);
+    assert_eq!(preflight["all_case_files_verified"], true);
+    assert_eq!(preflight["all_sensor_references_complete"], false);
+
+    let fingerprint_output = Command::new(executable)
+        .arg("fingerprint")
+        .arg(temp.path())
+        .arg("cases/minimal-le.dng")
+        .arg("fingerprint-draft")
+        .arg("dng_uncompressed_bayer")
+        .arg("operator asserted fixture")
+        .arg("local_evaluation_only")
+        .arg("operator supplied rights record")
+        .arg("prohibited")
+        .arg("false")
+        .arg("-")
+        .output()
+        .unwrap();
+    assert!(
+        fingerprint_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fingerprint_output.stderr)
+    );
+    let fingerprint: serde_json::Value =
+        serde_json::from_slice(&fingerprint_output.stdout).unwrap();
+    assert_eq!(fingerprint["case"]["sha256"], manifest.cases[0].sha256);
+    assert_eq!(
+        fingerprint["case"]["expected"]["sensor_reference"],
+        serde_json::Value::Null
+    );
+    assert!(fingerprint["unresolved_fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "expected.sensor_reference"));
+
     let evidence_path = temp.path().join("evidence.json");
     let run_output = Command::new(executable)
         .arg("run-owned")
@@ -555,6 +648,13 @@ fn cli_validates_and_collects_isolated_owned_evidence() {
     assert!(!bundle.runner.source_revision.is_empty());
     assert_ne!(bundle.runner.source_revision, "unknown");
     assert!(!bundle.summary.gate_ready);
+    assert!(!bundle.corpus_preflight.corpus_ready);
+    assert_eq!(
+        bundle.corpus_preflight.manifest_sha256,
+        bundle.manifest_sha256
+    );
+    assert!(bundle.corpus_preflight.all_case_files_verified);
+    assert!(!bundle.corpus_preflight.all_sensor_references_complete);
     assert_eq!(bundle.summary.metadata_probe_succeeded, 1);
     assert_eq!(bundle.summary.sensor_unpack_succeeded, 0);
     assert_eq!(
@@ -764,6 +864,7 @@ fn test_sensor_reference() -> RawSensorReference {
             tool_version: "1".into(),
             tool_artifact_sha256: "d".repeat(64),
             record_reference: "crates/hgripe-raw/tests/support/dng_fixture.rs".into(),
+            record_relative_path: "references/generated-fixture.json".into(),
             record_artifact_sha256: "e".repeat(64),
         },
     }

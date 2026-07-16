@@ -57,7 +57,7 @@ R0-B1 evidence infrastructure has also landed without product integration:
   checked against alias, escape, tampering, timeout, and overwrite races;
 - the schema distinguishes metadata success from sensor unpack. The owned
   runner reports unpack as not attempted and cannot mark the R0-B gate ready;
-- R0-B2a upgrades manifest/evidence to schema 2 and defines one canonical
+- R0-B2a upgrades manifest/evidence to schema 3 and defines one canonical
   full-sensor `u16` little-endian sample stream plus structured producer and
   candidate decoder lineage/artifact identity. The parent omits the expected
   sensor reference from the child snapshot and computes count/digest from a
@@ -65,6 +65,11 @@ R0-B1 evidence infrastructure has also landed without product integration:
   satisfy the gate, while actual independence still requires manual audit;
 - generated DNG, blind-protocol, Windows containment, integrity, and CLI tests
   pass, but no real camera corpus or external candidate decoder is present.
+- R0-B2b adds read-only `verify-corpus` readiness reports and an explicit-input
+  `fingerprint` draft command. It binds source/reference files through final
+  Windows handles and hashes without decoding or guessing rights/privacy/family.
+  Evidence bundles embed this report, and the gate hard-requires its
+  `corpus_ready` result while still allowing non-gating incremental baselines.
 
 Remaining implementation gaps include:
 
@@ -75,11 +80,10 @@ Remaining implementation gaps include:
 - HEIC/AVIF narrowed to untagged RGBA8;
 - fixed Rec.709 assumptions inside parts of the grade kernel.
 
-The next approved code work is R0-B2b on Windows x64: add read-only corpus
-preflight and explicit-path fingerprinting against the schema in
-`design/raw-r0-windows-evidence.md`. Real completion still requires a
-rights-cleared local camera corpus, independently produced canonical sensor
-references, and a clean release owned baseline. This does not authorise a RAW
+The next step is to use the R0-B2b tools on a rights-cleared local camera corpus,
+attach independently produced canonical sensor/reference records, obtain a
+`corpus_ready` report, and capture the clean release owned baseline. This does
+not authorise a RAW
 dependency, maintained vendor tree, product extension, or claimed import
 support. Candidate comparison follows the corpus baseline, and source adoption
 occurs only after the R0-C ownership record.

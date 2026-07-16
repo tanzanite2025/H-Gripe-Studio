@@ -1,7 +1,8 @@
 # RAW R0 Windows Evidence
 
-**Status:** R0-B1 runner and R0-B2a canonical sensor-reference contract
-implemented on 2026-07-16.
+**Status:** R0-B1 runner, R0-B2a canonical sensor-reference contract, and
+R0-B2b corpus preflight/fingerprint tools implemented on 2026-07-16 and
+2026-07-17.
 
 This document defines the Windows x64 evidence harness used after the R0-A
 metadata contract and before any external RAW decoder is adopted. The
@@ -61,7 +62,7 @@ of licensed camera files or personal metadata.
 
 ## Corpus Manifest
 
-RawCorpusManifest.schema_version is 2. A case requires:
+RawCorpusManifest.schema_version is 3. A case requires:
 
 - a unique stable ASCII ID;
 - one required camera family and a human-readable variant;
@@ -97,7 +98,7 @@ Illustrative case shape:
 
 ~~~json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "corpus_id": "r0-local-2026-07",
   "cases": [
     {
@@ -122,7 +123,7 @@ Illustrative case shape:
         "cfa_repeat_rows": 2,
         "cfa_repeat_columns": 2,
         "sensor_reference": {
-          "schema_version": 1,
+          "schema_version": 2,
           "domain": "full_sensor_raster",
           "frame": "only_full_resolution_raw_frame",
           "full_resolution_raw_frame_count": 1,
@@ -143,6 +144,7 @@ Illustrative case shape:
             "tool_version": "reference-tool-version",
             "tool_artifact_sha256": "replace-with-reference-tool-sha256",
             "record_reference": "local immutable reference record id",
+            "record_relative_path": "references/dng-uncompressed-owned-001.json",
             "record_artifact_sha256": "replace-with-reference-record-sha256"
           }
         }
@@ -177,7 +179,7 @@ limited to 2 GiB before allocation.
 
 ## Canonical Sensor Reference
 
-RawSensorReference.schema_version is 1. It defines one comparable unpacked
+RawSensorReference.schema_version is 2. It defines one comparable unpacked
 sensor stream without authorizing a decoder implementation:
 
 - `domain = full_sensor_raster`: the complete sensor raster, including
@@ -186,15 +188,15 @@ sensor stream without authorizing a decoder implementation:
 - `frame = only_full_resolution_raw_frame` and
   `full_resolution_raw_frame_count = 1`: a source with zero, multiple, or
   ambiguous full-resolution RAW frames is not gate-eligible under reference
-  schema 1;
+  schema 2;
 - samples are the original unsigned decoded sensor codes before orientation,
   active-area crop, linearization, black subtraction, white normalization,
   bad-pixel correction, white balance, highlight work, or demosaic;
 - packed source values are zero-extended to `u16` without scaling;
-- reference schema 1 accepts one reported bits-per-sample value in the range
+- reference schema 2 accepts one reported bits-per-sample value in the range
   1 through 16;
 - `sample_order = row_major_interleaved`: rows top-to-bottom, columns
-  left-to-right, then sample index within a pixel. Schema 1 accepts exactly one
+  left-to-right, then sample index within a pixel. Schema 2 accepts exactly one
   CFA sample per pixel;
 - `sample_encoding = unsigned_u16_little_endian`: each sample contributes
   exactly two little-endian bytes with no header, row padding, trailer, or
@@ -208,8 +210,9 @@ or decode RAW files.
 
 The producer record fixes the reference basis, canonical lowercase decoder or
 generator implementation lineage, implementation revision, wrapper tool ID and
-version, exact tool artifact SHA-256, and both the immutable local record ID and
-record artifact SHA-256. Allowed bases are a known generated fixture, an
+version, exact tool artifact SHA-256, the immutable local record ID, its safe
+corpus-root-relative path, and record artifact SHA-256. Allowed bases are a
+known generated fixture, an
 independent decoder, or a vendor reference. A known generated fixture requires
 redistributable-fixture provenance.
 
@@ -218,17 +221,21 @@ revision, and decoder artifact SHA-256. The gate rejects the same implementation
 lineage even when wrapper IDs or wrapper executables differ, and rejects a
 reference tool artifact that equals the candidate decoder artifact.
 
-Manifest validation checks the reference record ID and digest shape but does
-not locate or hash an external record artifact. R0-B2b preflight and the manual
-approval record must bind the asserted digest to the actual local immutable
-record before evidence is trusted.
+Manifest validation checks the reference record ID, relative path, and digest
+shape. R0-B2b preflight opens that path under the corpus root, verifies the
+final Windows handle remains inside the root, enforces a 64 MiB record limit,
+and hashes the actual immutable record before declaring the case ready.
 
 ## Evidence Bundle
 
-RawEvidenceBundle.schema_version is 2. All sizes, timings, and memory values
+RawEvidenceBundle.schema_version is 3. All sizes, timings, and memory values
 serialize as decimal strings to preserve u64 in JavaScript.
 The bundle records the exact manifest SHA-256; collection fails if the manifest
 changes before, during, or after a child run.
+Every bundle also embeds the read-only `corpus_preflight` report captured before
+child execution. Incremental owned baselines remain writable when that report is
+not ready, but `gate_ready` can never become true unless the embedded report has
+`corpus_ready = true` and refers to the same manifest SHA-256.
 
 Each case records one outcome:
 
@@ -269,6 +276,7 @@ translate a successful metadata probe into a sensor-decode claim.
 The bundle summary sets gate_ready = true only when:
 
 - the runner is a clean release build with a known Git revision;
+- the embedded corpus preflight is ready for the exact same manifest snapshot;
 - required corpus coverage is complete;
 - every case has a successful metadata report;
 - every case has successful sensor-unpack evidence;
@@ -310,6 +318,34 @@ Validate a manifest:
 target\release\hgripe-raw-evidence.exe validate C:\path\to\manifest.json
 ~~~
 
+Run the read-only corpus preflight:
+
+~~~powershell
+target\release\hgripe-raw-evidence.exe verify-corpus C:\path\to\manifest.json C:\path\to\corpus-root
+~~~
+
+The command prints schema 1 preflight JSON. Exit code 0 means `corpus_ready` is
+true; exit code 3 means the report was produced but at least one manifest,
+coverage, source-file, sensor-reference, or reference-record requirement is
+not ready. It never runs a decoder and never writes evidence. Source and record
+files are held through Windows handles that allow shared reads but block writes
+and deletion during hashing; the manifest snapshot is checked again after all
+cases.
+
+Draft one file identity with every non-file fact supplied explicitly by the
+operator:
+
+~~~powershell
+target\release\hgripe-raw-evidence.exe fingerprint C:\path\to\corpus-root cameras/sample.nef sample-nef-001 nikon_nef "operator asserted Nikon NEF" local_evaluation_only "local rights record 001" prohibited false -
+~~~
+
+The final `-` means no source URI. The output contains the final-handle-bound
+file size and SHA-256 plus a case draft. Family, origin, rights, redistribution,
+personal-metadata status, variant, ID, and optional source URI are operator
+assertions; the command does not infer them from file bytes or extensions. All
+metadata, compression, CFA, dimensions, and sensor-reference facts remain null
+and are listed in `unresolved_fields`.
+
 Collect the owned baseline:
 
 ~~~powershell
@@ -328,7 +364,7 @@ writers, child timeout/output limits, and gate tampering cases. No real camera
 corpus is present, no proprietary container is parsed, and no sensor samples
 are unpacked.
 
-R0-B2a is also implemented: manifest/evidence schema 2 carries the structured
+R0-B2a is also implemented: manifest/evidence schema 3 carries the structured
 sensor reference above, validation rejects non-canonical dimensions, counts,
 digests, producer identity, oversized artifacts, and fixture provenance. The
 parent uses a bounded blind child snapshot and retained output handle to compute
@@ -337,22 +373,24 @@ lineage. These controls prevent direct protocol self-certification but do not
 automatically prove independent implementation. This still does not provide a
 real corpus or a sensor decoder.
 
-R0-B2b is the next code step, followed by local corpus acquisition:
+R0-B2b is implemented: `verify-corpus` produces a read-only readiness report
+for every source and immutable reference record, while `fingerprint` produces
+only an operator-asserted manifest draft plus handle-bound size/SHA-256. Neither
+command decodes RAW data, guesses rights/privacy/family, or writes evidence.
 
-1. add a read-only corpus preflight that verifies completeness, final handle
-   paths, file sizes, hashes, canonical sensor-reference readiness, and the
-   actual immutable reference-record artifact hash without running a decoder or
-   writing evidence;
-2. add an explicit-path fingerprint command that can draft file identity but
-   cannot guess rights, privacy, camera family, or sensor reference facts;
-3. acquire or identify license-safe local files for all required families;
-4. remove or separately protect personal metadata as required by the rights
+The next step is local corpus acquisition and verification:
+
+1. acquire or identify license-safe local files for all required families;
+2. remove or separately protect personal metadata as required by the rights
    basis;
-5. calculate SHA-256 and fill expected facts in a local manifest;
-6. establish trusted unpacked-sensor references independently of the
+3. use `fingerprint` to calculate source identity, then explicitly review and
+   fill expected facts in a local manifest;
+4. establish trusted unpacked-sensor references independently of the
    candidate being evaluated; a candidate cannot certify its own reference;
-7. run the release owned baseline and review every mismatch;
-8. only then design disposable external-candidate runners against this same
+5. bind each local immutable reference record through `record_relative_path`
+   and its SHA-256, then require `verify-corpus` to report `corpus_ready`;
+6. run the release owned baseline and review every mismatch;
+7. only then design disposable external-candidate runners against this same
    schema.
 
 External source still does not enter the product workspace or maintained

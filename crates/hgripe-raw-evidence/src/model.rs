@@ -1,12 +1,15 @@
 use hgripe_raw::{RawContainer, RawDimensions, RawProbeError, RawProbeReport};
 use serde::{Deserialize, Serialize};
 
-pub const RAW_CORPUS_MANIFEST_SCHEMA_VERSION: u32 = 2;
-pub const RAW_EVIDENCE_SCHEMA_VERSION: u32 = 2;
-pub const RAW_SENSOR_REFERENCE_SCHEMA_VERSION: u32 = 1;
+pub const RAW_CORPUS_MANIFEST_SCHEMA_VERSION: u32 = 3;
+pub const RAW_EVIDENCE_SCHEMA_VERSION: u32 = 3;
+pub const RAW_SENSOR_REFERENCE_SCHEMA_VERSION: u32 = 2;
 pub const RAW_BLIND_CHILD_CASE_SCHEMA_VERSION: u32 = 1;
+pub const RAW_CORPUS_PREFLIGHT_SCHEMA_VERSION: u32 = 1;
+pub const RAW_FINGERPRINT_DRAFT_SCHEMA_VERSION: u32 = 1;
 pub const RAW_SENSOR_ARTIFACT_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const RAW_SENSOR_ARTIFACT_OBSERVATION_TIMEOUT_MS: u64 = 120_000;
+pub const RAW_REFERENCE_RECORD_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -138,6 +141,8 @@ pub struct RawSensorReferenceProducer {
     pub tool_version: String,
     pub tool_artifact_sha256: String,
     pub record_reference: String,
+    #[serde(default)]
+    pub record_relative_path: String,
     pub record_artifact_sha256: String,
 }
 
@@ -253,6 +258,63 @@ pub struct RawManifestValidation {
     pub valid: bool,
     pub coverage: RawCorpusCoverage,
     pub issues: Vec<RawManifestIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawCorpusFileVerification {
+    pub relative_path: String,
+    pub expected_sha256: String,
+    pub observed_sha256: Option<String>,
+    #[serde(with = "decimal_u64_option")]
+    pub observed_bytes: Option<u64>,
+    pub verified: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawCorpusPreflightCase {
+    pub case_id: String,
+    pub family: RawCorpusFamily,
+    pub source: RawCorpusFileVerification,
+    pub sensor_reference_present: bool,
+    pub sensor_reference_valid: bool,
+    pub reference_record: Option<RawCorpusFileVerification>,
+    pub ready: bool,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawCorpusPreflightReport {
+    pub schema_version: u32,
+    pub manifest_schema_version: u32,
+    pub manifest_sha256: String,
+    pub corpus_id: String,
+    pub manifest_validation: RawManifestValidation,
+    pub coverage_complete: bool,
+    pub all_case_files_verified: bool,
+    pub all_sensor_references_complete: bool,
+    pub all_reference_records_verified: bool,
+    pub corpus_ready: bool,
+    pub cases: Vec<RawCorpusPreflightCase>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawFingerprintRequest {
+    pub id: String,
+    pub family: RawCorpusFamily,
+    pub variant: String,
+    pub relative_path: String,
+    pub provenance: RawCorpusProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawFingerprintDraft {
+    pub schema_version: u32,
+    #[serde(with = "decimal_u64")]
+    pub observed_bytes: u64,
+    pub case: RawCorpusCase,
+    pub operator_asserted_fields: Vec<String>,
+    pub unresolved_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -412,6 +474,7 @@ pub struct RawEvidenceBundle {
     #[serde(with = "decimal_u64")]
     pub generated_unix_seconds: u64,
     pub coverage: RawCorpusCoverage,
+    pub corpus_preflight: RawCorpusPreflightReport,
     pub runner: RawRunnerIdentity,
     pub summary: RawEvidenceSummary,
     pub cases: Vec<RawEvidenceCaseRecord>,
