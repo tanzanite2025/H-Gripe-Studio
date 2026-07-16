@@ -18,13 +18,13 @@ Any older wording below must be interpreted through that protocol.
 | Foundation | Status | Why it matters for PS parity |
 | --- | --- | --- |
 | Non-destructive edit record (`EditPaths` JSON) | frontend records (paths / strokes / operations / point prompts); backend Rust rasterises + executes | Structurally the same model as PS's "history + adjustable parameters" — the single most important piece |
-| `Compute` executor lane | in-process Rust image/model work, no network | The execution home for every PS filter / transform |
-| 16-bit `WorkingImage` + ICC colour pipeline | ProPhoto wide-gamut canvas, CMYK/ICC management, linear-light maths | PS-grade colour correctness is already here |
+| `Compute` executor lane | in-process deterministic Rust image/mask work, no network | The execution home for every PS filter / transform |
+| Current u16 `WorkingImage` plus f32 grade kernel | Useful migration baseline, but external ICC, monitor colour and unbounded scene pixels are incomplete | Must migrate to the professional RAW colour contract; current support is not yet PS/RAW-grade colour correctness |
 | Tool registry (`imageEditorTools`) + scoped shortcuts (full PS key table reserved) | `ready`/`planned` declarative registration; i18n + collisions guarded by CI | A new tool = one registry row + an implementation; UI / shortcuts / translations follow automatically |
 | Undo/redo, boolean combine, morphology, feather, proxy preview | shipped | The core of the selection system exists |
-| Model foundation (`ort`: SAM 2 / BiRefNet / ViTMatte …) | shipped | PS's "Select Subject / Remove Background"-class AI features are already ahead |
+| Deterministic mask foundation | shipped | Manual selection, component constraints, trimaps and guided-filter matting are available offline |
 
-## 2. The architecture-level gaps vs PS (four)
+## 2. The architecture-level gaps vs PS (five)
 
 1. **Single mask → document model (layer stack).** Today the modal holds "one
    image + one mask". Everything in PS (layers, adjustment layers, blend modes,
@@ -39,6 +39,11 @@ Any older wording below must be interpreted through that protocol.
    currently recomputes the whole proxy. With multiple layers only dirty tiles
    may be recomputed.
 
+5. **Encoded u16 images -> professional RAW scene pipeline.** The current
+   working carrier cannot preserve unbounded sensor values, arbitrary input
+   profiles, or monitor-aware preview. The target is the single f32
+   `LinearProPhoto` scene carrier defined by the active RAW plan.
+
 ## 3. Target architecture (layered)
 
 ```
@@ -52,11 +57,11 @@ Any older wording below must be interpreted through that protocol.
 │               every Op's params stay revisable → non-destructive
 ├─ Execution layer (Rust, Compute lane)
 │   Op registry: each Op is a pure function (input surfaces, params) → surface
-│   Compositor: layer stack + blend mode + mask, in the 16-bit working space
+│   Compositor: layer stack + blend mode + mask, in the canonical f32 scene space
 │   Render scheduling: proxy resolution + dirty-region recompute
 │               (image_buffer grows into a tile cache)
-└─ Model layer (ort): SAM 2 / BiRefNet / ViTMatte / future generative fill —
-    attached to the EditStack as Ops
+└─ API layer: model-backed fill or semantic edits run through API profiles;
+   deterministic mask and pixel operations stay in the Compute lane
 ```
 
 **Key decision: the document model is the single source of truth; rendering is
@@ -137,7 +142,7 @@ revisable Op), `V` move, `C` crop inside the modal (reusing `CropEditModal`'s
 box logic).
 
 **M6 — Adjustment layers + filter Ops.** Levels / curves / hue-saturation /
-brightness-contrast as `AdjustmentLayer` (the 16-bit working space pays off
+brightness-contrast as `AdjustmentLayer` (the f32 scene working space pays off
 directly); gaussian blur / sharpen as filter Ops. From here on, every feature is
 a "registry row + one pure Rust function" increment.
 

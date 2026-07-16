@@ -9,15 +9,6 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
-  # Opt-in end-to-end checks that run real model inference: the weights are
-  # never committed, so the gated tests (`vitmatte_inference_when_weight_present`,
-  # `onnx_matting_runs_when_weight_present`,
-  # `realesrgan_inference_when_weight_present`,
-  # `onnx_defect_inference_when_weight_present`,
-  # `pctnet_inference_when_weight_present`) skip on every normal
-  # run. Trigger this manually to fetch the weights and exercise the native
-  # inference paths.
-  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -78,8 +69,6 @@ jobs:
         with:
           workspaces: apps/desktop-tauri/src-tauri
 
-      # Formatting gate: keeps the tree rustfmt-clean so functional diffs never
-      # drown in whitespace churn. Runs before the (much slower) test build.
       - name: cargo fmt --check
         working-directory: apps/desktop-tauri/src-tauri
         run: cargo fmt --all -- --check
@@ -95,163 +84,11 @@ jobs:
         working-directory: apps/desktop-tauri/src-tauri
         run: cargo test --no-default-features
 
-  vitmatte-e2e:
-    name: tauri (vitmatte e2e)
-    # Only on manual dispatch: fetches the ~104 MB weight and runs the real
-    # ViTMatte inference test. Kept out of the per-PR matrix to avoid the
-    # download on every run while still giving a verifiable execution path.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # ViTMatte uses the repository-maintained ONNX Runtime DLLs.
-          lfs: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: apps/desktop-tauri/studio-ui/package-lock.json
-
-      # The Tauri build script embeds the frontend at compile time, so the
-      # studio-ui bundle (apps/desktop-tauri/dist) must exist before cargo test.
-      - name: Build frontend
-        working-directory: apps/desktop-tauri
-        run: npm --prefix studio-ui ci && npm --prefix studio-ui run build
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop-tauri/src-tauri
-
-      # Fetches into resources/models/vitmatte.onnx (sha256-checked), which
-      # the shared ViTMatte resolver picks up so both gated tests stop skipping.
-      - name: Fetch ViTMatte weight
-        shell: bash
-        run: bash scripts/fetch-vitmatte.sh
-
-      - name: cargo test (vitmatte inference)
-        working-directory: apps/desktop-tauri/src-tauri
-        run: |
-          cargo test vitmatte_inference_when_weight_present -- --nocapture
-          cargo test onnx_matting_runs_when_weight_present -- --nocapture
-
-  realesrgan-e2e:
-    name: tauri (Real-ESRGAN e2e)
-    # Only on manual dispatch: fetches the optional ~4.9 MB FP32 ONNX and proves
-    # the native Rust/ORT Image Enhance path runs across a real tile boundary.
-    # The pinned third-party re-host is verification-only, not release approval.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Native Real-ESRGAN uses the repository-maintained ORT runtime DLL.
-          lfs: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: apps/desktop-tauri/studio-ui/package-lock.json
-
-      - name: Build frontend
-        working-directory: apps/desktop-tauri
-        run: npm --prefix studio-ui ci && npm --prefix studio-ui run build
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop-tauri/src-tauri
-
-      - name: Fetch Real-ESRGAN x4v3 ONNX
-        shell: pwsh
-        run: .\scripts\fetch-realesrgan.ps1
-
-      - name: cargo test (Real-ESRGAN inference)
-        working-directory: apps/desktop-tauri/src-tauri
-        run: cargo test realesrgan_inference_when_weight_present -- --nocapture
-
-  watchdog-e2e:
-    name: tauri (detail watchdog e2e)
-    # Only on manual dispatch: fetches the small trained PP-OCRv3 text weight
-    # and proves the native Rust/ORT detector emits a real garbled_text box.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: apps/desktop-tauri/studio-ui/package-lock.json
-
-      - name: Build frontend
-        working-directory: apps/desktop-tauri
-        run: npm --prefix studio-ui ci && npm --prefix studio-ui run build
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop-tauri/src-tauri
-
-      - name: Fetch Detail Watchdog text weight
-        shell: pwsh
-        run: .\scripts\fetch-watchdog-text.ps1
-
-      - name: cargo test (trained text detector)
-        working-directory: apps/desktop-tauri/src-tauri
-        run: cargo test onnx_defect_inference_when_weight_present -- --nocapture
-
-  harmonize-e2e:
-    name: tauri (PCT-Net harmonize e2e)
-    # Only on manual dispatch. The fetched file is an unofficial third-party
-    # ONNX conversion used for integration verification, not a default bundle
-    # or a release-readiness approval.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Native PCT-Net uses the repository-maintained ORT CPU runtime.
-          lfs: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: apps/desktop-tauri/studio-ui/package-lock.json
-
-      - name: Build frontend
-        working-directory: apps/desktop-tauri
-        run: npm --prefix studio-ui ci && npm --prefix studio-ui run build
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop-tauri/src-tauri
-
-      - name: Fetch unofficial PCT-Net ONNX conversion
-        shell: pwsh
-        run: .\scripts\fetch-color-harmonize.ps1
-
-      - name: cargo test (PCT-Net harmonize inference)
-        working-directory: apps/desktop-tauri/src-tauri
-        run: cargo test pctnet_inference_when_weight_present -- --nocapture
-
   no-python-spawn:
     name: no python spawn (grep gate)
-    # Phase 7 gate: the runtime is native-only, so no Rust source may spawn a
-    # Python interpreter and the deleted python/bridge / third_party/psd_tools
-    # trees must not reappear.
+    # The runtime is native-only, so no Rust source may spawn a Python
+    # interpreter and the deleted python/bridge / third_party/psd_tools trees
+    # must not reappear.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

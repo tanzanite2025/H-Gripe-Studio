@@ -1,6 +1,6 @@
 //! PSD tooling for the desktop app: the per-domain command submodules split
-//! out of this file (PSD compose/inspect/analyze, the local card processors,
-//! the engine capability probe, and the detail-repaint pipeline). Every
+//! out of this file (PSD compose/inspect/analyze, deterministic card processors,
+//! the engine capability probe, and the API detail-repaint pipeline). Every
 //! submodule command is re-exported here so `crate::psd::<command>` and the
 //! Tauri `invoke_handler` registrations stay unchanged.
 
@@ -11,7 +11,6 @@ mod cards;
 mod compose;
 mod engines;
 mod inspect;
-mod model_paths;
 mod repaint;
 mod smart;
 mod write;
@@ -19,7 +18,6 @@ mod write;
 pub(crate) use cards::*;
 pub(crate) use compose::*;
 pub(crate) use engines::*;
-pub(crate) use model_paths::*;
 pub(crate) use repaint::*;
 
 /// Validate a user-supplied `output_name` before handing it to a pipeline
@@ -70,45 +68,6 @@ mod tests {
         assert!(report.cards[0].error.is_none());
         assert_eq!(report.cards[1].error.as_deref(), Some("probe failed"));
         assert!(report.cards[1].engines.is_empty());
-    }
-
-    #[test]
-    fn local_repaint_result_parses_backend_and_fallback() {
-        // A successful local run: a backend ran and returned one repainted crop.
-        let raw = r#"{
-            "repainted": [{"index": 0, "path": "/out/hero_region0_repainted.png"}],
-            "skipped": [],
-            "engine": "sd_inpaint",
-            "engine_requested": "sd_inpaint",
-            "engine_fallback_reason": null,
-            "backend_model": "sd-inpaint",
-            "requested_count": 1,
-            "repainted_count": 1
-        }"#;
-        let res: super::LocalRepaintResult = serde_json::from_str(raw).unwrap();
-        assert_eq!(res.engine, "sd_inpaint");
-        assert_eq!(res.repainted.len(), 1);
-        assert_eq!(res.repainted[0].index, 0);
-        assert!(res.engine_fallback_reason.is_none());
-        assert_eq!(res.backend_model.as_deref(), Some("sd-inpaint"));
-
-        // The provider-fallback shape: no local repaint, a recorded reason.
-        let fallback = r#"{
-            "repainted": [],
-            "engine": "provider",
-            "engine_requested": "sd_inpaint",
-            "engine_fallback_reason": "missing optional dependency: torch",
-            "requested_count": 2,
-            "repainted_count": 0
-        }"#;
-        let res: super::LocalRepaintResult = serde_json::from_str(fallback).unwrap();
-        assert_eq!(res.engine, "provider");
-        assert!(res.repainted.is_empty());
-        assert_eq!(
-            res.engine_fallback_reason.as_deref(),
-            Some("missing optional dependency: torch")
-        );
-        assert!(res.backend_model.is_none());
     }
 
     #[test]

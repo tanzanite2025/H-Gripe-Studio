@@ -299,8 +299,8 @@ impl TextureGrader {
                 return Ok(());
             }
         }
+        let plan = build_plan(doc, w, h, space)?;
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let plan = build_plan(doc, w, h, space);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("grade-tex"),
             source: wgpu::ShaderSource::Wgsl(Cow::Owned(plan.shader)),

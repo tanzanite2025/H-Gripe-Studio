@@ -281,12 +281,12 @@ mod tests {
             "image_size": [128, 96],
             "selected_count": 0,
             "inpaint_mask_is_transparent": true,
-            "source_mode": "CMYK",
+            "source_mode": "RGB",
             "exif_transposed": true,
             "max_decode_pixels": 96_000_000
         });
         let result: crate::psd::PrepareRepaintResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.source_mode, "CMYK");
+        assert_eq!(result.source_mode, "RGB");
         assert!(result.exif_transposed);
         assert_eq!(result.max_decode_pixels, 96_000_000);
     }

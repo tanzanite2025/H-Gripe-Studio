@@ -2,8 +2,7 @@
 
 // --- Mask Edge Refine -------------------------------------------------------
 // Wraps the native Rust `refine_mask_edge` command: deterministic morphology,
-// guided-filter edge snapping, feather and colour decontamination, with an
-// optional ViTMatte/ORT alpha replacement inside the trimap unknown band.
+// guided-filter edge snapping, feather and colour decontamination.
 
 /** What `refine_mask_edge` did; snake_case to match the bridge JSON. */
 export interface EdgeReport {
@@ -27,18 +26,6 @@ export interface EdgeReport {
   coverage_after: number;
   /** `[width, height]` of the written images. */
   output_size?: [number, number];
-  /** Matte engine that actually ran (`cpu` heuristic or a backend id). */
-  engine?: string;
-  /** Engine the node asked for (may differ from `engine` on fallback). */
-  engine_requested?: string;
-  /** Why the requested engine was not used (deps/weight, no trimap, …); else null. */
-  engine_fallback_reason?: string | null;
-  /** Weight file the backend loaded (`null` on the CPU path). */
-  backend_model?: string | null;
-  /** Compute device the learned backend bound (`cpu`/`cuda`); null on cpu. */
-  device?: string | null;
-  /** Compute device the node asked for (`auto`/`cpu`/`cuda`). */
-  device_requested?: string;
 }
 
 /** Result of the Mask Edge Refine node (`refine_mask_edge`). */
@@ -76,14 +63,6 @@ export interface RefineMaskEdgeRequest {
   edgeDecontaminate?: boolean;
   /** Blend the edge band toward the target background 0..1 (custom only). */
   backgroundBlendStrength?: number;
-  /**
-   * Matte engine: `cpu` (default heuristic) or an opt-in learned matter id
-   * (e.g. `onnx_matting`). A learned matter needs a connected trimap and falls
-   * back to `cpu` when its deps / weights are missing.
-   */
-  engine?: string;
-  /** Compute device for the learned matter: `auto` (default) | `cpu` | `cuda`. */
-  device?: string;
   /** Directory for the written PNGs. */
   outputDir?: string;
   /** Base name for the written PNGs. */
@@ -123,15 +102,6 @@ export async function refineMaskEdge(req: RefineMaskEdgeRequest): Promise<Refine
         coverage_before: 0.44,
         coverage_after: 0.4,
         output_size: [1024, 1400],
-        engine: "cpu",
-        engine_requested: (req.engine ?? "cpu").trim() || "cpu",
-        engine_fallback_reason:
-          (req.engine ?? "cpu").trim() && (req.engine ?? "cpu").trim() !== "cpu"
-            ? "engine unavailable in browser dev mock"
-            : null,
-        backend_model: null,
-        device: null,
-        device_requested: req.device ?? "auto",
       },
     };
   }
@@ -148,8 +118,6 @@ export async function refineMaskEdge(req: RefineMaskEdgeRequest): Promise<Refine
     guidedRadius: req.guidedRadius ?? null,
     edgeDecontaminate: req.edgeDecontaminate ?? null,
     backgroundBlendStrength: req.backgroundBlendStrength ?? null,
-    engine: req.engine ?? null,
-    device: req.device ?? null,
     outputDir: req.outputDir ?? null,
     outputName: req.outputName ?? null,
   })) as RefineEdgeResult;

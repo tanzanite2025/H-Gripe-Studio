@@ -14,8 +14,8 @@
 //! keyed by the output path's `ResourceId`. The shared loaders
 //! ([`super::studio_image::load_rgba`] / [`load_mask`]) consult the cache first
 //! and, on a fresh hit, return the in-memory buffer instead of re-reading and
-//! re-decoding the file. The PNG is still written (the frontend preview, the
-//! Python-bridge cards, and PSD export all read it from disk), so this is a
+//! re-decoding the file. The PNG is still written (the frontend preview,
+//! file-backed nodes, and PSD export all read it from disk), so this is a
 //! transparent optimisation, not a new contract: a miss always falls back to
 //! the identical disk decode.
 //!
@@ -25,7 +25,7 @@
 //! cached surface is also re-checked against the caller's decode budget, so a
 //! tighter `--max-decode-pixels` still rejects an oversized buffer exactly as a
 //! disk decode would. Originals a user drags in are never published, so they
-//! always decode from disk. Like the ONNX warm pool and the thumbnail LRU this
+//! always decode from disk. Like the thumbnail LRU this
 //! is a plain process-global `static` guarded by a `Mutex`, bounded to a small
 //! entry count so a long session cannot grow it without limit.
 //!

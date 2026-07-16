@@ -3,22 +3,17 @@
 //! The `auto_*` modes (`auto_subject` / `auto_product` / `auto_person` /
 //! `auto_transparent_object`) compute a *base* matte from the image itself
 //! rather than starting from an empty / `previous_mask` base. Per the frozen
-//! contract these run on the `Compute` lane in-process (no network); the real
-//! SAM / RMBG / BiRefNet inference (`ort` / `candle`) lands in a follow-up PR.
+//! contract these run on the `Compute` lane in-process with no network or
+//! downloaded model.
 //!
 //! This module defines the lane-internal [`SubjectSegmenter`] abstraction the
 //! card routes those modes through, plus a deterministic, weight-free
-//! [`BuiltinCpuSegmenter`] fallback so the modes work end-to-end today. A model
-//! backend implements the same trait and is selected by [`segmenter_for_mode`]
-//! once weights are available; until then every `auto_*` mode resolves to the
-//! builtin fallback.
+//! [`BuiltinCpuSegmenter`] so the modes remain deterministic and weight-free.
 
 use std::collections::VecDeque;
 
 use image::{GrayImage, Luma, RgbaImage};
 use serde_json::{json, Value};
-
-use super::onnx_pool::{OnnxDeviceRequest, OnnxProviderResolution};
 
 const MASK_ON: u8 = 255;
 const MASK_OFF: u8 = 0;
@@ -68,7 +63,7 @@ impl AutoMode {
 }
 
 /// A click-to-select point prompt in image-pixel space. `positive` includes the
-/// region (SAM 2 `point_labels` 1 / foreground); a negative point excludes it
+/// region; a negative point excludes it
 /// (label 0 / background), so the user can carve a wrongly-grabbed neighbour out
 /// of the selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,14 +102,8 @@ pub(super) trait SubjectSegmenter {
     /// `matte_report.model_path` (GPU_DEVICE_STRATEGY_PLAN: report model
     /// path, provider, and fallback reason). `None` for weight-free
     /// segmenters such as the builtin fallback.
-    fn model_path(&self) -> Option<String> {
-        None
-    }
     /// Actual ORT provider resolution bound to this segmenter's warm session.
     /// Weight-free and non-ORT segmenters return `None`.
-    fn onnx_resolution(&self) -> Option<&OnnxProviderResolution> {
-        None
-    }
     fn segment(&self, request: &SegmentRequest) -> Result<SegmentResult, String>;
 }
 
@@ -126,67 +115,26 @@ pub(super) struct SegmenterSelection {
     pub(super) fallback_reason: Option<String>,
 }
 
-/// Choose the segmenter for an auto mode. When the request carries at least one
-/// *positive* point prompt, the interactive SAM 2 backend is preferred (it
-/// segments *what the user clicked*, then carves out the negative points) if
-/// both its weights resolve. Otherwise the prompt-free salient model backend
-/// (BiRefNet → U²-Netp) is used when a weight resolves, and finally the
-/// deterministic builtin CPU fallback. The call site (`subject_mask`) hands the
-/// same `SegmentRequest` to whichever is returned. A purely-negative point set
-/// has no subject seed, so it does not route to SAM 2.
+/// Choose the deterministic segmenter for an auto mode. Point prompts constrain
+/// connected components directly.
 pub(super) fn segmenter_for_mode(
     mode: AutoMode,
     points: &[PointPrompt],
-    sam2_variant: super::subject_sam2::Sam2Variant,
-    device_request: OnnxDeviceRequest,
 ) -> Box<dyn SubjectSegmenter> {
-    select_segmenter_for_mode(mode, points, sam2_variant, device_request).segmenter
+    select_segmenter_for_mode(mode, points).segmenter
 }
 
 /// Provider-aware selector used by Subject Mask's report-producing path. The
 /// compatibility wrapper above keeps older CPU-only editor commands simple,
 /// while this form carries load/session failures into stage telemetry.
 pub(super) fn select_segmenter_for_mode(
-    mode: AutoMode,
-    points: &[PointPrompt],
-    sam2_variant: super::subject_sam2::Sam2Variant,
-    device_request: OnnxDeviceRequest,
+    _mode: AutoMode,
+    _points: &[PointPrompt],
 ) -> SegmenterSelection {
-    let mut fallback_reasons = Vec::new();
-    if points.iter().any(|p| p.positive) {
-        match super::subject_sam2::Sam2Segmenter::resolve_and_load(sam2_variant, device_request) {
-            Ok((sam2, reason)) => {
-                fallback_reasons.extend(reason);
-                return SegmenterSelection {
-                    segmenter: Box::new(sam2),
-                    fallback_reason: joined_reasons(fallback_reasons),
-                };
-            }
-            Err(reason) => fallback_reasons.push(reason),
-        }
+    SegmenterSelection {
+        segmenter: Box::new(BuiltinCpuSegmenter),
+        fallback_reason: None,
     }
-
-    match super::subject_model::model_segmenter_for_mode(mode, device_request) {
-        Ok((model, reason)) => {
-            fallback_reasons.extend(reason);
-            SegmenterSelection {
-                segmenter: Box::new(model),
-                fallback_reason: joined_reasons(fallback_reasons),
-            }
-        }
-        Err(reason) => {
-            fallback_reasons.push(reason);
-            fallback_reasons.push("using deterministic builtin CPU segmenter".to_string());
-            SegmenterSelection {
-                segmenter: Box::new(BuiltinCpuSegmenter),
-                fallback_reason: joined_reasons(fallback_reasons),
-            }
-        }
-    }
-}
-
-fn joined_reasons(reasons: Vec<String>) -> Option<String> {
-    (!reasons.is_empty()).then(|| reasons.join("; "))
 }
 
 /// A deterministic, weight-free segmenter: estimate the background colour from
@@ -454,20 +402,15 @@ mod tests {
     #[test]
     fn builtin_selects_foreground_block() {
         let image = scene_with_block();
-        let result = segmenter_for_mode(
-            AutoMode::Subject,
-            &[],
-            Default::default(),
-            OnnxDeviceRequest::Auto,
-        )
-        .segment(&SegmentRequest {
-            image: &image,
-            mode: AutoMode::Subject,
-            placeholder: None,
-            prompt: None,
-            points: &[],
-        })
-        .unwrap();
+        let result = segmenter_for_mode(AutoMode::Subject, &[])
+            .segment(&SegmentRequest {
+                image: &image,
+                mode: AutoMode::Subject,
+                placeholder: None,
+                prompt: None,
+                points: &[],
+            })
+            .unwrap();
         // Inside the block selected, outside (background) not.
         assert_eq!(result.mask.get_pixel(4, 4).0[0], MASK_ON);
         assert_eq!(result.mask.get_pixel(0, 0).0[0], MASK_OFF);
@@ -574,20 +517,13 @@ mod tests {
     }
 
     #[test]
-    fn negative_only_points_do_not_route_to_sam2() {
-        // A purely-negative point set has no subject seed; routing must not
-        // prefer SAM 2 (it would have nothing to segment toward).
+    fn negative_only_points_keep_builtin_segmenter() {
         let negatives = [PointPrompt {
             x: 5,
             y: 5,
             positive: false,
         }];
-        let seg = segmenter_for_mode(
-            AutoMode::Subject,
-            &negatives,
-            Default::default(),
-            OnnxDeviceRequest::Auto,
-        );
+        let seg = segmenter_for_mode(AutoMode::Subject, &negatives);
         assert_eq!(seg.provider(), "builtin-cpu");
     }
 

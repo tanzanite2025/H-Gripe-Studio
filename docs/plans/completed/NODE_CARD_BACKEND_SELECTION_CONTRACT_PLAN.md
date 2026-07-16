@@ -1,5 +1,8 @@
 # Node Card Backend Selection Contract Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete. Landed via PRs #394 (steps 7–8 for leaf cards), #395
 > (local model selection), #396 (Image Processing row-level bindings, steps
 > 3–6), and #397 (pre-run ref validation, step 8).
@@ -174,7 +177,7 @@ If it selects `Built-in`, no external model/profile dropdown is needed.
 It must declare:
 
 - target: the card input image
-- operation: upscale / denoise / sharpen / restore detail / print-ready
+- operation: upscale / denoise / sharpen / restore detail
 - backend choice: built-in / local / API / auto
 - params: scale, denoise, texture/detail, preserve text/logo, output format
 - output: enhanced image

@@ -1,8 +1,8 @@
 //! Native in-process FFmpeg decoder backend (feature `native-ffmpeg`).
 //!
-//! A second implementation of the media-engine decoder seam
+//! The native implementation of the media-engine decoder seam
 //! ([`FrameSource`](super::video_engine::FrameSource)) that decodes with the
-//! vendored libav* libraries directly — no Python/PyAV, no system ffmpeg. The
+//! vendored libav* libraries directly, with no subprocess or system FFmpeg. The
 //! libraries live under `third_party/ffmpeg` (LGPL *shared*, cut from upstream
 //! and locally maintained); they are linked via `rusty_ffmpeg` using the
 //! `FFMPEG_*` env in `.cargo/config.toml`.
@@ -10,9 +10,7 @@
 //! It opens a fresh container per call (`probe` / `decode_frame`) keyed by the
 //! `video` path the seam hands in — the media engine already caches decoded
 //! frames, so there is no persistent per-file state to hold here. Every failure
-//! returns `Err`, which the callers (`video_probe` / `video_scrub`) turn into a
-//! fallback to the PyAV one-shot path, so enabling the feature never regresses
-//! behaviour: a clip the native decoder chokes on still resolves via PyAV.
+//! returns `Err` directly to the caller; there is no secondary decoder runtime.
 //!
 //! # Safety
 //! The body is FFI against libav. Raw pointers are confined to method scope and
@@ -25,6 +23,7 @@ use std::ptr;
 
 use rusty_ffmpeg::ffi;
 
+use super::studio_image::{self, DEFAULT_MAX_DECODE_PIXELS};
 use super::video_engine::{FrameSource, VideoMeta};
 use super::working_image::{WorkingImage, WorkingSpace};
 
@@ -447,8 +446,7 @@ pub(crate) fn hardware_h264_encoder() -> Option<String> {
         .find(|name| name.starts_with("h264_"))
 }
 
-/// Encode/trim result mirrored onto the `videoAssemble` / `videoTrim` node
-/// reports (the same shape the PyAV worker's payloads carried).
+/// Encode/trim result returned by the `videoAssemble` / `videoTrim` nodes.
 #[derive(Debug, Clone)]
 pub(crate) struct VideoEncodeStats {
     pub(crate) frame_count: u64,
@@ -462,8 +460,8 @@ pub(crate) struct VideoEncodeStats {
 }
 
 /// Encode an ordered image sequence into a video at `out` (the native
-/// `videoAssemble` path). The first frame fixes the (even) output size;
-/// later frames are resized to it, mirroring the PyAV worker's `assemble`.
+/// `videoAssemble` path). The first frame fixes the (even) output size and later
+/// frames are resized to it.
 pub(crate) fn assemble_frames(
     frames: &[String],
     out: &Path,
@@ -477,9 +475,9 @@ pub(crate) fn assemble_frames(
     let (mut width, mut height) = (0u32, 0u32);
     let mut count: u64 = 0;
     for path in frames {
-        let image = image::open(path)
+        let image = studio_image::load_rgba(Path::new(path), DEFAULT_MAX_DECODE_PIXELS)
             .map_err(|err| format!("failed to read frame {path}: {err}"))?
-            .to_rgba8();
+            .image;
         if encoder.is_none() {
             width = (image.width() - image.width() % 2).max(2);
             height = (image.height() - image.height() % 2).max(2);
@@ -523,9 +521,9 @@ pub(crate) fn probe_input_codec(video: &Path) -> Result<String, String> {
 }
 
 /// Cut `[start_sec, end_sec)` out of `video` into `out` (the native
-/// `videoTrim` path). Decode-and-re-encode so the cut is frame-accurate
-/// rather than snapping to keyframes; audio is not carried over, mirroring
-/// the PyAV worker's `trim`. `decoder_name` selects a specific (hardware)
+/// `videoTrim` path). Decode-and-re-encode so the cut is frame-accurate rather
+/// than snapping to keyframes; audio is not carried over. `decoder_name`
+/// selects a specific (hardware)
 /// decoder for the input; `None` uses the stream's default software decoder;
 /// the special name `"d3d11va"` keeps the stream's decoder but runs it as a
 /// D3D11VA hardware session (GPU frames, read back once for the re-encode).

@@ -1,5 +1,8 @@
 # Local React Flow Fork Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: completed and archived. The adapter boundary, vendored upstream
 > source, product trimming, H-Gripe edge system, and graph optimizations have
 > landed; deeper render-layer alternatives remain optional future work.

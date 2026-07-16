@@ -47,7 +47,7 @@ export function EditGradeIcon() {
   );
 }
 
-/** Model/API manager: connected local/API endpoints. */
+/** API profile manager: connected provider endpoints. */
 export function ModelApiIcon() {
   return (
     <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

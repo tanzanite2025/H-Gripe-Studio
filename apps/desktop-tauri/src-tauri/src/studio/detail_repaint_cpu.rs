@@ -1,12 +1,10 @@
-//! In-process pixel halves of the Detail Repaint node: native-Rust replicas
-//! of `detail_repaint_cli.py`'s `prepare` and `composite` subcommands, run
-//! inline in the `detailRepaint` executor instead of spawning the Python
-//! bridge. The generative fix itself stays API-first: the orchestrator sends
+//! In-process pixel halves of the Detail Repaint node: native-Rust `prepare`
+//! and `composite` operations run inline in the `detailRepaint` executor. The
+//! generative fix itself stays API-first: the orchestrator sends
 //! each prepared crop + mask + prompt through the broker's `image.edit`
-//! operation between the two halves, and the opt-in *local* inpaint backend
-//! (`repaint` subcommand, torch/diffusers) remains on the Python path.
+//! operation between the two halves. No model inference runs in this module.
 //!
-//! `try_prepare` mirrors the CLI's `prepare`: select repaintable issues from
+//! `try_prepare` selects repaintable issues from
 //! the QualityReport (action allow-list, min confidence, highest-confidence
 //! first, region cap), crop a padded window per issue and write a same-size
 //! inpaint mask whose un-padded core is the edit area (transparent by
@@ -22,11 +20,10 @@
 //! growing, matching Pillow `BOX`/`LANCZOS`).
 //!
 //! Loading goes through [`super::studio_image`], the shared hardened loader
-//! (decompression-bomb guard, EXIF normalisation, CMYK / high-bit /
+//! (decompression-bomb guard, EXIF normalisation, high-bit /
 //! wide-gamut colour management), mirroring the CLI's `_load_rgba` +
 //! `wide_gamut.managed_to_srgb`. A candidate the loader cannot decode defers
-//! to the Python bridge: both entry points return `Ok(None)` and the caller
-//! falls back.
+//! to the caller as an unsupported source.
 
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
@@ -80,9 +77,8 @@ struct Candidate {
     exif_transposed: bool,
 }
 
-/// Load the candidate through the shared hardened loader; `Ok(None)` defers
-/// to the Python bridge (missing file or an undecodable source), which
-/// surfaces the canonical error message.
+/// Load the candidate through the shared hardened loader. `Ok(None)` lets the
+/// native command handler surface its canonical unsupported-source error.
 fn load_candidate(image_path: &str) -> Result<Option<Candidate>, String> {
     let trimmed = image_path.trim();
     if trimmed.is_empty() || !Path::new(trimmed).is_file() {
@@ -112,8 +108,8 @@ fn load_candidate(image_path: &str) -> Result<Option<Candidate>, String> {
     }))
 }
 
-/// Run the `prepare` half in-process. Returns `Ok(Some(manifest))` on the
-/// fast path, or `Ok(None)` to defer to the Python bridge.
+/// Run the `prepare` half in-process. Returns `Ok(Some(manifest))` on success,
+/// or `Ok(None)` when the native loader cannot decode the candidate.
 pub(crate) fn try_prepare(p: &CpuPrepareParams) -> Result<Option<PrepareRepaintResult>, String> {
     reject_unsafe_output_name(p.output_name.as_deref().unwrap_or(""))?;
     let Some(candidate) = load_candidate(&p.image_path)? else {
@@ -303,8 +299,8 @@ pub(crate) fn try_prepare(p: &CpuPrepareParams) -> Result<Option<PrepareRepaintR
     }))
 }
 
-/// Run the `composite` half in-process. Returns `Ok(Some(result))` on the
-/// fast path, or `Ok(None)` to defer to the Python bridge.
+/// Run the `composite` half in-process. Returns `Ok(Some(result))` on success,
+/// or `Ok(None)` when the native loader cannot decode the candidate.
 pub(crate) fn try_composite(
     p: &CpuCompositeParams,
 ) -> Result<Option<CompositeRepaintResult>, String> {
@@ -398,9 +394,9 @@ pub(crate) fn try_composite(
             region_results.push(result);
             continue;
         }
-        let patch = image::open(&patch_path)
+        let patch = studio_image::load_rgba(Path::new(&patch_path), DEFAULT_MAX_DECODE_PIXELS)
             .map_err(|err| format!("failed to read {patch_path}: {err}"))?
-            .to_rgba8();
+            .image;
         let patch = resize_patch(patch, crop_w as u32, crop_h as u32);
         let patch_rgb: Vec<f32> = patch
             .pixels()
@@ -1081,9 +1077,9 @@ mod tests {
         assert!(err.contains("unknown blend mode"), "{err}");
     }
 
-    /// A missing candidate image defers to the Python bridge (both halves).
+    /// A missing candidate image is reported as unavailable by both halves.
     #[test]
-    fn missing_image_defers_to_python() {
+    fn missing_image_returns_none() {
         let dir = temp_dir("missing");
         let p = prepare_params("definitely_not_here_zzx.png", &dir);
         assert!(try_prepare(&p).unwrap().is_none());

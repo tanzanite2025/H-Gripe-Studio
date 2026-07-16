@@ -3,8 +3,8 @@ import { nonEmptyLines } from "./graph";
 import type { ExecutorRegistry } from "../dag";
 
 export const VIDEO_EXECUTORS = {
-  // Encodes an ordered frame sequence into a video via the media engine's
-  // FFmpeg backend (PyAV worker `assemble`). The encode only exists in the
+  // Encodes an ordered frame sequence through the media engine's vendored
+  // native FFmpeg backend. The encode only exists in the
   // desktop build's Rust runner; this browser-preview executor validates the
   // wiring and returns a plausible mock so the editor stays runnable in dev.
   videoAssemble: async (ctx) => {
@@ -28,8 +28,8 @@ export const VIDEO_EXECUTORS = {
       assemble_report: { fps, codec, frame_count: frames.length, mock: true },
     };
   },
-  // Cuts a time range out of a video via the media engine's FFmpeg backend
-  // (PyAV worker `trim`). The re-encode only exists in the desktop build's
+  // Cuts a time range out of a video through the media engine's vendored native
+  // FFmpeg backend. The re-encode only exists in the desktop build's
   // Rust runner; this browser-preview executor validates the wiring and
   // returns a plausible mock so the editor stays runnable in dev.
   videoTrim: async (ctx) => {

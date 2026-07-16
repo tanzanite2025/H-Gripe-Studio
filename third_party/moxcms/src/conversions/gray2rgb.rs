@@ -98,7 +98,6 @@ where
                 fused_gamma,
                 bit_depth,
             })),
-            _ => Err(CmsError::UnsupportedProfileConnection),
         },
         Layout::GrayAlpha => match dst_layout {
             Layout::Rgb => Ok(Arc::new(TransformGray2RgbFusedExecutor::<
@@ -133,9 +132,8 @@ where
                 fused_gamma,
                 bit_depth,
             })),
-            _ => Err(CmsError::UnsupportedProfileConnection),
         },
-        _ => Err(CmsError::UnsupportedProfileConnection),
+        Layout::Rgb | Layout::Rgba => Err(CmsError::UnsupportedProfileConnection),
     }
 }
 
@@ -359,7 +357,6 @@ where
                 bit_depth,
                 gamma_lut,
             })),
-            _ => Err(CmsError::UnsupportedProfileConnection),
         },
         Layout::GrayAlpha => match dst_layout {
             Layout::Rgb => Ok(Arc::new(TransformGrayToRgbExecutor::<
@@ -410,9 +407,8 @@ where
                 bit_depth,
                 gamma_lut,
             })),
-            _ => Err(CmsError::UnsupportedProfileConnection),
         },
-        _ => Err(CmsError::UnsupportedProfileConnection),
+        Layout::Rgb | Layout::Rgba => Err(CmsError::UnsupportedProfileConnection),
     }
 }
 

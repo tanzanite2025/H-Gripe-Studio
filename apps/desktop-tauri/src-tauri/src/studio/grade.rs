@@ -341,63 +341,6 @@ pub(crate) fn video_frame_grade_preview(
     grade_srgb_preview(srgb, doc, max_dim, started)
 }
 
-/// TS-facing result of a `.cube` LUT export.
-#[derive(Debug, Serialize)]
-pub(crate) struct CubeExportResult {
-    pub(crate) path: String,
-    pub(crate) size: u32,
-    /// Spatial ops (blur/sharpen/denoise/grain/vignette) excluded from the
-    /// bake — a LUT is a pure colour→colour map.
-    pub(crate) skipped_spatial_ops: usize,
-    /// Positional layer masks excluded from the bake (the layer still bakes,
-    /// applied everywhere).
-    pub(crate) dropped_masks: usize,
-}
-
-/// Bake a grade document to a `.cube` 3D LUT and write it under the project
-/// output dir — the interchange path out of the grading dialog (Resolve,
-/// FFmpeg `lut3d`, etc. consume the file). The bake samples the identity
-/// lattice through the kernel in sRGB, the space the dialog previews in;
-/// spatial ops and positional masks cannot live in a LUT and are excluded
-/// (reported on the result).
-#[tauri::command]
-pub(crate) fn grade_export_cube(
-    doc: Value,
-    size: Option<u32>,
-    output_name: Option<String>,
-) -> Result<CubeExportResult, String> {
-    let doc = parse_grade_doc(Some(&doc))?;
-    let size = size.unwrap_or(33);
-    let baked = hgripe_grade::bake_cube(&doc, size, GradeSpace::Srgb)?;
-
-    let base = match output_name
-        .map(|n| n.trim().to_string())
-        .filter(|n| !n.is_empty())
-    {
-        Some(name) => name,
-        None => format!(
-            "grade_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0)
-        ),
-    };
-    studio_reject_unsafe_basename(&base)?;
-    let dir = crate::runtime_paths()?.output_dir;
-    std::fs::create_dir_all(&dir)
-        .map_err(|err| format!("failed to create output dir {}: {err}", dir.display()))?;
-    let out_path = dir.join(format!("{base}.cube"));
-    std::fs::write(&out_path, baked.cube)
-        .map_err(|err| format!("failed to write {}: {err}", out_path.display()))?;
-    Ok(CubeExportResult {
-        path: out_path.to_string_lossy().to_string(),
-        size,
-        skipped_spatial_ops: baked.skipped_spatial_ops,
-        dropped_masks: baked.dropped_masks,
-    })
-}
-
 /// Downscale an sRGB proxy to at most `max_dim` on the long edge.
 fn downscale_srgb(srgb: RgbaImage, max_dim: u32) -> RgbaImage {
     let (w, h) = srgb.dimensions();

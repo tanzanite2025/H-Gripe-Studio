@@ -3,7 +3,8 @@ import { ImageEditorModal } from "./ImageEditorModal";
 import type { CropCommit } from "./CropEditModal";
 import type { EditorTab } from "./host/EditorHost";
 import { useT } from "../i18n";
-import { fromImageEditorDocument, imageEditorBridgeGap, toImageEditorDocument, type ImageDocument } from "./imageDocument";
+import { fromImageEditorDocument, toImageEditorDocument, type ImageDocument } from "./imageDocument";
+import { imageDocumentEditBlock } from "./imageDocumentEditGuard";
 import { serializeEditState, type EditState } from "./imageEditorState";
 
 /**
@@ -50,18 +51,15 @@ export function ImageSourceEditorModal({
   onClose,
 }: ImageSourceEditorModalProps) {
   const t = useT();
+  const editBlock = useMemo(() => (initial ? imageDocumentEditBlock(initial) : null), [initial]);
   // The image editor's contract is ImageDocument (image-kernel K1). Until the
   // grade-kernel render path lands (K2), the image editor remains the canvas,
   // so documents bridge losslessly at this boundary in both directions.
   const maskInitial = useMemo(() => {
-    if (!initial) return null;
+    if (!initial || editBlock) return null;
     if (initial.editHistory) return initial.editHistory;
-    const lowered = toImageEditorDocument(initial);
-    // A draft that cannot lower opens as a blank document; surface why so
-    // the restored-empty editor is diagnosable rather than silent.
-    if (!lowered) console.warn(`image draft cannot lower to edit_paths (${imageEditorBridgeGap(initial)}) — opening blank`);
-    return lowered;
-  }, [initial]);
+    return toImageEditorDocument(initial);
+  }, [editBlock, initial]);
   // Every edit mirrors straight into the host draft, so collapsing and
   // reopening the editor restores layers / history exactly as left. The tab
   // light reports the draft as saved; committing to the graph stays on the
@@ -109,6 +107,51 @@ export function ImageSourceEditorModal({
       </svg>
     </button>
   );
+
+  if (editBlock) {
+    return (
+      <div className="media-viewer-backdrop" onClick={onClose}>
+        <div
+          className="media-viewer image-editor"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="image-draft-block-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="media-viewer-bar">
+            <span className="media-viewer-name" title={title}>{title}</span>
+            <div className="media-viewer-actions">
+              <button className="primary" disabled aria-label={t("mask.applyTitle")}>
+                {t("mask.apply")}
+              </button>
+              <button onClick={onClose} title={t("mask.closeTitle")} aria-label={t("mask.close")}>
+                {t("mask.close")}
+              </button>
+            </div>
+          </div>
+          {tabStrip ? <div className="media-viewer-tabs-row">{tabStrip}</div> : null}
+          <div
+            role="alert"
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              padding: 32,
+              textAlign: "center",
+              background: "var(--panel)",
+            }}
+          >
+            <strong id="image-draft-block-title">{t("imageSourceEditor.blockedTitle")}</strong>
+            <span>{t("imageSourceEditor.blockedReason", { reason: editBlock.detail })}</span>
+            <span className="muted">{t("imageSourceEditor.blockedUnchanged")}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ImageEditorModal

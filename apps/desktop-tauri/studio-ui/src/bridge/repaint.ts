@@ -2,9 +2,8 @@ import { tauriInvoke } from "./core";
 import { type QualityReport, type RepaintReport } from "../contracts/quality";
 
 // --- Detail Repaint ---------------------------------------------------------
-// The two pixel halves of the Detail Repaint node, wrapping the Rust
-// `prepare_repaint_regions` / `composite_repaint` commands (which shell out to
-// the torch-free `detail_repaint_cli.py`). `prepare` crops each repaintable
+// The two native pixel halves of the Detail Repaint node, wrapping the Rust
+// `prepare_repaint_regions` / `composite_repaint` commands. `prepare` crops each repaintable
 // QualityReport issue + writes an inpaint mask; the orchestrator then sends each
 // crop through the broker's `image.edit`; `composite` pastes the repainted crops
 // back with a feathered seam. The provider call lives in the executor, not here.
@@ -72,10 +71,10 @@ function _clampBox(
 }
 
 /**
- * Crop repaintable issue regions + write inpaint masks via the backend
- * (`prepare_repaint_regions`). The pixel work needs the Python/Pillow pipeline,
- * which only exists in the desktop build, so outside Tauri this returns a
- * plausible mock (mirroring the CLI's selection + geometry) so the editor stays
+ * Crop repaintable issue regions + write inpaint masks through the native
+ * backend (`prepare_repaint_regions`). The filesystem pixel work only exists in
+ * the desktop build, so outside Tauri this returns a plausible mock (mirroring
+ * the native selection + geometry) so the editor stays
  * runnable in browser dev.
  */
 export async function prepareRepaintRegions(
@@ -193,10 +192,10 @@ export interface CompositeRepaintRequest {
 }
 
 /**
- * Paste repainted crops back into the candidate with a feathered seam via the
- * backend (`composite_repaint`). The pixel work needs the Python/Pillow
- * pipeline, which only exists in the desktop build, so outside Tauri this
- * returns a plausible mock so the editor stays runnable in browser dev.
+ * Paste repainted crops back into the candidate with a feathered seam through
+ * the native backend (`composite_repaint`). The filesystem pixel work only
+ * exists in the desktop build, so outside Tauri this returns a plausible mock
+ * so the editor stays runnable in browser dev.
  */
 export async function compositeRepaint(
   req: CompositeRepaintRequest,
@@ -246,98 +245,4 @@ export async function compositeRepaint(
     outputDir: req.outputDir ?? null,
     outputName: req.outputName ?? null,
   })) as CompositeRepaintResult;
-}
-
-/** Result of the local inpaint step (mirrors Rust `LocalRepaintResult`). */
-export interface LocalRepaintResult {
-  /** Regenerated crops, ready to feed into {@link compositeRepaint}. */
-  repainted: RepaintedCrop[];
-  skipped: unknown[];
-  /** Engine that actually ran (`provider` when no local backend was used). */
-  engine: string;
-  engine_requested: string;
-  /** Why the local backend was not used (provider selected / missing deps/weight). */
-  engine_fallback_reason?: string | null;
-  /** Weight name when a local backend ran, else null. */
-  backend_model?: string | null;
-  /** Compute device the local backend bound (`cpu`/`cuda`); null on provider. */
-  device?: string | null;
-  /** Compute precision the local backend bound (`fp16`/`fp32`); null on provider. */
-  precision?: string | null;
-  /** Compute precision the node asked for (`auto`/`fp32`/`fp16`). */
-  precision_requested?: string;
-  /** Structural conditioning the node asked for (`off`/`canny`). */
-  controlnet_requested?: string;
-  requested_count: number;
-  repainted_count: number;
-}
-
-export interface LocalRepaintRequest {
-  /** Manifest returned by {@link prepareRepaintRegions}. */
-  manifest: PrepareRepaintResult;
-  /** Engine id: `provider` (default) or a local backend like `sd_inpaint`. */
-  engine?: string;
-  /** Repaint prompt applied to every region. */
-  prompt?: string;
-  /** Inline JSON mapping issue type -> prompt (overrides `prompt` per region). */
-  promptMap?: string;
-  negativePrompt?: string;
-  strength?: number;
-  guidanceScale?: number;
-  steps?: number;
-  /** Random seed (<0 / undefined = nondeterministic). */
-  seed?: number;
-  /** Compute precision for the local backend: `auto` (default) | `fp32` | `fp16`. */
-  precision?: string;
-  /** Structural conditioning for `sd_inpaint`: `off` (default) | `canny`. */
-  controlnet?: string;
-  outputDir?: string;
-  outputName?: string;
-}
-
-/**
- * Run the opt-in **local** inpaint backend over a prepare manifest via the
- * backend (`local_repaint_regions`), an alternative to the remote `image.edit`
- * provider. `provider` (the default) or any backend whose deps/weights are
- * missing yields an empty `repainted` list and a recorded reason so the caller
- * falls back to the provider loop. The GPU inpaint pipeline only exists in the
- * desktop build, so outside Tauri this returns the provider-fallback shape.
- */
-export async function localRepaintRegions(req: LocalRepaintRequest): Promise<LocalRepaintResult> {
-  const invoke = tauriInvoke();
-  const engine = req.engine ?? "provider";
-  if (!invoke) {
-    return {
-      repainted: [],
-      skipped: [],
-      engine: "provider",
-      engine_requested: engine,
-      engine_fallback_reason:
-        engine === "provider"
-          ? "engine 'provider': remote image.edit owned by orchestrator"
-          : "local inpaint unavailable in browser dev (mock)",
-      backend_model: null,
-      device: null,
-      precision: null,
-      precision_requested: req.precision ?? "auto",
-      controlnet_requested: req.controlnet ?? "off",
-      requested_count: req.manifest.regions?.length ?? 0,
-      repainted_count: 0,
-    };
-  }
-  return (await invoke("local_repaint_regions", {
-    manifest: JSON.stringify(req.manifest),
-    engine,
-    prompt: req.prompt ?? null,
-    promptMap: req.promptMap ?? null,
-    negativePrompt: req.negativePrompt ?? null,
-    strength: req.strength ?? null,
-    guidanceScale: req.guidanceScale ?? null,
-    steps: req.steps ?? null,
-    seed: req.seed ?? null,
-    precision: req.precision ?? null,
-    controlnet: req.controlnet ?? null,
-    outputDir: req.outputDir ?? null,
-    outputName: req.outputName ?? null,
-  })) as LocalRepaintResult;
 }

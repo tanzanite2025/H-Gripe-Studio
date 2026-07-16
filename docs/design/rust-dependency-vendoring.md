@@ -1,121 +1,95 @@
-# Rust dependency vendoring
+# Rust Dependency And Native Runtime Ownership
 
-**Status:** Active policy.
+The desktop product targets Windows x64 and supports offline Cargo builds from
+the repository-maintained dependency snapshot.
 
-H-Gripe Studio keeps Rust dependencies reproducible by cutting Cargo's default
-network path to crates.io. (There is no Python runtime since Phase 7, #314,
-so Rust crates are the only language-package surface to vendor.)
+## Owned Trees
 
-## Layout
+| Tree | Purpose |
+| --- | --- |
+| third_party/cargo-vendor | Registry package snapshot for dependencies present in Cargo.lock |
+| third_party/ffmpeg | Native shared FFmpeg libraries, import libraries, headers, notices, and version lock |
+| third_party/moxcms | Locally maintained RGB colour-management fork |
 
-| Area | Path | Purpose |
-| --- | --- | --- |
-| Cargo source replacement | `.cargo/config.toml` | Replaces `crates-io` with the local vendor directory. |
-| Registry crate snapshot | `third_party/cargo-vendor/` | Output of `cargo vendor --versioned-dirs`; contains every crates.io package resolved by `Cargo.lock`. |
-| Owned colour-management fork | `third_party/moxcms/` | Editable local fork of `moxcms`; wired through workspace `[patch.crates-io]`. |
-| Native FFmpeg binaries | `third_party/ffmpeg/` | Windows libav DLLs/headers/import libs for the optional native video backend. |
-| Native ONNX Runtime | `third_party/onnxruntime/` | Locked Windows x64 CPU runtime loaded dynamically by the desktop app. |
+Cargo.lock is the authority for which registry packages remain required. When a
+direct dependency is removed, regenerate the lock file first, then delete only
+vendored package versions that no longer appear in the resolved graph.
 
-`third_party/cargo-vendor` is a snapshot. Do not hand-edit vendored registry
-crates there. If a crate needs project-specific changes, move that crate to its
-own explicit directory under `third_party/<crate>/`, add a `VENDOR.md`, and
-wire it with `[patch.crates-io]` like `moxcms`.
+## FFmpeg
 
-## What is cut off
+Native FFmpeg is a product feature, not a development-only tool. The default
+desktop feature links the Windows shared libraries and build.rs copies their
+runtime DLLs beside application and test binaries. Git LFS materialises the
+binary payload; normal builds do not download it.
 
-- Cargo will not resolve Rust packages from crates.io during normal workspace
-  builds because `.cargo/config.toml` replaces crates.io with
-  `third_party/cargo-vendor`.
-- `moxcms` is not consumed from the registry snapshot either; it is an owned
-  fork at `third_party/moxcms`.
+The media integration owns still/video probe, decode, scrub, poster, trim, and
+assemble behavior. Hardware decode/encode capabilities are reported separately
+from the software baseline and require real runtime evidence.
 
-## What is not covered
+## Colour Management
 
-- Node/npm dependencies.
-- Model weights and their opt-in acquisition scripts.
+The moxcms fork is limited to the RGB and grayscale transforms used by the
+digital-media working surface. Unsupported print-oriented and lookup-table
+features are excluded from the maintained fork and dependency feature set.
 
-The ONNX Runtime binary is covered by a separate native-artifact lock at
-`third_party/onnxruntime/VENDOR.md`. Its Windows x64 CPU DLL is checked in with
-Git LFS and packaged from the repository. Cargo build scripts, Tauri hooks, and
-CI must not download it;
-`scripts/fetch-onnxruntime.ps1` is a manual maintainer refresh tool only.
+The decided professional-RAW target uses one unbounded f32 linear-ProPhoto
+scene surface. The current fork's fixed sRGB/ProPhoto matrix-shaper support is a
+useful implementation baseline, but it is not evidence of complete input ICC,
+camera DCP, monitor-profile, or scene-linear support. Any expansion must be
+limited to the RGB/profile functionality required by the colour-pipeline
+contract; the RAW decision does not authorise restoring CMYK, multi-ink,
+printing, `.cube`, or creative-LUT product surfaces.
 
-## Feature minimisation
+Source-file decoding is separate from CMYK/YCCK authoring. Dependency pruning
+must preserve the ability to import and normally edit every source encoding
+supported by the selected general image decoder. Conversely, hypothetical
+CMYK/YCCK document conversion, export, proofing, or print workflows do not
+justify a new dependency, maintained fork surface, UI control, or dedicated
+encoder. Any retained colour code must be justified by current RGB working
+surfaces, source compatibility, or interoperable RGB export.
 
-Vendoring mirrors the resolved dependency graph; it is not permission to keep
-every upstream feature enabled. Narrow direct dependencies at their manifest
-boundary, then regenerate `Cargo.lock` and `third_party/cargo-vendor` together.
-Never delete individual files or crate directories from the snapshot by hand.
+## Camera RAW Dependency Gate
 
-The desktop `image` dependency follows the product's still-image contract:
+Camera RAW requires broad vendor-container parsing, but no candidate decoder is
+approved yet. Follow R0 in
+`../plans/active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md` before changing Cargo,
+the offline snapshot, native payloads, CI, packaging, file-extension lists, or
+resource registration.
 
-- `png`, `jpeg`, `webp`, `gif`, `bmp`, and `tiff` are enabled explicitly.
-- HEIC, HEIF, and AVIF stills decode through the vendored native FFmpeg path.
-- DDS, EXR, Farbfeld, HDR, ICO, PNM, QOI, and TGA are not product formats and
-  must not re-enter the graph accidentally through `image` default features.
+The R0 comparison must prove on Windows x64 that a candidate can expose raw
+sensor samples and professional-development metadata across DNG, CR2/CR3, NEF,
+ARW, RAF, ORF, and RW2. It must also record license, update model, binary size,
+memory, failure isolation, and camera coverage.
 
-Any change to that codec set must update the shared frontend format contract
-and pass the native media decode/thumbnail regression matrix.
+Dependency ownership after selection is deliberately narrow:
 
-### Functional integration before removal
+- the external decoder may unpack proprietary containers and report metadata;
+- embedded previews may accelerate thumbnails only;
+- H-Gripe-owned Rust/WGPU code owns sensor normalization, demosaic, camera
+  colour, scene pixels, adjustments, display rendering, and export;
+- an external decoder's convenience 8-bit RGB post-process cannot define the
+  editable image or professional colour result;
+- no decoder tree is vendored before the evidence record names the retained
+  source surface and the upstream features/files that remain necessary.
 
-Reduce one dependency boundary at a time. A library function is removable only
-after the replacement is on the real product path, parity/fallback tests pass,
-and a repository-wide search proves the old path has no callers. Do not equate
-"vendored" with "owned": registry snapshots stay upstream code unless a
-documented product requirement justifies an explicit fork.
+## API-First Boundary
 
-The desktop `ort` dependency currently earns its place through native subject
-segmentation, Subject Mask ViTMatte, Refine Mask Edge `onnx_matting`, Detail
-Watchdog `onnx_defect`, Match Light & Color `onnx_harmonize`, and Image Enhance
-`realesrgan`. These paths share managed model resolution and a provider-aware
-warm pool keyed by canonical model path, runtime flavor, actual provider, and
-device id. Real-ESRGAN additionally uses bounded padded tiling before its exact
-target resample; SAM2 resolves its encoder and decoder as one provider group.
-The runtime adds no Paddle, Python, Torch, OpenCV or second ONNX dependency.
-Model weights and label sidecars are runtime artifacts and are not committed
-into `cargo-vendor` or bundled by default.
+The repository does not ship an inference runtime or model weights.
+Generative and model-backed tasks use API profiles through hgripe-api.
+Deterministic local cards must not add an inference dependency, model download
+hook, bundled weight, or hidden CPU inference fallback.
 
-The runtime boundary is now explicit: `ort` uses dynamic loading against the
-locked Windows x64 CPU runtime in `third_party/onnxruntime`, and its
-`download-binaries` plus HTTP/TLS downloader chain is disabled. A clean clone
-must materialise the LFS payload with `git lfs pull`; it must not depend on an
-undocumented machine installation or network access during build.
+Future Windows CUDA or AMD/Intel GPU work must be justified by an actual
+shipping kernel/media consumer and must land packaging, capability reporting,
+fallback, and real-hardware tests together.
 
-This CPU payload is the current baseline, not a permanent feature ceiling. The
-provider-selection and device-request contract stays intact for later Windows
-NVIDIA/CUDA and AMD or Intel/DirectML stages; ROCm is not a Windows target.
-The CPU `win-x64/bin` directory is an exact DLL allowlist containing only
-`onnxruntime.dll`. Provider-shared alone adds no capability, so each GPU stage
-must atomically add its core/shared/provider/dependency binaries, registration
-path, locked payload, packaging contract, fallback behavior, and real-device
-tests. Official CUDA and DirectML packages carry different core DLLs and cannot
-be overlaid as one runtime flavor.
+## Update Checklist
 
-## Update procedure
-
-Use this only when deliberately upgrading Rust dependencies:
-
-1. Temporarily allow Cargo to resolve from upstream by editing/removing the
-   source replacement locally, or run the update in a disposable checkout.
-2. Run the intended `cargo update ...` command.
-3. Re-run:
-
-   ```powershell
-   cargo vendor --versioned-dirs third_party/cargo-vendor
-   ```
-
-4. Restore `.cargo/config.toml` if needed.
-5. Run at least:
-
-   ```powershell
-   cargo check --workspace --offline
-   cargo test -p hgripe-desktop studio::color --offline
-   ```
-
-6. For broader dependency changes, also run package tests that cover the touched
-   area.
-
-The lockfile, vendor snapshot, and any local fork changes must land in the same
-commit so cloud-side work cannot accidentally build against different Rust
-source code.
+1. Change the direct dependency or maintained native payload.
+2. Regenerate Cargo.lock without network hooks in builds.
+3. Remove only unreferenced vendored package versions.
+4. Run cargo check and cargo test with default and no-default feature sets.
+5. Verify CI and packaging copy only runtime DLLs that current features use.
+6. Update the relevant VENDOR or design document in the same change.
+7. For a new native/RAW dependency, attach the completed evidence gate and the
+   exact retained ownership boundary before vendoring or packaging it.

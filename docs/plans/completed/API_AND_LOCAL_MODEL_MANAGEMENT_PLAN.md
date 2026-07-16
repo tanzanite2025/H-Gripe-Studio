@@ -1,5 +1,8 @@
 # API And Local Model Management Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete. Migration steps 1–8 landed (#393–#397, #522–#523): the
 > managers, capability-filtered selectors, card refs, and the Prompt
 > Assistant all consume `ModelBackendRef`. Kept as the reference contract for

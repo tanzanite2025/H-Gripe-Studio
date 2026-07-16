@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileImageAdjustments } from "./imageCompile";
 import { applyDoc } from "./gradeKernel";
 import type { GradeSurface } from "./gradeKernel";
-import { adjustmentLut } from "./maskMorphology";
+import { adjustmentToneMapper } from "./maskMorphology";
 import { emptyImageDocument, emptyImageLayer, type ImageDocument, type ImageLayer } from "./imageDocument";
 import { type LayerAdjustment } from "../contracts/imageEditorDocument";
 
@@ -31,13 +31,13 @@ describe("compileImageAdjustments", () => {
     const doc = docWith([
       emptyImageLayer(),
       adjustmentLayer({ type: "levels", in_black: 20 }, { opacity: 0.7 }),
-      adjustmentLayer({ type: "brightness_contrast", contrast: 30 }),
+      adjustmentLayer({ type: "color_ranges", monochrome: true }),
     ]);
     const grade = compileImageAdjustments(doc);
     expect(grade?.layers).toHaveLength(2);
     expect(grade?.layers[0]).toMatchObject({ blend: "normal", opacity: 0.7, visible: true, mask: null });
     expect(grade?.layers[0].ops[0].type).toBe("levels");
-    expect(grade?.layers[1].ops[0].type).toBe("lut1d");
+    expect(grade?.layers[1].ops[0].type).toBe("color_ranges");
   });
 
   it("rendering the compiled doc matches the mask kernel's opacity lerp", () => {
@@ -47,10 +47,9 @@ describe("compileImageAdjustments", () => {
     expect(grade).not.toBeNull();
     const surface = rampSurface();
     applyDoc(grade!, surface);
-    const lut = adjustmentLut(adj);
+    const mapValue = adjustmentToneMapper(adj);
     for (let i = 0; i < 256; i++) {
-      // apply_adjustment lerps u8: v + (lut[v] - v) * opacity.
-      const want = (i + (lut[i] - i) * opacity) / 255;
+      const want = (i + (mapValue(i) - i) * opacity) / 255;
       expect(Math.abs(surface.data[i * 4] * 255 - want * 255), `level ${i}`).toBeLessThanOrEqual(0.5 + 1e-3);
     }
   });
@@ -68,31 +67,27 @@ describe("compileImageAdjustments", () => {
     ).toBeNull();
     expect(compileImageAdjustments(docWith([{ ...emptyImageLayer(), clipped: true }]))).toBeNull();
     expect(compileImageAdjustments(docWith([{ ...emptyImageLayer(), mask: { path: "m.png" } }]))).toBeNull();
+    expect(
+      compileImageAdjustments(docWith([emptyImageLayer(), adjustmentLayer({ type: "brightness_contrast" })])),
+    ).toBeNull();
   });
 
-  it("lowers a pixel layer's invert steps to a negative grade layer", () => {
+  it("keeps odd pixel-layer invert stacks on the image executor", () => {
     const base = emptyImageLayer();
     base.layer = { kind: "pixel", edits: [{ type: "invert" }] };
-    const grade = compileImageAdjustments(docWith([base]));
-    expect(grade?.layers).toHaveLength(1);
-    expect(grade?.layers[0].ops[0].type).toBe("lut1d");
-    const surface = rampSurface();
-    applyDoc(grade!, surface);
-    for (let i = 0; i < 256; i++) {
-      expect(Math.abs(surface.data[i * 4] - (1 - i / 255)), `level ${i}`).toBeLessThanOrEqual(1e-3);
-    }
+    expect(compileImageAdjustments(docWith([base]))).toBeNull();
     // An even number of inverts cancels; disabled steps are skipped.
     base.layer = { kind: "pixel", edits: [{ type: "invert" }, { type: "invert" }] };
     expect(compileImageAdjustments(docWith([base]))?.layers).toHaveLength(0);
     base.layer = { kind: "pixel", edits: [{ type: "invert" }, { type: "invert", disabled: true }] };
-    expect(compileImageAdjustments(docWith([base]))?.layers).toHaveLength(1);
+    expect(compileImageAdjustments(docWith([base]))).toBeNull();
   });
 
   it("hidden pixel layers above the stack do not block compilation", () => {
     const grade = compileImageAdjustments(
       docWith([
         emptyImageLayer(),
-        adjustmentLayer({ type: "brightness_contrast", brightness: 10 }),
+        adjustmentLayer({ type: "levels", in_black: 10 }),
         { ...emptyImageLayer("Hidden"), visible: false },
       ]),
     );

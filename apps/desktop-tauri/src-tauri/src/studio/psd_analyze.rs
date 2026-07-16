@@ -90,8 +90,8 @@ mod tests {
 
     #[test]
     fn rejects_missing_template() {
-        // Neither a connected `template` input nor a `psd_path` param: must fail
-        // fast with a clear message before shelling out to the python bridge.
+        // Neither a connected `template` input nor a `psd_path` param: fail
+        // before invoking the native PSD analyzer.
         let err = execute_studio_psd_context_analyze(&node(), &BTreeMap::new()).unwrap_err();
         assert!(err.contains("needs a PSD template"), "{err}");
     }

@@ -10,7 +10,7 @@ use crate::contracts::QualityReport;
 use super::reject_unsafe_output_name;
 
 /// Mean colour / colour temperature / contrast of the corrected region, before
-/// or after matching. Mirrors the Python bridge's `_appearance`.
+/// or after matching.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ColorAppearance {
     #[serde(default)]
@@ -23,7 +23,7 @@ pub(crate) struct ColorAppearance {
 
 /// What `match_light_color` did: the mode/parameters, before/after appearance,
 /// and (for the transfer modes) the Lab statistics it matched against. Fields
-/// are `snake_case` to match the `color_match_cli.py` JSON.
+/// are `snake_case` to match the persisted color-match JSON contract.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct MatchReport {
     #[serde(default)]
@@ -38,7 +38,7 @@ pub(crate) struct MatchReport {
     pub(crate) protect_saturation: bool,
     #[serde(default)]
     pub(crate) protect_brand_color: bool,
-    /// The subject's source colour mode label (e.g. `RGB`, `RGBA`, `CMYK`).
+    /// The subject's source colour mode label (e.g. `RGB`, `RGBA`, `L`).
     #[serde(default)]
     pub(crate) source_mode: String,
     /// The background's source colour mode label (absent without one).
@@ -72,8 +72,7 @@ pub(crate) struct MatchReport {
     /// `[width, height]` of the written image.
     #[serde(default)]
     pub(crate) output_size: Option<[i64; 2]>,
-    /// The match engine that actually ran (`cpu` heuristic or a backend id,
-    /// e.g. `onnx_harmonize`).
+    /// The match engine that actually ran (`cpu`).
     #[serde(default)]
     pub(crate) engine: String,
     /// The engine the node asked for (may differ from `engine` on fallback).
@@ -83,11 +82,10 @@ pub(crate) struct MatchReport {
     /// background reference, …); else `null`.
     #[serde(default)]
     pub(crate) engine_fallback_reason: Option<String>,
-    /// Weight file name when a learned backend ran, else `null`.
+    /// Legacy compatibility field; null for current engines.
     #[serde(default)]
     pub(crate) backend_model: Option<String>,
-    /// Compute device the learned backend bound (`cpu`, later `cuda` or
-    /// `directml`); `null` on the CPU heuristic path, which runs no ML session.
+    /// Legacy compatibility field; null on the CPU heuristic path.
     #[serde(default)]
     pub(crate) device: Option<String>,
     /// Compute device the node asked for (`auto`/`cpu`/`gpu`, with legacy
@@ -113,8 +111,7 @@ pub(crate) struct ColorMatchResult {
 /// the composite stops looking pasted-on. This is the **Light & Color Match**
 /// node's backend: it consumes the upstream image, the background preview, and
 /// optionally the serialized `VisualContext` JSON from PSD Context Analyze.
-/// Runs in-process on the native `cpu` heuristic, with opt-in native PCT-Net
-/// (`onnx_harmonize`) and complete CPU fallback; `mode` is
+/// Runs in-process on the native `cpu` heuristic; `mode` is
 /// `prompt_only | color_transfer | histogram_match | hybrid`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -172,7 +169,7 @@ pub(crate) fn match_light_color(
 
 /// What the mask edge refine pass did: the resolved preset/morphology parameters, the
 /// edge-band size and the mask coverage before/after. Fields are `snake_case`
-/// to match the `edge_refine_cli.py` JSON.
+/// to match the persisted edge-refine JSON contract.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct EdgeReport {
     #[serde(default)]
@@ -180,7 +177,7 @@ pub(crate) struct EdgeReport {
     /// `explicit` when a mask was connected, else `alpha` (the image's own).
     #[serde(default)]
     pub(crate) source_mask: String,
-    /// The source colour mode label (e.g. `RGB`, `RGBA`, `CMYK`, `L`).
+    /// The source colour mode label (e.g. `RGB`, `RGBA`, `L`).
     #[serde(default)]
     pub(crate) source_mode: String,
     /// Whether a non-identity EXIF orientation was normalised away.
@@ -219,8 +216,7 @@ pub(crate) struct EdgeReport {
     /// `[width, height]` of the written images.
     #[serde(default)]
     pub(crate) output_size: Option<[i64; 2]>,
-    /// The matte engine that actually ran (`cpu` heuristic or a backend id,
-    /// e.g. `onnx_matting`).
+    /// The matte engine that actually ran (`cpu`).
     #[serde(default)]
     pub(crate) engine: String,
     /// The engine the node asked for (may differ from `engine` on fallback).
@@ -230,11 +226,10 @@ pub(crate) struct EdgeReport {
     /// unknown engine, runtime error); else null.
     #[serde(default)]
     pub(crate) engine_fallback_reason: Option<String>,
-    /// The weight file the backend loaded (`null` on the CPU path).
+    /// Legacy compatibility field; null on the CPU path.
     #[serde(default)]
     pub(crate) backend_model: Option<String>,
-    /// Compute device the learned backend bound (`cpu`/`cuda`); `null` on the
-    /// CPU heuristic path, which runs no ML session.
+    /// Legacy compatibility field; null on the CPU path.
     #[serde(default)]
     pub(crate) device: Option<String>,
     /// Compute device the node asked for (`auto`/`cpu`/`cuda`); an explicit
@@ -261,7 +256,7 @@ pub(crate) struct RefineEdgeResult {
 /// Clean up a cut-out subject's matte so it drops into a PSD placeholder
 /// without white halos, fringing or jagged semi-transparent edges. This is the
 /// **Mask Edge Refine** node's backend. Runs in-process through the native CPU
-/// heuristic and optionally replaces the trimap band with ViTMatte via ORT;
+/// heuristic;
 /// `preset` is `clean | natural | soft | custom`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -315,7 +310,7 @@ pub(crate) fn refine_mask_edge(
 
 /// What the image enhance pass did: the resolved mode, source/output/target sizes, the
 /// applied scale factor and the per-step strengths. Fields are `snake_case` to
-/// match the `image_enhance_cli.py` JSON.
+/// match the persisted image-enhance JSON contract.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct EnhanceReport {
     #[serde(default)]
@@ -332,8 +327,6 @@ pub(crate) struct EnhanceReport {
     #[serde(default)]
     pub(crate) target_size: Option<[i64; 2]>,
     #[serde(default)]
-    pub(crate) target_dpi: u32,
-    #[serde(default)]
     pub(crate) max_pixels: i64,
     /// `true` when the scale was reduced to honour `max_pixels`.
     #[serde(default)]
@@ -344,7 +337,7 @@ pub(crate) struct EnhanceReport {
     pub(crate) texture_strength: f64,
     #[serde(default)]
     pub(crate) preserve_text_logo: bool,
-    /// The upscale engine actually used (`cpu` or a backend id, e.g. `realesrgan`).
+    /// The upscale engine actually used (`cpu`).
     #[serde(default)]
     pub(crate) engine: String,
     /// The engine the node asked for (may differ from `engine` on fallback).
@@ -353,19 +346,17 @@ pub(crate) struct EnhanceReport {
     /// Why the requested engine was not used (missing deps/weight, downscale, …).
     #[serde(default)]
     pub(crate) engine_fallback_reason: Option<String>,
-    /// Weight file name when a model backend ran, else `null`.
+    /// Legacy compatibility field; null for current engines.
     #[serde(default)]
     pub(crate) backend_model: Option<String>,
-    /// Compute device the model backend actually bound; `null` on the built-in
-    /// resize path, which runs no ML session.
+    /// Legacy compatibility field; null on the built-in resize path.
     #[serde(default)]
     pub(crate) device: Option<String>,
     /// Compute device the node asked for. Visible values are `auto`/`gpu`/`cpu`;
     /// legacy provider-specific requests remain readable.
     #[serde(default)]
     pub(crate) device_requested: String,
-    /// Compute precision the model backend bound (`fp32` for the current
-    /// Real-ESRGAN weight); `null` on the built-in resize path.
+    /// Legacy compatibility field; null on the built-in resize path.
     #[serde(default)]
     pub(crate) precision: Option<String>,
     /// Compute precision the node asked for. Visible values are `auto`/`fp32`;
@@ -388,12 +379,10 @@ pub(crate) struct EnhanceImageResult {
     pub(crate) enhance_report: EnhanceReport,
 }
 
-/// Upscale and sharpen a low-resolution subject so it fills a PSD placeholder
-/// at the target DPI without going soft. This is the **Image Enhance / Super
-/// Resolution** node's backend. Runs in-process on the shared native pipeline
-/// ([`crate::studio::image_enhance_cpu`]) with optional ORT Real-ESRGAN;
-/// `mode` is
-/// `conservative | texture_rebuild | print_ready | custom`.
+/// Upscale and sharpen a low-resolution subject to a requested pixel size. This
+/// is the **Image Enhance / Super Resolution** node's backend. Runs in-process
+/// on the shared native pipeline ([`crate::studio::image_enhance_cpu`]);
+/// `mode` is `conservative | texture_rebuild | custom`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn enhance_image(
@@ -403,7 +392,6 @@ pub(crate) fn enhance_image(
     mode: Option<String>,
     target_width: Option<i64>,
     target_height: Option<i64>,
-    target_dpi: Option<i64>,
     max_pixels: Option<i64>,
     scale: Option<f64>,
     denoise_strength: Option<f64>,
@@ -425,7 +413,6 @@ pub(crate) fn enhance_image(
         target_bounds: target_bounds.filter(|s| !s.trim().is_empty()),
         target_width: target_width.unwrap_or(0),
         target_height: target_height.unwrap_or(0),
-        target_dpi: target_dpi.unwrap_or(300),
         max_pixels: max_pixels.unwrap_or(48_000_000),
         scale: scale.unwrap_or(2.0),
         denoise_strength: denoise_strength.unwrap_or(0.3),
@@ -463,8 +450,8 @@ pub(crate) struct WatchdogReport {
     /// Laplacian-variance sharpness of the whole image (higher = sharper).
     #[serde(default)]
     pub(crate) global_sharpness: f64,
-    /// Pillow mode of the decoded source before normalising to 8-bit RGB
-    /// (e.g. `RGB`, `RGBA`, `CMYK`, `I;16`, `P`).
+    /// Source mode of the decoded image before normalising to 8-bit RGB
+    /// (e.g. `RGB`, `RGBA`, `I;16`, `P`).
     #[serde(default)]
     pub(crate) source_mode: String,
     /// Whether an EXIF orientation tag was applied to upright the input.
@@ -477,8 +464,7 @@ pub(crate) struct WatchdogReport {
     /// image's own alpha rim, so the supplied matte is advisory only (`false`).
     #[serde(default)]
     pub(crate) mask_consumed: bool,
-    /// Detection engine that actually ran: `rules` (always-on CPU baseline) or a
-    /// learned detector id (e.g. `onnx_defect`) when its deps/weight were present.
+    /// Detection engine that actually ran: `rules`.
     #[serde(default)]
     pub(crate) engine: String,
     /// Engine the node asked for (may differ from `engine` on fallback).
@@ -488,14 +474,13 @@ pub(crate) struct WatchdogReport {
     /// not run (missing dep/weight, unknown engine, runtime error); else null.
     #[serde(default)]
     pub(crate) engine_fallback_reason: Option<String>,
-    /// Learned detector passes that ran on top of the rule layer.
+    /// Legacy compatibility field; empty for current engines.
     #[serde(default)]
     pub(crate) detectors: Vec<String>,
-    /// File name of the weight the ML detector loaded, when one ran.
+    /// Legacy compatibility field; null for current engines.
     #[serde(default)]
     pub(crate) backend_model: Option<String>,
-    /// Compute device the learned detector actually bound (`cpu`/`cuda`); `null`
-    /// on the rule-only path, which runs no ML session.
+    /// Legacy compatibility field; null on the rule-only path.
     #[serde(default)]
     pub(crate) device: Option<String>,
     /// Compute device the node asked for (`auto`/`cpu`/`cuda`); an explicit
@@ -522,8 +507,8 @@ pub(crate) struct DetectQualityResult {
 /// Scan a candidate image for local quality breakdowns (blur, halos, colour
 /// mismatch, missing resolution) and emit a [`QualityReport`]. This is the
 /// **Detail Watchdog** node's backend. Detect + report only (no automatic
-/// repaint); the native `rules` layer always runs and `onnx_defect` can append
-/// learned findings in-process ([`crate::studio::detail_watchdog_cpu`]).
+/// repaint); the native `rules` layer runs in-process
+/// ([`crate::studio::detail_watchdog_cpu`]).
 /// `mode` is `strict | balanced | lenient`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -567,7 +552,7 @@ mod tests {
     use image::{Rgba, RgbaImage};
 
     #[test]
-    fn match_command_uses_native_learned_dispatch_and_shared_defaults() {
+    fn match_command_rejects_retired_local_engine() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -579,7 +564,7 @@ mod tests {
             .save(&source)
             .unwrap();
 
-        let result = match_light_color(
+        let err = match_light_color(
             None,
             source.to_string_lossy().to_string(),
             None,
@@ -591,36 +576,18 @@ mod tests {
             None,
             None,
             None,
-            Some("onnx_harmonize".to_string()),
+            Some("retired_local_engine".to_string()),
             Some("gpu".to_string()),
             None,
             Some(format!("direct_match_{nanos}")),
         )
-        .unwrap();
-
-        assert_eq!(result.match_report.engine, "cpu");
-        assert_eq!(result.match_report.engine_requested, "onnx_harmonize");
-        assert_eq!(result.match_report.device_requested, "gpu");
-        assert!(result.match_report.protect_brand_color);
-        assert!(result
-            .match_report
-            .engine_fallback_reason
-            .as_deref()
-            .unwrap_or_default()
-            .contains("no background"));
-        let matched = std::path::Path::new(&result.matched_image);
-        assert!(matched.is_file());
-        assert_eq!(
-            matched.parent().unwrap(),
-            crate::runtime_paths().unwrap().output_dir
-        );
-
-        let _ = std::fs::remove_file(matched);
+        .unwrap_err();
+        assert!(err.contains("retired"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn refine_command_preserves_defaults_and_falls_back_without_trimap() {
+    fn refine_command_rejects_retired_local_engine() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -632,7 +599,7 @@ mod tests {
             .save(&source)
             .unwrap();
 
-        let result = refine_mask_edge(
+        let err = refine_mask_edge(
             None,
             source.to_string_lossy().to_string(),
             None,
@@ -648,28 +615,17 @@ mod tests {
             None,
             Some(dir.to_string_lossy().to_string()),
             Some("direct_refine".to_string()),
-            Some("onnx_matting".to_string()),
+            Some("retired_local_engine".to_string()),
             Some("cpu".to_string()),
         )
-        .unwrap();
-
-        assert_eq!(result.edge_report.engine, "cpu");
-        assert_eq!(result.edge_report.engine_requested, "onnx_matting");
-        assert!(result.edge_report.edge_decontaminate);
-        assert!(result
-            .edge_report
-            .engine_fallback_reason
-            .as_deref()
-            .unwrap_or_default()
-            .contains("trimap"));
-        assert!(std::path::Path::new(&result.refined_image).is_file());
-        assert!(std::path::Path::new(&result.refined_mask).is_file());
+        .unwrap_err();
+        assert!(err.contains("retired"), "{err}");
 
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn enhance_command_routes_non_cpu_engine_through_native_fallback_contract() {
+    fn enhance_command_rejects_retired_local_engine() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -681,38 +637,26 @@ mod tests {
             .save(&source)
             .unwrap();
 
-        let result = enhance_image(
+        let err = enhance_image(
             None,
             source.to_string_lossy().to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            None, // target_bounds
+            None, // mode
+            None, // target_width
+            None, // target_height
+            None, // max_pixels
+            None, // scale
+            None, // denoise_strength
+            None, // texture_strength
+            None, // preserve_text_logo
             Some("ccsr".to_string()),
             Some("gpu".to_string()),
             Some("fp16".to_string()),
             Some(dir.to_string_lossy().to_string()),
             Some("direct_enhance".to_string()),
         )
-        .unwrap();
-
-        assert_eq!(result.enhance_report.engine, "cpu");
-        assert_eq!(result.enhance_report.engine_requested, "ccsr");
-        assert_eq!(result.enhance_report.device_requested, "gpu");
-        assert_eq!(result.enhance_report.precision_requested, "fp16");
-        assert!(result
-            .enhance_report
-            .engine_fallback_reason
-            .as_deref()
-            .unwrap()
-            .contains("removed with the Python/Torch runtime"));
-        assert!(std::path::Path::new(&result.enhanced_image).is_file());
+        .unwrap_err();
+        assert!(err.contains("retired"), "{err}");
 
         let _ = std::fs::remove_dir_all(dir);
     }

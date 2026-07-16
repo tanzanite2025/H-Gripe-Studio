@@ -185,7 +185,7 @@ describe("selection protocol helpers", () => {
     expect(selectionSourceFromToolId("object_select")).toBe("object_select");
     expect(selectionSourceFromToolId("quick_select")).toBe("quick_select");
     expect(selectionSourceFromToolId("wand")).toBe("magic_wand");
-    expect(selectionSourceFromToolId("point")).toBe("sam2");
+    expect(selectionSourceFromToolId("point")).toBe("point");
     expect(selectionSourceFromToolId("unknown_future_tool")).toBe("manual");
   });
 });

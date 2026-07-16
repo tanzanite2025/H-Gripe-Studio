@@ -26,45 +26,21 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::RenderingIntent;
 use std::error::Error;
 use std::fmt::Display;
-
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
-pub struct MalformedSize {
-    pub size: usize,
-    pub expected: usize,
-}
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub enum CmsError {
     LaneSizeMismatch,
     LaneMultipleOfChannels,
     InvalidProfile,
-    InvalidTrcCurve,
     InvalidCicp,
-    CurveLutIsTooLarge,
-    ParametricCurveZeroDivision,
-    InvalidRenderingIntent,
     DivisionByZero,
     UnsupportedColorPrimaries(u8),
     UnsupportedTrc(u8),
     InvalidLayout,
     UnsupportedProfileConnection,
     BuildTransferFunction,
-    UnsupportedChannelConfiguration,
-    UnknownTag(u32),
-    UnknownTagTypeDefinition(u32),
-    UnsupportedLutRenderingIntent(RenderingIntent),
-    InvalidAtoBLut,
-    OverflowingError,
-    LUTTablesInvalidKind,
-    MalformedClut(MalformedSize),
-    MalformedCurveLutTable(MalformedSize),
-    InvalidInksCountForProfile,
-    MalformedTrcCurve(String),
-    OutOfMemory(usize),
-    IncorrectlyFormedLut(String),
 }
 
 impl Display for CmsError {
@@ -78,12 +54,6 @@ impl Display for CmsError {
             CmsError::InvalidCicp => {
                 f.write_str("Invalid Code Independent point (CICP) in ICC profile")
             }
-            CmsError::InvalidTrcCurve => f.write_str("Invalid TRC curve"),
-            CmsError::CurveLutIsTooLarge => f.write_str("Curve Lut is too large"),
-            CmsError::ParametricCurveZeroDivision => {
-                f.write_str("Parametric Curve definition causes division by zero")
-            }
-            CmsError::InvalidRenderingIntent => f.write_str("Invalid rendering intent"),
             CmsError::DivisionByZero => f.write_str("Division by zero"),
             CmsError::UnsupportedColorPrimaries(value) => {
                 f.write_fmt(format_args!("Unsupported color primaries, {value}"))
@@ -92,52 +62,8 @@ impl Display for CmsError {
             CmsError::InvalidLayout => f.write_str("Invalid layout"),
             CmsError::UnsupportedProfileConnection => f.write_str("Unsupported profile connection"),
             CmsError::BuildTransferFunction => f.write_str("Can't reconstruct transfer function"),
-            CmsError::UnsupportedChannelConfiguration => {
-                f.write_str("Can't reconstruct channel configuration")
-            }
-            CmsError::UnknownTag(t) => f.write_fmt(format_args!("Unknown tag: {t}")),
-            CmsError::UnknownTagTypeDefinition(t) => {
-                f.write_fmt(format_args!("Unknown tag type definition: {t}"))
-            }
-            CmsError::UnsupportedLutRenderingIntent(intent) => f.write_fmt(format_args!(
-                "Can't find LUT for rendering intent: {intent:?}"
-            )),
-            CmsError::InvalidAtoBLut => f.write_str("Invalid A to B Lut"),
-            CmsError::OverflowingError => {
-                f.write_str("Overflowing was happen, that is not allowed")
-            }
-            CmsError::LUTTablesInvalidKind => f.write_str("All LUT curves must have same kind"),
-            CmsError::MalformedClut(size) => {
-                f.write_fmt(format_args!("Invalid CLUT size: {size:?}"))
-            }
-            CmsError::MalformedCurveLutTable(size) => {
-                f.write_fmt(format_args!("Malformed curve LUT size: {size:?}"))
-            }
-            CmsError::InvalidInksCountForProfile => {
-                f.write_str("Invalid inks count for profile was provided")
-            }
-            CmsError::MalformedTrcCurve(str) => f.write_str(str),
-            CmsError::OutOfMemory(capacity) => f.write_fmt(format_args!(
-                "There is no enough memory to allocate {capacity} bytes"
-            )),
-            CmsError::IncorrectlyFormedLut(str) => f.write_str(str),
         }
     }
 }
 
 impl Error for CmsError {}
-
-macro_rules! try_vec {
-    () => {
-        Vec::new()
-    };
-    ($elem:expr; $n:expr) => {{
-        let mut v = Vec::new();
-        v.try_reserve_exact($n)
-            .map_err(|_| crate::err::CmsError::OutOfMemory($n))?;
-        v.resize($n, $elem);
-        v
-    }};
-}
-
-pub(crate) use try_vec;

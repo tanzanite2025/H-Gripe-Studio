@@ -4,9 +4,8 @@ import { validateBackendRefs } from "./backendBindings";
 import {
   emptyRegistry,
   upsertApiProfile,
-  upsertLocalModel,
   type ApiProfileEntry,
-  type LocalModelEntry,
+  type BackendRegistry,
 } from "./backendRegistry";
 import { GRAPH_VERSION, type WorkflowGraph } from "../graph/model";
 
@@ -25,95 +24,87 @@ function apiProfile(overrides: Partial<ApiProfileEntry> = {}): ApiProfileEntry {
   };
 }
 
-function localModel(overrides: Partial<LocalModelEntry> = {}): LocalModelEntry {
-  return {
-    ref: "sam2-base",
-    display_name: "SAM2 base",
-    capabilities: ["mask.subject"],
-    engine: "onnx",
-    weights_path: "C:/models/sam2.onnx",
-    device_policy: "auto",
-    precision_policy: "auto",
-    health: "untested",
-    fallback_policy: "built_in",
-    health_detail: null,
-    ...overrides,
-  };
-}
-
-function graph(nodes: { id: string; kind: string; params: Record<string, unknown> }[]): WorkflowGraph {
+function graph(
+  nodes: { id: string; kind: string; params: Record<string, unknown> }[],
+  edges: WorkflowGraph["edges"] = [],
+): WorkflowGraph {
   return {
     version: GRAPH_VERSION,
-    nodes: nodes.map((n) => ({ ...n, position: { x: 0, y: 0 } })),
-    edges: [],
+    nodes: nodes.map((node) => ({ ...node, position: { x: 0, y: 0 } })),
+    edges,
   };
 }
 
-const registry = upsertLocalModel(upsertApiProfile(emptyRegistry(), apiProfile()), localModel());
+const registry: BackendRegistry = upsertApiProfile(emptyRegistry(), apiProfile());
 
 describe("validateBackendRefs", () => {
-  it("accepts empty refs and refs that exist with the right capability", () => {
-    const g = graph([
+  it("accepts empty refs and compatible API profiles", () => {
+    const workflow = graph([
       { id: "a", kind: "subjectMask", params: {} },
-      { id: "b", kind: "subjectMask", params: { local_model_ref: "sam2-base" } },
-      { id: "c", kind: "detailRepaint", params: { api_profile_ref: "openai-main" } },
+      { id: "b", kind: "detailRepaint", params: { api_profile_ref: "openai-main" } },
     ]);
-    expect(validateBackendRefs(g, registry)).toEqual([]);
+    expect(validateBackendRefs(workflow, registry)).toEqual([]);
   });
 
-  it("flags refs missing from the manager", () => {
-    const g = graph([{ id: "a", kind: "subjectMask", params: { local_model_ref: "gone" } }]);
-    const issues = validateBackendRefs(g, registry);
-    expect(issues).toHaveLength(1);
-    expect(issues[0].nodeId).toBe("a");
-    expect(issues[0].message).toContain("not found");
+  it("warns for missing or capability-incompatible API refs", () => {
+    const missing = validateBackendRefs(
+      graph([{ id: "a", kind: "detailRepaint", params: { api_profile_ref: "gone" } }]),
+      registry,
+    );
+    expect(missing).toMatchObject([{ nodeId: "a", blocking: false }]);
+    expect(missing[0].message).toContain("not found");
+
+    const incompatibleRegistry = upsertApiProfile(
+      emptyRegistry(),
+      apiProfile({ capabilities: ["image.generate"] }),
+    );
+    const incompatible = validateBackendRefs(
+      graph([{ id: "a", kind: "detailRepaint", params: { api_profile_ref: "openai-main" } }]),
+      incompatibleRegistry,
+    );
+    expect(incompatible[0].message).toContain("does not declare capability image.edit");
   });
 
-  it("flags refs whose entry lacks the selector's capability", () => {
-    // sam2-base declares mask.subject only, but refineMaskEdge filters matte.refine.
-    const g = graph([{ id: "a", kind: "refineMaskEdge", params: { local_model_ref: "sam2-base" } }]);
-    const issues = validateBackendRefs(g, registry);
-    expect(issues).toHaveLength(1);
-    expect(issues[0].message).toContain("matte.refine");
+  it("blocks every persisted local-model ref explicitly", () => {
+    const issues = validateBackendRefs(
+      graph([{ id: "mask", kind: "subjectMask", params: { local_model_ref: "legacy-mask" } }]),
+      registry,
+    );
+    expect(issues).toMatchObject([{ nodeId: "mask", blocking: true }]);
+    expect(issues[0].message).toContain("retired and unavailable");
   });
 
-  it("ignores legacy Match Light & Color model refs until registry paths reach Rust", () => {
-    const g = graph([
-      { id: "match", kind: "matchLightColor", params: { local_model_ref: "gone" } },
-    ]);
-    expect(validateBackendRefs(g, registry)).toEqual([]);
+  it("blocks retired inference engines even without a model ref", () => {
+    const issues = validateBackendRefs(
+      graph([{ id: "enhance", kind: "imageEnhance", params: { engine: "realesrgan" } }]),
+      registry,
+    );
+    expect(issues).toMatchObject([{ nodeId: "enhance", blocking: true }]);
   });
 
-  it("checks only the active row bindings on integrated cards", () => {
-    // repair.engine defaults to "provider", so only the API binding is active:
-    // the dangling local ref must not be flagged, the dangling API ref must be.
-    const g = graph([
-      {
-        id: "card",
-        kind: "imageProcessing",
-        params: { "repair.api_profile_ref": "gone", "repair.local_model_ref": "also-gone" },
-      },
-    ]);
-    const issues = validateBackendRefs(g, registry);
-    expect(issues).toHaveLength(1);
-    expect(issues[0].message).toContain('"gone"');
-  });
-
-  it("checks only the running row's bindings when a rowFilter is given", () => {
-    // Both the enhance and mask rows carry dangling refs; a card_row-scoped
-    // run of "enhance" must flag only the enhance binding.
-    const g = graph([
-      {
-        id: "card",
-        kind: "imageProcessing",
-        params: { "enhance.local_model_ref": "gone", "mask.local_model_ref": "also-gone" },
-      },
-    ]);
-    expect(validateBackendRefs(g, registry)).toHaveLength(2);
-    const issues = validateBackendRefs(g, registry, {
-      rowFilter: { nodeId: "card", rowId: "enhance" },
-    });
-    expect(issues).toHaveLength(1);
-    expect(issues[0].message).toContain('"gone"');
+  it("validates only wired rows of integrated cards", () => {
+    const workflow = graph(
+      [
+        { id: "src", kind: "imageSource", params: {} },
+        {
+          id: "card",
+          kind: "imageProcessing",
+          params: {
+            "enhance.local_model_ref": "retired",
+            "repair.api_profile_ref": "openai-main",
+          },
+        },
+      ],
+      [
+        {
+          id: "e1",
+          source: "src",
+          sourcePort: "image",
+          target: "card",
+          targetPort: "repair.in",
+        },
+      ],
+    );
+    expect(validateBackendRefs(workflow, registry)).toEqual([]);
   });
 });

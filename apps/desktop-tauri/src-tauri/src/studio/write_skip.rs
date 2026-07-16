@@ -12,7 +12,7 @@ use super::graph::{StudioGraphNode, StudioWorkflowGraph};
 /// `Compute` card — it loads the surface in-process through the shared
 /// [`image_buffer`], so the file is never read.
 ///
-/// Every other consumer — a `Local` python-bridge card, an `Api` upload, or a
+/// Every file-backed consumer — a native `Local` card, an `Api` upload, or a
 /// `save` / export sink — reads the file and forces a materialised output.
 ///
 /// [`image_buffer`]: super::image_buffer

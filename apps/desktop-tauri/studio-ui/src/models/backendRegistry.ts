@@ -1,10 +1,7 @@
 // System model manager registry (docs/plans/active/SYSTEM_MODEL_MANAGER_SURFACE_PLAN.md).
 //
-// One global source of truth for API profiles and local model entries. Cards
-// reference entries through stable refs (`api_profile_ref` / `local_model_ref`)
-// and query capability-filtered selectors; raw base URLs, credential refs and
-// weight paths live only here. Pure helpers + localStorage persistence, kept
-// out of the modal component for testing.
+// API profiles are the only managed backends. Retired local-model fields in
+// older persisted payloads are ignored when the registry is loaded.
 
 /** Tasks a backend entry can run. The manager owns this taxonomy, not cards. */
 export type ModelCapability =
@@ -59,13 +56,6 @@ export type ApiProfileHealth =
   | "unreachable"
   | "capability_mismatch";
 
-export type LocalModelHealth =
-  | "untested"
-  | "installed"
-  | "missing_weights"
-  | "unsupported_runtime"
-  | "device_fallback";
-
 export interface ApiProfileEntry {
   /** Stable id stored by cards (`api_profile_ref`). */
   ref: string;
@@ -82,42 +72,17 @@ export interface ApiProfileEntry {
   health: ApiProfileHealth;
 }
 
-export type DevicePolicy = "auto" | "cpu" | "cuda" | "directml";
-export type PrecisionPolicy = "auto" | "fp32" | "fp16";
-export type FallbackPolicy = "built_in" | "cpu" | "api" | "none";
-
-export interface LocalModelEntry {
-  /** Stable id stored by cards (`local_model_ref`). */
-  ref: string;
-  display_name: string;
-  capabilities: ModelCapability[];
-  /** ONNX / ORT / native Rust / external service / future backend. */
-  engine: string;
-  /** Local path or managed cache ref. */
-  weights_path: string;
-  device_policy: DevicePolicy;
-  precision_policy: PrecisionPolicy;
-  health: LocalModelHealth;
-  fallback_policy: FallbackPolicy;
-  /** Why the entry is unhealthy (missing dependency, device fallback, …). */
-  health_detail?: string | null;
-}
-
-/** What card params store instead of raw configuration. */
-export type ManagedBackendRef =
-  | { kind: "api_profile"; ref: string }
-  | { kind: "local_model"; ref: string }
-  | { kind: "built_in"; ref: string };
+/** What API-backed card params store instead of raw configuration. */
+export type ManagedBackendRef = { kind: "api_profile"; ref: string };
 
 export interface BackendRegistry {
   apiProfiles: ApiProfileEntry[];
-  localModels: LocalModelEntry[];
 }
 
 const REGISTRY_KEY = "hgripe.studio.modelRegistry.v1";
 
 export function emptyRegistry(): BackendRegistry {
-  return { apiProfiles: [], localModels: [] };
+  return { apiProfiles: [] };
 }
 
 function isCapability(v: unknown): v is ModelCapability {
@@ -149,38 +114,7 @@ function sanitizeApiProfile(raw: unknown): ApiProfileEntry | null {
   };
 }
 
-function sanitizeLocalModel(raw: unknown): LocalModelEntry | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  if (typeof o.ref !== "string" || !o.ref) return null;
-  return {
-    ref: o.ref,
-    display_name: typeof o.display_name === "string" ? o.display_name : o.ref,
-    capabilities: Array.isArray(o.capabilities) ? o.capabilities.filter(isCapability) : [],
-    engine: typeof o.engine === "string" ? o.engine : "",
-    weights_path: typeof o.weights_path === "string" ? o.weights_path : "",
-    device_policy:
-      o.device_policy === "cpu" || o.device_policy === "cuda" || o.device_policy === "directml"
-        ? o.device_policy
-        : "auto",
-    precision_policy:
-      o.precision_policy === "fp32" || o.precision_policy === "fp16" ? o.precision_policy : "auto",
-    health:
-      o.health === "installed" ||
-      o.health === "missing_weights" ||
-      o.health === "unsupported_runtime" ||
-      o.health === "device_fallback"
-        ? o.health
-        : "untested",
-    fallback_policy:
-      o.fallback_policy === "cpu" || o.fallback_policy === "api" || o.fallback_policy === "none"
-        ? o.fallback_policy
-        : "built_in",
-    health_detail: typeof o.health_detail === "string" ? o.health_detail : null,
-  };
-}
-
-/** Parse a persisted registry payload; unknown fields are dropped. */
+/** Parse a persisted registry payload; unknown and retired fields are dropped. */
 export function parseRegistry(raw: unknown): BackendRegistry {
   if (!raw || typeof raw !== "object") return emptyRegistry();
   const o = raw as Record<string, unknown>;
@@ -189,11 +123,6 @@ export function parseRegistry(raw: unknown): BackendRegistry {
       ? o.apiProfiles
           .map(sanitizeApiProfile)
           .filter((p): p is ApiProfileEntry => p !== null)
-      : [],
-    localModels: Array.isArray(o.localModels)
-      ? o.localModels
-          .map(sanitizeLocalModel)
-          .filter((m): m is LocalModelEntry => m !== null)
       : [],
   };
 }
@@ -265,39 +194,8 @@ export function duplicateApiProfile(
   return { ...registry, apiProfiles: [...registry.apiProfiles, copy] };
 }
 
-/** Insert or replace the local model with the same ref. */
-export function upsertLocalModel(
-  registry: BackendRegistry,
-  model: LocalModelEntry,
-): BackendRegistry {
-  const rest = registry.localModels.filter((m) => m.ref !== model.ref);
-  return { ...registry, localModels: [...rest, model] };
-}
-
-export function removeLocalModel(registry: BackendRegistry, ref: string): BackendRegistry {
-  return { ...registry, localModels: registry.localModels.filter((m) => m.ref !== ref) };
-}
-
-export function duplicateLocalModel(
-  registry: BackendRegistry,
-  ref: string,
-): BackendRegistry {
-  const source = registry.localModels.find((m) => m.ref === ref);
-  if (!source) return registry;
-  const copyRef = uniqueRef(`${source.ref}-copy`, registry.localModels);
-  const copy: LocalModelEntry = {
-    ...source,
-    ref: copyRef,
-    display_name: `${source.display_name} (copy)`,
-    health: "untested",
-    health_detail: null,
-  };
-  return { ...registry, localModels: [...registry.localModels, copy] };
-}
-
 // --- Capability-filtered selector API ----------------------------------------
-// Every card dropdown must go through these, so two cards can never show
-// inconsistent options for the same capability.
+// Only API profiles are selectable.
 
 export function apiProfilesFor(
   registry: BackendRegistry,
@@ -306,45 +204,28 @@ export function apiProfilesFor(
   return registry.apiProfiles.filter((p) => p.capabilities.includes(capability));
 }
 
-export function localModelsFor(
-  registry: BackendRegistry,
-  capability: ModelCapability,
-): LocalModelEntry[] {
-  return registry.localModels.filter((m) => m.capabilities.includes(capability));
-}
-
 export interface BackendOption {
   ref: ManagedBackendRef;
   label: string;
 }
 
-/** All manager-backed choices for one capability, API profiles first. */
+/** All selectable manager-backed choices for one capability. */
 export function backendsFor(
   registry: BackendRegistry,
   capability: ModelCapability,
 ): BackendOption[] {
-  return [
-    ...apiProfilesFor(registry, capability).map((p) => ({
-      ref: { kind: "api_profile" as const, ref: p.ref },
-      label: p.display_name,
-    })),
-    ...localModelsFor(registry, capability).map((m) => ({
-      ref: { kind: "local_model" as const, ref: m.ref },
-      label: m.display_name,
-    })),
-  ];
+  return apiProfilesFor(registry, capability).map((profile) => ({
+    ref: { kind: "api_profile" as const, ref: profile.ref },
+    label: profile.display_name,
+  }));
 }
 
-/** Resolve a stored ref back to its managed entry (null when it dangles). */
+/** Resolve a selectable stored API profile ref. */
 export function resolveBackendRef(
   registry: BackendRegistry,
   ref: ManagedBackendRef,
-): ApiProfileEntry | LocalModelEntry | null {
-  if (ref.kind === "api_profile")
-    return registry.apiProfiles.find((p) => p.ref === ref.ref) ?? null;
-  if (ref.kind === "local_model")
-    return registry.localModels.find((m) => m.ref === ref.ref) ?? null;
-  return null;
+): ApiProfileEntry | null {
+  return registry.apiProfiles.find((p) => p.ref === ref.ref) ?? null;
 }
 
 // --- Legacy import ------------------------------------------------------------

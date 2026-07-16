@@ -1,20 +1,18 @@
-//! Native PSD context analysis: the Rust default behind the
-//! `analyze_psd_context` command (the **PSD Context Analyze** node), ported
-//! 1:1 from `python/bridge/analyze_psd_cli.py`.
+//! Native PSD context analysis behind the `analyze_psd_context` command (the
+//! **PSD Context Analyze** node).
 //!
 //! It decodes only the pixels it needs from the template parsed by
 //! `super::inspect` — the named background layer's own channels when given, or
-//! the merged (composite) image data section otherwise — and reproduces the
-//! CLI's Phase-1 heuristics exactly: alpha-weighted mean colour / brightness /
+//! the merged (composite) image data section otherwise — and applies the
+//! Phase-1 heuristics exactly: alpha-weighted mean colour / brightness /
 //! contrast, a median-cut dominant palette, the 3x3 brightest-cell light
 //! direction, the red/blue colour-temperature estimate, and the same
 //! `description` / `prompt_suffix` strings. It writes the same three artifact
 //! PNGs (placeholder mask, background preview, luminance histogram) with the
 //! same file names.
 //!
-//! Scope: 8-bit RGB PSD/PSB with raw or RLE channel compression — the subset
-//! `psd_tools` writes and real product templates use. Anything else returns an
-//! error so the command can fall back to the optional legacy Python bridge.
+//! Scope: 8-bit RGB PSD/PSB with raw or RLE channel compression. Unsupported
+//! inputs return an explicit error from this native implementation.
 
 use std::fs;
 use std::path::Path;
@@ -44,7 +42,7 @@ const DIRECTIONS: [&str; 9] = [
     "bottom-right",
 ];
 
-/// Python's `round()` (banker's rounding, half-to-even) for integral results.
+/// Banker's rounding (half-to-even) for integral results.
 fn round_half_even(value: f64) -> f64 {
     let floor = value.floor();
     let diff = value - floor;
@@ -59,7 +57,7 @@ fn round_half_even(value: f64) -> f64 {
     }
 }
 
-/// Python's `round(value, 4)`.
+/// Round a value to four decimal places using the contract's half-even rule.
 fn round4(value: f64) -> f64 {
     round_half_even(value * 10_000.0) / 10_000.0
 }
@@ -93,8 +91,8 @@ fn hex(rgb: [u8; 3]) -> String {
 }
 
 /// Decode one channel data block (compression u16 + payload) into
-/// `width*height` bytes. Supports raw (0) and PackBits RLE (1); zip variants
-/// return an error so the caller can fall back to the legacy bridge.
+/// `width*height` bytes. Supports raw (0) and PackBits RLE (1); other variants
+/// return an explicit unsupported-compression error.
 fn decode_channel(
     data: &[u8],
     channel: &ChannelRef,
@@ -120,7 +118,7 @@ fn decode_channel(
         }
         1 => decode_rle_rows(payload, width, height, psb),
         other => Err(format!(
-            "unsupported channel compression {other} (zip); legacy bridge required"
+            "unsupported PSD channel compression {other}; native analyzer supports raw and RLE"
         )),
     }
 }
@@ -217,18 +215,18 @@ fn layer_rgba(data: &[u8], parsed: &ParsedPsd, node: &LayerNode) -> Result<RgbaI
 }
 
 /// A layer the simple compositor can handle faithfully: normal blend mode at
-/// full opacity, no clipping, no layer mask. Anything else needs the real
-/// blending engine and falls back to the legacy bridge.
+/// full opacity, no clipping, no layer mask. Anything else is rejected because
+/// this analyzer does not implement the full PSD blending engine.
 fn require_plain(node: &LayerNode) -> Result<(), String> {
     if &node.blend != b"norm" || node.opacity != 255 || node.clipping != 0 {
         return Err(format!(
-            "layer '{}' uses non-trivial blending; legacy bridge required",
+            "layer '{}' uses non-trivial blending, unsupported by the native PSD analyzer",
             node.name
         ));
     }
     if node.channels.iter().any(|channel| channel.id == -2) {
         return Err(format!(
-            "layer '{}' has a layer mask; legacy bridge required",
+            "layer '{}' has a layer mask, unsupported by the native PSD analyzer",
             node.name
         ));
     }
@@ -575,10 +573,9 @@ fn write_histogram(image: &RgbaImage, uniform_weight: bool, path: &Path) -> Resu
         .map_err(|err| format!("failed to write {}: {err}", path.display()))
 }
 
-/// Run the native PSD context analysis. Mirrors `analyze_psd_cli.py`'s
-/// `analyze()` exactly; any unsupported input (non-RGB/8-bit, zip channels, a
-/// missing merged composite) returns `Err` so the caller can fall back to the
-/// optional legacy Python bridge.
+/// Run the native PSD context analysis. Unsupported input (non-RGB/8-bit,
+/// unsupported channel compression, or a missing merged composite) returns an
+/// explicit `Err` to the caller.
 pub(crate) fn analyze_psd_native(
     template: &str,
     background_layer: &str,
@@ -612,19 +609,19 @@ pub(crate) fn analyze_psd_native(
 
     // --- Background selection: the named layer's own pixels when given and
     // found (like `layer.composite()`), else the merged composite. A group or
-    // a masked layer needs real re-compositing, which only the legacy bridge
-    // does; error out so the command can fall back.
+    // masked layer needs full PSD re-compositing, which this analyzer does not
+    // implement, so reject it explicitly.
     let background_name = background_layer.trim();
     let background = match find_layer(&parsed.tree, background_name) {
         Some(node) if !background_name.is_empty() => {
             if node.kind == "group" {
                 return Err(format!(
-                    "background layer '{background_name}' is a group; legacy bridge required"
+                    "background layer '{background_name}' is a group, unsupported by the native PSD analyzer"
                 ));
             }
             if node.channels.iter().any(|channel| channel.id == -2) {
                 return Err(format!(
-                    "background layer '{background_name}' has a layer mask; legacy bridge required"
+                    "background layer '{background_name}' has a layer mask, unsupported by the native PSD analyzer"
                 ));
             }
             layer_rgba(&data, &parsed, node)?
@@ -757,8 +754,7 @@ mod tests {
     use super::*;
 
     /// The same synthetic fixture `super::inspect` tests against; the expected
-    /// values below are the golden output of `analyze_psd_cli.py` on this file
-    /// (see the PR that introduced them).
+    /// values below are the checked-in analysis golden for this file.
     fn fixture_path() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests")

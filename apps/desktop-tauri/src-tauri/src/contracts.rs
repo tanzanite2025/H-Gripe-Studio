@@ -1,9 +1,9 @@
 //! Shared production data contracts for the PSD-first AI production pipeline.
 //!
-//! These structs are the **single source of truth** for the JSON exchanged
-//! between the Python bridge (which produces them), the Rust orchestration
-//! layer (which (de)serializes them here), and the studio-ui front end (which
-//! mirrors them in the focused modules under `studio-ui/src/contracts/`). Field names are
+//! These structs are the **single source of truth** for the JSON produced by
+//! the native Rust command layer, serialized by the orchestration layer, and
+//! consumed by the studio-ui front end (which mirrors them in the focused
+//! modules under `studio-ui/src/contracts/`). Field names are
 //! `snake_case` so the same JSON object round-trips unchanged across all three
 //! layers; keep the TypeScript interfaces in lock-step with changes here.
 //!

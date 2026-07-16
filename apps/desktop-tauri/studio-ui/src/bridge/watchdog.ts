@@ -4,9 +4,8 @@ import { type QualityReport } from "../contracts/quality";
 
 // --- Detail Watchdog --------------------------------------------------------
 // Wraps the native Rust `detect_quality_issues` command. The CPU rule layer
-// always scans global/region blur, alpha-rim halos, colour mismatch and target
-// resolution; opt-in `onnx_defect` adds sidecar-mapped hands/text/logo findings
-// through the shared ORT runtime. Detection remains report-only.
+// scans global/region blur, alpha-rim halos, colour mismatch and target
+// resolution. Detection remains report-only.
 
 /** Diagnostics for a Detail Watchdog run; snake_case to match the bridge JSON. */
 export interface WatchdogReport {
@@ -22,20 +21,6 @@ export interface WatchdogReport {
   target_size?: [number, number] | null;
   /** Laplacian-variance sharpness of the whole image (higher = sharper). */
   global_sharpness: number;
-  /** Detection engine that actually ran: `rules` (CPU baseline) or an ML id. */
-  engine?: string;
-  /** Engine the node asked for (may differ from `engine` on fallback). */
-  engine_requested?: string;
-  /** Why the rule-only path was used when an ML engine could not run; else null. */
-  engine_fallback_reason?: string | null;
-  /** Learned detector passes that ran on top of the rule layer. */
-  detectors?: string[];
-  /** File name of the weight the ML detector loaded, when one ran. */
-  backend_model?: string | null;
-  /** Compute device the learned detector bound (`cpu`/`cuda`); null on rules. */
-  device?: string | null;
-  /** Compute device the node asked for (`auto`/`cpu`/`cuda`). */
-  device_requested?: string;
 }
 
 /** Result of the Detail Watchdog node (`detect_quality_issues`). */
@@ -59,10 +44,6 @@ export interface DetectQualityRequest {
   watchTargets?: string;
   /** `strict | balanced | lenient` detection sensitivity. */
   mode?: string;
-  /** Detection engine: `rules` (default CPU layer) or an opt-in ML detector id. */
-  engine?: string;
-  /** Compute device: `auto` (default) | `cpu` | vendor-neutral `gpu` | `cuda`. */
-  device?: string;
   /** Directory for the written overlay PNG. */
   outputDir?: string;
   /** Base name for the written overlay PNG. */
@@ -87,10 +68,10 @@ function parseWatchTargets(raw?: string): string[] {
 }
 
 /**
- * Scan a candidate image for quality breakdowns via the backend
- * (`detect_quality_issues`). The pixel analysis needs the Python/Pillow
- * pipeline, which only exists in the desktop build, so outside Tauri this
- * returns a plausible mock so the editor stays runnable in browser dev.
+ * Scan a candidate image for quality breakdowns through the native backend
+ * (`detect_quality_issues`). Filesystem pixel analysis only exists in the
+ * desktop build, so outside Tauri this returns a plausible mock so the editor
+ * stays runnable in browser dev.
  */
 export async function detectQualityIssues(
   req: DetectQualityRequest,
@@ -151,18 +132,6 @@ export async function detectQualityIssues(
         image_size: src,
         target_size: target,
         global_sharpness: 142.0,
-        engine: "rules",
-        engine_requested: req.engine ?? "rules",
-        engine_fallback_reason:
-          (req.engine ?? "rules") === "rules"
-            ? null
-            : "ML detector unavailable in browser dev (mock)",
-        detectors: [],
-        backend_model: null,
-        // The rule layer runs no ML session, so no device is bound; echo the
-        // request so the inspector still reflects the chosen device.
-        device: null,
-        device_requested: req.device ?? "auto",
       },
     };
   }
@@ -172,8 +141,6 @@ export async function detectQualityIssues(
     targetBounds: req.targetBounds ? JSON.stringify(req.targetBounds) : null,
     watchTargets: req.watchTargets ?? null,
     mode: req.mode ?? null,
-    engine: req.engine ?? null,
-    device: req.device ?? null,
     outputDir: req.outputDir ?? null,
     outputName: req.outputName ?? null,
   })) as DetectQualityResult;

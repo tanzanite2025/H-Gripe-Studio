@@ -19,7 +19,7 @@
 //! invalidate their own entry.
 //!
 //! **Policy.** Only deterministic, expensive lanes participate: `Compute` and
-//! `Local` (python-bridge CLI) nodes are always cacheable; `Api` nodes are only
+//! native `Local` nodes are always cacheable; `Api` nodes are only
 //! cacheable when the call is pinned by an explicit `seed` (a seeded generation
 //! is a deterministic request — an unseeded one is a deliberate re-roll). A
 //! boolean `cache` node param overrides both directions. `Graph` nodes are free

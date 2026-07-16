@@ -36,11 +36,11 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   promptOptimize: {
     title: "提示词",
     description:
-      "送入生成节点的文本提示词。可选择一个模型对其优化——内置本地预设，或来自「模型 / API」管理器的本地模型 / API 配置。模型留空则直接输出原文。",
+      "送入生成节点的文本提示词。可用确定性的内置预设或 API 配置进行优化；关闭优化时直接输出原文。",
     params: {
       text: { label: "提示词", hint: "初始提示词（连接的 `text` 输入会覆盖它）" },
-      mode: { label: "优化", hint: "off = 直通 · local = 规则化 · api = 经档案走 LLM（由模型下拉框设置）" },
-      preset: { label: "本地预设", hint: "`local` 模式使用：去重 + 追加增强标签" },
+      mode: { label: "优化", hint: "off = 直通 · builtin = 确定性规则 · api = 经配置走 LLM" },
+      preset: { label: "内置预设", hint: "`builtin` 模式使用：去重 + 追加增强标签" },
       api_profile_ref: {
         label: "API 配置引用",
         hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
@@ -165,14 +165,6 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
       "将生成主体的光照与色彩向 PSD 背景靠拢，让合成不再显得「贴上去」：Reinhard Lab 迁移 / 直方图匹配，并向阴影与高光加权，同时保护品牌色。输出匹配后图像、匹配报告与提示词后缀。",
     params: {
       mode: { label: "模式" },
-      engine: {
-        label: "引擎",
-        hint: "cpu = 内置 Lab 迁移 / 直方图匹配（始终可用）；onnx_harmonize = 通过 ONNX Runtime 原生运行 PCT-Net，权重、运行时或推理不可用时回落 cpu",
-      },
-      device: {
-        label: "设备",
-        hint: "原生 PCT-Net 的计算请求：auto | gpu | cpu。当前 ONNX Runtime 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入。cpu 启发式忽略此项",
-      },
       strength: { label: "强度" },
       shadow_strength: { label: "阴影强度", hint: "阴影区的额外校正权重" },
       highlight_strength: { label: "高光强度", hint: "高光区的额外校正权重" },
@@ -204,36 +196,12 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         hint: "layerSplit.out 行的资产将哪一层标记为选中",
       },
       "enhance.mode": { label: "增强：模式" },
-      "enhance.local_model_ref": {
-        label: "增强：本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
-      },
-      "enhance.engine": {
-        label: "增强：引擎",
-        hint: "cpu 始终可用；原生 Real-ESRGAN 当前以 CPU/FP32 运行，模型缺失时回退到 cpu",
-      },
-      "enhance.device": {
-        label: "增强：设备",
-        hint: "原生 Real-ESRGAN 的计算请求：auto | gpu | cpu。当前路径仅使用 CPU；CUDA 与 DirectML 计划后续支持",
-      },
-      "enhance.precision": {
-        label: "增强：精度",
-        hint: "原生 Real-ESRGAN 的计算精度：auto 当前解析为 fp32；暂不支持 fp16",
-      },
       "grade.format": { label: "调色：输出格式" },
       "crop.mode": { label: "裁剪：模式" },
       "crop.aspect": { label: "裁剪：宽高比" },
-      "repair.engine": {
-        label: "修复：引擎",
-        hint: "provider = 远程 image.edit；本地引擎在权重缺失时回退到提供方",
-      },
       "repair.api_profile_ref": {
         label: "修复：API 配置引用",
         hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
-      },
-      "repair.local_model_ref": {
-        label: "修复：本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
       },
     },
     ports: {
@@ -349,7 +317,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   imageGrade: {
     title: "调色",
     description:
-      "用 hgripe-grade 内核（docs/design/grade-kernel.md）对图像进行调色——在调色对话框中编排 op 栈（曝光、白平衡、对比度、饱和度、RGB 混合器、色彩扭曲器、可调半径的锐化/降噪、胶片颗粒、1D/3D LUT），保存为 grade_doc。对话框通过内核实时预览（以 grade-gpu 构建且有适配器时走 GPU，否则走按行并行的 CPU 参考通路）；运行通路在图像自身色彩空间中对全分辨率 16-bit 工作表面调色，宽色域源保持 16-bit + ICC。输出调色后的图像与调色报告。",
+      "用 hgripe-grade 内核对图像进行调色：在调色对话框中编排曝光、白平衡、对比度、饱和度、RGB 混合、色彩扭曲、锐化、降噪、颗粒和暗角等操作。运行通路在图像自身色彩空间中处理全分辨率 16-bit 工作表面，并输出调色后的图像与报告。",
     params: {
       format: {
         label: "输出格式",
@@ -366,28 +334,16 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   subjectMask: {
     title: "主体蒙版 / 抠像",
     description:
-      "选取主体并生成 蒙版 / 抠像 / alpha 三件套。Phase 1 在原生 Rust 内进程运行（无 python 桥）：魔棒漫水选择 + 画笔/橡皮笔触（记录在 edit_paths 中）、形态学（扩张/收缩、填洞）以及最后的羽化。输出蒙版、alpha 图、抠像图与增强版抠像报告。自动主体模型模式（SAM/RMBG/BiRefNet）属于 Phase 2。",
+      "使用确定性的内置工具选取主体并生成蒙版、alpha 图和抠像图：点选、魔棒漫水选择、画笔/橡皮笔触、形态学、填洞与羽化。",
     params: {
-      mode: { label: "模式", hint: "Phase 1 运行 manual_* / hybrid 模式；auto_* 模型模式属于 Phase 2" },
-      local_model_ref: {
-        label: "本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
-      },
-      sam2_variant: {
-        label: "SAM 2 型号",
-        hint: "点提示使用的 SAM 2 模型规格——越大越慢但边缘越干净；缺少权重时回退到 tiny（用 scripts/fetch-sam2 下载各型号）",
-      },
-      device: {
-        label: "设备",
-        hint: "自动分割与 ViTMatte 的计算请求：auto | gpu | cpu。当前 ONNX Runtime 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入",
-      },
+      mode: { label: "模式", hint: "手动模式使用已绘制笔触；自动模式使用确定性的内置分割器" },
       wand_tolerance: { label: "魔棒容差", hint: "魔棒漫水选择的颜色距离" },
       grow_px: { label: "扩张 / 收缩 px", hint: "正值膨胀蒙版，负值腐蚀蒙版" },
       fill_holes: { label: "填洞", hint: "羽化前封闭内部封闭空隙" },
       feather_px: { label: "羽化 px", hint: "柔化蒙版边缘（最后应用）" },
       alpha_matting: {
         label: "Alpha 抠像",
-        hint: "通过三分图把二值边缘解算为连续 alpha（头发 / 玻璃）——有 ViTMatte 权重时用 ViTMatte，否则退到确定性羽化兜底",
+        hint: "通过确定性的三分图羽化把二值边缘解算为连续 alpha（头发 / 玻璃）",
       },
       matting_band_px: {
         label: "抠像带宽 px",
@@ -419,18 +375,6 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         label: "预设",
         hint: "clean = 紧致 1px 收边，natural = 柔和 6px 羽化，soft = 不收边，custom = 展开全部",
       },
-      local_model_ref: {
-        label: "本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
-      },
-      engine: {
-        label: "引擎",
-        hint: "cpu = 内置启发式精修（始终可用）；onnx_matting = 可选学习抠像，需要连接 trimap，权重/依赖缺失时回落 cpu",
-      },
-      device: {
-        label: "设备",
-        hint: "原生 ViTMatte 的计算请求：auto | gpu | cpu。当前 ONNX Runtime 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入。cpu 启发式忽略此项",
-      },
       erode_px: { label: "腐蚀 px", hint: "向内收边以去除白边" },
       dilate_px: { label: "膨胀 px", hint: "向外扩张蒙版" },
       feather_px: { label: "羽化 px", hint: "柔化边缘过渡" },
@@ -454,31 +398,14 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   imageEnhance: {
     title: "图像增强",
     description:
-      "放大低分辨率主体，使其以印刷 DPI 清晰填满 PSD 占位符。内置 CPU 路径使用 Lanczos 与锐化；原生 Real-ESRGAN 提供模型超分，当前以 CPU/FP32 运行。接入占位符边界可自动定尺，或显式设定目标像素。输出增强图像、所用缩放系数与增强报告。预设会隐藏细节；选 `custom` 可展开降噪/纹理/缩放。",
+      "使用确定性的内置 Lanczos、降噪和锐化路径，把低分辨率主体放大到所需像素尺寸。接入占位符边界可自动定尺，或显式设定目标像素。",
     params: {
       mode: {
         label: "模式",
-        hint: "conservative = 温和，texture_rebuild = 强细节，print_ready = 均衡，custom = 展开滑块",
-      },
-      local_model_ref: {
-        label: "本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
-      },
-      engine: {
-        label: "引擎",
-        hint: "cpu = 内置 Lanczos+锐化（始终可用）；realesrgan = 原生模型超分，当前使用 CPU/FP32，模型缺失时回退到 cpu",
-      },
-      device: {
-        label: "设备",
-        hint: "原生 Real-ESRGAN 的计算请求：auto | gpu | cpu。当前路径仅使用 CPU；CUDA 与 DirectML 计划后续支持。cpu 路径忽略此项",
-      },
-      precision: {
-        label: "精度",
-        hint: "原生 Real-ESRGAN 的计算精度：auto 当前解析为 fp32；暂不支持 fp16。cpu 路径忽略此项",
+        hint: "conservative = 温和，texture_rebuild = 强细节，custom = 展开滑块",
       },
       target_width: { label: "目标宽度", hint: "显式目标像素（0 = 由所连边界或预设缩放自动推算）" },
       target_height: { label: "目标高度", hint: "显式目标像素（0 = 由所连边界或预设缩放自动推算）" },
-      target_dpi: { label: "目标 DPI", hint: "写入输出 PNG 元数据的 DPI" },
       scale: { label: "缩放", hint: "未给定目标尺寸时的放大倍数" },
       denoise_strength: { label: "降噪", hint: "放大前的边缘保留中值降噪混合" },
       texture_strength: { label: "纹理", hint: "放大后 USM 细节强度" },
@@ -498,20 +425,12 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   detailWatchdog: {
     title: "细节看护",
     description:
-      "扫描候选图像中的局部劣化（全局/区域模糊、alpha 边缘光晕、与所连背景的颜色不匹配、低于目标的分辨率）并输出 QualityReport，让工作流决定是重跑还是手工修。Phase 1 仅检测（不自动重绘）：`fixed_image` 即未改动的输入。CPU 规则层始终运行；手/文字/logo 等语义目标默认标记为跳过，除非通过 `engine` 选用可选的 ML 检测器来覆盖。接入 VisualContext 和/或占位符边界以进行分辨率与颜色检查。",
+      "使用确定性的内置规则扫描候选图像中的模糊、alpha 边缘光晕、颜色不匹配和分辨率不足，并输出 QualityReport。仅检测，不自动重绘。",
     params: {
       mode: { label: "模式", hint: "检测灵敏度：strict = 标记更多，lenient = 标记更少" },
       watch_targets: {
         label: "看护目标",
-        hint: "face,hands,text,logo,product_edges 的逗号列表（空 = 全部）；未启用 ML 引擎时跳过 hands/text/logo",
-      },
-      engine: {
-        label: "引擎",
-        hint: "rules = 内置 CPU 规则层（始终可用）；onnx_defect = 原生 ORT 检测器，覆盖 手/文字/logo，运行时、权重或推理不可用时保留完整 rules 输出",
-      },
-      device: {
-        label: "设备",
-        hint: "onnx_defect 的计算请求：auto | gpu | cpu。当前 Windows ORT 路径仅使用 CPU；CUDA 与 DirectML provider 将在后续接入。rules 层忽略此项",
+        hint: "face,hands,text,logo,product_edges 的逗号列表（空 = 全部）；不支持的语义目标会报告为已跳过",
       },
       output_dir: { label: "输出目录", hint: OUTPUT_DIR_HINT },
       output_name: { label: "输出名", hint: "问题叠加 PNG 的基础名（空 = <image>_issues）" },
@@ -535,27 +454,11 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
         label: "API 配置引用",
         hint: "来自「模型 / API」管理器的托管后端引用（由后端选择器设置）",
       },
-      local_model_ref: {
-        label: "本地模型引用",
-        hint: "来自「模型 / API」管理器的托管本地模型引用（由后端选择器设置）",
-      },
       provider: {
         label: "提供方",
         hint: "具备 image.edit 能力的提供方（选择档案时自动设置）；空/mock 则直通",
       },
       operation: { label: "操作" },
-      engine: {
-        label: "引擎",
-        hint: "provider = 远程 image.edit（默认）；sd_inpaint / sdxl_inpaint / flux_fill = 可选本地 GPU 重绘，权重/依赖缺失时回落 provider（flux_fill 忽略负面提示词与强度）",
-      },
-      precision: {
-        label: "精度",
-        hint: "本地重绘后端的计算精度：auto（CUDA 上 fp16，否则 fp32）| fp32 | fp16（CPU 运行时回落 fp32）；provider 路径忽略此项",
-      },
-      controlnet: {
-        label: "ControlNet",
-        hint: "sd_inpaint 的结构约束：off（默认）| canny（边缘约束重绘保持结构稳定；需要 HGRIPE_CONTROLNET_MODEL 权重，缺失时回落 provider）",
-      },
       credentials_ref: { label: "凭据", hint: "选择档案时自动设置" },
       repaint_prompt_base: {
         label: "重绘提示词",
@@ -583,7 +486,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   videoAssemble: {
     title: "视频合成",
     description:
-      "通过媒体引擎的 FFmpeg 后端（PyAV）将有序的帧图像序列编码为视频文件。连接帧列表（或在 frames 参数中每行填一个路径），选择帧率与编码器，即可在磁盘上得到 .mp4 及编码报告。",
+      "通过媒体引擎内置的原生 FFmpeg 后端将有序的帧图像序列编码为视频文件。连接帧列表（或在 frames 参数中每行填一个路径），选择帧率与编码器，即可在磁盘上得到 .mp4 及编码报告。",
     params: {
       frames: { label: "帧列表", hint: "帧图像路径，每行一个（连接的 frames 输入优先）" },
       fps: { label: "帧率", hint: "输出帧率" },
@@ -609,7 +512,7 @@ export const NODE_ZH: Record<string, NodeSpecZh> = {
   videoTrim: {
     title: "视频剪辑",
     description:
-      "通过媒体引擎的 FFmpeg 后端（PyAV）从视频文件中剪出一个时间区间。连接视频（或在 video 参数中填路径），设置起止秒数，即可得到帧精确的重编码片段及剪辑报告。音频不会保留。",
+      "通过媒体引擎内置的原生 FFmpeg 后端从视频文件中剪出一个时间区间。连接视频（或在 video 参数中填路径），设置起止秒数，即可得到帧精确的重编码片段及剪辑报告。音频不会保留。",
     params: {
       video: { label: "视频", hint: "源视频路径（连接的 video 输入优先）" },
       start_sec: { label: "起始秒", hint: "剪辑起点（自开头起的秒数）" },

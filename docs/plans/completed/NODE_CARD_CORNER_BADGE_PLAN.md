@@ -1,5 +1,9 @@
 # Node Card Corner Badge Plan
 
+> Historical note (2026-07-16): this completed plan is retained only as an
+> implementation record. Treat the remaining text as history, not current
+> product guidance.
+
 > Status: implemented (top-right placement, centralized in `NodeCardShell` /
 > `NodeTypeBadge`; node specs declare a `family` field).
 

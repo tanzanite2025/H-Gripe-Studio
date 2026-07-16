@@ -5,11 +5,7 @@
 //! Both [`super::exec::studio_executor_for_kind`] and
 //! [`super::schedule::category_for_kind`] delegate here, so onboarding a new
 //! node kind is a single row edit rather than keeping two parallel `match kind`
-//! tables in step. Parameter-dependent ONNX nodes may be conservatively promoted
-//! from the baseline CPU lane by `schedule::category_for_node` when pre-execution
-//! resolution finds an accelerated provider candidate. That candidate is
-//! advisory; the shared session resolution and per-stage report are
-//! authoritative. An unknown kind
+//! tables in step. An unknown kind
 //! returns `None` — the single gate for unsupported kinds. Keep in sync with
 //! `nodeSpecs.ts`.
 //!
@@ -38,8 +34,7 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
     let (executor, category) = match kind {
         "batch" | "imageSource" | "videoSource" | "psdTemplate" | "number" | "reroute"
         | "group" | "compare" | "logic" | "if" | "switch" | "save" => (Graph, CpuLight),
-        // Local native cards. Their baseline/fallback work is CPU-bound;
-        // conservative scheduling may promote an accelerated ONNX candidate.
+        // Local native cards. Their deterministic work is CPU-bound.
         "psdContextAnalyze" | "matchLightColor" | "refineMaskEdge" | "imageEnhance"
         | "detailWatchdog" | "psdExport" => (Local, CpuBound),
         // Video encodes (vendored libav encoder) hold their own single-slot
@@ -50,9 +45,8 @@ pub(crate) fn node_class(kind: &str) -> Option<NodeClass> {
         // edit-path inputs are not visible here; current CPU plans stay CPU.
         "subjectMask" => (Compute, CpuBound),
         "crop" => (Compute, CpuBound),
-        // The layer-split node runs the subject segmentation stack in-process
-        // (model backend when a weight resolves, else the builtin CPU
-        // segmenter) and writes per-layer artifacts: CPU-bound compute.
+        // The layer-split node runs deterministic segmentation in-process and
+        // writes per-layer artifacts: CPU-bound compute.
         "smartLayerSplit" => (Compute, CpuBound),
         // The grading kernel node: CPU row-parallel by default; the optional
         // `grade-gpu` build routes through wgpu inside the same lane.

@@ -1,19 +1,12 @@
 import { tauriInvoke } from "./core";
 import { type Bounds } from "../contracts/context";
-import type {
-  ImageEnhanceDeviceRequest,
-  ImageEnhanceEngineRequest,
-  ImageEnhancePrecisionRequest,
-} from "../contracts/imageEnhance";
 
 // --- Image Enhance ----------------------------------------------------------
-// Wraps the native Rust `enhance_image` command. The always-available CPU
-// engine uses Lanczos + sharpening; the optional Real-ESRGAN engine currently
-// runs on CPU in FP32 and falls back to that built-in path when unavailable.
+// Wraps the deterministic native Rust `enhance_image` command.
 
 /** What `enhance_image` did; snake_case to match the bridge JSON. */
 export interface EnhanceReport {
-  /** `conservative | texture_rebuild | print_ready | custom`. */
+  /** `conservative | texture_rebuild | custom`. */
   mode: string;
   scale_factor: number;
   /** `[width, height]` of the input image. */
@@ -22,29 +15,12 @@ export interface EnhanceReport {
   output_size?: [number, number];
   /** `[width, height]` requested target, or null when a preset scale was used. */
   target_size?: [number, number] | null;
-  target_dpi: number;
   max_pixels: number;
   /** `true` when the scale was reduced to honour `max_pixels`. */
   clamped: boolean;
   denoise_strength: number;
   texture_strength: number;
   preserve_text_logo: boolean;
-  /** Upscale engine actually used (`cpu` or a backend id, e.g. `realesrgan`). */
-  engine?: string;
-  /** Engine the node asked for (differs from `engine` on fallback). */
-  engine_requested?: string;
-  /** Why the requested engine was not used (missing deps/weight, downscale, …). */
-  engine_fallback_reason?: string | null;
-  /** Weight file name when a model backend ran, else null. */
-  backend_model?: string | null;
-  /** Compute device the model backend actually bound (`cpu` today); null on the built-in path. */
-  device?: string | null;
-  /** Requested device. New nodes use `auto`/`gpu`/`cpu`; old workflows may report provider-specific values. */
-  device_requested?: string;
-  /** Compute precision the model backend actually used (`fp32` today); null on the built-in path. */
-  precision?: string | null;
-  /** Requested precision. New nodes use `auto`/`fp32`; old workflows may still report `fp16`. */
-  precision_requested?: string;
   processing_time_ms: number;
 }
 
@@ -60,13 +36,11 @@ export interface EnhanceImageRequest {
   image: string;
   /** Connected PSD placeholder bounds {x,y,width,height}; sets the target size. */
   targetBounds?: Bounds;
-  /** `conservative | texture_rebuild | print_ready | custom`. */
+  /** `conservative | texture_rebuild | custom`. */
   mode?: string;
   /** Explicit target px (0 = auto from bounds / preset scale). */
   targetWidth?: number;
   targetHeight?: number;
-  /** DPI written into the output PNG metadata. */
-  targetDpi?: number;
   /** Cap on output pixels; the scale is reduced to fit (0 disables). */
   maxPixels?: number;
   /** Upscale factor used when no target size is given (custom only). */
@@ -77,12 +51,6 @@ export interface EnhanceImageRequest {
   textureStrength?: number;
   /** Cap sharpening so logos / packaging text are not mangled. */
   preserveTextLogo?: boolean;
-  /** Upscale engine. `ccsr`/`supir` remain transport-only legacy values. */
-  engine?: ImageEnhanceEngineRequest;
-  /** Compute request. `cuda`/`directml` remain transport-only legacy values. */
-  device?: ImageEnhanceDeviceRequest;
-  /** Compute precision. `fp16` remains a transport-only legacy value and currently degrades to fp32. */
-  precision?: ImageEnhancePrecisionRequest;
   /** Directory for the written PNG. */
   outputDir?: string;
   /** Base name for the written PNG. */
@@ -100,11 +68,13 @@ export async function enhanceImage(req: EnhanceImageRequest): Promise<EnhanceIma
     const dir = (req.outputDir ?? "/mock/outputs").replace(/\/$/, "");
     const stem = req.outputName ?? "subject_enhanced";
     const mode = req.mode ?? "conservative";
+    if (!["conservative", "texture_rebuild", "custom"].includes(mode)) {
+      throw new Error(`unknown mode ${JSON.stringify(mode)}`);
+    }
     const custom = mode === "custom";
     const presetScale: Record<string, number> = {
       conservative: 2.0,
       texture_rebuild: 2.0,
-      print_ready: 2.0,
       custom: req.scale ?? 2.0,
     };
     const src: [number, number] = [512, 700];
@@ -126,7 +96,9 @@ export async function enhanceImage(req: EnhanceImageRequest): Promise<EnhanceIma
       clamped = true;
     }
     const out: [number, number] = [Math.round(src[0] * scale), Math.round(src[1] * scale)];
-    let texture = custom ? (req.textureStrength ?? 0.25) : { conservative: 0.25, texture_rebuild: 0.7, print_ready: 0.5 }[mode] ?? 0.25;
+    let texture = custom
+      ? (req.textureStrength ?? 0.25)
+      : ({ conservative: 0.25, texture_rebuild: 0.7 }[mode] ?? 0.25);
     const preserveTextLogo = req.preserveTextLogo ?? true;
     if (preserveTextLogo) texture = Math.min(texture, 0.4);
     const scaleFactor = Math.round((out[0] / src[0]) * 1e4) / 1e4;
@@ -139,21 +111,13 @@ export async function enhanceImage(req: EnhanceImageRequest): Promise<EnhanceIma
         source_size: src,
         output_size: out,
         target_size: hasTarget ? [targetW, targetH] : null,
-        target_dpi: req.targetDpi ?? 300,
         max_pixels: maxPixels,
         clamped,
-        denoise_strength: custom ? (req.denoiseStrength ?? 0.3) : { conservative: 0.3, texture_rebuild: 0.15, print_ready: 0.2 }[mode] ?? 0.3,
+        denoise_strength: custom
+          ? (req.denoiseStrength ?? 0.3)
+          : ({ conservative: 0.3, texture_rebuild: 0.15 }[mode] ?? 0.3),
         texture_strength: texture,
         preserve_text_logo: preserveTextLogo,
-        engine: "cpu",
-        engine_requested: req.engine ?? "cpu",
-        engine_fallback_reason:
-          (req.engine ?? "cpu") === "cpu" ? null : "engine unavailable in browser dev mock",
-        backend_model: null,
-        device: null,
-        device_requested: req.device ?? "auto",
-        precision: null,
-        precision_requested: req.precision ?? "auto",
         processing_time_ms: 0,
       },
     };
@@ -164,15 +128,11 @@ export async function enhanceImage(req: EnhanceImageRequest): Promise<EnhanceIma
     mode: req.mode ?? null,
     targetWidth: req.targetWidth ?? null,
     targetHeight: req.targetHeight ?? null,
-    targetDpi: req.targetDpi ?? null,
     maxPixels: req.maxPixels ?? null,
     scale: req.scale ?? null,
     denoiseStrength: req.denoiseStrength ?? null,
     textureStrength: req.textureStrength ?? null,
     preserveTextLogo: req.preserveTextLogo ?? null,
-    engine: req.engine ?? null,
-    device: req.device ?? null,
-    precision: req.precision ?? null,
     outputDir: req.outputDir ?? null,
     outputName: req.outputName ?? null,
   })) as EnhanceImageResult;

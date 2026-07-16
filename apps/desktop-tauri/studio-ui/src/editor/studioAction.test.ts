@@ -1,17 +1,9 @@
-// Studio Action runtime (plan steps 5–7): compute block registry, action
-// registry stages (dry_run -> preview -> commit -> undo), and the first
+// Studio Action runtime: action registry stages (dry_run -> preview -> commit
+// -> undo), and the first
 // non-agent actions. Every commit must land as an ordinary undo step and
 // must refuse to touch anything but its resolved target.
 
 import { describe, expect, it } from "vitest";
-import {
-  bridgeSam2Runner,
-  builtinComputeBlocks,
-  createComputeBlockRegistry,
-  sam2PointPromptBlock,
-  type Sam2SelectionAlphaRequest,
-  type Sam2SelectionAlphaResult,
-} from "./computeBlocks";
 import {
   builtinStudioActions,
   type ActionContext,
@@ -34,59 +26,6 @@ const maskCtx = (state: EditState): ActionContext => {
     target: { kind: "layer_mask", ...ref, layerId: layer.id, maskId: layer.mask!.id },
   };
 };
-
-describe("compute block registry", () => {
-  it("registers SAM 2 under mask.subject.point_prompt and runs the injected transport", async () => {
-    const registry = createComputeBlockRegistry();
-    const calls: Sam2SelectionAlphaRequest[] = [];
-    const fake = async (request: Sam2SelectionAlphaRequest): Promise<Sam2SelectionAlphaResult> => {
-      calls.push(request);
-      return { selectionAlphaArtifactRef: "artifact-1", provider: "sam2" };
-    };
-    registry.register(sam2PointPromptBlock(fake));
-
-    const [block] = registry.forCapability("mask.subject.point_prompt");
-    expect(block.id).toBe("sam2.point_prompt");
-    expect(block.backendCapability).toBe("mask.subject");
-    const result = (await block.run(
-      { imageRef: "img", targetSpace: "document", points: [{ x: 1, y: 2, label: 1 }] },
-      { backend: null },
-    )) as Sam2SelectionAlphaResult;
-    expect(result.selectionAlphaArtifactRef).toBe("artifact-1");
-    expect(calls).toHaveLength(1);
-  });
-
-  it("preloads the bridge-backed SAM 2 block in the builtin registry", async () => {
-    const registry = builtinComputeBlocks();
-    const [block] = registry.forCapability("mask.subject.point_prompt");
-    expect(block.id).toBe("sam2.point_prompt");
-    // Outside Tauri the bridge answers with its browser-dev mock; the
-    // contract mapping (mask_path -> selectionAlphaArtifactRef, etc.) still applies.
-    const result = (await block.run(
-      { imageRef: "img.png", targetSpace: "document", points: [{ x: 1, y: 2, label: 1 }] },
-      { backend: null },
-    )) as Sam2SelectionAlphaResult;
-    expect(result.selectionAlphaArtifactRef).toMatch(/\.png$/);
-    expect(result.provider).toBeTruthy();
-    expect(result.variantUsed).toBe("tiny");
-  });
-
-  it("bridge runner refuses a prompt without a positive point", async () => {
-    await expect(
-      bridgeSam2Runner(
-        { imageRef: "img.png", targetSpace: "document", points: [{ x: 1, y: 2, label: 0 }] },
-        { backend: null },
-      ),
-    ).rejects.toThrow(/positive point/);
-  });
-
-  it("rejects duplicate block ids", () => {
-    const registry = createComputeBlockRegistry();
-    const block = sam2PointPromptBlock(async () => ({ selectionAlphaArtifactRef: "a", provider: "sam2" }));
-    registry.register(block);
-    expect(() => registry.register(block)).toThrow(/already registered/);
-  });
-});
 
 describe("studio action registry stages", () => {
   it("refuses a target kind the action does not accept", () => {
@@ -173,28 +112,28 @@ describe("commit_selection_to_layer_mask", () => {
   });
 });
 
-describe("run_sam2_prompt_mask", () => {
+describe("record_point_selection", () => {
   it("needs at least one positive point", () => {
     const registry = builtinStudioActions();
     const state = addLayerMask(initEditState(), 0);
-    const plan = registry.dryRun("run_sam2_prompt_mask", maskCtx(state), {
+    const plan = registry.dryRun("record_point_selection", maskCtx(state), {
       points: [{ x: 1, y: 1, label: 0 }],
     });
     expect(plan.ok).toBe(false);
     expect(plan.summary).toMatch(/positive point/);
   });
 
-  it("records the prompts undoably and reports the capability + cost", () => {
+  it("records the prompts undoably without a backend capability", () => {
     const registry = builtinStudioActions();
     const state = addLayerMask(initEditState(), 0);
-    const params = { points: [{ x: 5, y: 6, label: 1 as const }], variant: "small" as const };
+    const params = { points: [{ x: 5, y: 6, label: 1 as const }] };
 
-    const plan = registry.dryRun("run_sam2_prompt_mask", maskCtx(state), params);
+    const plan = registry.dryRun("record_point_selection", maskCtx(state), params);
     expect(plan.ok).toBe(true);
-    expect(plan.capability).toBe("mask.subject.point_prompt");
-    expect(plan.costClass).toBe("local_compute");
+    expect(plan.capability).toBeUndefined();
+    expect(plan.costClass).toBe("free");
 
-    const result = registry.commit("run_sam2_prompt_mask", maskCtx(state), params);
+    const result = registry.commit("record_point_selection", maskCtx(state), params);
     expect(result.ok).toBe(true);
     expect(result.state.current.points).toEqual([{ x: 5, y: 6, label: 1 }]);
     expect(activeTargetKind(result.state.current)).toBe("mask");

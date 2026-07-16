@@ -39,10 +39,10 @@
 
 - FFmpeg 二进制、打包、下载和 native FFmpeg 功能改造；
 - `third_party/`、生成产物、构建缓存；
-- 已从产品运行时移除的 ComfyUI/Python 树。除非先完成 upstream/legacy 归属确认，否则不以“文件大”为理由重构；
+- 已从产品运行时移除的 legacy 源码树。除非先完成 upstream/legacy 归属确认，否则不以“文件大”为理由重构；
 - 本文不直接改变产品行为，不删除兼容路径。
 
-`CONTRIBUTING.md` 已明确当前产品后端为原生 Rust、无 Python runtime，因此顶层 ComfyUI 源码不应和一方桌面产品代码采用同一整改优先级。
+`CONTRIBUTING.md` 已明确当前产品后端仅为原生 Rust，因此已移除的 legacy 源码不应和一方桌面产品代码采用同一整改优先级。
 
 ## 3. 方法与优先级
 

@@ -10,9 +10,9 @@
 //! when it grows past `capacity`.
 //!
 //! This type is deliberately pure and decoder-agnostic — it holds no file
-//! handles and does no I/O — so it is unit-testable without ffmpeg and is reused
-//! unchanged when a native-Rust ffmpeg decoder replaces the PyAV worker behind
-//! the [`super::video_engine`] seam. Eviction *returns* the dropped path rather
+//! handles and does no I/O — so it is unit-testable without FFmpeg and can be
+//! reused directly by the native decoder behind the [`super::video_engine`]
+//! seam. Eviction *returns* the dropped path rather
 //! than deleting it, leaving the file lifecycle to the owner (posters live in a
 //! project cache dir that is cleared wholesale).
 

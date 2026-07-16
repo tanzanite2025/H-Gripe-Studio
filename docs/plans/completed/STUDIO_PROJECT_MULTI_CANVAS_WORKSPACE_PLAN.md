@@ -1,5 +1,9 @@
 # Studio Project Multi-Canvas Workspace Plan
 
+> Historical note (2026-07-16): this completed plan is retained only as an
+> implementation record. Treat the remaining text as history, not current
+> product guidance.
+
 > Status: completed. All five migration phases landed (PRs #382–#386), plus
 > the "Open Workflow imports into a new tab" behavior (PR #387).
 > Purpose: define the long-term project, multi-canvas tab, and toolbar

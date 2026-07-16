@@ -1,435 +1,60 @@
-# Subject Mask / Matte Editor card
+# Subject Mask / Matte Editor
 
-Backend: **native Rust** (in-process). This was the first card whose image
-processing lived in Rust (`image` + `imageproc`) — since Phase 7 (#314) every
-card is native — and it established the reusable `studio_image` hardening util
-the other Rust cards share. Segmentation / matting models also run in Rust
-(`ort`).
+Subject Mask is a deterministic native Rust compute card. It creates and edits
+a grayscale mask, alpha image, and cropped cutout without network access or
+downloaded model weights.
 
-The PSD-first subject-selection card. It answers *where the subject is, what to
-keep, which edges go semi-transparent, and what needs manual fixing* — and hands
-a clean matte to `Refine Mask Edge` → `PSD Export`. It is **not** an edge-quality
-card: selection lives here, edge cleanup / feather / fringe removal stays in
-`Refine Mask Edge`. The two are never merged.
+## Selection
 
-Terminology boundary: this card's "selection" means a subject mask/matte output
-and its `edit_paths` replay contract. It is not the image editor's active
-marching-ants selection state. For pen/lasso/marquee drafts, Make Selection, and
-`Ctrl+J` / Layer Via Copy inside the image editor, use
-[`../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md`](../plans/active/IMAGE_EDITOR_SELECTION_STATE_PROTOCOL_PLAN.md).
+Manual tools include brush, eraser, magic wand, marquee, lasso, pen/path,
+quick selection, object-region selection, background eraser, and mask
+morphology. Auto modes use a weight-free segmenter:
 
-This document is the card's frozen contract. Phase 1 (manual + magic-wand, no
-model) is specified in full; later phases are listed as planned extensions
-behind the same ports.
+1. Estimate the background colour from the image border.
+2. Mark pixels that differ from that background.
+3. Keep the largest connected component, or the components constrained by
+   positive/negative point hints.
+4. Apply placeholder, prior-mask, and manual-edit constraints.
 
-## Backend / executor lane
+This is deterministic subject isolation, not semantic model inference.
 
-Historically `StudioExecutor::Local` meant *"always a `python/bridge` CLI;
-must not touch the network"*, so this native in-process card introduced the
-separate `Compute` class. Post Phase 7 both `Local` and `Compute` run native
-Rust in-process with no network handle; the structural no-network guarantee is
-unchanged:
+## Continuous Alpha
 
-```
-StudioExecutor::Graph    pure in-process graph node, no heavy work
-StudioExecutor::Local    in-process native Rust card, no network (formerly python/bridge CLI)
-StudioExecutor::Compute  in-process Rust image/model work, no network (subjectMask)
-StudioExecutor::Api      provider call through the broker
-StudioExecutor::Hybrid   graph + api
-```
+When alpha_matting is enabled or matting strokes exist, the card builds a
+foreground/unknown/background trimap. A bounded guided filter uses image luma
+to resolve only the unknown band. Hard foreground and background remain exact.
 
-`Compute` is given **no broker / network handle**, exactly like `Local`, so the
-security gate (`studio_executor_for_kind` → class handler) stays structural: a
-`Compute` card can never make a provider call. Phase 2 local models (`ort` /
-`candle`) run in-process and stay on `Compute`; only a *remote* segmentation API
-would move the relevant mode to `Api` / `Hybrid`.
+## Contract
 
-`studio_executor_for_kind("subjectMask")` returns `Compute`; `nodeSpecs.ts` gets
-`executor: "compute"`.
+Inputs:
 
-## `studio_image` (new reusable util)
+- image (required)
+- previous_mask, placeholder_mask, prompt, edit_paths (optional)
 
-The legacy Python cards shared hardened loaders (`_load_rgba` / `_load_mask`).
-Rust cards need the same guarantees, so this card introduced `studio_image`
-(under `src-tauri/src/studio/`) which every Rust card now reuses:
+Key parameters:
 
-| Fn | Guarantee |
-| --- | --- |
-| `load_rgba(path, max_decode_pixels)` | Reject a decoded size over the budget **before** allocation (decompression-bomb guard); decode to 8-bit RGBA. |
-| `load_mask(path, max_decode_pixels)` | Same guard; decode to 8-bit `L` (high-bit mattes tone-scaled, not clipped). |
-| colour-space normalise | CMYK → sRGB (ICC when embedded), 16-bit / float → 8-bit, palette / grayscale → RGBA; record `source_mode`. |
-| `apply_exif_orientation` | Normalise only a real, non-identity orientation; record `exif_transposed`. |
+- mode: auto_subject, auto_product, auto_person, auto_transparent_object,
+  manual_brush, manual_pen, or hybrid
+- fill_holes, grow_px, feather_px
+- alpha_matting and matting_band_px
+- max_decode_pixels
+- output_dir and output_name
 
-The `image` crate decodes most of this; CMYK-ICC and EXIF are added here,
-matching the behaviour of the legacy Python loaders.
+Outputs:
 
-## Responsibility split (node / preview modal / image-editor modal)
+- mask
+- alpha_image
+- cutout_image
+- trimap
+- matte_report
+- edit_paths
 
-Two separate modals, deliberately not one:
+The report identifies builtin-cpu for auto selection and
+builtin-cpu-matte for guided matting. A legacy accelerated-device request is
+reported as a CPU decision with a visible reason.
 
-| Layer | Owns | Notes |
-| --- | --- | --- |
-| **Node body** | thumbnail, `Auto Detect` / `Edit Mask` / `Apply`, lightweight **click-to-select** | Heavy canvas stays out of the body (it would fight the graph's LOD rendering + lazy-thumbnail media discipline). The node holds only the **result** (`mask` / `cutout` / `edit_paths`). |
-| **Preview modal** (shared) | read-only review of the current image / mask / result at a stage | A **generic, reusable** component, not Subject-Mask-specific: it is a *review gate* you can drop after **any** stage to eyeball the output and decide whether to proceed. It exposes an `Edit` button that opens the image-editor modal. |
-| **Image Editor modal** (on-demand) | full canvas: brush / eraser / wand / feather, undo/redo, overlay + transparency preview | A separate heavier editor, opened **from** the preview's `Edit` button. The edit tool set is driven by a registry (below). It reads/writes the node's result and closes back to the preview. |
+## Implementation
 
-Keeping the preview generic (so it can sit at every stage) and isolating the
-heavy pen/brush work in a separate on-demand editor is the key structural choice:
-the review surface stays universal and cheap, the editor stays specialised.
-
-### Click-to-select (node) — one interaction, two backends
-
-| Phase | Click = | Lane |
-| --- | --- | --- |
-| 1 | magic-wand flood fill: select a contiguous region by colour similarity (`wand_tolerance`) — native Rust | `Compute` |
-| 2 | a model point-prompt (SAM 2): click points → model computes the mask — `ort` in-process | `Compute` |
-
-**Phase 2 point-prompt is wired (PR-4b).** The `Point (SAM 2)` tool records each
-click into `edit_paths.points` as `{ x, y, label }` (image-space); a **left-click**
-adds a positive / include point (`label: 1`, green), a **right-click** adds a
-negative / exclude point (`label: 0`, red) that carves a wrongly-grabbed
-neighbour out. When an `auto_*` mode runs with at least one *positive* point, the
-backend routes to the SAM 2 segmenter ("segment what you clicked, not what you
-right-clicked") — the labels feed SAM 2's `point_labels` tensor (1 / 0). No
-positive point ⇒ the prompt-free salient cascade (BiRefNet → U²-Netp →
-`builtin-cpu`). A legacy `[x, y]` pair is read as a positive point, so older
-workflows stay loadable. The UI ships the same "click → region" interaction for
-both lanes.
-
-The UI ships "click → get a region" once; the backend is hot-swapped Phase 1 → 2
-without a frontend rewrite.
-
-### Image Editor tool registry (Phase 1)
-
-| Tool | Status | Phase 1 behaviour |
-| --- | --- | --- |
-| `brush` (add) / `eraser` (subtract) | ready | Paint mask in / out. |
-| `point` (SAM 2 prompt) | ready | Left-click records a positive (include) point, right-click a negative (exclude) point, into `edit_paths.points`; routes `auto_*` modes (with a positive point) to the SAM 2 segmenter. |
-| `wand` (click-select) | ready | Flood fill a contiguous region by colour similarity. |
-| `rect` / `ellipse` | ready | Marquee add/subtract. |
-| `invert` | ready | Invert the whole mask. |
-| `fill_holes` | ready | Close interior holes. |
-| `smooth` | ready | Morphological open/close. |
-| `grow` / `shrink` | ready | Dilate / erode by N px. |
-| `feather` | ready | Gaussian-feather the mask edge. |
-| `pen` (bezier path) | ready | Click to place anchors; clicking the first anchor (or *Close path*) closes it. Rasterised + boolean-combined with the mask (`add` / `subtract` / `intersect`). |
-| `lasso` | ready | Drag a freehand loop; released, it closes into a path selection with the same boolean modes. |
-| `matting` (continuous alpha) | ready | Cascade 3/4 — a **paint** tool: stroke the trimap *unknown band* over hair / fur / glass; the backend resolves it into continuous alpha via a trimap (ViTMatte, else a builtin **guided-filter** matte). Recorded as `matte_strokes`. |
-
-`planned` tools render greyed ("coming soon"); the registry lets a future tool
-ship stubbed before its backend lands.
-
-#### Keyboard shortcuts (image-editor scope)
-
-The modal registers a Photoshop-aligned shortcut table into the central scoped
-shortcut system (`src/shortcuts/core.ts` — a scope stack: bindings are declarative,
-per-scope, and only the topmost scope receives keys, so PS-style keys here can
-never collide with the node canvas or a future clip-timeline scope's
-Premiere-style keys). `src/shortcuts/scopes/imageEditorState.ts` is the frozen table for the
-`image-editor` scope: `B` brush, `E` eraser, `W` wand, `P` pen, `L` lasso, `M` /
-`Shift+M` marquees, `[` / `]` brush size, `X` swap add/subtract, `Ctrl+Z` /
-`Ctrl+Shift+Z` / `Ctrl+Y` undo/redo, `Ctrl+D` clear, `Ctrl+Shift+I` invert,
-`Ctrl+H` mask-only view, `Enter` close pen path, `Esc` cancel path / close.
-Not-yet-implemented PS tools and commands already *reserve* their combos as
-`planned` — the full PS default tool letter map (`V/C/K/I/J/S/Y/G/O/T/A/U/H/R/Z`
-plus `D/Q/F`) and common commands (`Ctrl+A` select all, `Ctrl+Shift+D`
-reselect, `Ctrl+T` transform, `Ctrl+J` duplicate, `Alt+Ctrl+Z` step backward,
-`Shift+F5`/`Shift+F6` fill/feather dialogs, `Delete`, `Space` pan,
-`Ctrl+0/1/=/−` zoom, `Shift+[`/`Shift+]` brush hardness). Reserved bindings are
-never dispatched, but a unit test fails CI if a new binding steals a reserved
-combo, and the zh coverage test guards the translations.
-
-## Inputs (ports)
-
-| Port | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `image` | image path | yes | The image to cut the subject from. |
-| `reference` | image path | no | Reference / target subject. |
-| `visual_context` | object | no | `VisualContext` from `PSD Context Analyze`. |
-| `placeholder_mask` | image path | no | PSD placeholder region; can constrain the subject extent. |
-| `prompt` | text | no | e.g. `perfume bottle`, `main product`, `person` (used by Phase 2 models). |
-| `previous_mask` | image path | no | Continue editing a prior mask. |
-| `edit_paths` | object | no | Prior brush/path edits to re-apply (see schema). |
-
-## Parameters (Phase 1)
-
-| Param | Type | Default | Range / values | Notes |
-| --- | --- | --- | --- | --- |
-| `mode` | enum | `hybrid` | `auto_subject` \| `auto_product` \| `auto_person` \| `auto_transparent_object` \| `manual_brush` \| `manual_pen` \| `hybrid` | Phase 1 implements `manual_*` + `hybrid` (manual layer over an empty / `previous_mask` base). The `auto_*` model modes are Phase 2: with `edit_paths.points` they run SAM 2, otherwise the salient cascade. |
-| `sam2_variant` | enum | `tiny` | `tiny` \| `small` \| `base_plus` \| `large` | SAM 2 hierarchy for point prompts; a missing non-tiny variant falls back to tiny. |
-| `device` | enum | `auto` | `auto` \| `gpu` \| `cpu` | Vendor-neutral request for auto-segmentation and ViTMatte ONNX sessions. Legacy `cuda` / `directml` workflow values remain accepted. The current Windows runtime binds CPU and reports accelerated-request fallback. |
-| `wand_tolerance` | int | `24` | `0..255` | Colour distance for the magic-wand flood fill. |
-| `feather_px` | float | `0.0` | `>= 0` | Edge feather applied last. |
-| `grow_px` | int | `0` | any | Positive dilates, negative erodes. |
-| `fill_holes` | bool | `false` | | Close interior holes before feather. |
-| `alpha_matting` | bool | `false` | | Resolve the binary edge into continuous alpha via a trimap (hair / glass). Runs **ViTMatte** when its weight resolves, else a deterministic `builtin-cpu-matte` guided-filter matte. Applied after morphology, before `feather_px`. Also runs automatically when `edit_paths.matte_strokes` is non-empty. |
-| `matting_band_px` | int | `12` | `>= 0` | Width of the *auto* trimap *unknown* band the matter resolves; hand-painted `matte_strokes` add to it. Used whenever matting runs. |
-| `output_dir` | path | run output dir | | Triplet written here. |
-| `output_name` | basename | `<image>_mask` | plain basename | Rejected if it contains `..` or a path separator (`studio_reject_unsafe_basename`). |
-| `max_decode_pixels` | int | `96_000_000` | `>= 0` (0 disables) | Rejects an **input** image / mask larger than this before decoding (decompression-bomb guard, via `studio_image`, aligned with the other cards). |
-
-## Outputs
-
-| Port | Type | Notes |
-| --- | --- | --- |
-| `mask` | grayscale PNG | The matte (`L`); binary or feathered. |
-| `alpha_image` | RGBA PNG | The full image with the mask as alpha. |
-| `cutout_image` | RGBA PNG | Subject cropped to its bbox; feeds `Refine Mask Edge`. |
-| `trimap` | grayscale PNG | The matting trimap (FG=255 / unknown=128 / BG=0) that drove the soft alpha; empty when matting did not run. Wire it to `Refine Mask Edge`'s `trimap` input to protect the unknown band from the erode/feather clean-up. |
-| `matte_report` | object | Operations + provenance (see schema). |
-| `edit_paths` | object | Pen/lasso/brush record for re-editing (see schema). |
-
-### `SubjectMaskResult` (Rust struct, serde-serialised)
-
-```json
-{
-  "mask_path": "",
-  "alpha_image_path": "",
-  "cutout_image_path": "",
-  "edit_paths_path": "",
-  "matte_report": {
-    "mode": "hybrid",
-    "provider": "vitmatte",
-    "engine": "onnxruntime",
-    "model_path": "C:/models/vitmatte.onnx",
-    "device": "cpu",
-    "device_requested": "cpu",
-    "source_mode": "RGB",
-    "exif_transposed": false,
-    "max_decode_pixels": 96000000,
-    "image_size": [1200, 1600],
-    "mask_coverage": 0.41,
-    "detected_subjects": [
-      { "label": "product", "confidence": 0.92, "bbox": [120, 80, 900, 1300] }
-    ],
-    "operations": [
-      { "type": "wand", "tolerance": 24 },
-      { "type": "brush_subtract", "radius": 18 },
-      { "type": "fill_holes" },
-      { "type": "alpha_matting", "provider": "vitmatte", "engine": "onnxruntime", "model_path": "C:/models/vitmatte.onnx", "device": "cpu", "device_requested": "cpu", "device_fallback_reason": null, "band_px": 12, "painted_strokes": 2 },
-      { "type": "feather", "px": 2.5 }
-    ],
-    "triplet": { "mask": true, "alpha_image": true, "cutout_image": true },
-    "processing_time_ms": 0
-  }
-}
-```
-
-`matte_report` follows the same enriched-report convention as the other cards:
-`source_mode`, `exif_transposed`, `max_decode_pixels`, `image_size`,
-`processing_time_ms`, and a `triplet` completeness flag. The top-level provider,
-model, engine, device, request, and fallback fields always come from one stage:
-auto segmentation when it ran, otherwise alpha matting. A purely manual/hybrid
-run without either stage remains `rust-native` and omits device fields. Each
-`auto_segment` and `alpha_matting` operation also carries its complete stage
-tuple, so a two-stage run never combines the segmentation provider/model with
-the matting device. Auto segmentation tries `sam2` for point prompts, otherwise
-`u2net_human_seg` / `birefnet` / `u2netp` by mode and priority; any weight,
-session, inference, or output-contract failure reaches deterministic
-`builtin-cpu` with the original reason. ViTMatte has the same contract and
-falls back to `builtin-cpu-matte`.
-
-### `EditPaths`
-
-```json
-{
-  "version": 2,
-  "ops": [
-    {
-      "type": "path",
-      "id": "path_1", "mode": "add", "tool": "pen", "closed": true,
-      "points": [ { "x": 100, "y": 120, "in": [90, 110], "out": [110, 130] } ]
-    },
-    { "type": "brush", "id": "stroke_1", "mode": "subtract", "radius": 18, "points": [[100, 120], [105, 124]] },
-    { "type": "feather", "amount": 2 }
-  ],
-  "matte_strokes": [
-    { "id": "matte_1", "radius": 16, "points": [[300, 200], [312, 214]] }
-  ],
-  "points": [ { "x": 420, "y": 360, "label": 1 }, { "x": 690, "y": 540, "label": 0 } ]
-}
-```
-
-Version 2 records the edits as **one ordered `ops` stack** (see
-`docs/design/ps-editor-architecture.md`, M1), replayed in recorded order on
-run. `type: "path"` / `type: "brush"` carry the vector-path / brush-stroke
-shapes; any other `type` is a queued selection / morphology operation (`wand` /
-`rect` / `ellipse` / `invert` / `fill_holes` / `grow` / `shrink` / `feather` /
-`smooth`, with optional `amount` / `region`). A version-1 record (separate
-`paths` / `brush_strokes` / `operations` arrays) is migrated automatically on
-load — folded onto `ops` in the legacy replay order (paths, then strokes, then
-operations) so old workflows rasterise identically.
-
-`path` ops (pen / lasso) are **rasterised on run**: the backend flattens each
-closed anchor loop (cubic bezier segments where `in` / `out` control handles are
-present), fills it with an even-odd scanline rasteriser and boolean-combines it
-with the mask per `mode` (`add` / `subtract` / `intersect`). `matte_strokes` are
-trimap *unknown-band* strokes painted by the **Matting** tool: the backend
-stamps them as the unknown level on top of the auto `matting_band_px` ring, and
-their presence runs matting even when the `alpha_matting` flag is off. `points`
-are SAM 2 point prompts (image-space `{ x, y, label }`, `label: 1` positive /
-include, `label: 0` negative / exclude) consumed by the `auto_*` model lane
-(Phase 2): a positive point routes to SAM 2 and seeds the selection, a negative
-point carves a region back out (SAM 2 `point_labels` 0, or component exclusion in
-the builtin fallback). A legacy `[x, y]` pair is read as positive. They are
-ignored by the manual lanes.
-
-## Colour space & bit depth
-
-> Working space / bit depth / ICC handling is defined once in
-> [`docs/design/colour-pipeline.md`](../design/colour-pipeline.md) (the source
-> of truth). That pipeline (P1–P5) has **landed** here (P4d, #194): the image
-> loads via `studio_image::load_working` into the 16-bit canonical
-> `WorkingImage`; the segmenters/matting models consume its 8-bit sRGB egress
-> (`to_srgb_rgba8`, consistent with P3); the cutout / alpha-image **RGBA
-> products** are written 16-bit with the ICC embedded (`write_working_png`)
-> when the canonical surface is wide-gamut, while **masks stay 8-bit gray**.
-
-The model/heuristic entry consumes the 8-bit sRGB egress of that surface
-(and `source_mode` is recorded):
-
-| Source mode | Handling |
-| --- | --- |
-| RGB / RGBA / L / LA | Used directly. |
-| palette | Expanded to RGB(A); transparency treated as alpha. |
-| CMYK | Converted to sRGB via the embedded ICC profile when present, else naive. |
-| 16-bit / float | Tone-scaled to 8-bit before conversion. |
-
-A `placeholder_mask` / `previous_mask` is read as 8-bit `L` via
-`studio_image::load_mask` (high-bit mattes tone-scaled, not clipped) and used to
-constrain / seed the subject.
-
-## Boundary behaviour
-
-| Condition | Behaviour |
-| --- | --- |
-| Missing / blank `image` | Card handler errors fast: `Subject Mask needs a connected image input`. |
-| Missing file on disk | `<which> not found: <path>`. |
-| Input larger than `max_decode_pixels` | `input image too large to decode safely: <path> WxH ...` (before allocation). |
-| Empty selection after edits | Emits a fully-transparent mask + `mask_coverage: 0.0`; never panics. |
-| EXIF-rotated image | Orientation normalised; `exif_transposed: true`. |
-| `auto_*` mode (BiRefNet weight resolvable) | The BiRefNet ONNX model produces the base matte in-process (`provider: birefnet`) — highest quality, preferred when present. A `previous_mask`, if connected, still takes precedence as continuation. |
-| `auto_*` mode (only U²-Netp weight resolvable) | The lightweight bundled U²-Netp model produces the base matte (`provider: u2netp`). |
-| `auto_*` mode (no model weight resolvable) | Falls back to a deterministic built-in CPU segmenter (border-background distance + largest connected component, point-prompt aware); `provider: builtin-cpu`. |
-| Unsafe `output_name` | Rejected via `studio_reject_unsafe_basename`. |
-
-## Determinism
-
-Phase 1 is deterministic: identical `image` + params + `edit_paths` produce the
-same triplet. Phase 2 model modes may not be, and will report their `provider` /
-model id in `matte_report`.
-
-## Phases
-
-1. **Manual usable** (this contract): native-Rust magic-wand + brush/eraser +
-   morphology + feather, triplet output, `edit_paths` stored. Ships into the real
-   PSD chain.
-2. **Auto subject** — SAM / RMBG / BiRefNet in-process via `ort` / `candle` on the
-   `Compute` lane; the node's click-to-select becomes a model point-prompt. A
-   *remote* segmentation API instead moves that mode to `Api` / `Hybrid`.
-   - *Landed:* a `SubjectSegmenter` trait routes the four `auto_*` modes through
-     the `Compute` lane, behind a shared `ModelSpec`-driven `ort` backend so
-     multiple models share one load + inference path. Backends are tried in
-     priority order — when the request carries point prompts, **SAM 2**
-     (`provider: sam2`, interactive); otherwise the prompt-free salient cascade
-     runs. `auto_person` leads that cascade with the **U²-Net human-seg** net
-     (`provider: u2net_human_seg`, person-tracking) before the generic
-     **BiRefNet** (`provider: birefnet`, high quality) → **U²-Netp**
-     (`provider: u2netp`, lightweight default) → deterministic **`builtin-cpu`**
-     fallback; every other mode uses the generic priority. Missing weights,
-     session-load failures, inference failures, and malformed/non-finite model
-     outputs all degrade to `builtin-cpu`, so the modes always work while the
-     original reason remains visible. `matte_report` carries `provider` and
-     `detected_subjects` (`label` / `bbox` / `coverage`). Object Select and
-     Remove stay explicit CPU paths, reuse the same learned-to-builtin retry,
-     and record failed/no-op status instead of logging a silent success.
-   - *Interactive (SAM 2):* a two-stage **SAM 2** backend (encoder + prompt
-     decoder, Apache-2.0; tiny is ~154 MB combined) implements the same trait
-      (`provider: sam2`). `segmenter_for_mode(mode, points, sam2_variant,
-      device_request)` is
-     point-aware: a non-empty `edit_paths.points` routes to SAM 2, otherwise
-     the salient cascade runs. The frontend `Point (SAM 2)` tool records those
-     clicks into `edit_paths.points` (PR-4b), so the node's click-to-select
-     drives the model. The node's **`sam2_variant`** param picks the hiera
-     model size — `tiny` (default) / `small` / `base_plus` / `large`; a
-     variant whose weight is missing falls back to tiny, and
-     `detected_subjects` records the `variant` actually used, so two nodes on
-     the same prompts compare variants side by side (XY).
-   - *Weight sourcing:* no `.onnx` is committed to git. **u2netp** (Apache-2.0,
-     ~4.6 MB) is the *bundled default* — fetched at package time
-     (`scripts/fetch-subject-model.*`) and shipped via `tauri.conf.json`
-     `bundle.resources` under `<install>/resources/models/`. **BiRefNet lite**
-     (MIT, ~224 MB), **U²-Net human-seg** (Apache-2.0, ~168 MB, `auto_person`),
-     **SAM 2** (Apache-2.0, four hiera variants: tiny ~154 MB → large ~910 MB
-     combined) and **ViTMatte small** (Apache-2.0, ~104 MB) are the
-     *downloadable big tier* — not bundled by default;
-     `scripts/fetch-birefnet.*` / `scripts/fetch-person-model.*` /
-     `scripts/fetch-sam2.*` (takes a variant list, `all` for every one) /
-     `scripts/fetch-vitmatte.*` place them in the same
-     dir to ship or test with. `HGRIPE_SUBJECT_MODEL` / `HGRIPE_BIREFNET_MODEL`
-     / `HGRIPE_PERSON_MODEL` / `HGRIPE_SAM2_ENCODER` / `HGRIPE_SAM2_DECODER` /
-     `HGRIPE_VITMATTE_MODEL` env vars override the paths for dev / tests.
-   - *Landed:* the `auto_person` portrait/human-matting net
-     (`u2net_human_seg`) slots into `segmenter_for_mode` behind the same trait,
-     preferred only for that mode.
-3. **Pen paths** — bezier rasterise, path add/subtract/intersect, re-editable.
-   - *Landed:* pen / lasso tools in the Image Editor modal record closed `paths`;
-     the backend rasterises them (bezier flatten → even-odd scanline fill) and
-     boolean-combines per `mode`, and the proxy preview folds them in.
-     Re-editing committed anchors remains open.
-4. **Alpha matting** — continuous alpha (hair / glass / translucency), trimap,
-   tighter `Refine Mask Edge` hand-off.
-   - *Landed (cascade 3, backend):* the `alpha_matting` param derives a trimap
-     from the binary matte (`trimap_from_mask`: erode → FG core, dilate → BG
-     exterior, the `matting_band_px` ring between → unknown) and resolves it
-     through an `AlphaMatter`. **ViTMatte small** (`provider: vitmatte`,
-     Apache-2.0, ~104 MB, single 4-channel `pixel_values` = RGB + trimap)
-     runs in-process via `ort` when its weight resolves; otherwise a
-     deterministic `builtin-cpu-matte` **guided filter** (He et al., image-guided)
-     resolves the unknown band along real edges, so the toggle always works
-     without the weight. The op is recorded in `matte_report.operations` and
-     the soft matte hands off to `Refine Mask Edge`. The real ViTMatte path is
-     covered by a weight-gated test (`vitmatte_inference_when_weight_present`)
-     that skips when no blob resolves; the opt-in `tauri (vitmatte e2e)` CI job
-     (`workflow_dispatch`) fetches the weight and runs it. See
-     `resources/models/README.md` → *Verify ViTMatte end-to-end*.
-   - *Landed (cascade 4, UI):* a dedicated `matting` paint tool in the Image Editor
-     modal records `matte_strokes` (per-region trimap-unknown painting); the
-     backend stamps them onto the trimap before matting (`parse_matte_strokes`).
-   - *Landed (cascade 5, hand-off):* when matting runs the node persists its
-     driving trimap and surfaces it on a new `trimap` output. Connect that to
-     `Refine Mask Edge`'s `trimap` input and the refiner **protects the unknown
-     band**: inside it the upstream continuous alpha is kept instead of the
-     eroded/feathered edge, so hair / fur / glass survives the clean-up rather
-     than being treated as binary fringe (`edge_report.trimap_applied` /
-     `protected_band_px`).
-
-## Backend boundary
-
-```
-React UI         -> node preview + shared Preview modal + on-demand Image Editor modal (brush/pen/undo/redo)
-Rust / Tauri     -> studio_image (decode guard + colour-space), morphology / wand / feather,
-                    Phase 2 model inference (ort/candle), file IO, path validation
-Refine Mask Edge -> receives mask / cutout, owns edge fusion
-```
-
-## Tests
-
-- `src-tauri/src/studio/subject_mask.rs` — *(added with the Phase 1
-  implementation)* `#[cfg(test)]` unit tests: rejects missing/blank image, param
-  defaults, wand flood-fill, brush apply, morphology + feather, empty-selection
-  fallback, report/triplet shape.
-- `src-tauri/src/studio/studio_image.rs` — decode-guard rejection, colour-space
-  normalisation, EXIF orientation.
-- `src-tauri/src/studio/subject_matte.rs` — trimap derivation (FG / unknown /
-  BG levels, zero-band pass-through), ViTMatte pre/post-processing
-  (4-channel pack, `[-1, 1]` RGB + rescaled trimap, clamp + resize-back), the
-  deterministic `builtin-cpu-matte` guided-filter matte (including an
-  image-edge-following assertion), and a weight-gated ViTMatte inference smoke
-  test (skipped when the blob is absent).
-- `exec.rs` — `subjectMask` maps to `Compute`; the `Compute` handler rejects
-  foreign kinds (mirrors the existing `class_handlers_reject_foreign_kinds`).
-- studio-ui — the shared Preview modal as a stage gate, the Image Editor tool
-  registry (`ready` vs `planned`, incl. the `point` SAM 2 tool), the edit-state
-  model (`imageEditorState` brush / op / **point** record + undo/redo), and
-  click-to-select (E2E).
+- apps/desktop-tauri/src-tauri/src/studio/subject_mask.rs
+- apps/desktop-tauri/src-tauri/src/studio/subject_segment.rs
+- apps/desktop-tauri/src-tauri/src/studio/subject_matte.rs

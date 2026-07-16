@@ -27,16 +27,6 @@ fn hd_surface() -> GradeSurface {
 
 fn grade_doc(n_px: usize) -> GradeDoc {
     let mask: Vec<f32> = (0..n_px).map(|px| ((px as f32) * 0.37).fract()).collect();
-    let mut lut_table = Vec::new();
-    let size = 17u32; // a typical .cube size
-    for b in 0..size {
-        for g in 0..size {
-            for r in 0..size {
-                let n = (size - 1) as f32;
-                lut_table.extend([r as f32 / n, g as f32 / n, b as f32 / n]);
-            }
-        }
-    }
     GradeDoc {
         layers: vec![
             GradeLayer {
@@ -50,10 +40,6 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                     GradeOp::WhiteBalance {
                         temp: 0.1,
                         tint: -0.05,
-                    },
-                    GradeOp::Curves {
-                        channel: CurveChannel::Master,
-                        points: vec![[0.0, 0.05], [0.5, 0.6], [1.0, 0.95]],
                     },
                 ],
             },
@@ -75,13 +61,7 @@ fn grade_doc(n_px: usize) -> GradeDoc {
                 visible: true,
                 mask: None,
                 qualifier: None,
-                ops: vec![
-                    GradeOp::Lut3d {
-                        size,
-                        table: lut_table,
-                    },
-                    GradeOp::Saturation { amount: 0.3 },
-                ],
+                ops: vec![GradeOp::Saturation { amount: 0.3 }],
             },
         ],
     }
@@ -174,7 +154,6 @@ fn main() {
                 lightness: -0.1,
             },
         ),
-        ("lut3d (17^3)", doc.layers[2].ops[0].clone()),
     ];
     for (name, op) in single_ops {
         let mut s = input.clone();

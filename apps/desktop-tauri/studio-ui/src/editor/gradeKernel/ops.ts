@@ -2,7 +2,6 @@
 // and `applyOp` dispatch, plus the per-pixel traversal helpers.
 
 import { hslToRgb, rgbToHsl } from "./hsl";
-import { lut1dSample, lut3dSample } from "./lut";
 import { denoise, filmGrain, gaussianBlur, sharpen, vignette } from "./spatial";
 import { monotoneSpline, multiplierSpline, periodicSpline } from "./spline";
 import { trcDecode, trcEncode } from "./trc";
@@ -19,8 +18,6 @@ export type GradeOp =
   | { type: "saturation"; amount: number }
   | { type: "lift_gamma_gain"; lift: [number, number, number]; gamma: [number, number, number]; gain: [number, number, number] }
   | { type: "hsl_adjust"; hue: number; saturation: number; lightness: number }
-  | { type: "lut3d"; size: number; table: number[] }
-  | { type: "lut1d"; size: number; table: number[] }
   | { type: "hue_vs_hue"; points: [number, number][] }
   | { type: "hue_vs_sat"; points: [number, number][] }
   | { type: "lum_vs_sat"; points: [number, number][] }
@@ -51,6 +48,37 @@ export type GradeOp =
   | { type: "film_grain"; amount: number; seed: number }
   | { type: "blur"; sigma: number }
   | { type: "vignette"; amount: number; midpoint?: number; feather?: number };
+
+const GRADE_OP_TYPES = new Set<GradeOp["type"]>([
+  "exposure",
+  "white_balance",
+  "levels",
+  "curves",
+  "saturation",
+  "lift_gamma_gain",
+  "hsl_adjust",
+  "hue_vs_hue",
+  "hue_vs_sat",
+  "lum_vs_sat",
+  "sat_vs_sat",
+  "log_wheels",
+  "contrast",
+  "soft_clip",
+  "white_balance_k",
+  "rgb_mixer",
+  "color_warper",
+  "color_ranges",
+  "replace_color",
+  "sharpen",
+  "denoise",
+  "film_grain",
+  "blur",
+  "vignette",
+]);
+
+export function isGradeOpType(value: unknown): value is GradeOp["type"] {
+  return typeof value === "string" && GRADE_OP_TYPES.has(value as GradeOp["type"]);
+}
 
 /** One colour-warper control point (mirrors Rust `WarpPoint`). */
 export interface WarpPoint {
@@ -289,29 +317,6 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
       }
       break;
     }
-    case "lut1d": {
-      for (let px = 0; px < n; px++) {
-        const i = px * 4;
-        for (let c = 0; c < 3; c++) {
-          surface.data[i + c] = lut1dSample(op.size, op.table, c, clamp01(surface.data[i + c]));
-        }
-      }
-      break;
-    }
-    case "lut3d": {
-      for (let px = 0; px < n; px++) {
-        const i = px * 4;
-        const out = lut3dSample(op.size, op.table, [
-          clamp01(surface.data[i]),
-          clamp01(surface.data[i + 1]),
-          clamp01(surface.data[i + 2]),
-        ]);
-        surface.data[i] = out[0];
-        surface.data[i + 1] = out[1];
-        surface.data[i + 2] = out[2];
-      }
-      break;
-    }
     case "soft_clip": {
       const hs = Math.min(Math.max(op.high_start, 0), 1 - 1e-4);
       const ls = Math.min(Math.max(op.low_start, 0), hs);
@@ -422,5 +427,7 @@ export function applyOp(surface: GradeSurface, op: GradeOp): void {
     case "vignette":
       vignette(surface, op.amount, op.midpoint ?? 0.5, op.feather ?? 0.5);
       break;
+    default:
+      throw new Error(`unsupported grade operation: ${String((op as { type?: unknown }).type)}`);
   }
 }

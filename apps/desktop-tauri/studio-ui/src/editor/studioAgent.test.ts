@@ -87,7 +87,7 @@ describe("commitProposal (user-confirmed)", () => {
       intent: "mask + sam + feather",
       steps: [
         { actionId: "create_layer_mask" },
-        { actionId: "run_sam2_prompt_mask", params: { points: [{ x: 5, y: 6, label: 1 }] } },
+        { actionId: "record_point_selection", params: { points: [{ x: 5, y: 6, label: 1 }] } },
         { actionId: "feather_layer_mask", params: { radiusPx: 3 } },
       ],
     };

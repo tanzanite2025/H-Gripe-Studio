@@ -720,12 +720,44 @@ pub(crate) fn viewport_present_view(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, MutexGuard};
 
     use super::*;
 
+    static VIEWPORT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    struct ViewportTestGuard {
+        _serial: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ViewportTestGuard {
+        fn drop(&mut self) {
+            clear_test_viewports();
+        }
+    }
+
+    fn clear_test_viewports() {
+        let registry = viewports();
+        let mut map = registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        map.clear();
+        drop(map);
+        registry.clear_poison();
+    }
+
+    fn viewport_test_guard() -> ViewportTestGuard {
+        let serial = VIEWPORT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        VIEWPORT_TEST_LOCK.clear_poison();
+        clear_test_viewports();
+        ViewportTestGuard { _serial: serial }
+    }
+
     #[test]
     fn create_set_render_destroy_lifecycle() {
+        let _guard = viewport_test_guard();
         let desc = viewport_create("image_edit".to_string()).expect("create");
         assert!(desc.viewport_id.starts_with("vp-"));
         assert_eq!(desc.backend.actual, "cpu");
@@ -742,6 +774,7 @@ mod tests {
 
     #[test]
     fn image_composite_camera_and_resize_reuse_retained_layer_scene() {
+        let _guard = viewport_test_guard();
         let path = std::env::temp_dir().join("hgripe_retained_scene_identity.png");
         image::RgbaImage::from_pixel(64, 48, image::Rgba([1, 2, 3, 255]))
             .save(&path)
@@ -829,6 +862,7 @@ mod tests {
 
     #[test]
     fn target_size_and_render_only_generations_have_distinct_lifetimes() {
+        let _guard = viewport_test_guard();
         let desc = viewport_create("image_edit".to_string()).expect("create");
         let id = parse_id(&desc.viewport_id).expect("id");
         let initial = {
@@ -868,6 +902,7 @@ mod tests {
 
     #[test]
     fn image_scene_commit_is_atomic_and_keeps_content_identity() {
+        let _guard = viewport_test_guard();
         let path = std::env::temp_dir().join("hgripe_atomic_scene_commit.png");
         image::RgbaImage::from_pixel(16, 16, image::Rgba([4, 5, 6, 255]))
             .save(&path)
@@ -986,6 +1021,7 @@ mod tests {
 
     #[test]
     fn layer_presentation_moves_linked_pixels_outside_document_and_frame_in_one_render() {
+        let _guard = viewport_test_guard();
         let red_path = std::env::temp_dir().join("hgripe_scene_linked_red.png");
         let green_path = std::env::temp_dir().join("hgripe_scene_linked_green.png");
         image::RgbaImage::from_pixel(4, 4, image::Rgba([220, 20, 40, 255]))
@@ -1143,6 +1179,7 @@ mod tests {
 
     #[test]
     fn mask_overlay_only_on_image_edit_viewports_and_validates_the_buffer() {
+        let _guard = viewport_test_guard();
         let data = crate::commands::thumbnails::base64_encode(&[0u8; 4]);
         let arg = |data: String| MaskOverlayArg {
             w: 2,
@@ -1188,6 +1225,7 @@ mod tests {
 
     #[test]
     fn overlay_scene_only_on_overlay_viewports_and_validates_coordinates() {
+        let _guard = viewport_test_guard();
         let scene = |region: [f32; 4]| OverlayScene {
             items: vec![OverlayItem::Marquee {
                 region,
@@ -1386,6 +1424,7 @@ mod tests {
 
     #[test]
     fn overlay_band_validation_rejects_bad_values() {
+        let _guard = viewport_test_guard();
         let vp = viewport_create("image_edit".to_string()).expect("create");
         let band = |radius: f32, color: [f32; 4]| OverlayScene {
             items: vec![OverlayItem::Band {
@@ -1423,6 +1462,7 @@ mod tests {
 
     #[test]
     fn overlay_marker_validation_rejects_bad_values() {
+        let _guard = viewport_test_guard();
         let vp = viewport_create("image_edit".to_string()).expect("create");
         let marker = |center: [f32; 2], size: f32, stroke: [f32; 4]| OverlayScene {
             items: vec![OverlayItem::Marker {
@@ -1456,6 +1496,7 @@ mod tests {
 
     #[test]
     fn overlay_polygon_validation_rejects_bad_points_and_colours() {
+        let _guard = viewport_test_guard();
         let vp = viewport_create("image_edit".to_string()).expect("create");
         let poly = |points: Vec<[f32; 2]>, stroke: [f32; 4]| OverlayScene {
             items: vec![OverlayItem::Polygon {
@@ -1673,6 +1714,7 @@ mod tests {
 
     #[test]
     fn read_pixels_matches_the_reference_render_parity() {
+        let _guard = viewport_test_guard();
         // Golden parity (surface swap Phase S4): what `viewport_read_pixels`
         // answers must be exactly the reference render's pixels. On CI
         // runners without a GPU the surface never presents, so the CPU
@@ -1758,6 +1800,7 @@ mod tests {
 
     #[test]
     fn grade_doc_only_on_grading_viewports() {
+        let _guard = viewport_test_guard();
         let image = viewport_create("image_edit".to_string()).expect("create");
         let err = viewport_set_grade(image.viewport_id.clone(), Some(serde_json::json!({})), None)
             .expect_err("image_edit must reject a grade doc");
@@ -1778,6 +1821,7 @@ mod tests {
 
     #[test]
     fn temporal_chain_blends_continuous_frames_and_restarts_on_seek() {
+        let _guard = viewport_test_guard();
         let desc = viewport_create("video_preview".to_string()).expect("create");
         let id = parse_id(&desc.viewport_id).expect("id");
         viewport_set_grade(desc.viewport_id.clone(), None, Some(1.0)).expect("set amount");
@@ -1825,6 +1869,7 @@ mod tests {
 
     #[test]
     fn graded_render_caches_the_source_proxy_per_target_and_size() {
+        let _guard = viewport_test_guard();
         // Register a real image so the graded render path runs end to end.
         let path = std::env::temp_dir().join("hgripe_viewport_proxy_cache.png");
         image::RgbaImage::from_pixel(64, 32, image::Rgba([40, 80, 120, 255]))
@@ -1905,6 +1950,7 @@ mod tests {
 
     #[test]
     fn set_view_validates_and_crops_the_rendered_frame() {
+        let _guard = viewport_test_guard();
         let path = std::env::temp_dir().join("hgripe_viewport_set_view.png");
         image::RgbaImage::from_pixel(64, 64, image::Rgba([200, 100, 50, 255]))
             .save(&path)
@@ -1958,6 +2004,7 @@ mod tests {
 
     #[test]
     fn proxy_cache_is_a_bounded_per_viewport_lru() {
+        let _guard = viewport_test_guard();
         let desc = viewport_create("image_edit".to_string()).expect("create");
         let id = parse_id(&desc.viewport_id).expect("id");
         let key = |n: u64| ProxyKey {
@@ -1999,6 +2046,7 @@ mod tests {
 
     #[test]
     fn zoomed_render_decodes_at_higher_detail() {
+        let _guard = viewport_test_guard();
         // Detail sizing: power-of-two steps toward size*zoom, capped.
         let view = |zoom: f32| ViewportView {
             zoom,
@@ -2050,6 +2098,7 @@ mod tests {
 
     #[test]
     fn image_layer_targets_resolve_through_the_layered_asset_registry() {
+        let _guard = viewport_test_guard();
         // Two real layer artifacts of different colors, registered by path.
         let dir = std::env::temp_dir();
         let subject_path = dir.join("hgripe_viewport_layer_subject.png");
@@ -2123,6 +2172,7 @@ mod tests {
 
     #[test]
     fn image_composite_target_renders_source_copy_layers_through_masks() {
+        let _guard = viewport_test_guard();
         let path = std::env::temp_dir().join("hgripe_viewport_image_composite.png");
         image::RgbaImage::from_pixel(64, 64, image::Rgba([220, 20, 40, 255]))
             .save(&path)
@@ -2199,6 +2249,7 @@ mod tests {
 
     #[test]
     fn image_composite_target_moves_linked_masks_with_transformed_layers() {
+        let _guard = viewport_test_guard();
         let path = std::env::temp_dir().join("hgripe_viewport_image_composite_move.png");
         image::RgbaImage::from_pixel(64, 64, image::Rgba([20, 180, 90, 255]))
             .save(&path)
@@ -2258,6 +2309,7 @@ mod tests {
 
     #[test]
     fn video_clip_targets_resolve_through_the_timeline_registry() {
+        let _guard = viewport_test_guard();
         // A still clip renders end to end without the media engine; video
         // clips share the video_frame decode path (exercised elsewhere).
         let path = std::env::temp_dir().join("hgripe_viewport_timeline_still.png");
@@ -2347,6 +2399,7 @@ mod tests {
 
     #[test]
     fn node_output_targets_resolve_through_the_node_output_registry() {
+        let _guard = viewport_test_guard();
         let path = std::env::temp_dir().join("hgripe_viewport_node_output.png");
         image::RgbaImage::from_pixel(64, 64, image::Rgba([40, 90, 220, 255]))
             .save(&path)
@@ -2518,6 +2571,7 @@ mod tests {
 
     #[test]
     fn set_target_validates_image_resource() {
+        let _guard = viewport_test_guard();
         let desc = viewport_create("grade_preview".to_string()).expect("create");
         let err = viewport_set_target(
             desc.viewport_id.clone(),

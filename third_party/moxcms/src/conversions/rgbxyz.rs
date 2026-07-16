@@ -231,54 +231,6 @@ impl<T: Clone + PointeeSizeExpressible, const BUCKET: usize>
             adaptation_matrix: dst_matrix,
         }
     }
-
-    #[cfg(all(target_arch = "aarch64", feature = "neon_shaper_fixed_point_paths"))]
-    pub(crate) fn to_q1_30_n<R: Copy + 'static + Default, const PRECISION: i32>(
-        &self,
-        gamma_lut: usize,
-        bit_depth: usize,
-    ) -> TransformMatrixShaperFpOptVec<R, i32, T>
-    where
-        f32: AsPrimitive<R>,
-        f64: AsPrimitive<R>,
-    {
-        // It is important to scale 1 bit more to compensate vqrdmlah Q0.31, because we're going to use Q1.30
-        let table_size = if T::FINITE {
-            (1 << bit_depth) - 1
-        } else {
-            T::NOT_FINITE_LINEAR_TABLE_SIZE - 1
-        };
-        let ext_bp = if T::FINITE {
-            bit_depth as u32 + 1
-        } else {
-            let bp = (T::NOT_FINITE_LINEAR_TABLE_SIZE - 1).count_ones();
-            bp + 1
-        };
-        let linear_scale = {
-            let lut_scale = (gamma_lut - 1) as f64 / table_size as f64;
-            ((1u32 << ext_bp) - 1) as f64 * lut_scale
-        };
-        let new_box_linear = self
-            .linear
-            .iter()
-            .map(|&v| (v as f64 * linear_scale).round().as_())
-            .collect::<Vec<R>>();
-        let scale: f64 = (1i64 << PRECISION) as f64;
-        let source_matrix = self.adaptation_matrix;
-        let mut dst_matrix = Matrix3::<i32> {
-            v: [[i32::default(); 3]; 3],
-        };
-        for i in 0..3 {
-            for j in 0..3 {
-                dst_matrix.v[i][j] = (source_matrix.v[i][j] as f64 * scale) as i32;
-            }
-        }
-        TransformMatrixShaperFpOptVec {
-            linear: new_box_linear,
-            gamma: self.gamma.clone(),
-            adaptation_matrix: dst_matrix,
-        }
-    }
 }
 
 #[allow(unused)]
@@ -305,10 +257,7 @@ struct TransformMatrixShaperOptScalar<
     pub(crate) bit_depth: usize,
 }
 
-#[cfg(any(
-    any(target_arch = "x86", target_arch = "x86_64"),
-    target_arch = "aarch64"
-))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[allow(unused)]
 macro_rules! create_rgb_xyz_dependant_executor {
     ($dep_name: ident, $dependant: ident, $shaper: ident) => {
@@ -375,10 +324,7 @@ macro_rules! create_rgb_xyz_dependant_executor {
     };
 }
 
-#[cfg(any(
-    any(target_arch = "x86", target_arch = "x86_64"),
-    target_arch = "aarch64"
-))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[allow(unused)]
 macro_rules! create_rgb_xyz_dependant_executor_to_v {
     ($dep_name: ident, $dependant: ident, $shaper: ident) => {
@@ -442,10 +388,7 @@ macro_rules! create_rgb_xyz_dependant_executor_to_v {
     };
 }
 
-#[cfg(any(
-    any(target_arch = "x86", target_arch = "x86_64"),
-    target_arch = "aarch64"
-))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[allow(unused)]
 macro_rules! create_in_place_opt_rgb_xyz_fp_to_v {
     ($dep_name: ident, $dependant: ident, $resolution: ident, $shaper: ident) => {
@@ -585,17 +528,6 @@ create_rgb_xyz_dependant_executor_to_v!(
     TransformMatrixShaperOptimized
 );
 
-#[cfg(all(target_arch = "x86_64", feature = "avx512_shaper_optimized_paths"))]
-use crate::conversions::avx512::TransformShaperRgbOptAvx512;
-
-#[cfg(all(target_arch = "x86_64", feature = "avx512_shaper_optimized_paths"))]
-create_rgb_xyz_dependant_executor!(
-    make_rgb_xyz_rgb_transform_avx512_opt,
-    TransformShaperRgbOptAvx512,
-    TransformMatrixShaperOptimized
-);
-
-#[cfg(not(all(target_arch = "aarch64", feature = "neon_shaper_paths")))]
 pub(crate) fn make_rgb_xyz_rgb_transform<
     T: Clone + Send + Sync + PointeeSizeExpressible + 'static + Copy + Default,
     const LINEAR_CAP: usize,
@@ -672,7 +604,6 @@ where
     Err(CmsError::UnsupportedProfileConnection)
 }
 
-#[cfg(not(all(target_arch = "aarch64", feature = "neon_shaper_optimized_paths")))]
 pub(crate) fn make_rgb_xyz_rgb_transform_opt<
     T: Clone + Send + Sync + PointeeSizeExpressible + 'static + Copy + Default,
     const LINEAR_CAP: usize,
@@ -686,15 +617,6 @@ pub(crate) fn make_rgb_xyz_rgb_transform_opt<
 where
     u32: AsPrimitive<T>,
 {
-    #[cfg(all(feature = "avx512_shaper_optimized_paths", target_arch = "x86_64"))]
-    if std::arch::is_x86_feature_detected!("avx512bw")
-        && std::arch::is_x86_feature_detected!("avx512vl")
-        && std::arch::is_x86_feature_detected!("fma")
-    {
-        return make_rgb_xyz_rgb_transform_avx512_opt::<T, LINEAR_CAP>(
-            src_layout, dst_layout, profile, gamma_lut, bit_depth,
-        );
-    }
     #[cfg(all(feature = "avx_shaper_optimized_paths", target_arch = "x86_64"))]
     if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
         return make_rgb_xyz_rgb_transform_avx2_opt::<T, LINEAR_CAP>(
@@ -758,22 +680,11 @@ where
     Err(CmsError::UnsupportedProfileConnection)
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_paths"))]
-use crate::conversions::neon::TransformShaperRgbNeon;
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_optimized_paths"))]
-use crate::conversions::neon::TransformShaperRgbOptNeon;
 use crate::conversions::rgbxyz_fixed::TransformMatrixShaperFpOptVec;
 use crate::conversions::rgbxyz_fixed::{
     TransformMatrixShaperFixedPointOpt, TransformMatrixShaperFp,
 };
 use crate::transform::PointeeSizeExpressible;
-
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_paths"))]
-create_rgb_xyz_dependant_executor_to_v!(
-    make_rgb_xyz_rgb_transform,
-    TransformShaperRgbNeon,
-    TransformMatrixShaper
-);
 
 #[cfg(feature = "in_place")]
 create_in_place_rgb_xyz!(
@@ -782,36 +693,10 @@ create_in_place_rgb_xyz!(
     TransformMatrixShaper
 );
 
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_optimized_paths"))]
-create_rgb_xyz_dependant_executor_to_v!(
-    make_rgb_xyz_rgb_transform_opt,
-    TransformShaperRgbOptNeon,
-    TransformMatrixShaperOptimized
-);
-
 #[cfg(feature = "in_place")]
 create_in_place_rgb_xyz!(
     make_rgb_xyz_in_place_transform_opt,
     TransformMatrixShaperOptScalar,
-    TransformMatrixShaperOptimized
-);
-
-#[cfg(all(
-    target_arch = "aarch64",
-    feature = "in_place",
-    feature = "neon_shaper_fixed_point_paths"
-))]
-use crate::conversions::neon::TransformShaperQ2_13NeonOpt;
-
-#[cfg(all(
-    target_arch = "aarch64",
-    feature = "in_place",
-    feature = "neon_shaper_fixed_point_paths"
-))]
-create_in_place_opt_rgb_xyz_fp_to_v!(
-    make_rgb_xyz_in_place_transform_q2_13_opt,
-    TransformShaperQ2_13NeonOpt,
-    i16,
     TransformMatrixShaperOptimized
 );
 

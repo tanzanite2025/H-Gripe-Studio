@@ -18,19 +18,23 @@ Companion documents:
 - `image-editor-ui-structure.md`: frontend file layout and editor boundary.
 - `grade-kernel.md` / `grade-kernel-roadmap.md`: f32 colour and grading core.
 - `colour-pipeline.md`: ICC / working-space ownership.
+- `../plans/active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md`: immutable RAW source,
+  development document, scene surface, and delivery order.
 
 ## Surfaces
 
 | Surface | Document | Pixel core | Semantics |
 | --- | --- | --- | --- |
 | Image editor | `ImageEditorDocument` | image compositor plus raster ops, moving toward `hgripe-grade` where colour math is needed | real pixels, layers, selections, paths, masks |
+| RAW development | `RawSource` + `RawDevelopDoc` before `ImageEditorDocument` materialization | shared RAW stages feeding the same image compositor and `hgripe-grade` | immutable sensor source plus revisable development parameters; no second editor |
 | True mask features | `LayerMask` / active mask target inside `ImageEditorDocument` | u8 alpha/coverage compositor (`subject_mask.rs` + `maskMorphology.ts`) | coverage and matte operations; 8-bit is correct here |
 | Video grade / clip colour | `GradeDoc` | `hgripe-grade` | f32 frame-agnostic grading |
 
 **Key decision:** there is no third pixel core. Image editor compositing and
 adjustment math should compile toward the same grade kernel used by video
 grading. True mask coverage stays a separate u8 alpha path because it is not a
-colour surface.
+colour surface. RAW development feeds the same canonical image surface before
+the document edit stack; it does not create a second editor or compositor.
 
 ```text
 React image editor shell

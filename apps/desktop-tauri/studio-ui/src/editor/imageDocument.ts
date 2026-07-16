@@ -97,7 +97,7 @@ export interface ImageDocument {
   canvas?: ImageCanvasSize;
   /** Carried through from a bridged image editor document (matting band strokes). */
   matte_strokes: ImageEditorDocument["matte_strokes"];
-  /** Carried through from a bridged image editor document (SAM 2 point prompts). */
+  /** Carried through from a bridged image editor document (built-in point prompts). */
   points: ImageEditorDocument["points"];
   /** Visual layer tags carried through the image editor document bridge. */
   layerGroups: LayerGroup[];

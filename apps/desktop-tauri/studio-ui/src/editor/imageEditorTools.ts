@@ -23,7 +23,7 @@ export type ToolKind =
   | "paint"
   // Single click that records an `operations` entry seeded at the click point.
   | "click"
-  // Single click that records a SAM 2 point prompt (`points` entry).
+  // Single click that records a built-in include/exclude point (`points` entry).
   | "point"
   // Freehand paint that records a `matte_strokes` entry: the trimap unknown
   // band the matter resolves into soft alpha (hair / fur / glass).
@@ -102,12 +102,12 @@ export const IMAGE_EDITOR_TOOLS: readonly ImageEditorTool[] = [
   { id: "brush", label: "Brush", status: "ready", kind: "paint", mode: "add", lane: "interactive", hint: "Paint mask in.", targets: ["layer", "matte"] },
   { id: "eraser", label: "Eraser", status: "ready", kind: "paint", mode: "subtract", lane: "interactive", hint: "Paint mask out." },
   { id: "pencil", label: "Pencil", status: "ready", kind: "paint", mode: "add", lane: "interactive", hint: "Pencil: hard-edged strokes — a brush with hardness and flow pinned to 100%.", targets: ["layer", "matte"] },
-  { id: "point", label: "Point (SAM 2)", status: "ready", kind: "point", lane: "render", hint: "Left-click the subject to include, right-click to exclude — SAM 2 segments from your points (auto modes)." },
+  { id: "point", label: "Point selection", status: "ready", kind: "point", lane: "render", hint: "Left-click to include, right-click to exclude; the built-in selector uses these points during auto selection." },
   { id: "wand", label: "Wand", status: "ready", kind: "click", lane: "render", hint: "Flood-fill a region by colour similarity (wand_tolerance)." },
   { id: "paint_bucket", label: "Paint bucket", status: "ready", kind: "click", lane: "render", hint: "Paint bucket: click to flood-fill similar colours into the mask (tolerance-driven, like the wand)." },
   { id: "magic_eraser", label: "Magic eraser", status: "ready", kind: "click", mode: "subtract", lane: "render", hint: "Magic eraser: click to erase similar colours out of the mask — a wand flood-fill that subtracts." },
   { id: "quick_select", label: "Quick selection", status: "ready", kind: "paint", mode: "add", lane: "render", hint: "Quick selection: paint over the subject — each point seeds a tolerance flood-fill and the fills union into the mask." },
-  { id: "object_select", label: "Object selection", status: "ready", kind: "marquee", lane: "render", hint: "Object selection: drag a box — the segmenter (SAM 2 when weights resolve, the builtin fallback otherwise) masks the object inside it on run." },
+  { id: "object_select", label: "Object selection", status: "ready", kind: "marquee", lane: "render", hint: "Object selection: drag a box and the deterministic built-in segmenter masks the object inside it on run." },
   { id: "background_eraser", label: "Background eraser", status: "ready", kind: "paint", mode: "subtract", lane: "render", hint: "Background eraser: paint and pixels matching the colour under the brush centre are erased from the mask (tolerance-keyed)." },
   { id: "rect", label: "Rect", status: "ready", kind: "marquee", mode: "add", lane: "interactive", hint: "Marquee add a rectangle." },
   { id: "ellipse", label: "Ellipse", status: "ready", kind: "marquee", mode: "add", lane: "interactive", hint: "Marquee add an ellipse." },

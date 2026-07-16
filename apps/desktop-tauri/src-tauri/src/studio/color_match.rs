@@ -1,7 +1,5 @@
-//! The `matchLightColor` node executor. The native CPU heuristic is the default
-//! and complete fallback; opt-in `onnx_harmonize` runs PCT-Net through the
-//! shared Windows ORT runtime. Both expose the same matched image, report and
-//! prompt-suffix ports.
+//! The `matchLightColor` node executor. The deterministic native CPU heuristic
+//! exposes the matched image, report and prompt-suffix ports.
 
 use std::collections::BTreeMap;
 
@@ -42,10 +40,10 @@ pub(super) fn execute_studio_match_light_color(
     let highlight_strength = number_param(node, "highlight_strength", 0.0);
     let protect_saturation = bool_param(node, "protect_saturation", false);
     let protect_brand_color = bool_param(node, "protect_brand_color", true);
-    // The CPU heuristic remains the default and complete fallback.
+    // Legacy engine values are forwarded so the native boundary can reject
+    // retired local engines explicitly.
     let engine = optional(studio_value_to_string(node.params.get("engine")));
-    // `device` selects the ONNX execution provider for the learned matcher
-    // (default `auto`); ignored by the CPU heuristic.
+    // Retained in report compatibility; ignored by the CPU heuristic.
     let device = optional(studio_value_to_string(node.params.get("device")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
 
@@ -89,7 +87,6 @@ fn to_output_map(result: ColorMatchResult) -> Result<BTreeMap<String, Value>, St
 mod tests {
     use super::*;
     use image::{Rgba, RgbaImage};
-    use std::path::Path;
 
     fn node() -> StudioGraphNode {
         StudioGraphNode {
@@ -124,8 +121,8 @@ mod tests {
     }
 
     #[test]
-    fn learned_engine_without_background_keeps_a_complete_cpu_result() {
-        let dir = std::env::temp_dir().join("hgripe_color_match_graph_onnx_fallback");
+    fn retired_engine_returns_explicit_error() {
+        let dir = std::env::temp_dir().join("hgripe_color_match_graph_retired");
         std::fs::create_dir_all(&dir).unwrap();
         let image = dir.join("subject.png");
         RgbaImage::from_pixel(8, 8, Rgba([20, 80, 160, 255]))
@@ -134,7 +131,7 @@ mod tests {
 
         let mut node = node();
         node.params
-            .insert("engine".to_string(), json!("onnx_harmonize"));
+            .insert("engine".to_string(), json!("retired_local_engine"));
         node.params.insert(
             "output_dir".to_string(),
             json!(dir.to_string_lossy().to_string()),
@@ -145,14 +142,7 @@ mod tests {
             json!(image.to_string_lossy().to_string()),
         );
 
-        let outputs = execute_studio_match_light_color(&node, &inputs).unwrap();
-        let report = outputs["match_report"].as_object().unwrap();
-        assert_eq!(report["engine"], "cpu");
-        assert_eq!(report["engine_requested"], "onnx_harmonize");
-        assert!(report["engine_fallback_reason"]
-            .as_str()
-            .unwrap()
-            .contains("no background"));
-        assert!(Path::new(outputs["matched_image"].as_str().unwrap()).is_file());
+        let err = execute_studio_match_light_color(&node, &inputs).unwrap_err();
+        assert!(err.contains("retired"), "{err}");
     }
 }

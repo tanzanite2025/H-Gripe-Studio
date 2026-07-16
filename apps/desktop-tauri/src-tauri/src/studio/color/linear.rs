@@ -7,28 +7,17 @@
 //! (a black/white edge resamples to sRGB 128 instead of the photometrically
 //! correct 188), which shows up as dark fringing on high-contrast edges.
 //!
-//! The Python bridge mirrors these exact curves in
-//! `python/bridge/linear_light.py`; the goldens in both test suites pin the
-//! two engines to the same values.
-
-use std::sync::OnceLock;
+//! The checked-in goldens pin these exact curves and prevent accidental
+//! gamma-space regressions.
 
 /// Decode one 8-bit sRGB sample to linear light in `0.0..=1.0` (IEC 61966-2-1).
 pub(crate) fn srgb_u8_to_linear(v: u8) -> f32 {
-    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
-    let lut = LUT.get_or_init(|| {
-        let mut lut = [0.0f32; 256];
-        for (i, slot) in lut.iter_mut().enumerate() {
-            let c = i as f32 / 255.0;
-            *slot = if c <= 0.04045 {
-                c / 12.92
-            } else {
-                ((c + 0.055) / 1.055).powf(2.4)
-            };
-        }
-        lut
-    });
-    lut[usize::from(v)]
+    let c = f32::from(v) / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Encode linear light back to an 8-bit sRGB sample (clamping to `0.0..=1.0`).
@@ -55,8 +44,8 @@ mod tests {
 
     #[test]
     fn linear_midpoint_encodes_to_188() {
-        // The photometric midpoint of black and white: the golden the Python
-        // mirror (`linear_light.py`) pins too.
+        // The photometric midpoint of black and white is 188, not the
+        // gamma-space midpoint 128.
         assert_eq!(linear_to_srgb_u8(0.5), 188);
         assert_eq!(srgb_u8_to_linear(0), 0.0);
         assert!((srgb_u8_to_linear(255) - 1.0).abs() < 1e-6);

@@ -9,7 +9,7 @@
 
 import { LOWERED_CARD_ROWS } from "../graph/lowering";
 import type { WorkflowGraph } from "../graph/model";
-import { backendCapability, localModelCapability } from "../models/backendBindings";
+import { backendCapability } from "../models/backendBindings";
 
 /** Lowered row-leaf id -> its semantic row name (`card::row` -> `row`). */
 function rowOfLeaf(leafId: string, cardId: string): string {
@@ -66,28 +66,13 @@ export function buildRunReport(opts: {
     lines.push(line);
   }
 
-  // Backend/device refs carried by the executing nodes (post-lowering, so row
-  // params are already un-prefixed): which API profile / local model each node
-  // will ask for, plus its device/precision policies where present.
+  // API profile refs carried by executing nodes (post-lowering, so row params
+  // are already un-prefixed). Deterministic built-ins need no managed ref.
   for (const node of lowered.nodes) {
     const api = backendCapability(node.kind, node.params)
       ? asRef(node.params["api_profile_ref"])
       : null;
-    const local = localModelCapability(node.kind, node.params)
-      ? asRef(node.params["local_model_ref"])
-      : null;
-    if (!api && !local) continue;
-    const parts: string[] = [];
-    if (api) parts.push(`api profile "${api}"`);
-    if (local) {
-      const device = asRef(node.params["device"]);
-      const precision = asRef(node.params["precision"]);
-      const policies = [device && `device ${device}`, precision && `precision ${precision}`]
-        .filter(Boolean)
-        .join(", ");
-      parts.push(`local model "${local}"${policies ? ` (${policies})` : ""}`);
-    }
-    lines.push(`backend ${node.id}: ${parts.join(", ")}`);
+    if (api) lines.push(`backend ${node.id}: api profile "${api}"`);
   }
 
   return lines;

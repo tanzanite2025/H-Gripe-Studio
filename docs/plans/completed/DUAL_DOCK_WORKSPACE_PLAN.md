@@ -1,5 +1,8 @@
 # Dual Dock Workspace Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: superseded in direction by
 > [`UNIFIED_PRODUCTION_DRAWER_PLAN.md`](UNIFIED_PRODUCTION_DRAWER_PLAN.md) —
 > the "two docks" idea evolved into one bottom production drawer (landed,
@@ -30,7 +33,7 @@ push each other, split the screen, or collapse to thin handles.
 Colour correction should not be implemented separately for the image editor, the
 video editor, and graph nodes. Photoshop-style adjustments, Premiere-style clip
 grading, and DaVinci-style grading share the same underlying ideas: exposure,
-contrast, curves, HSL, LUTs, colour-space conversion, scopes, and masked/local
+contrast, curves, HSL, colour-space conversion, scopes, and masked/local
 adjustments.
 
 Decision:

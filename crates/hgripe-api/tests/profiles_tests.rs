@@ -13,10 +13,10 @@ fn provider_profiles_load_profiles_wrapper_document() {
         &path,
         json!({
             "profiles": {
-                "local-profile": {
+                "test-profile": {
                     "provider": "openai_compatible",
-                    "base_url": "http://127.0.0.1:1234/v1",
-                    "model": "local-model",
+                    "base_url": "https://api.example.test/v1",
+                    "model": "test-model",
                     "no_auth": true
                 }
             }
@@ -26,10 +26,10 @@ fn provider_profiles_load_profiles_wrapper_document() {
     let profiles = load_provider_profiles(Some(path.to_str().unwrap()))
         .expect("provider profiles should load");
 
-    assert!(profiles.contains_key("local-profile"));
+    assert!(profiles.contains_key("test-profile"));
     assert_eq!(
-        profiles["local-profile"].base_url.as_deref(),
-        Some("http://127.0.0.1:1234/v1")
+        profiles["test-profile"].base_url.as_deref(),
+        Some("https://api.example.test/v1")
     );
 
     let _ = fs::remove_file(path);
@@ -148,22 +148,22 @@ fn provider_profiles_get_profile_by_ref() {
     write_profiles_file(
         &path,
         json!({
-            "local": {
+            "test": {
                 "provider": "openai_compatible",
-                "base_url": "http://127.0.0.1:1234/v1",
-                "model": "local-model",
+                "base_url": "https://api.example.test/v1",
+                "model": "test-model",
                 "no_auth": true
             }
         }),
     );
 
-    let profile = get_provider_profile("local", Some(path.to_str().unwrap()))
+    let profile = get_provider_profile("test", Some(path.to_str().unwrap()))
         .expect("profile lookup should run")
         .expect("profile should exist");
     let missing = get_provider_profile("missing", Some(path.to_str().unwrap()))
         .expect("missing profile lookup should run");
 
-    assert_eq!(profile.model.as_deref(), Some("local-model"));
+    assert_eq!(profile.model.as_deref(), Some("test-model"));
     assert!(missing.is_none());
 
     let _ = fs::remove_file(path);

@@ -61,10 +61,9 @@ export async function listPsdOutputs(dir: string): Promise<PsdOutput[]> {
 }
 
 // --- PSD compose / export ---------------------------------------------------
-// Wraps the Rust `compose_psd` command, which shells out to the torch-free
-// `compose_psd_cli.py` helper to write the generated image into a PSD
-// template's placeholder (true smart-object content replacement when possible)
-// and export `<filename>.psd` + `_preview.png` + `_metadata.json`.
+// Wraps the native Rust `compose_psd` command, which writes the generated image
+// into a PSD template's placeholder (true smart-object content replacement when
+// possible) and exports `<filename>.psd` + `_preview.png` + `_metadata.json`.
 
 export interface ComposePsdRequest {
   /** Path to the `.psd` template. */
@@ -100,9 +99,9 @@ export interface ComposePsdResult {
 }
 
 /**
- * Compose + export a PSD via the backend (`compose_psd`). Outside Tauri there is
- * no Python/psd-tools pipeline, so this returns a mocked succeeded result so the
- * editor stays runnable in browser dev.
+ * Compose + export a PSD through the native backend (`compose_psd`). Outside
+ * Tauri there is no filesystem backend, so this returns a mocked succeeded
+ * result so the editor stays runnable in browser dev.
  */
 export async function composePsd(req: ComposePsdRequest): Promise<ComposePsdResult> {
   const invoke = tauriInvoke();
@@ -134,10 +133,9 @@ export async function composePsd(req: ComposePsdRequest): Promise<ComposePsdResu
 }
 
 // --- PSD inspection ---------------------------------------------------------
-// Wraps the Rust `inspect_psd` command, which shells out to the torch-free
-// `inspect_psd_cli.py` helper to read a PSD template's layers via psd-tools.
-// Used to validate a real PSD on disk before a run: that the template path
-// points at a file, and that a configured placeholder layer name truly exists.
+// Wraps the native Rust `inspect_psd` command. Used to validate a real PSD on
+// disk before a run: that the template path points at a file, and that a
+// configured placeholder layer name truly exists.
 
 // Fields are snake_case to match the Rust `PsdLayerInfo` serialization.
 export interface PsdLayer {
@@ -159,10 +157,9 @@ export interface InspectPsdResult {
 }
 
 /**
- * Inspect a PSD template's layers via the backend (`inspect_psd`). Reading a
- * `.psd` from disk requires the Python/psd-tools pipeline, which only exists in
- * the desktop build, so outside Tauri this resolves to `null` and callers fall
- * back to the syntactic path check.
+ * Inspect a PSD template's layers through the native backend (`inspect_psd`).
+ * Reading a `.psd` from disk only exists in the desktop build, so outside Tauri
+ * this resolves to `null` and callers fall back to the syntactic path check.
  */
 export async function inspectPsd(
   template: string,
@@ -177,10 +174,10 @@ export async function inspectPsd(
 }
 
 // --- PSD context analyze ----------------------------------------------------
-// Wraps the Rust `analyze_psd_context` command, which shells out to the
-// torch-free `analyze_psd_cli.py` helper to distil a PSD template into a
-// `VisualContext` (background/lighting heuristics, placeholder geometry, a
-// written mask + background preview, and a ready-to-append prompt suffix).
+// Wraps the native Rust `analyze_psd_context` command, which distils a PSD
+// template into a `VisualContext` (background/lighting heuristics, placeholder
+// geometry, a written mask + background preview, and a ready-to-append prompt
+// suffix).
 
 export interface AnalyzePsdRequest {
   /** Path to the `.psd` template. */
@@ -198,9 +195,8 @@ export interface AnalyzePsdRequest {
 /**
  * Analyze a PSD template into a {@link VisualContext} via the backend
  * (`analyze_psd_context`). Reading a `.psd` and writing the mask/background
- * previews requires the Python/psd-tools pipeline, which only exists in the
- * desktop build, so outside Tauri this returns a plausible mock so the editor
- * stays runnable in browser dev.
+ * previews requires the desktop filesystem backend, so outside Tauri this
+ * returns a plausible mock so the editor stays runnable in browser dev.
  */
 export async function analyzePsdContext(req: AnalyzePsdRequest): Promise<VisualContext> {
   const invoke = tauriInvoke();

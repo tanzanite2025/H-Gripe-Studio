@@ -64,6 +64,7 @@ pub(crate) fn read_image_data_url(path: String) -> Result<String, String> {
 
     let format = image::guess_format(&bytes)
         .map_err(|_| format!("unsupported image type: {}", path.display()))?;
+    crate::studio::studio_image::probe_source(path)?;
 
     if let Some(mime) = browser_native_mime(format) {
         return Ok(format!("data:{mime};base64,{}", base64_encode(&bytes)));
@@ -111,6 +112,7 @@ fn probe_image_dims_inner(path: &str) -> Result<ImageDims, String> {
         let (width, height) = crate::studio::heif_decode::probe_dims(src)?;
         return Ok(ImageDims { width, height });
     }
+    crate::studio::studio_image::probe_source(src)?;
     let (width, height) = image::ImageReader::open(src)
         .map_err(|err| format!("failed to open {}: {err}", src.display()))?
         .with_guessed_format()
@@ -130,6 +132,17 @@ fn is_heif_file(path: &Path) -> bool {
         return false;
     };
     crate::studio::heif_decode::heif_kind(&header[..read]).is_some()
+}
+
+fn is_recognized_image(path: &Path) -> bool {
+    if is_heif_file(path) {
+        return true;
+    }
+    image::ImageReader::open(path)
+        .ok()
+        .and_then(|reader| reader.with_guessed_format().ok())
+        .and_then(|reader| reader.format())
+        .is_some()
 }
 
 /// Read an image's `width` x `height` from its header. This is the fast first
@@ -189,11 +202,13 @@ fn register_resource_inner(path: &str) -> Result<ResourceRef, String> {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| trimmed.to_string());
     let id = resource::id_for(&canonical);
-    // Header-only dims; a non-image (or unreadable) source just registers
-    // without dimensions and the card falls back to its own probe.
-    let (width, height) = match probe_image_dims_inner(trimmed) {
-        Ok(d) => (Some(d.width), Some(d.height)),
-        Err(_) => (None, None),
+    // Recognized images must pass the shared header and colour-mode guards.
+    // Other media types register without dimensions and use their own probe.
+    let (width, height) = if is_recognized_image(src) {
+        let dims = probe_image_dims_inner(trimmed)?;
+        (Some(dims.width), Some(dims.height))
+    } else {
+        (None, None)
     };
     resource::put(
         &id,
@@ -465,6 +480,32 @@ mod tests {
 
         let err = read_image_data_url(path.to_string_lossy().to_string()).unwrap_err();
         assert!(err.contains("unsupported image type"), "{err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn four_component_jpeg_is_not_inlined_into_the_webview() {
+        let dir = tmp_dir("dataurl_four_component_jpeg");
+        let path = dir.join("four-component.jpg");
+        let bytes = [
+            0xFF, 0xD8, // SOI
+            0xFF, 0xC0, 0x00, 0x14, // baseline SOF, 18-byte payload
+            0x08, 0x00, 0x01, 0x00, 0x01, 0x04, // precision, size, components
+            0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0x04, 0x11, 0x00,
+        ];
+        std::fs::write(&path, bytes).unwrap();
+
+        let err = read_image_data_url(path.to_string_lossy().to_string()).unwrap_err();
+        assert!(err.contains("four-component JPEG"), "{err}");
+        let err = probe_image_dims_inner(path.to_string_lossy().as_ref())
+            .err()
+            .expect("four-component JPEG dimensions must be rejected");
+        assert!(err.contains("four-component JPEG"), "{err}");
+        let err = register_resource_inner(path.to_string_lossy().as_ref())
+            .err()
+            .expect("four-component JPEG registration must be rejected");
+        assert!(err.contains("four-component JPEG"), "{err}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

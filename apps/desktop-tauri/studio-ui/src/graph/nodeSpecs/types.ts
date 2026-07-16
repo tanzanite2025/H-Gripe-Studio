@@ -13,9 +13,7 @@ export type ParamControl =
   | "select"
   | "slider"
   | "checkbox"
-  | "path"
-  /** Registry-backed model dropdown (local models + API profiles, empty allowed). */
-  | "model";
+  | "path";
 
 export interface ParamSpec {
   key: string;
@@ -60,7 +58,7 @@ export interface ParamSpec {
  * - `graph`  pure in-process node (no backend call).
  * - `local`  a local card; its engines run in-process in native Rust and must
  *   not touch the network.
- * - `compute` in-process native-Rust image/model work; must not touch the network.
+ * - `compute` in-process native-Rust image work; must not touch the network.
  * - `api`    always a provider call (needs a profile + credentials_ref).
  * - `hybrid` user picks per-node via a `mode` param (e.g. `promptOptimize`).
  * See docs/card-executor-split-and-psd-chain-hardening.md.
@@ -96,7 +94,7 @@ export interface NodeSpec {
    * Palette grouping. Categories are production-facing so the palette reads
    * like a studio tool (see NODE_CARD_PRODUCT_BOUNDARY_PLAN.md):
    * - `source`   the user places an input object on the canvas.
-   * - `generate` a model/provider generation step.
+   * - `generate` an API-provider generation step.
    * - `process`  a production media operation (split/enhance/grade/crop/mask/repair).
    * - `review`   the user confirms or inspects a meaningful result.
    * - `workflow` changes how the graph is executed.
@@ -105,12 +103,12 @@ export interface NodeSpec {
    *   runtime compatibility; never shown in the palette.
    */
   category: "source" | "generate" | "process" | "review" | "workflow" | "output" | "internal";
-  /** Where the node runs; drives palette local/API grouping + broker routing. */
+  /** Where the node runs; drives built-in/API badges and broker routing. */
   executor: Executor;
   /**
    * Internal primitives stay loadable for saved workflows/runtime support, but
    * they are not product-facing cards. Their behavior belongs inside the
-   * owning media/model/edit card as params, ports, menus, or internal rules.
+   * owning media/API/edit card as params, ports, menus, or internal rules.
    */
   palette?: "default" | "internal";
   inputs: PortSpec[];

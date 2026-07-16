@@ -1,5 +1,8 @@
 # WGPU Heavy Viewport Migration Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete. Phases 0–5 and the entire "remaining work" list below
 > (surface swap, host-side overlays, scopes/safe-area, shared `DeviceReport`
 > wiring) have landed; heavy pixels present through WGPU viewports with the
@@ -299,7 +302,6 @@ React keeps:
 
 - grade operation list
 - sliders
-- LUT file selection UI
 - apply / reset / preset controls
 
 WGPU owns:

@@ -3,11 +3,18 @@ members = [
     "crates/hgripe-api",
     "crates/hgripe-grade",
     "apps/desktop-tauri/src-tauri",
+    "third_party/moxcms",
 ]
 resolver = "2"
 
 [patch.crates-io]
 # H-Gripe owns its colour-management fork. Keep the dependency version pinned
 # in the app crate, but resolve `moxcms` from this vendored copy so ProPhoto /
-# CMYK / ICC behaviour cannot drift with upstream releases.
+# sRGB / ICC behaviour cannot drift with upstream releases.
 moxcms = { path = "third_party/moxcms" }
+
+# The Windows desktop unit-test binary contains hundreds of modules. Keeping
+# full debug symbols for that single crate can exceed MSVC's PDB capacity
+# (LNK1318), while dependency symbols remain available for diagnostics.
+[profile.test.package.hgripe-desktop]
+debug = 0

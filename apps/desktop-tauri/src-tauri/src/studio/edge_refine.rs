@@ -1,6 +1,5 @@
-//! The `refineMaskEdge` node executor. The default `cpu` engine and optional
-//! native `onnx_matting`/ViTMatte band replacement both run through
-//! [`super::edge_refine_cpu`], preserving one output and fallback contract.
+//! The `refineMaskEdge` node executor. The deterministic CPU implementation
+//! preserves one output and report contract.
 
 use std::collections::BTreeMap;
 
@@ -35,8 +34,7 @@ pub(super) fn execute_studio_refine_mask_edge(
     let background_blend_strength = number_param(node, "background_blend_strength", 0.4);
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
     let engine = optional(studio_value_to_string(node.params.get("engine")));
-    // `device` selects the ORT execution provider for the learned matter
-    // (default `auto`); ignored by the CPU heuristic.
+    // Retained in report compatibility; ignored by the CPU heuristic.
     let device = optional(studio_value_to_string(node.params.get("device")));
 
     let cpu_params = CpuEdgeRefineParams {
@@ -116,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_entry_forwards_learned_engine_to_native_fallback() {
+    fn graph_entry_rejects_retired_local_engine() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -129,7 +127,8 @@ mod tests {
             .unwrap();
 
         let mut n = node();
-        n.params.insert("engine".to_string(), json!("onnx_matting"));
+        n.params
+            .insert("engine".to_string(), json!("retired_local_engine"));
         n.params.insert(
             "output_dir".to_string(),
             json!(dir.to_string_lossy().to_string()),
@@ -142,14 +141,8 @@ mod tests {
             json!(source.to_string_lossy().to_string()),
         );
 
-        let outputs = execute_studio_refine_mask_edge(&n, &inputs).unwrap();
-        let report = outputs.get("edge_report").unwrap();
-        assert_eq!(report["engine"], "cpu");
-        assert_eq!(report["engine_requested"], "onnx_matting");
-        assert!(report["engine_fallback_reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("trimap"));
+        let err = execute_studio_refine_mask_edge(&n, &inputs).unwrap_err();
+        assert!(err.contains("retired"), "{err}");
 
         let _ = std::fs::remove_dir_all(dir);
     }

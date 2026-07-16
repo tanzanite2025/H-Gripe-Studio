@@ -198,7 +198,7 @@ pub(crate) struct InspectPsdResult {
 /// surfacing the problem mid-compose.
 ///
 /// Runs natively in Rust (`super::inspect`), reading only the header + layer
-/// records — no Python involved.
+/// records entirely in-process.
 #[tauri::command]
 pub(crate) fn inspect_psd(
     dir: Option<String>,

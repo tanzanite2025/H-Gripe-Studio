@@ -1,4 +1,4 @@
-// Right rail — "Mask info" panel block: matting band strokes, SAM 2 point
+// Right rail — "Mask info" panel block: matting band strokes, built-in point
 // prompts, and the edit-paths note.
 
 import { useT } from "../../i18n";

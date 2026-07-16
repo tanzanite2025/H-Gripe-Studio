@@ -1,7 +1,7 @@
 // The grading operations (G2 core set + G3 video set + G4 spatial set),
 // split by family: `spline` (curve primitives), `hsl` (colour model),
-// `lut` (LUT sampling + `.cube` parsing), `wb` (Planckian white balance),
-// `spatial` (neighbourhood / position ops). Each op declares whether its
+// `wb` (Planckian white balance), `spatial` (neighbourhood / position ops).
+// Each op declares whether its
 // maths runs on gamma-encoded or linear-light values; `apply_op`
 // decodes/re-encodes around linear ops using the surface's TRC (`trc.rs`).
 // Alpha never passes through an op — coverage is already linear and grading
@@ -11,7 +11,6 @@
 // tests and the studio-ui mirror.
 
 mod hsl;
-mod lut;
 mod spatial;
 mod spline;
 mod wb;
@@ -21,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use crate::surface::GradeSurface;
 use crate::trc::{trc_decode, trc_encode};
 
-pub use lut::parse_cube;
 pub use spatial::{temporal_denoise, MAX_BLUR_SIGMA, MAX_RADIUS};
 
 #[cfg(feature = "gpu")]
@@ -32,7 +30,6 @@ pub(crate) use hsl::rgb_to_hsl;
 pub(crate) use wb::planckian_gains;
 
 use hsl::hsl_to_rgb;
-use lut::{Lut1d, Lut3d};
 use spline::{MultiplierSpline, PeriodicSpline};
 
 /// Rec.709 luma weights (the design-doc choice for saturation).
@@ -96,11 +93,6 @@ pub enum GradeOp {
         saturation: f32,
         lightness: f32,
     },
-    /// 3D LUT on encoded values with tetrahedral interpolation (the same
-    /// sampling the ICC engine uses). `table` is
-    /// `size³ × 3` RGB triples with red varying fastest (the `.cube`
-    /// convention); build one from a file with [`parse_cube`].
-    Lut3d { size: u32, table: Vec<f32> },
     /// Resolve-style hue-vs-hue curve on encoded values: `x` is hue in
     /// degrees (`0..360`, periodic), `y` is the hue shift in degrees at
     /// that hue. No points is identity.
@@ -155,12 +147,6 @@ pub enum GradeOp {
         blue: [f32; 3],
         monochrome: bool,
     },
-    /// 1D LUT on encoded values: per-channel linear interpolation over
-    /// `size` RGB triples (the `.cube` `LUT_1D_SIZE` layout — row `i` is
-    /// the output for input `i/(size−1)` on each channel). Used standalone
-    /// as a tone LUT, or chained before a [`GradeOp::Lut3d`] as its shaper.
-    /// Build one from a file with [`parse_cube`].
-    Lut1d { size: u32, table: Vec<f32> },
     /// Resolve-style colour warper on encoded values: control points on the
     /// hue–saturation plane each pull nearby colours (`hue_shift` degrees,
     /// `sat_scale` multiplier) with a smoothstep falloff over an elliptical
@@ -632,29 +618,6 @@ pub fn apply_op(surface: &mut GradeSurface, op: &GradeOp) {
                 )
             });
         }
-        GradeOp::Lut1d { size, table } => {
-            let lut = Lut1d::new(*size, table);
-            for px in 0..n {
-                let i = px * 4;
-                for c in 0..3 {
-                    surface.data[i + c] = lut.sample(c, surface.data[i + c].clamp(0.0, 1.0));
-                }
-            }
-        }
-        GradeOp::Lut3d { size, table } => {
-            let lut = Lut3d::new(*size, table);
-            for px in 0..n {
-                let i = px * 4;
-                let out = lut.sample([
-                    surface.data[i].clamp(0.0, 1.0),
-                    surface.data[i + 1].clamp(0.0, 1.0),
-                    surface.data[i + 2].clamp(0.0, 1.0),
-                ]);
-                surface.data[i] = out[0];
-                surface.data[i + 1] = out[1];
-                surface.data[i + 2] = out[2];
-            }
-        }
         GradeOp::Sharpen { amount, radius } => spatial::sharpen(surface, *amount, *radius),
         GradeOp::Denoise { amount, radius } => spatial::denoise(surface, *amount, *radius),
         GradeOp::FilmGrain { amount, seed } => spatial::film_grain(surface, *amount, *seed),
@@ -881,69 +844,5 @@ mod tests {
         );
         assert!((s.data[0] - s.data[1]).abs() < 1e-6);
         assert!((s.data[1] - s.data[2]).abs() < 1e-6);
-    }
-
-    #[test]
-    fn identity_lut_is_a_no_op() {
-        let size = 3u32;
-        let mut table = Vec::new();
-        for b in 0..size {
-            for g in 0..size {
-                for r in 0..size {
-                    table.extend([r as f32 / 2.0, g as f32 / 2.0, b as f32 / 2.0]);
-                }
-            }
-        }
-        let mut s = one_px([0.1, 0.55, 0.9]);
-        let before = s.data.clone();
-        apply_op(&mut s, &GradeOp::Lut3d { size, table });
-        for (got, want) in s.data.iter().zip(&before) {
-            assert!((got - want).abs() < 1e-6);
-        }
-    }
-
-    #[test]
-    fn parse_cube_reads_a_minimal_lut() {
-        let text = "# comment\nTITLE \"t\"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
-        let op = parse_cube(text).expect("parse");
-        match &op {
-            GradeOp::Lut3d { size, table } => {
-                assert_eq!(*size, 2);
-                assert_eq!(table.len(), 24);
-            }
-            other => panic!("unexpected op {other:?}"),
-        }
-        let mut s = one_px([0.25, 0.5, 0.75]);
-        let before = s.data.clone();
-        apply_op(&mut s, &op); // this LUT is identity at the corners + trilinear
-        for (got, want) in s.data.iter().zip(&before) {
-            assert!((got - want).abs() < 1e-6);
-        }
-    }
-
-    #[test]
-    fn parse_cube_reads_a_1d_lut() {
-        let text = "TITLE \"shaper\"\nLUT_1D_SIZE 3\n0 0 0\n0.4 0.5 0.6\n1 1 1\n";
-        let op = parse_cube(text).expect("parse");
-        match &op {
-            GradeOp::Lut1d { size, table } => {
-                assert_eq!(*size, 3);
-                assert_eq!(table.len(), 9);
-            }
-            other => panic!("unexpected op {other:?}"),
-        }
-        let mut s = one_px([0.25, 0.5, 0.75]);
-        apply_op(&mut s, &op);
-        assert!((s.data[0] - 0.2).abs() < 1e-6); // lerp(0, 0.4, 0.5)
-        assert!((s.data[1] - 0.5).abs() < 1e-6); // exactly the middle row
-        assert!((s.data[2] - 0.8).abs() < 1e-6); // lerp(0.6, 1, 0.5)
-    }
-
-    #[test]
-    fn parse_cube_rejects_bad_input() {
-        assert!(parse_cube("LUT_3D_SIZE 2\n0 0 0\n").is_err()); // short table
-        assert!(parse_cube("0 0 0\n").is_err()); // no size
-        assert!(parse_cube("LUT_1D_SIZE 2\n0 0 0\n").is_err()); // short 1D table
-        assert!(parse_cube("LUT_1D_SIZE 2\nLUT_3D_SIZE 2\n").is_err()); // both sizes
     }
 }

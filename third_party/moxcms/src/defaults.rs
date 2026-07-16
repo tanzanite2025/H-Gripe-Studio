@@ -31,10 +31,9 @@ use crate::cicp::create_rec709_parametric;
 use crate::trc::{ToneReprCurve, curve_from_gamma};
 use crate::{
     CicpColorPrimaries, CicpProfile, ColorPrimaries, ColorProfile, DataColorSpace,
-    LocalizableString, LutMultidimensionalType, LutWarehouse, Matrix3d, MatrixCoefficients,
-    ProfileClass, ProfileText, RenderingIntent, TransferCharacteristics, Vector3, XyY,
+    LocalizableString, Matrix3d, MatrixCoefficients, ProfileClass, ProfileText, RenderingIntent,
+    TransferCharacteristics, XyY,
 };
-use pxfm::{copysignk, exp, floor, pow};
 
 /// From lcms: `cmsWhitePointFromTemp`
 /// tempK must be >= 4000. and <= 25000.
@@ -82,104 +81,6 @@ pub const WHITE_POINT_D60: XyY = white_point_from_temperature(6000);
 pub const WHITE_POINT_D65: XyY = white_point_from_temperature(6504);
 pub const WHITE_POINT_DCI_P3: XyY = white_point_from_temperature(6300);
 
-// https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.2100-2-201807-I!!PDF-F.pdf
-// Perceptual Quantization / SMPTE standard ST.2084
-#[inline]
-const fn pq_curve(x: f64) -> f64 {
-    const M1: f64 = 2610.0 / 16384.0;
-    const M2: f64 = (2523.0 / 4096.0) * 128.0;
-    const C1: f64 = 3424.0 / 4096.0;
-    const C2: f64 = (2413.0 / 4096.0) * 32.0;
-    const C3: f64 = (2392.0 / 4096.0) * 32.0;
-
-    if x == 0.0 {
-        return 0.0;
-    }
-    let sign = x;
-    let x = x.abs();
-
-    let xpo = pow(x, 1.0 / M2);
-    let num = (xpo - C1).max(0.0);
-    let den = C2 - C3 * xpo;
-    let res = pow(num / den, 1.0 / M1);
-
-    copysignk(res, sign)
-}
-
-pub(crate) const fn build_trc_table_pq() -> [u16; 4096] {
-    let mut table = [0u16; 4096];
-
-    const NUM_ENTRIES: usize = 4096;
-    let mut i = 0usize;
-    while i < NUM_ENTRIES {
-        let x: f64 = i as f64 / (NUM_ENTRIES - 1) as f64;
-        let y: f64 = pq_curve(x);
-        let mut output: f64;
-        output = y * 65535.0 + 0.5;
-        if output > 65535.0 {
-            output = 65535.0
-        }
-        if output < 0.0 {
-            output = 0.0
-        }
-        table[i] = floor(output) as u16;
-        i += 1;
-    }
-    table
-}
-
-pub(crate) const fn build_trc_table_hlg() -> [u16; 4096] {
-    let mut table = [0u16; 4096];
-
-    const NUM_ENTRIES: usize = 4096;
-    let mut i = 0usize;
-    while i < NUM_ENTRIES {
-        let x: f64 = i as f64 / (NUM_ENTRIES - 1) as f64;
-        let y: f64 = hlg_curve(x);
-        let mut output: f64;
-        output = y * 65535.0 + 0.5;
-        if output > 65535.0 {
-            output = 65535.0
-        }
-        if output < 0.0 {
-            output = 0.0
-        }
-        table[i] = floor(output) as u16;
-        i += 1;
-    }
-    table
-}
-
-// https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.2100-2-201807-I!!PDF-F.pdf
-// Hybrid Log-Gamma
-const fn hlg_curve(x: f64) -> f64 {
-    const BETA: f64 = 0.04;
-    const RA: f64 = 5.591816309728916; // 1.0 / A where A = 0.17883277
-    const B: f64 = 0.28466892; // 1.0 - 4.0 * A
-    const C: f64 = 0.5599107295; // 0,5 –aln(4a)
-
-    let e = (x * (1.0 - BETA) + BETA).max(0.0);
-
-    if e == 0.0 {
-        return 0.0;
-    }
-
-    let sign = e.abs();
-
-    let res = if e <= 0.5 {
-        e * e / 3.0
-    } else {
-        (exp((e - C) * RA) + B) / 12.0
-    };
-
-    copysignk(res, sign)
-}
-
-/// Perceptual Quantizer Lookup table
-pub const PQ_LUT_TABLE: [u16; 4096] = build_trc_table_pq();
-/// Hybrid Log Gamma Lookup table
-pub const HLG_LUT_TABLE: [u16; 4096] = build_trc_table_hlg();
-
 impl ColorProfile {
     const SRGB_COLORANTS: Matrix3d =
         ColorProfile::colorants_matrix(WHITE_POINT_D65, ColorPrimaries::BT_709);
@@ -198,12 +99,6 @@ impl ColorProfile {
 
     const BT2020_COLORANTS: Matrix3d =
         ColorProfile::colorants_matrix(WHITE_POINT_D65, ColorPrimaries::BT_2020);
-
-    const ACES_2065_1_COLORANTS: Matrix3d =
-        ColorProfile::colorants_matrix(WHITE_POINT_D60, ColorPrimaries::ACES_2065_1);
-
-    const ACES_CG_COLORANTS: Matrix3d =
-        ColorProfile::colorants_matrix(WHITE_POINT_D60, ColorPrimaries::ACES_CG);
 
     #[inline]
     fn basic_rgb_profile() -> ColorProfile {
@@ -309,36 +204,6 @@ impl ColorProfile {
         profile
     }
 
-    /// Creates new Display P3 PQ profile
-    pub fn new_display_p3_pq() -> ColorProfile {
-        let mut profile = ColorProfile::basic_rgb_profile();
-        profile.update_colorants(ColorProfile::DISPLAY_P3_COLORANTS);
-
-        let curve = ToneReprCurve::Lut(PQ_LUT_TABLE.to_vec());
-
-        profile.red_trc = Some(curve.clone());
-        profile.blue_trc = Some(curve.clone());
-        profile.green_trc = Some(curve);
-        profile.media_white_point = Some(WHITE_POINT_D65.to_xyzd());
-        profile.cicp = Some(CicpProfile {
-            color_primaries: CicpColorPrimaries::Smpte431,
-            transfer_characteristics: TransferCharacteristics::Smpte2084,
-            matrix_coefficients: MatrixCoefficients::Bt709,
-            full_range: false,
-        });
-        profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Display P3 PQ".to_string(),
-        )]));
-        profile.copyright = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Public Domain".to_string(),
-        )]));
-        profile
-    }
-
     /// Creates new DCI P3 profile
     pub fn new_dci_p3() -> ColorProfile {
         let mut profile = ColorProfile::basic_rgb_profile();
@@ -414,66 +279,6 @@ impl ColorProfile {
         profile
     }
 
-    /// Creates new Bt.2020 PQ profile
-    pub fn new_bt2020_pq() -> ColorProfile {
-        let mut profile = ColorProfile::basic_rgb_profile();
-        profile.update_colorants(ColorProfile::BT2020_COLORANTS);
-
-        let curve = ToneReprCurve::Lut(PQ_LUT_TABLE.to_vec());
-
-        profile.red_trc = Some(curve.clone());
-        profile.blue_trc = Some(curve.clone());
-        profile.green_trc = Some(curve);
-        profile.media_white_point = Some(WHITE_POINT_D65.to_xyzd());
-        profile.cicp = Some(CicpProfile {
-            color_primaries: CicpColorPrimaries::Bt2020,
-            transfer_characteristics: TransferCharacteristics::Smpte2084,
-            matrix_coefficients: MatrixCoefficients::Bt709,
-            full_range: false,
-        });
-        profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Rec.2020 PQ".to_string(),
-        )]));
-        profile.copyright = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Public Domain".to_string(),
-        )]));
-        profile
-    }
-
-    /// Creates new Bt.2020 HLG profile
-    pub fn new_bt2020_hlg() -> ColorProfile {
-        let mut profile = ColorProfile::basic_rgb_profile();
-        profile.update_colorants(ColorProfile::BT2020_COLORANTS);
-
-        let curve = ToneReprCurve::Lut(HLG_LUT_TABLE.to_vec());
-
-        profile.red_trc = Some(curve.clone());
-        profile.blue_trc = Some(curve.clone());
-        profile.green_trc = Some(curve);
-        profile.media_white_point = Some(WHITE_POINT_D65.to_xyzd());
-        profile.cicp = Some(CicpProfile {
-            color_primaries: CicpColorPrimaries::Bt2020,
-            transfer_characteristics: TransferCharacteristics::Hlg,
-            matrix_coefficients: MatrixCoefficients::Bt709,
-            full_range: false,
-        });
-        profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Rec.2020 HLG".to_string(),
-        )]));
-        profile.copyright = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Public Domain".to_string(),
-        )]));
-        profile
-    }
-
     /// Creates new Monochrome profile
     pub fn new_gray_with_gamma(gamma: f32) -> ColorProfile {
         ColorProfile {
@@ -491,114 +296,5 @@ impl ColorProfile {
             )])),
             ..Default::default()
         }
-    }
-
-    /// Creates new ACES 2065-1/AP0 profile
-    pub fn new_aces_aces_2065_1_linear() -> ColorProfile {
-        let mut profile = ColorProfile::basic_rgb_profile();
-        profile.update_colorants(ColorProfile::ACES_2065_1_COLORANTS);
-
-        let curve = ToneReprCurve::Lut(vec![]);
-        profile.red_trc = Some(curve.clone());
-        profile.blue_trc = Some(curve.clone());
-        profile.green_trc = Some(curve);
-        profile.media_white_point = Some(WHITE_POINT_D60.to_xyzd());
-        profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "ACES 2065-1".to_string(),
-        )]));
-        profile.copyright = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Public Domain".to_string(),
-        )]));
-        profile
-    }
-
-    /// Creates new ACEScg profile
-    pub fn new_aces_cg_linear() -> ColorProfile {
-        let mut profile = ColorProfile::basic_rgb_profile();
-        profile.update_colorants(ColorProfile::ACES_CG_COLORANTS);
-
-        let curve = ToneReprCurve::Lut(vec![]);
-        profile.red_trc = Some(curve.clone());
-        profile.blue_trc = Some(curve.clone());
-        profile.green_trc = Some(curve);
-        profile.media_white_point = Some(WHITE_POINT_D60.to_xyzd());
-        profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "ACEScg/AP1".to_string(),
-        )]));
-        profile.copyright = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Public Domain".to_string(),
-        )]));
-        profile
-    }
-
-    /// Creates new Generic CIE LAB profile
-    pub fn new_lab() -> ColorProfile {
-        let mut profile = ColorProfile {
-            profile_class: ProfileClass::DisplayDevice,
-            rendering_intent: RenderingIntent::Perceptual,
-            color_space: DataColorSpace::Lab,
-            pcs: DataColorSpace::Xyz,
-            chromatic_adaptation: Some(BRADFORD_D),
-            white_point: WHITE_POINT_D50.to_xyzd(),
-            media_white_point: Some(WHITE_POINT_D65.to_xyzd()),
-            ..Default::default()
-        };
-
-        let b_to_a_lut = LutWarehouse::Multidimensional(LutMultidimensionalType {
-            num_input_channels: 3,
-            num_output_channels: 3,
-            grid_points: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            clut: None,
-            b_curves: vec![
-                ToneReprCurve::Lut(vec![]),
-                ToneReprCurve::Lut(vec![]),
-                ToneReprCurve::Lut(vec![]),
-            ],
-            matrix: Matrix3d::IDENTITY,
-            a_curves: vec![],
-            m_curves: vec![],
-            bias: Vector3::default(),
-        });
-        profile.lut_b_to_a_perceptual = Some(b_to_a_lut.clone());
-        profile.lut_b_to_a_colorimetric = Some(b_to_a_lut);
-
-        let a_to_b = LutWarehouse::Multidimensional(LutMultidimensionalType {
-            num_input_channels: 3,
-            num_output_channels: 3,
-            grid_points: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            clut: None,
-            b_curves: vec![
-                ToneReprCurve::Lut(vec![]),
-                ToneReprCurve::Lut(vec![]),
-                ToneReprCurve::Lut(vec![]),
-            ],
-            matrix: Matrix3d::IDENTITY,
-            a_curves: vec![],
-            m_curves: vec![],
-            bias: Vector3::default(),
-        });
-        profile.lut_a_to_b_colorimetric = Some(a_to_b.clone());
-        profile.lut_a_to_b_perceptual = Some(a_to_b);
-
-        profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Generic L*a*b* Profile".to_string(),
-        )]));
-        profile.copyright = Some(ProfileText::Localizable(vec![LocalizableString::new(
-            "en".to_string(),
-            "US".to_string(),
-            "Public Domain".to_string(),
-        )]));
-
-        profile
     }
 }

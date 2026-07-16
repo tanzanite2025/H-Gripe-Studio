@@ -30,12 +30,4 @@ export interface RepaintReport {
   requested_count: number;
   image_size: [number, number];
   blend?: string;
-  engine?: string;
-  engine_requested?: string;
-  engine_fallback_reason?: string | null;
-  backend_model?: string | null;
-  device?: string | null;
-  precision?: string | null;
-  precision_requested?: string;
-  controlnet_requested?: string;
 }

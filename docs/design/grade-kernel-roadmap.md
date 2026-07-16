@@ -10,7 +10,7 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 - **Op set:** exposure, white balance (incl. planckian), levels, curves,
   saturation, lift/gamma/gain, contrast, HSL adjust, HSL curves
-  (hue-vs-hue etc.), log wheels, RGB mixer, 1D/3D LUT (tetrahedral),
+  (hue-vs-hue etc.), log wheels, RGB mixer,
   color warper, soft clip, sharpen / bilateral denoise (3×3/5×5/7×7),
   film grain, plus the cross-frame `temporal_denoise` stage.
 - **Backends:** CPU reference path (bit-identical to the TS mirror via
@@ -32,8 +32,7 @@ directions so future work can be picked deliberately instead of ad hoc.
   remains the browser-preview / error fallback. The `grade-gpu` feature is
   now **on by default** in the desktop build.
 - ✅ **Expose the newer ops in the panel.** Sharpen / denoise (with the
-  radius control), film grain, RGB mixer, color warper and `.cube` LUT
-  loading are in `GradePanel`.
+  radius control), film grain, RGB mixer and color warper are in `GradePanel`.
 - **Temporal denoise in the video dialog.** Still open: the kernel stage is
   caller-managed (`temporal_denoise(current, prev, amount)`); the
   `TemporalAccumulator` seam exists in `studio/grade.rs` but the video
@@ -56,15 +55,10 @@ directions so future work can be picked deliberately instead of ad hoc.
 - **Noise reduction, chroma-specific** — bilateral on chroma only (needs a
   YCbCr split helper in the spatial family).
 
-### 3. LUT and interchange
+### 3. Interchange
 
-- **Bake a `GradeDoc` to `.cube`** — sample the identity cube through
-  `apply()` and export; makes every grade portable to Resolve/PS. Spatial
-  ops are excluded by construction (document that).
-- **`.cube` export of individual layers** and import of shaper+cube pairs.
 - **CDL (`.cdl`/ASC-CDL) import/export** — slope/offset/power/sat maps
   directly onto existing ops.
-- **HALD CLUT PNG import/export** — cheap interchange with image tools.
 
 ### 4. Spatial/kernel infrastructure
 
@@ -83,8 +77,8 @@ directions so future work can be picked deliberately instead of ad hoc.
   either (a) relax the contract to a tolerance for the parallel path, or
   (b) implement identical SIMD on both ends (Rust intrinsics + WASM SIMD).
   Decide explicitly; do not drift into it.
-- **Precomputation caching** — monotone splines, HSL curve tables, planckian
-  gains and 1D-LUT tables are recomputed per `apply()`; cache keyed on the
+- **Precomputation caching** — monotone splines and planckian gains are
+  recomputed per `apply()`; cache keyed on the
   serialized op for interactive slider drags.
 - **GPU: readback overlap and fp16 storage** — double-buffered staging to
   hide the copy latency; optional half-float intermediate surfaces for
@@ -109,6 +103,11 @@ directions so future work can be picked deliberately instead of ad hoc.
 
 ### 7. Colour science
 
+- **Professional RAW scene migration (highest priority)** - add the unbounded
+  `LinearProPhoto` surface defined by the active RAW plan, make every
+  primaries-dependent operation and scope space-aware, and remove the
+  still-image u16 round trip. This is a fixed canonical space, not a
+  working-space selector.
 - **More working spaces** — the `GradeSpace` enum is extensible; candidates:
   Rec.2020/PQ and HLG (HDR video), ACEScct (grading interchange). Each needs
   TRC pairs in `trc.rs` + goldens on both ends.
@@ -132,10 +131,9 @@ directions so future work can be picked deliberately instead of ad hoc.
    temporal denoise in the video dialog is the remaining §1 item.
 2. ✅ Blur primitive (§4) + vignette (§2) — landed; halation/bloom + glow
    (§2) are the natural next ops on top of the blur primitive.
-3. LUT export (§3) — small, high interchange value.
-4. Keyframe interpolation + GPU export renderer (§6) as the video dialog
+3. Keyframe interpolation + GPU export renderer (§6) as the video dialog
    lands.
-5. Precompute caching (§5) when interactive sliders feel sluggish; SIMD
+4. Precompute caching (§5) when interactive sliders feel sluggish; SIMD
    only after the contract decision.
 
 ## Related

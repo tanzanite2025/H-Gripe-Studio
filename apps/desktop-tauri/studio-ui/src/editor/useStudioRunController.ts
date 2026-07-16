@@ -452,19 +452,18 @@ export function useStudioRunController({
   // the run log before executing, so users do not have to wait for a mid-run
   // failure to find them.
   const warnPsdChain = useCallback(
-    async (graph: WorkflowGraph, scope?: RunScope) => {
+    async (graph: WorkflowGraph) => {
       for (const w of validatePsdChain(graph)) pushLog("warn", `⚠ ${w.node}: ${w.message}`);
-      // Backend selection contract, step 8: a stored api_profile_ref /
-      // local_model_ref must exist in the manager and declare the capability
-      // its selector filters by. Warnings only — executors keep their own
-      // fallback behavior. Row-scoped runs check only the running row's
-      // bindings — the other rows of the card do not execute.
-      const rowFilter =
-        scope?.kind === "card_row" ? { nodeId: scope.nodeId, rowId: scope.rowId } : undefined;
-      for (const w of validateBackendRefs(graph, loadRegistry(), { rowFilter }))
+      // API refs are validated before execution. Retired backend requests are
+      // blocking so they cannot silently fall back to another implementation.
+      const backendIssues = validateBackendRefs(graph, loadRegistry());
+      for (const w of backendIssues) {
         pushLog("warn", `⚠ ${w.node}: ${w.message}`);
+      }
+      const retired = backendIssues.find((issue) => issue.blocking);
+      if (retired) throw new Error(`run blocked: ${retired.message}`);
       // Beyond the syntactic checks above, confirm against the real files on
-      // disk. This needs the Python/psd-tools backend, so it is desktop-only;
+      // disk. This needs the native PSD filesystem backend, so it is desktop-only;
       // browser preview keeps just the path-shape check.
       if (!isTauri()) return;
       for (const tpl of psdTemplatePaths(graph)) {
@@ -526,7 +525,7 @@ export function useStudioRunController({
       const resolved = resolveRunScope(full, scope);
       for (const warning of resolved.warnings) pushLog("warn", `⚠ ${warning}`);
       const authored = resolved.graph;
-      await warnPsdChain(authored, scope);
+      await warnPsdChain(authored);
       const { graph, origin } = lowerWorkflowGraph(authored);
       loweredOrigin.current = origin;
       for (const line of buildRunReport({ scopeLabel, authored, lowered: graph, origin }))

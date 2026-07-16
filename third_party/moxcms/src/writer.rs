@@ -26,36 +26,18 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::profile::{LutDataType, ProfileHeader};
+use crate::profile::ProfileHeader;
 use crate::tag::{TAG_SIZE, Tag, TagTypeDefinition};
 use crate::trc::ToneReprCurve;
 use crate::{
     CicpProfile, CmsError, ColorDateTime, ColorProfile, DataColorSpace, LocalizableString,
-    LutMultidimensionalType, LutStore, LutType, LutWarehouse, Matrix3d, ProfileClass,
-    ProfileSignature, ProfileText, ProfileVersion, Vector3d, ViewingConditions, Xyz, Xyzd,
+    Matrix3d, ProfileClass, ProfileSignature, ProfileText, ProfileVersion, ViewingConditions, Xyz,
+    Xyzd,
 };
 
 pub(crate) trait FloatToFixedS15Fixed16 {
     fn to_s15_fixed16(self) -> i32;
 }
-
-pub(crate) trait FloatToFixedU8Fixed8 {
-    fn to_u8_fixed8(self) -> u16;
-}
-
-// pub(crate) trait FloatToFixedU16 {
-//     fn to_fixed_u16(self) -> u16;
-// }
-
-// impl FloatToFixedU16 for f32 {
-//     #[inline]
-//     fn to_fixed_u16(self) -> u16 {
-//         const SCALE: f64 = (1 << 16) as f64;
-//         (self as f64 * SCALE + 0.5)
-//             .floor()
-//             .clamp(u16::MIN as f64, u16::MAX as f64) as u16
-//     }
-// }
 
 impl FloatToFixedS15Fixed16 for f32 {
     #[inline]
@@ -234,16 +216,6 @@ fn write_viewing_conditions_value(
 
 fn write_trc_entry(into: &mut Vec<u8>, trc: &ToneReprCurve) -> Result<usize, CmsError> {
     match trc {
-        ToneReprCurve::Lut(lut) => {
-            let curv: u32 = TagTypeDefinition::LutToneCurve.into();
-            write_u32_be(into, curv);
-            write_u32_be(into, 0);
-            write_u32_be(into, lut.len() as u32);
-            for item in lut.iter() {
-                write_u16_be(into, *item);
-            }
-            Ok(12 + lut.len() * 2)
-        }
         ToneReprCurve::Parametric(parametric_curve) => {
             if parametric_curve.len() > 7
                 || parametric_curve.len() == 6
@@ -305,219 +277,6 @@ fn write_matrix3d(into: &mut Vec<u8>, v: Matrix3d) {
     write_i32_be(into, v.v[2][0].to_s15_fixed16());
     write_i32_be(into, v.v[2][1].to_s15_fixed16());
     write_i32_be(into, v.v[2][2].to_s15_fixed16());
-}
-
-#[inline]
-fn write_vector3d(into: &mut Vec<u8>, v: Vector3d) {
-    write_i32_be(into, v.v[0].to_s15_fixed16());
-    write_i32_be(into, v.v[1].to_s15_fixed16());
-    write_i32_be(into, v.v[2].to_s15_fixed16());
-}
-
-#[inline]
-fn write_lut_entry(into: &mut Vec<u8>, lut: &LutDataType) -> Result<usize, CmsError> {
-    if !lut.has_same_kind() {
-        return Err(CmsError::InvalidProfile);
-    }
-    let start = into.len();
-    let lut16_tag: u32 = match &lut.input_table {
-        LutStore::Store8(_) => LutType::Lut8.into(),
-        LutStore::Store16(_) => LutType::Lut16.into(),
-    };
-    write_u32_be(into, lut16_tag);
-    write_u32_be(into, 0);
-    into.push(lut.num_input_channels);
-    into.push(lut.num_output_channels);
-    into.push(lut.num_clut_grid_points);
-    into.push(0);
-    write_matrix3d(into, lut.matrix);
-    write_u16_be(into, lut.num_input_table_entries);
-    write_u16_be(into, lut.num_output_table_entries);
-    match &lut.input_table {
-        LutStore::Store8(input_table) => {
-            for &item in input_table.iter() {
-                into.push(item);
-            }
-        }
-        LutStore::Store16(input_table) => {
-            for &item in input_table.iter() {
-                write_u16_be(into, item);
-            }
-        }
-    }
-    match &lut.clut_table {
-        LutStore::Store8(input_table) => {
-            for &item in input_table.iter() {
-                into.push(item);
-            }
-        }
-        LutStore::Store16(input_table) => {
-            for &item in input_table.iter() {
-                write_u16_be(into, item);
-            }
-        }
-    }
-    match &lut.output_table {
-        LutStore::Store8(input_table) => {
-            for &item in input_table.iter() {
-                into.push(item);
-            }
-        }
-        LutStore::Store16(input_table) => {
-            for &item in input_table.iter() {
-                write_u16_be(into, item);
-            }
-        }
-    }
-    let end = into.len();
-    Ok(end - start)
-}
-
-#[inline]
-fn write_mab_entry(
-    into: &mut Vec<u8>,
-    lut: &LutMultidimensionalType,
-    is_a_to_b: bool,
-) -> Result<usize, CmsError> {
-    let start = into.len();
-    let lut16_tag: u32 = if is_a_to_b {
-        LutType::LutMab.into()
-    } else {
-        LutType::LutMba.into()
-    };
-    write_u32_be(into, lut16_tag);
-    write_u32_be(into, 0);
-    into.push(lut.num_input_channels);
-    into.push(lut.num_output_channels);
-    write_u16_be(into, 0);
-    let mut working_offset = 32usize;
-
-    let mut data = Vec::new();
-
-    // Offset to "B curves"
-    if !lut.b_curves.is_empty() {
-        while working_offset % 4 != 0 {
-            data.push(0);
-            working_offset += 1;
-        }
-
-        write_u32_be(into, working_offset as u32);
-
-        for trc in lut.b_curves.iter() {
-            let curve_size = write_trc_entry(&mut data, trc)?;
-            working_offset += curve_size;
-            while working_offset % 4 != 0 {
-                data.push(0);
-                working_offset += 1;
-            }
-        }
-    } else {
-        write_u32_be(into, 0);
-    }
-
-    // Offset to matrix
-    if !lut.m_curves.is_empty() {
-        while working_offset % 4 != 0 {
-            data.push(0);
-            working_offset += 1;
-        }
-
-        write_u32_be(into, working_offset as u32);
-        write_matrix3d(&mut data, lut.matrix);
-        write_vector3d(&mut data, lut.bias);
-        working_offset += 9 * 4 + 3 * 4;
-        // Offset to "M curves"
-        write_u32_be(into, working_offset as u32);
-        for trc in lut.m_curves.iter() {
-            let curve_size = write_trc_entry(&mut data, trc)?;
-            working_offset += curve_size;
-            while working_offset % 4 != 0 {
-                data.push(0);
-                working_offset += 1;
-            }
-        }
-    } else {
-        // Offset to matrix
-        write_u32_be(into, 0);
-        // Offset to "M curves"
-        write_u32_be(into, 0);
-    }
-
-    let mut clut_start = data.len();
-
-    // Offset to CLUT
-    if let Some(clut) = &lut.clut {
-        while working_offset % 4 != 0 {
-            data.push(0);
-            working_offset += 1;
-        }
-
-        clut_start = data.len();
-
-        write_u32_be(into, working_offset as u32);
-
-        // Writing CLUT
-        for &pt in lut.grid_points.iter() {
-            data.push(pt);
-        }
-        data.push(match clut {
-            LutStore::Store8(_) => 1,
-            LutStore::Store16(_) => 2,
-        }); // Entry size
-        data.push(0);
-        data.push(0);
-        data.push(0);
-        match clut {
-            LutStore::Store8(store) => {
-                for &element in store.iter() {
-                    data.push(element)
-                }
-            }
-            LutStore::Store16(store) => {
-                for &element in store.iter() {
-                    write_u16_be(&mut data, element);
-                }
-            }
-        }
-    } else {
-        write_u32_be(into, 0);
-    }
-
-    let clut_size = data.len() - clut_start;
-    working_offset += clut_size;
-
-    // Offset to "A curves"
-    if !lut.a_curves.is_empty() {
-        while working_offset % 4 != 0 {
-            data.push(0);
-            working_offset += 1;
-        }
-
-        write_u32_be(into, working_offset as u32);
-
-        for trc in lut.a_curves.iter() {
-            let curve_size = write_trc_entry(&mut data, trc)?;
-            working_offset += curve_size;
-            while working_offset % 4 != 0 {
-                data.push(0);
-                working_offset += 1;
-            }
-        }
-    } else {
-        write_u32_be(into, 0);
-    }
-
-    into.extend(data);
-
-    let end = into.len();
-    Ok(end - start)
-}
-
-fn write_lut(into: &mut Vec<u8>, lut: &LutWarehouse, is_a_to_b: bool) -> Result<usize, CmsError> {
-    match lut {
-        LutWarehouse::Lut(lut) => Ok(write_lut_entry(into, lut)?),
-        LutWarehouse::Multidimensional(mab) => write_mab_entry(into, mab, is_a_to_b),
-    }
 }
 
 impl ProfileHeader {
@@ -584,28 +343,7 @@ impl ColorProfile {
         if self.media_white_point.is_some() {
             tags_count += 1;
         }
-        if self.gamut.is_some() {
-            tags_count += 1;
-        }
         if self.chromatic_adaptation.is_some() {
-            tags_count += 1;
-        }
-        if self.lut_a_to_b_perceptual.is_some() {
-            tags_count += 1;
-        }
-        if self.lut_a_to_b_colorimetric.is_some() {
-            tags_count += 1;
-        }
-        if self.lut_a_to_b_saturation.is_some() {
-            tags_count += 1;
-        }
-        if self.lut_b_to_a_perceptual.is_some() {
-            tags_count += 1;
-        }
-        if self.lut_b_to_a_colorimetric.is_some() {
-            tags_count += 1;
-        }
-        if self.lut_b_to_a_saturation.is_some() {
             tags_count += 1;
         }
         if self.luminance.is_some() {
@@ -729,78 +467,6 @@ impl ColorProfile {
             }
         }
 
-        if let Some(lut) = &self.lut_a_to_b_perceptual {
-            let entry_size = write_lut(&mut entries, lut, true)?;
-            write_tag_entry(
-                &mut tags,
-                Tag::DeviceToPcsLutPerceptual,
-                base_offset,
-                entry_size,
-            );
-            base_offset += entry_size;
-        }
-
-        if let Some(lut) = &self.lut_a_to_b_colorimetric {
-            let entry_size = write_lut(&mut entries, lut, true)?;
-            write_tag_entry(
-                &mut tags,
-                Tag::DeviceToPcsLutColorimetric,
-                base_offset,
-                entry_size,
-            );
-            base_offset += entry_size;
-        }
-
-        if let Some(lut) = &self.lut_a_to_b_saturation {
-            let entry_size = write_lut(&mut entries, lut, true)?;
-            write_tag_entry(
-                &mut tags,
-                Tag::DeviceToPcsLutSaturation,
-                base_offset,
-                entry_size,
-            );
-            base_offset += entry_size;
-        }
-
-        if let Some(lut) = &self.lut_b_to_a_perceptual {
-            let entry_size = write_lut(&mut entries, lut, false)?;
-            write_tag_entry(
-                &mut tags,
-                Tag::PcsToDeviceLutPerceptual,
-                base_offset,
-                entry_size,
-            );
-            base_offset += entry_size;
-        }
-
-        if let Some(lut) = &self.lut_b_to_a_colorimetric {
-            let entry_size = write_lut(&mut entries, lut, false)?;
-            write_tag_entry(
-                &mut tags,
-                Tag::PcsToDeviceLutColorimetric,
-                base_offset,
-                entry_size,
-            );
-            base_offset += entry_size;
-        }
-
-        if let Some(lut) = &self.lut_b_to_a_saturation {
-            let entry_size = write_lut(&mut entries, lut, false)?;
-            write_tag_entry(
-                &mut tags,
-                Tag::PcsToDeviceLutSaturation,
-                base_offset,
-                entry_size,
-            );
-            base_offset += entry_size;
-        }
-
-        if let Some(lut) = &self.gamut {
-            let entry_size = write_lut(&mut entries, lut, false)?;
-            write_tag_entry(&mut tags, Tag::Gamut, base_offset, entry_size);
-            base_offset += entry_size;
-        }
-
         if let Some(luminance) = self.luminance {
             write_tag_entry(&mut tags, Tag::Luminance, base_offset, 20);
             write_xyz_tag_value(&mut entries, luminance);
@@ -893,29 +559,9 @@ impl ColorProfile {
     }
 }
 
-impl FloatToFixedU8Fixed8 for f32 {
-    #[inline]
-    fn to_u8_fixed8(self) -> u16 {
-        if self > 255.0 + 255.0 / 256f32 {
-            0xffffu16
-        } else if self < 0.0 {
-            0u16
-        } else {
-            (self * 256.0 + 0.5).floor() as u16
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn to_u8_fixed8() {
-        assert_eq!(0, 0f32.to_u8_fixed8());
-        assert_eq!(0x0100, 1f32.to_u8_fixed8());
-        assert_eq!(u16::MAX, (255f32 + (255f32 / 256f32)).to_u8_fixed8());
-    }
 
     #[test]
     fn to_s15_fixed16() {

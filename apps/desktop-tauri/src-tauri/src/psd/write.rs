@@ -1,17 +1,14 @@
 //! Native PSD compose: place a generated image into a PSD template's
 //! placeholder as a new pixel layer and export the `<name>.psd` +
-//! `<name>_preview.png` + `<name>_metadata.json` triplet — the write half of
-//! the completed Rust PSD migration (Phase 5), mirroring
-//! `python/bridge/compose_psd_cli.py`.
+//! `<name>_preview.png` + `<name>_metadata.json` triplet.
 //!
 //! The writer splices into the template rather than re-serialising it: every
 //! byte of the original file is preserved verbatim except the layer info
 //! sub-section, where a `03_GENERATED` group (end marker + pixel layer +
 //! group record, matching psd_tools' record layout) is inserted at the
 //! requested z-order and the section lengths/count are recomputed. Inputs the
-//! writer cannot reproduce faithfully — smart-object content replacement,
-//! non-PNG or colour-managed sources, non-8-bit/RGB templates — return an
-//! error so the command falls back to the legacy Python bridge.
+//! writer cannot reproduce faithfully return an explicit unsupported-input
+//! error from this native implementation.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,7 +44,7 @@ struct Placeholder {
     top: i32,
     width: i32,
     height: i32,
-    /// `"smartobject"` / `"pixel"` like the Python CLI (groups count as pixel).
+    /// `"smartobject"` / `"pixel"` (groups count as pixel).
     kind: Option<&'static str>,
     /// Flat index of the placeholder's own record.
     record_index: Option<usize>,
@@ -135,7 +132,7 @@ fn build_index_tree(records: &[RecordSpan]) -> Vec<IndexNode> {
     tree
 }
 
-/// Depth-first search matching the Python `_find_layer` order: at each level
+/// Depth-first search in the compose contract's layer resolution order: at each level
 /// (bottom-to-top) check the name first, then descend into groups.
 fn find_node<'a>(nodes: &'a [IndexNode], name: &str) -> Option<&'a IndexNode> {
     for node in nodes {
@@ -240,16 +237,14 @@ fn png_has_unsupported_chunk(data: &[u8]) -> bool {
 }
 
 /// Load the generated image as 8-bit RGBA. Only plain 8-bit PNGs are handled
-/// natively (`source_mode` reports `"RGB"`/`"RGBA"`/`"L"`/`"LA"` like PIL);
-/// anything needing colour management, EXIF rotation or bit-depth mapping is
-/// left to the legacy bridge.
+/// natively (`source_mode` reports `"RGB"`/`"RGBA"`/`"L"`/`"LA"`); inputs
+/// needing colour management, EXIF rotation or bit-depth mapping are rejected.
 fn load_rgba(path: &str) -> Result<(RgbaImage, &'static str), String> {
     guard_decode_size(path)?;
     let data = fs::read(path).map_err(|err| format!("failed to read {path}: {err}"))?;
     if png_has_unsupported_chunk(&data) {
         return Err(format!(
-            "image {path} is not a plain PNG (colour-managed/EXIF or non-PNG input); \
-             legacy bridge required"
+            "image {path} is not a plain PNG; colour-managed, EXIF-tagged, and non-PNG inputs are unsupported by native PSD compose"
         ));
     }
     let decoded =
@@ -265,7 +260,9 @@ fn load_rgba(path: &str) -> Result<(RgbaImage, &'static str), String> {
         image::DynamicImage::ImageLumaA8(img) => {
             (image::DynamicImage::ImageLumaA8(img).to_rgba8(), "LA")
         }
-        _ => return Err(format!("image {path} is not 8-bit; legacy bridge required")),
+        _ => return Err(format!(
+            "image {path} is not a supported 8-bit PNG for native PSD compose"
+        )),
     };
     Ok((rgba, mode))
 }
@@ -277,7 +274,7 @@ fn load_mask(path: &str) -> Result<(GrayImage, &'static str), String> {
     let data = fs::read(path).map_err(|err| format!("failed to read {path}: {err}"))?;
     if png_has_unsupported_chunk(&data) {
         return Err(format!(
-            "mask {path} is not a plain PNG; legacy bridge required"
+            "mask {path} is not a plain PNG supported by native PSD compose"
         ));
     }
     let decoded =
@@ -308,7 +305,9 @@ fn load_mask(path: &str) -> Result<(GrayImage, &'static str), String> {
             }
             (out, "RGBA")
         }
-        _ => return Err(format!("mask {path} is not 8-bit; legacy bridge required")),
+        _ => return Err(format!(
+            "mask {path} is not a supported 8-bit PNG for native PSD compose"
+        )),
     };
     Ok((mask, mode))
 }
@@ -695,8 +694,8 @@ fn utc_now_isoformat() -> String {
     )
 }
 
-/// Render a JSON document from ordered key/value pairs the way Python's
-/// `json.dumps(..., ensure_ascii=False, indent=2)` does.
+/// Render a JSON document from ordered key/value pairs with stable insertion
+/// order and two-space indentation.
 fn json_pretty(pairs: &[(String, Value)]) -> String {
     fn indent_tail(text: &str) -> String {
         text.replace('\n', "\n  ")
@@ -713,11 +712,10 @@ fn json_pretty(pairs: &[(String, Value)]) -> String {
     out
 }
 
-/// The native compose path behind the `compose_psd` command. Mirrors
-/// `compose_psd_cli.py`'s pixel-layer route and, for `replace_content` on an
-/// embedded smart object, `super::smart`'s in-place content replacement;
-/// returns `Err` (so the caller can fall back to the legacy bridge) for any
-/// input the writer cannot reproduce faithfully.
+/// The native compose path behind the `compose_psd` command. It uses the
+/// pixel-layer route and, for `replace_content` on an embedded smart object,
+/// `super::smart`'s in-place content replacement. Inputs the writer cannot
+/// reproduce faithfully return an explicit `Err`.
 pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdResult, String> {
     let template_path = args.template.trim();
     let image_path = args.image.trim();
@@ -737,7 +735,7 @@ pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdRes
     let spans = parse_psd_spans(&data)?;
     if spans.depth != 8 || spans.color_mode != 3 {
         return Err(format!(
-            "PSD mode not supported natively (depth {}, color mode {}); legacy bridge required",
+            "PSD mode not supported by native compose (depth {}, color mode {}); expected 8-bit RGB",
             spans.depth, spans.color_mode
         ));
     }
@@ -775,7 +773,7 @@ pub(crate) fn compose_psd_native(args: &ComposeArgs<'_>) -> Result<ComposePsdRes
     );
     let (composed, main_name, smart_object_mode) = if so_replace {
         // True smart-object replacement: draw the fitted image into a
-        // box-sized transparent canvas (like the Python CLI's `paste`) and
+        // box-sized transparent canvas and
         // swap both the embedded source and the cached raster in place.
         let record_index = placeholder
             .record_index
@@ -985,10 +983,9 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/compose_generated.png"
     );
-    /// `final_preview.png` written by `compose_psd_cli.py` for the same job
-    /// (template + generated image into the `Green` placeholder, contain,
-    /// above_background, hide placeholder).
-    const PYTHON_PREVIEW: &[u8] = include_bytes!(concat!(
+    /// Checked-in `final_preview.png` for the same compose job (template plus
+    /// generated image in the `Green` placeholder).
+    const GOLDEN_PREVIEW: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/compose_preview_python.png"
     ));
@@ -1017,13 +1014,13 @@ mod tests {
         }
     }
 
-    /// The golden test: run the same job the Python CLI ran, re-read the
+    /// The golden test: run the reference compose job, re-read the
     /// written PSD with the native parser and check the layer tree matches
     /// what psd_tools produced (03_GENERATED group above the background,
     /// generated layer at the fitted rect, placeholder hidden), and the
-    /// preview matches the Python preview pixel-for-pixel.
+    /// preview matches the checked-in preview pixel-for-pixel.
     #[test]
-    fn golden_pixel_insert_matches_python_cli() {
+    fn golden_pixel_insert_matches_reference() {
         let out = temp_out("golden");
         let out_str = out.to_string_lossy().to_string();
         let result = compose_psd_native(&golden_args(&out_str)).expect("native compose");
@@ -1058,17 +1055,17 @@ mod tests {
         assert!(!green.visible);
         assert!(my_group.visible);
 
-        // Preview parity with the Python CLI output.
+        // Preview parity with the checked-in golden output.
         let native = image::open(&result.preview_path)
             .expect("preview")
             .to_rgb8();
-        let python = image::load_from_memory(PYTHON_PREVIEW)
+        let golden = image::load_from_memory(GOLDEN_PREVIEW)
             .expect("golden")
             .to_rgb8();
-        assert_eq!(native.dimensions(), python.dimensions());
+        assert_eq!(native.dimensions(), golden.dimensions());
         assert!(
-            native.pixels().eq(python.pixels()),
-            "preview differs from the Python CLI preview"
+            native.pixels().eq(golden.pixels()),
+            "preview differs from the checked-in golden preview"
         );
 
         // Metadata carries the same facts (paths/timestamps differ).
@@ -1148,15 +1145,19 @@ mod tests {
     }
 
     #[test]
-    fn non_png_image_falls_back_to_legacy() {
+    fn non_png_image_is_rejected() {
         let out = temp_out("nonpng");
+        fs::create_dir_all(&out).unwrap();
+        let jpeg = out.join("input.jpg");
+        image::DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, image::Rgb([1, 2, 3])))
+            .save_with_format(&jpeg, image::ImageFormat::Jpeg)
+            .unwrap();
+        let jpeg_str = jpeg.to_string_lossy().to_string();
         let out_str = out.to_string_lossy().to_string();
         let mut args = golden_args(&out_str);
-        args.image = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/cmyk_adobe_app14.jpg"
-        );
+        args.image = &jpeg_str;
         let err = compose_psd_native(&args).map(|_| ()).unwrap_err();
-        assert!(err.contains("legacy bridge required"), "{err}");
+        assert!(err.contains("not a plain PNG"), "{err}");
+        let _ = fs::remove_dir_all(&out);
     }
 }

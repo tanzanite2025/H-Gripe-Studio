@@ -14,7 +14,7 @@
  * - `preview` (~100 ms-1 s): cheap, cancellable, latest-wins compute on a
  *   downscaled proxy — geometry / morphology (grow, shrink, feather, …).
  * - `render` (heavy, full-resolution): the committed backend pipeline, model
- *   inference or real-pixel work gated behind the GPU queue — matting, SAM 2
+ *   real-pixel work gated behind the GPU queue — matting and built-in point
  *   points, colour-flood wand.
  */
 export type ExecLane = "interactive" | "preview" | "render";

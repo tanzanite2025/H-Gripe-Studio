@@ -7,9 +7,7 @@
 //!
 //! Splits a flat image into a `LayeredImageAsset` — a locked original layer
 //! plus real background/subject candidates whose masks come from the shared
-//! subject segmentation stack (`subject_segment`): a model backend (BiRefNet /
-//! U²-Netp) when a weight resolves, else the deterministic weight-free builtin
-//! CPU segmenter, so the node works end-to-end without any downloads. Layer
+//! deterministic subject segmentation stack (`subject_segment`). Layer
 //! mask + RGBA cutout PNGs are written to the output directory. Keep the JSON
 //! shape in lock-step with the TS mirror in
 //! `studio-ui/src/production/layeredImage.ts` (the browser preview keeps the
@@ -28,16 +26,15 @@ use super::graph::{
 use super::persist::studio_reject_unsafe_basename;
 use super::pixel_ops;
 use super::studio_image;
-use super::subject_sam2::Sam2Variant;
 use super::subject_segment::{segmenter_for_mode, AutoMode, SegmentRequest};
 
 /// Engine tag prefix recorded in `split_report.engine_version`; the segmenter
 /// provider is appended (e.g. `layer-split/0.2 (builtin-cpu)`).
 const LAYER_SPLIT_ENGINE: &str = "layer-split/0.2";
 
-/// Provider id of the weight-free fallback segmenter (mirrors
+/// Provider id of the weight-free segmenter (mirrors
 /// `subject_segment::BuiltinCpuSegmenter::provider`). Its candidates are
-/// low-confidence and flagged for review; a model backend's are not.
+/// low-confidence and flagged for review.
 const BUILTIN_PROVIDER: &str = "builtin-cpu";
 
 const ORIGINAL_LAYER_ID: &str = "layer_original";
@@ -220,12 +217,7 @@ pub(crate) fn execute_studio_smart_layer_split(
 
     // Segment the subject with the shared stack: a model backend when its
     // weight resolves, else the deterministic builtin CPU fallback.
-    let segmenter = segmenter_for_mode(
-        AutoMode::Subject,
-        &[],
-        Sam2Variant::default(),
-        super::onnx_pool::OnnxDeviceRequest::Cpu,
-    );
+    let segmenter = segmenter_for_mode(AutoMode::Subject, &[]);
     let provider = segmenter.provider().to_string();
     let segmented = segmenter.segment(&SegmentRequest {
         image: &srgb,

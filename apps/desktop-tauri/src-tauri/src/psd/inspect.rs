@@ -1,13 +1,10 @@
-//! Native PSD template reading: a minimal, read-only PSD/PSB parser behind
-//! the `inspect_psd` and `analyze_psd_context` commands — the PSD read
-//! capabilities moved off the Python bridge during the completed Rust PSD
-//! migration (Phase 5).
+//! Native PSD template reading: a minimal, read-only PSD/PSB parser behind the
+//! `inspect_psd` and `analyze_psd_context` commands.
 //!
 //! The parser reads the file header and the layer records (names, bounds,
 //! group dividers, smart-object markers, channel data locations) without
 //! decoding any pixels, so inspection is fast and safe on multi-hundred-MB
-//! templates; `super::analyze` decodes channels on demand. Semantics mirror
-//! the legacy `inspect_psd_cli.py` exactly: layers are listed in file order
+//! templates; `super::analyze` decodes channels on demand. Layers are listed in file order
 //! (bottom-to-top), each group is followed by its children, names prefer the
 //! Unicode (`luni`) block over the Pascal name, and the kind is one of
 //! `"group"` / `"smartobject"` / `"pixel"`.
@@ -16,7 +13,7 @@ use std::fs;
 use std::path::Path;
 
 /// A parsed layer row: `name` + `kind` (`"group"` / `"smartobject"` /
-/// `"pixel"`), matching the rows `inspect_psd_cli.py` prints.
+/// `"pixel"`), matching the public inspection contract.
 pub(crate) struct NativeLayer {
     pub(crate) name: String,
     pub(crate) kind: &'static str,
@@ -29,8 +26,7 @@ pub(crate) struct NativeInspect {
     pub(crate) layers: Vec<NativeLayer>,
 }
 
-/// Refuse to inspect a PSD whose declared canvas exceeds this many pixels
-/// (decompression-bomb guard, aligned with the Python bridge CLIs).
+/// Refuse to inspect a PSD whose declared canvas exceeds this many pixels.
 pub(crate) const MAX_DECODE_PIXELS: u64 = 96_000_000;
 
 /// Big-endian cursor over the raw PSD bytes with bounds-checked reads.
@@ -352,7 +348,7 @@ fn build_tree(records: Vec<(RawLayer, Vec<ChannelRef>)>) -> Vec<LayerNode> {
     tree
 }
 
-/// Flatten the tree into the `name`/`kind` rows the Python CLI prints: file
+/// Flatten the tree into the `name`/`kind` contract rows: file
 /// order (bottom-to-top), each group immediately followed by its children.
 fn flatten(tree: &[LayerNode], rows: &mut Vec<NativeLayer>) {
     for node in tree {
@@ -535,12 +531,14 @@ pub(crate) fn parse_psd_full(data: &[u8]) -> Result<ParsedPsd, String> {
 }
 
 /// Parse the byte spans the native compose writer needs. Errors when the file
-/// has no layer info sub-section to splice into (the legacy bridge handles
-/// those).
+/// has no layer info sub-section to splice into.
 pub(crate) fn parse_psd_spans(data: &[u8]) -> Result<PsdSpans, String> {
     let raw = parse_psd_raw(data)?;
     if !raw.has_layer_info {
-        return Err("PSD has no layer info section; legacy bridge required".to_string());
+        return Err(
+            "PSD has no layer info section; native PSD composition requires layer records"
+                .to_string(),
+        );
     }
     let records = raw
         .records
@@ -595,15 +593,14 @@ mod tests {
     /// Fixture written by the vendored `psd_tools` (see the PR that introduced
     /// it): 64x48 canvas with `Red`, `MyGroup` (open) containing `Green` and a
     /// closed `SubGroup` holding a hidden `Blue`, plus a Unicode-named
-    /// top-level layer. The expected rows are the golden output of
-    /// `python/bridge/inspect_psd_cli.py` on the same file.
+    /// top-level layer. The expected rows are the checked-in golden contract.
     const FIXTURE: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/inspect_template.psd"
     ));
 
     #[test]
-    fn matches_python_cli_golden_output() {
+    fn matches_inspection_golden_output() {
         let parsed = parse_psd(FIXTURE).expect("fixture must parse");
         assert_eq!((parsed.width, parsed.height), (64, 48));
         let rows: Vec<(&str, &str)> = parsed

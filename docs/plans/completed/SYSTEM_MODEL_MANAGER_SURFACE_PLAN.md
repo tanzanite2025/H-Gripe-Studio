@@ -1,5 +1,8 @@
 # System Model Manager Surface Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete. Landed via PRs #393 (manager surface, registry, selector
 > APIs), #394 (card API profile selection), and #395 (card local model
 > selection).

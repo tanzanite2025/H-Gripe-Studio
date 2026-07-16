@@ -48,7 +48,7 @@ export function resolveActiveTarget(doc: ImageEditorDocument, ref: StudioDocumen
  */
 export interface SelectionTarget {
   id: string;
-  source: "pen" | "magnetic_lasso" | "polygon_lasso" | "marquee" | "sam2" | "wand" | "selection_alpha";
+  source: "pen" | "magnetic_lasso" | "polygon_lasso" | "marquee" | "point" | "wand" | "selection_alpha";
   /** Image-space `[x1, y1, x2, y2]`. */
   bounds: [number, number, number, number];
   selectionAlphaArtifactRef?: string;

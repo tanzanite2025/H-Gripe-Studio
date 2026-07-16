@@ -449,57 +449,6 @@ describe("matchLightColor", () => {
     ).rejects.toThrow(/connected image/);
   });
 
-  it("defaults to the cpu engine and carries the engine telemetry through", async () => {
-    const out = (await defaultExecutors.matchLightColor(
-      ctx(
-        "matchLightColor",
-        { mode: "color_transfer", output_dir: "/out" },
-        { image: "/subject.png", background: "/bg.png" },
-      ),
-    )) as Record<string, unknown>;
-    const report = out.match_report as {
-      engine: string;
-      engine_requested: string;
-      engine_fallback_reason: string | null;
-      backend_model: string | null;
-    };
-    expect(report.engine).toBe("cpu");
-    expect(report.engine_requested).toBe("cpu");
-    expect(report.engine_fallback_reason).toBeNull();
-    expect(report.backend_model).toBeNull();
-  });
-
-  it("forwards an opt-in learned engine and records the browser-dev fallback", async () => {
-    const out = (await defaultExecutors.matchLightColor(
-      ctx(
-        "matchLightColor",
-        { mode: "color_transfer", engine: "onnx_harmonize", output_dir: "/out" },
-        { image: "/subject.png", background: "/bg.png" },
-      ),
-    )) as Record<string, unknown>;
-    const report = out.match_report as {
-      engine: string;
-      engine_requested: string;
-      engine_fallback_reason: string | null;
-    };
-    // Outside Tauri the learned engine cannot run, so the mock falls back to
-    // cpu but still surfaces what was requested and why it was not used.
-    expect(report.engine).toBe("cpu");
-    expect(report.engine_requested).toBe("onnx_harmonize");
-    expect(report.engine_fallback_reason).toBe("engine unavailable in browser dev mock");
-  });
-
-  it("threads the device param into the report (defaults to auto)", async () => {
-    const def = (await defaultExecutors.matchLightColor(
-      ctx("matchLightColor", { mode: "color_transfer" }, { image: "/subject.png", background: "/bg.png" }),
-    )) as Record<string, unknown>;
-    expect((def.match_report as { device_requested?: string }).device_requested).toBe("auto");
-
-    const cuda = (await defaultExecutors.matchLightColor(
-      ctx("matchLightColor", { mode: "color_transfer", device: "cuda" }, { image: "/subject.png", background: "/bg.png" }),
-    )) as Record<string, unknown>;
-    expect((cuda.match_report as { device_requested?: string }).device_requested).toBe("cuda");
-  });
 });
 
 describe("refineMaskEdge", () => {
@@ -551,55 +500,6 @@ describe("refineMaskEdge", () => {
     ).rejects.toThrow(/connected image/);
   });
 
-  it("defaults to the cpu engine and carries the engine telemetry through", async () => {
-    const out = (await defaultExecutors.refineMaskEdge(
-      ctx(
-        "refineMaskEdge",
-        { preset: "natural", output_dir: "/out" },
-        { image: "/subject.png", trimap: "/trimap.png" },
-      ),
-    )) as Record<string, unknown>;
-    const report = out.edge_report as {
-      engine: string;
-      engine_requested: string;
-      engine_fallback_reason: string | null;
-      backend_model: string | null;
-    };
-    expect(report.engine).toBe("cpu");
-    expect(report.engine_requested).toBe("cpu");
-    expect(report.engine_fallback_reason).toBeNull();
-    expect(report.backend_model).toBeNull();
-  });
-
-  it("forwards an opt-in learned matter and records the browser-dev fallback", async () => {
-    const out = (await defaultExecutors.refineMaskEdge(
-      ctx(
-        "refineMaskEdge",
-        { preset: "natural", engine: "onnx_matting", output_dir: "/out" },
-        { image: "/subject.png", trimap: "/trimap.png" },
-      ),
-    )) as Record<string, unknown>;
-    const report = out.edge_report as {
-      engine: string;
-      engine_requested: string;
-      engine_fallback_reason: string | null;
-    };
-    expect(report.engine).toBe("cpu");
-    expect(report.engine_requested).toBe("onnx_matting");
-    expect(report.engine_fallback_reason).toBe("engine unavailable in browser dev mock");
-  });
-
-  it("threads the device param into the report (defaults to auto)", async () => {
-    const def = (await defaultExecutors.refineMaskEdge(
-      ctx("refineMaskEdge", { preset: "natural" }, { image: "/subject.png", trimap: "/trimap.png" }),
-    )) as Record<string, unknown>;
-    expect((def.edge_report as { device_requested?: string }).device_requested).toBe("auto");
-
-    const cpu = (await defaultExecutors.refineMaskEdge(
-      ctx("refineMaskEdge", { preset: "natural", device: "cpu" }, { image: "/subject.png", trimap: "/trimap.png" }),
-    )) as Record<string, unknown>;
-    expect((cpu.edge_report as { device_requested?: string }).device_requested).toBe("cpu");
-  });
 });
 
 describe("imageEnhance", () => {
@@ -609,7 +509,7 @@ describe("imageEnhance", () => {
     const out = (await defaultExecutors.imageEnhance(
       ctx(
         "imageEnhance",
-        { mode: "print_ready", output_dir: "/out", output_name: "hero" },
+        { mode: "texture_rebuild", output_dir: "/out", output_name: "hero" },
         { image: "/subject.png", target_bounds: { x: 0, y: 0, width: 2048, height: 2800 } },
       ),
     )) as Record<string, unknown>;
@@ -621,7 +521,7 @@ describe("imageEnhance", () => {
       target_size: [number, number] | null;
       clamped: boolean;
     };
-    expect(report.mode).toBe("print_ready");
+    expect(report.mode).toBe("texture_rebuild");
     expect(report.target_size).toEqual([2048, 2800]);
     expect(report.clamped).toBe(false);
   });
@@ -660,39 +560,6 @@ describe("imageEnhance", () => {
     ).rejects.toThrow(/connected image/);
   });
 
-  it("threads visible and legacy device params into the report (defaults to auto)", async () => {
-    const def = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative" }, { image: "/subject.png" }),
-    )) as Record<string, unknown>;
-    expect((def.enhance_report as { device_requested?: string }).device_requested).toBe("auto");
-
-    const gpu = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative", device: "gpu" }, { image: "/subject.png" }),
-    )) as Record<string, unknown>;
-    expect((gpu.enhance_report as { device_requested?: string }).device_requested).toBe("gpu");
-
-    const directml = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative", device: "directml" }, { image: "/subject.png" }),
-    )) as Record<string, unknown>;
-    expect((directml.enhance_report as { device_requested?: string }).device_requested).toBe("directml");
-  });
-
-  it("threads visible and legacy precision params into the report (defaults to auto)", async () => {
-    const def = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative" }, { image: "/subject.png" }),
-    )) as Record<string, unknown>;
-    expect((def.enhance_report as { precision_requested?: string }).precision_requested).toBe("auto");
-
-    const fp32 = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative", precision: "fp32" }, { image: "/subject.png" }),
-    )) as Record<string, unknown>;
-    expect((fp32.enhance_report as { precision_requested?: string }).precision_requested).toBe("fp32");
-
-    const fp16 = (await defaultExecutors.imageEnhance(
-      ctx("imageEnhance", { mode: "conservative", precision: "fp16" }, { image: "/subject.png" }),
-    )) as Record<string, unknown>;
-    expect((fp16.enhance_report as { precision_requested?: string }).precision_requested).toBe("fp16");
-  });
 });
 
 describe("detailWatchdog", () => {
@@ -752,23 +619,6 @@ describe("detailWatchdog", () => {
     expect(wr.skipped_targets).toEqual(["hands", "logo"]);
   });
 
-  it("threads the device param into the report (defaults to auto)", async () => {
-    // The mock bridge echoes the requested device back as device_requested, so
-    // the default (no param) lands as "auto" and an explicit choice is honoured.
-    const def = (await defaultExecutors.detailWatchdog(
-      ctx("detailWatchdog", { engine: "onnx_defect" }, { image: "/cand.png" }),
-    )) as Record<string, unknown>;
-    expect((def.watchdog_report as { device_requested?: string }).device_requested).toBe("auto");
-
-    const cpu = (await defaultExecutors.detailWatchdog(
-      ctx(
-        "detailWatchdog",
-        { engine: "onnx_defect", device: "cpu" },
-        { image: "/cand.png" },
-      ),
-    )) as Record<string, unknown>;
-    expect((cpu.watchdog_report as { device_requested?: string }).device_requested).toBe("cpu");
-  });
 
   it("requires a connected image input", async () => {
     await expect(
@@ -867,100 +717,18 @@ describe("detailRepaint", () => {
     expect(out.fixed_image).toBe("/out/candidate_repainted.png");
   });
 
-  it("routes to the local inpaint engine, skips the provider loop, and folds engine telemetry into the report", async () => {
+  it("rejects retired repaint backends instead of falling back to the API", async () => {
     const runSpy = vi.spyOn(bridge, "runTaskJson");
-    const reqs: unknown[] = [];
-    vi.spyOn(bridge, "localRepaintRegions").mockImplementation(async (req) => {
-      reqs.push(req);
-      return {
-        // The local backend repaints the one selected region offline.
-        repainted: req.manifest.regions.map((r) => ({ index: r.index, path: `/inp/r${r.index}.png` })),
-        skipped: [],
-        engine: "sd_inpaint",
-        engine_requested: "sd_inpaint",
-        engine_fallback_reason: null,
-        backend_model: "sd-inpaint.safetensors",
-        // The backend echoes the precision it actually ran (fp16 honoured on a
-        // CUDA box) plus the request, so the report never lies.
-        device: "cuda",
-        precision: "fp16",
-        precision_requested: req.precision ?? "auto",
-        requested_count: req.manifest.regions.length,
-        repainted_count: req.manifest.regions.length,
-      };
-    });
-
-    const out = (await defaultExecutors.detailRepaint(
-      ctx(
-        "detailRepaint",
-        { provider: "mock", engine: "sd_inpaint", precision: "fp16", repaint_actions: "detail_redraw", min_confidence: 0.5, output_dir: "/out" },
-        { image: "/cand.png", quality_report: REPORT },
+    await expect(
+      defaultExecutors.detailRepaint(
+        ctx(
+          "detailRepaint",
+          { provider: "openai_compatible", engine: "sd_inpaint" },
+          { image: "/cand.png", quality_report: REPORT },
+        ),
       ),
-    )) as Record<string, unknown>;
-
-    // Local engine used => the provider broker loop is never entered.
+    ).rejects.toThrow(/retired and unavailable/);
     expect(runSpy).not.toHaveBeenCalled();
-    expect(reqs).toHaveLength(1);
-    // The node's precision selection threads through to the local backend call.
-    expect((reqs[0] as { precision?: string }).precision).toBe("fp16");
-    const report = out.repaint_report as {
-      repainted_count: number;
-      engine: string;
-      engine_requested: string;
-      engine_fallback_reason: string | null;
-      backend_model: string | null;
-      device: string | null;
-      precision: string | null;
-      precision_requested: string;
-    };
-    expect(report.repainted_count).toBe(1);
-    // The dropped-before telemetry now rides along with the RepaintReport.
-    expect(report.engine).toBe("sd_inpaint");
-    expect(report.engine_requested).toBe("sd_inpaint");
-    expect(report.engine_fallback_reason).toBeNull();
-    expect(report.backend_model).toBe("sd-inpaint.safetensors");
-    // Device + precision telemetry rides along too.
-    expect(report.device).toBe("cuda");
-    expect(report.precision).toBe("fp16");
-    expect(report.precision_requested).toBe("fp16");
-  });
-
-  it("falls back to the provider loop and records the fallback reason when the local engine is unavailable", async () => {
-    vi.spyOn(bridge, "localRepaintRegions").mockResolvedValue({
-      repainted: [],
-      skipped: [],
-      engine: "provider",
-      engine_requested: "sd_inpaint",
-      engine_fallback_reason: "missing optional dependency: torch",
-      backend_model: null,
-      requested_count: 1,
-      repainted_count: 0,
-    });
-    const tasks: Record<string, unknown>[] = [];
-    vi.spyOn(bridge, "runTaskJson").mockImplementation(async (task: unknown) => {
-      const t = task as Record<string, unknown>;
-      tasks.push(t);
-      return { id: String(t.id), status: "succeeded", output_files: [{ path: `${String(t.id)}.png` }] };
-    });
-
-    const out = (await defaultExecutors.detailRepaint(
-      ctx(
-        "detailRepaint",
-        { provider: "openai_compatible", engine: "sd_inpaint", credentials_ref: "k", repaint_actions: "detail_redraw", min_confidence: 0.5, output_dir: "/out" },
-        { image: "/cand.png", quality_report: REPORT },
-      ),
-    )) as Record<string, unknown>;
-
-    // Local engine produced nothing => the provider path repaints the region.
-    expect(tasks).toHaveLength(1);
-    const report = out.repaint_report as {
-      repainted_count: number;
-      engine: string;
-      engine_fallback_reason: string | null;
-    };
-    expect(report.repainted_count).toBe(1);
-    expect(report.engine).toBe("provider");
-    expect(report.engine_fallback_reason).toBe("missing optional dependency: torch");
   });
 
   it("requires a connected image input", async () => {

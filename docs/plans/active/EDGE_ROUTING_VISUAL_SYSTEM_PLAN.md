@@ -67,13 +67,11 @@ It must not own:
 - WGPU viewports
 - GPU device selection
 - media execution scheduling
-- model/API execution
+- API execution
 
-Read together with:
+Current product boundary:
 
-- [`LOCAL_REACT_FLOW_FORK_PLAN.md`](LOCAL_REACT_FLOW_FORK_PLAN.md)
 - [`NODE_CARD_PRODUCT_BOUNDARY_PLAN.md`](NODE_CARD_PRODUCT_BOUNDARY_PLAN.md)
-- [`RUN_SCOPE_AND_EXECUTION_AFFORDANCE_PLAN.md`](../completed/RUN_SCOPE_AND_EXECUTION_AFFORDANCE_PLAN.md)
 
 ## Visual Contract
 
@@ -176,7 +174,7 @@ This is especially important for:
 
 - Image Processing card rows
 - Prompt card raw / optimized rows
-- model/API cards with image, video, audio, and prompt inputs
+- API-backed cards with image, video, audio, and prompt inputs
 - execution scope visualization
 
 ## Performance Contract

@@ -1,11 +1,14 @@
 # Vendored Runtime End-to-End Integration Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > **状态更新（Phase 7，#314）：** Python runtime、`third_party/psd_tools`、PyAV
 > fallback 与所有 Python torch/onnx 引擎已从仓库彻底删除。本文档中“去除
 > Python 桥 / 移除 PyAV / 删除 psd_tools”类目标均已完成：native FFmpeg 是唯一
 > 视频路径，Rust PSD 子集（analyze / compose / export）是唯一 PSD 路径。
 > P3（hgripe-grade 接入）也已落地：图片 / 视频帧 / 时间线导出共用同一内核，
-> temporal denoise 已接入视频预览，.cube LUT 可导入导出。ONNX 小模型链已完成
+> temporal denoise 已接入视频预览。后续已移除的实验功能以当前实现状态为准。
 > 主体识别、ViTMatte 和 Refine Mask Edge 的首个复用闭环；Windows x64 CPU 运行时
 > 也已转为仓库锁定、动态加载，后续主要是检测、轻量 harmonize 与 Windows GPU provider。
 
@@ -41,7 +44,7 @@ H-Gripe Studio 已经开始把关键库 fork / vendor 到仓库内，并切断�
 
 ## 1. moxcms: 必须端到端集成
 
-`moxcms` 不应该只是一个 CMYK 转 sRGB 的工具。它应该成为 H-Gripe 的色彩地基。
+`moxcms` 应作为 H-Gripe 的 RGB ICC 与工作空间转换基础。
 
 目标链路：
 
@@ -57,7 +60,7 @@ source image / PSD / video frame
 
 应该端到端覆盖：
 
-- 图片导入时的 ICC / CMYK / YCCK / TIFF 处理。
+- 图片导入时的 RGB ICC / TIFF 处理与不支持输入的明确拒绝。
 - 16-bit ProPhoto working surface。
 - 手工编辑路径，不要过早压成 8-bit sRGB。
 - PSD 导出前的图层 / 蒙版 / 合成色彩一致性。
@@ -198,7 +201,7 @@ studio/color
   -> 负责 ICC / ProPhoto / sRGB / egress
 
 hgripe-grade
-  -> 负责 f32 blend / curves / levels / LUT / wheels
+  -> 负责 f32 blend / curves / levels / wheels
 
 ffmpeg_native
   -> 负责视频帧 decode / encode
@@ -277,7 +280,7 @@ psd engine
 - ✅ 图片调色：`imageGrade` 节点（`studio/grade.rs::execute_studio_grade`）在 16-bit 工作面上全精度走内核；`grade_preview` 提供对话框实时预览（GPU 后端 `grade-gpu` 默认启用，CPU rayon 参考路径兜底）。
 - ✅ 视频帧调色：`video_frame_grade_preview` 经 native FFmpeg 解码直接进内核；viewport host 的 `video_frame` / `video_clip` target 渲染时套用 grade doc；`timeline_export` 导出时逐帧全精度调色。
 - ✅ temporal denoise：`TemporalAccumulator`（`studio/grade.rs`）已接入 viewport 渲染路径——连续播放时用上一帧 graded surface 做时域混合，seek / 换源自动重置。
-- ✅ LUT、曲线、色轮、levels、blend mode 统一在 `GradeOp` op graph；`.cube` 可导入（`parse_cube`）也可导出（`bake_cube` 烘焙 3D LUT，空间 op 与 mask 按定义排除）。
+- ✅ 曲线、色轮、levels、blend mode 统一在 `GradeOp` op graph。
 - 剩余方向见 `docs/design/grade-kernel-roadmap.md`（halation/bloom、关键帧插值、GPU 帧序列导出渲染器等增强项）。
 
 ### P4: Rust PSD 子集 — ✅ 完成（Phase 7 收尾）
@@ -317,7 +320,7 @@ psd engine
 
 最应该端到端集成：
 
-1. `moxcms` - 色彩和 ProPhoto / CMYK / ICC 地基。
+1. `moxcms` - ProPhoto / sRGB / ICC 地基。
 2. `ffmpeg` - 视频、时间线、帧缓存、导出地基。
 3. `hgripe-grade` - 图片和视频统一调色地基（✅ 已集成）。
 4. Rust PSD engine - PSD 生产交付地基。

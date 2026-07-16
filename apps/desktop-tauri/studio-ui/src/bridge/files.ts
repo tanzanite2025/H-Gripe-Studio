@@ -112,10 +112,10 @@ export interface VideoProbeResult {
 }
 
 /**
- * Probe a video for the generic video card: read its metadata and decode a
- * poster frame to a cached PNG. Rust has no video decoder, so this shells out
- * to the bundled Python (PyAV). Outside Tauri there is no backend, so this
- * returns a mock with an empty poster path (browser preview shows a placeholder).
+ * Probe a video for the generic video card: the desktop Rust backend reads its
+ * metadata and decodes a poster frame with the vendored FFmpeg libraries.
+ * Outside Tauri there is no file backend, so this returns a mock with an empty
+ * poster path (browser preview shows a placeholder).
  */
 export async function videoProbe(path: string, timestamp = 0): Promise<VideoProbeResult> {
   const invoke = tauriInvoke();

@@ -898,7 +898,7 @@ export function setLayerBlend(state: EditState, index: number, blend: LayerBlend
 }
 
 /**
- * Append a SAM 2 point prompt (image-space). `label` is `1` for a positive
+ * Append a built-in point prompt (image-space). `label` is `1` for a positive
  * (include) point and `0` for a negative (exclude) point.
  */
 export function addPoint(state: EditState, point: PointPrompt): EditState {

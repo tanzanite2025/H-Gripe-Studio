@@ -1,5 +1,8 @@
 # Unified Production Drawer Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete（已归档）。**第一阶段（下方 1–9）已全部落地**（PR #294–#300）：底部抽屉、
 > `ProductionTarget`、Edit/Timeline 工作区、多轨模型、可嵌入 `GradePanel`
 > （image + video_clip）、图片/音频右键按需编辑、timeline render plan +
@@ -105,7 +108,7 @@ node canvas
 负责：
 
 - f32 grade surface。
-- exposure / contrast / levels / curves / HSL / LUT / wheels。
+- exposure / contrast / levels / curves / HSL / wheels。
 - scopes 相关计算。
 - image 和 video 使用同一套 op graph。
 - keyframe interpolation 所需的可序列化参数模型。
@@ -122,7 +125,7 @@ node canvas
 
 负责：
 
-- ICC / CMYK / YCCK / TIFF / ProPhoto / sRGB egress。
+- RGB ICC / TIFF / ProPhoto / sRGB egress。
 - `WorkingImage` 和 `GradeSurface` 的 ingress / egress。
 - API/model 边界的 sRGB 8-bit egress。
 

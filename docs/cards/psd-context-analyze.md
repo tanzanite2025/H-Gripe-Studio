@@ -2,8 +2,8 @@
 
 Executor: **local** (in-process native Rust, never networks).
 Backend: `analyze_psd_context` Tauri command → the native PSD reader
-(`psd/analyze.rs` + `studio/psd_analyze.rs`, CPU-only). The Python bridge and
-vendored `psd_tools` were deleted in Phase 7 (#314).
+(`psd/analyze.rs` + `studio/psd_analyze.rs`, CPU-only). There is no secondary
+scripting backend or runtime fallback.
 
 Reads a PSD *template* and distils it into a machine-usable `VisualContext`:
 background colour / lighting heuristics, the target placeholder's geometry (plus

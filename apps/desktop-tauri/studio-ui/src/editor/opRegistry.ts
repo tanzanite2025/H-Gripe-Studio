@@ -117,8 +117,6 @@ export const GRADE_OPS: Record<GradeOp["type"], OpMeta> = {
   saturation: GRADE_ADJ,
   lift_gamma_gain: GRADE_ADJ,
   hsl_adjust: GRADE_ADJ,
-  lut3d: GRADE_ADJ,
-  lut1d: GRADE_ADJ,
   hue_vs_hue: GRADE_ADJ,
   hue_vs_sat: GRADE_ADJ,
   lum_vs_sat: GRADE_ADJ,

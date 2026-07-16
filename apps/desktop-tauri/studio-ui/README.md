@@ -104,8 +104,7 @@ folder, above). FFmpeg-backed video assembly/export exists as the
 **Video Assemble** output card: it encodes an ordered frame-image sequence into
 a video file (fps/codec/output params) through the media engine — in-process
 via the vendored native FFmpeg (`native-ffmpeg`; see
-`third_party/ffmpeg/VENDOR.md`). The legacy PyAV worker was deleted in
-Phase 7 (#314).
+`third_party/ffmpeg/VENDOR.md`). There is no subprocess media fallback.
 
 The desktop app intentionally has no Credentials / Profiles account-management
 surface. Provider profiles and credential refs are local API config files consumed

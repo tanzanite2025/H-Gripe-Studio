@@ -68,7 +68,7 @@ describe("whitelist enforcement", () => {
       {
         intent: "mask then export",
         steps: [
-          { actionId: "run_sam2_prompt_mask" },
+          { actionId: "record_point_selection" },
           { actionId: "run_full_canvas" },
           { actionId: "change_api_secret" },
         ],

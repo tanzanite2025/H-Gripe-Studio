@@ -14,10 +14,10 @@ default = ["native-ffmpeg", "grade-gpu", "viewport-surface"]
 # Native in-process FFmpeg backend: decode (`FrameSource` behind the
 # media-engine seam) plus encode (`videoTrim`/`videoAssemble`), linked against
 # the vendored LGPL *shared* libav* libraries checked into `third_party/ffmpeg`
-# via git-lfs — cut from upstream, locally maintained, no system ffmpeg and no
-# PyAV. On by default: probe/decode/poster/trim/assemble all run in-process
-# through libav. Build with `--no-default-features` for the legacy PyAV-worker
-# paths. The `FFMPEG_*` link/binding env for `rusty_ffmpeg` lives in
+# via git-lfs — cut from upstream and locally maintained, with no system FFmpeg
+# or subprocess fallback. On by default: probe/decode/poster/trim/assemble all
+# run in-process through libav. Builds without this feature reject video
+# operations explicitly. The `FFMPEG_*` link/binding env for `rusty_ffmpeg` lives in
 # `.cargo/config.toml`, and `build.rs` copies the runtime DLLs next to the
 # test/app binaries.
 native-ffmpeg = ["dep:rusty_ffmpeg"]
@@ -57,42 +57,23 @@ image = { version = "0.25", default-features = false, features = [
   "tiff",
 ] }
 # Direct PNG encoder for the in-process enhance output so it can embed a source
-# ICC profile (iCCP) + DPI (pHYs), matching the Python bridge's save. Already in
-# the tree transitively via `image`; pinned here to use its API directly.
+# ICC profile (iCCP). Already in the tree transitively via `image`; pinned here
+# to use its API directly.
 png = "0.17"
 # Data-parallelism for CPU-bound image operators (e.g. mask morphology). Runs on
 # the Compute lane's worker threads, independent of the GPU serialization gate.
 rayon = "1"
-# ONNX Runtime for native helper-model inference (in-process, Compute lane).
-# The Windows x64 runtime is version-locked under third_party/onnxruntime and
-# loaded explicitly at runtime. Builds must never download native artifacts.
-# CUDA and DirectML providers remain a later, separately tested layer over this
-# CPU baseline; `api-24` matches the vendored ONNX Runtime 1.24.2 ABI exactly.
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-24"] }
 # Native in-process FFmpeg decoder (feature `native-ffmpeg`). Linked against the
 # vendored LGPL shared libav* under third_party/ffmpeg via the FFMPEG_* env in
 # `.cargo/config.toml`; `use_prebuilt_binding` ships FFmpeg 8 bindings (matching
 # the vendored 8.1 libs) so no libclang/bindgen is needed on CI. `ffmpeg8_1`
 # aligns the version cfgs with those libs.
 rusty_ffmpeg = { version = "0.17", default-features = false, features = ["ffmpeg8_1", "use_prebuilt_binding"], optional = true }
-# Raw CMYK sample access for the in-process enhance path. The `image` crate
-# converts CMYK -> RGB and drops the ICC at decode, so a faithful ICC
-# CMYK -> sRGB transform needs the raw 4-channel samples straight from the JPEG
-# (`zune-jpeg`, out colourspace pinned to CMYK) / TIFF (`tiff`, CMYK photometric)
-# decoder. Both are already in the tree transitively via `image`; pinned here to
-# use their APIs directly. `zune-core` provides the shared `ColorSpace` /
-# `ZCursor` types. See `studio/cmyk_decode.rs`.
-zune-jpeg = "0.5"
-zune-core = "0.5"
+# TIFF remains a supported digital-media container and is used directly for
+# 16-bit RGB/RGBA working-surface I/O.
 tiff = "0.11"
-# Pure-Rust colour management for the ICC CMYK -> sRGB transform on the enhance
-# fast path (R3 CMYK step c2). Applies the embedded CMYK profile's A2B LUT the
-# same way the Python bridge does via littleCMS (`ImageCms.profileToProfile`),
-# with a naive PIL-formula fallback when no profile is present. Used by
-# `studio/cmyk_transform.rs`.
-# `options` enables the tetrahedral LUT interpolation used below to match
-# littleCMS / lcms2 (moxcms defaults to quadlinear for CMYK).
-moxcms = { version = "0.8.1", features = ["options"] }
+# Colour management for the sRGB / ProPhoto working-surface boundary only.
+moxcms = { version = "0.8.1", default-features = false }
 # Stable content hash for the media index/cache fingerprints (studio/media_index.rs).
 # Already in the tree via hgripe-api.
 sha2 = "0.10"

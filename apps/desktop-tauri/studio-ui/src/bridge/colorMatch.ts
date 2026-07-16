@@ -2,9 +2,7 @@ import { tauriInvoke } from "./core";
 import { type VisualContext } from "../contracts/context";
 
 // --- Light & Color Match ----------------------------------------------------
-// Wraps the native Rust `match_light_color` command. The built-in CPU heuristic
-// performs Lab transfer / histogram matching; the opt-in `onnx_harmonize`
-// engine runs PCT-Net through ONNX Runtime and keeps the heuristic as fallback.
+// Wraps the deterministic native Rust `match_light_color` command.
 
 /** Mean colour / colour temperature / contrast of the corrected region. */
 export interface ColorAppearance {
@@ -33,18 +31,6 @@ export interface MatchReport {
   note?: string;
   /** `[width, height]` of the written image. */
   output_size?: [number, number];
-  /** Match engine that actually ran (`cpu` heuristic, or a backend id). */
-  engine?: string;
-  /** Engine the node asked for (differs from `engine` on fallback). */
-  engine_requested?: string;
-  /** Why the requested engine was not used (missing deps/weight, no background, …). */
-  engine_fallback_reason?: string | null;
-  /** Weight file name when a learned backend ran, else `null`. */
-  backend_model?: string | null;
-  /** Compute device the learned backend bound (`cpu` today; CUDA/DirectML later); null on cpu. */
-  device?: string | null;
-  /** Compute request (`auto`/`gpu`/`cpu`; legacy `cuda`/`directml` remain accepted). */
-  device_requested?: string;
 }
 
 /** Result of the Light & Color Match node (`match_light_color`). */
@@ -74,10 +60,6 @@ export interface MatchLightColorRequest {
   protectSaturation?: boolean;
   /** Damp the shift on high-chroma (brand) pixels. */
   protectBrandColor?: boolean;
-  /** Match engine: `cpu` (default heuristic) or native PCT-Net `onnx_harmonize`. */
-  engine?: string;
-  /** Vendor-neutral compute request: `auto` (default) | `gpu` | `cpu`; current ORT runs on CPU. */
-  device?: string;
   /** Directory for the written matched PNG. */
   outputDir?: string;
   /** Base name for the matched PNG. */
@@ -86,8 +68,7 @@ export interface MatchLightColorRequest {
 
 /**
  * Match a subject image's light & colour to a PSD background via the backend
- * (`match_light_color`). Pixel work stays in native Rust, with optional PCT-Net
- * inference through ONNX Runtime. Outside Tauri this returns a plausible mock
+ * (`match_light_color`). Pixel work stays in native Rust. Outside Tauri this returns a plausible mock
  * so the editor stays runnable in browser dev.
  */
 export async function matchLightColor(req: MatchLightColorRequest): Promise<ColorMatchResult> {
@@ -115,13 +96,6 @@ export async function matchLightColor(req: MatchLightColorRequest): Promise<Colo
         before,
         after: applied ? { mean_color: [150, 138, 120], color_temperature: 5200, contrast: 0.27 } : before,
         output_size: [1024, 1400],
-        engine: "cpu",
-        engine_requested: req.engine ?? "cpu",
-        engine_fallback_reason:
-          (req.engine ?? "cpu") === "cpu" ? null : "engine unavailable in browser dev mock",
-        backend_model: null,
-        device: null,
-        device_requested: req.device ?? "auto",
       },
     };
   }
@@ -136,8 +110,6 @@ export async function matchLightColor(req: MatchLightColorRequest): Promise<Colo
     highlightStrength: req.highlightStrength ?? null,
     protectSaturation: req.protectSaturation ?? null,
     protectBrandColor: req.protectBrandColor ?? null,
-    engine: req.engine ?? null,
-    device: req.device ?? null,
     outputDir: req.outputDir ?? null,
     outputName: req.outputName ?? null,
   })) as ColorMatchResult;

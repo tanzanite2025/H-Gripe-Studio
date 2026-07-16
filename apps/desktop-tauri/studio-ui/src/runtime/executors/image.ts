@@ -8,11 +8,6 @@ import {
   refineMaskEdge,
 } from "../../bridge/tauri";
 import { type Bounds, type VisualContext } from "../../contracts/context";
-import type {
-  ImageEnhanceDeviceRequest,
-  ImageEnhanceEngineRequest,
-  ImageEnhancePrecisionRequest,
-} from "../../contracts/imageEnhance";
 import {
   findLayer,
   layeredAssetManifest,
@@ -20,7 +15,6 @@ import {
   STUB_ORIGINAL_LAYER_ID,
   type LayeredImageAsset,
 } from "../../domain/layeredImage";
-import { defaultDeviceParam } from "../devicePreference";
 import type { ExecutorRegistry } from "../dag";
 
 export const IMAGE_EXECUTORS = {
@@ -119,8 +113,6 @@ export const IMAGE_EXECUTORS = {
       highlightStrength: Number(ctx.params.highlight_strength ?? 0),
       protectSaturation: Boolean(ctx.params.protect_saturation ?? false),
       protectBrandColor: Boolean(ctx.params.protect_brand_color ?? true),
-      engine: String(ctx.params.engine ?? "cpu") || undefined,
-      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -152,8 +144,6 @@ export const IMAGE_EXECUTORS = {
       guidedRadius: Number(ctx.params.guided_radius ?? 8),
       edgeDecontaminate: Boolean(ctx.params.edge_decontaminate ?? true),
       backgroundBlendStrength: Number(ctx.params.background_blend_strength ?? 0.4),
-      engine: String(ctx.params.engine ?? "cpu").trim() || undefined,
-      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -164,8 +154,7 @@ export const IMAGE_EXECUTORS = {
     };
   },
   // Upscales the upstream subject to a PSD placeholder's pixel target through
-  // the native `enhance_image` command. The built-in path uses Lanczos +
-  // sharpening; optional Real-ESRGAN currently runs on CPU in FP32.
+  // the native `enhance_image` command using deterministic built-in processing.
   imageEnhance: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
     if (!image) throw new Error("Image Enhance needs a connected image input");
@@ -177,15 +166,11 @@ export const IMAGE_EXECUTORS = {
       mode: String(ctx.params.mode ?? "conservative") || undefined,
       targetWidth: Number(ctx.params.target_width ?? 0),
       targetHeight: Number(ctx.params.target_height ?? 0),
-      targetDpi: Number(ctx.params.target_dpi ?? 300),
       maxPixels: Number(ctx.params.max_pixels ?? 48_000_000),
       scale: Number(ctx.params.scale ?? 2),
       denoiseStrength: Number(ctx.params.denoise_strength ?? 0.3),
       textureStrength: Number(ctx.params.texture_strength ?? 0.25),
       preserveTextLogo: Boolean(ctx.params.preserve_text_logo ?? true),
-      engine: (String(ctx.params.engine ?? "cpu").trim() || "cpu") as ImageEnhanceEngineRequest,
-      device: (String(ctx.params.device ?? defaultDeviceParam()).trim() || "auto") as ImageEnhanceDeviceRequest,
-      precision: (String(ctx.params.precision ?? "auto").trim() || "auto") as ImageEnhancePrecisionRequest,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });
@@ -211,8 +196,6 @@ export const IMAGE_EXECUTORS = {
       targetBounds: (ctx.inputs.target_bounds as Bounds | undefined) || undefined,
       watchTargets: String(ctx.params.watch_targets ?? "").trim() || undefined,
       mode: String(ctx.params.mode ?? "balanced") || undefined,
-      engine: String(ctx.params.engine ?? "rules").trim() || undefined,
-      device: String(ctx.params.device ?? defaultDeviceParam()).trim() || undefined,
       outputDir: outputDir || undefined,
       outputName: String(ctx.params.output_name ?? "").trim() || undefined,
     });

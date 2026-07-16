@@ -1,9 +1,4 @@
 import { describe, expect, it } from "vitest";
-import {
-  IMAGE_ENHANCE_DEVICE_OPTIONS,
-  IMAGE_ENHANCE_ENGINE_OPTIONS,
-  IMAGE_ENHANCE_PRECISION_OPTIONS,
-} from "../contracts/imageEnhance";
 import { LOWERED_CARD_ROWS } from "./lowering";
 import { NODE_SPECS, paletteGroups, type Executor, type NodeVisualFamily } from "./nodeSpecs";
 
@@ -76,90 +71,28 @@ describe("nodeSpecs executor tagging", () => {
     }
   });
 
-  it("keeps Match Light & Color engine and device choices aligned with the native contract", () => {
-    const params = NODE_SPECS.matchLightColor.params;
-    const engine = params.find((param) => param.key === "engine");
-    const device = params.find((param) => param.key === "device");
-    expect(params.find((param) => param.key === "local_model_ref")).toBeUndefined();
-
-    expect(engine).toMatchObject({
-      control: "select",
-      options: ["cpu", "onnx_harmonize"],
-      defaultValue: "cpu",
-      visibleWhen: { param: "mode", in: ["color_transfer", "histogram_match", "hybrid"] },
-    });
-    expect(device).toMatchObject({
-      control: "select",
-      options: ["auto", "gpu", "cpu"],
-      defaultValue: "auto",
-      visibleWhen: { param: "engine", in: ["onnx_harmonize"] },
-    });
-  });
-
-  it("uses the vendor-neutral ONNX device choices on every visible native card", () => {
+  it("exposes only deterministic built-ins and API profile refs", () => {
     for (const kind of [
+      "imageProcessing",
       "subjectMask",
       "matchLightColor",
       "refineMaskEdge",
+      "imageEnhance",
       "detailWatchdog",
-    ] as const) {
-      const device = NODE_SPECS[kind].params.find((param) => param.key === "device");
-      expect(device, kind).toMatchObject({
-        control: "select",
-        options: ["auto", "gpu", "cpu"],
-        defaultValue: "auto",
-      });
-    }
-  });
-
-  it("keeps both Image Enhance specs aligned with the native Real-ESRGAN contract", () => {
-    const cases = [
-      {
-        kind: "imageProcessing",
-        engineKey: "enhance.engine",
-        deviceKey: "enhance.device",
-        precisionKey: "enhance.precision",
-      },
-      {
-        kind: "imageEnhance",
-        engineKey: "engine",
-        deviceKey: "device",
-        precisionKey: "precision",
-      },
-    ] as const;
-
-    for (const { kind, engineKey, deviceKey, precisionKey } of cases) {
+      "detailRepaint",
+    ]) {
       const params = NODE_SPECS[kind].params;
-      const engine = params.find((param) => param.key === engineKey);
-      const device = params.find((param) => param.key === deviceKey);
-      const precision = params.find((param) => param.key === precisionKey);
-
-      expect(engine, `${kind} engine`).toMatchObject({
-        control: "select",
-        options: [...IMAGE_ENHANCE_ENGINE_OPTIONS],
-        defaultValue: "cpu",
-      });
-      expect(device, `${kind} device`).toMatchObject({
-        control: "select",
-        options: [...IMAGE_ENHANCE_DEVICE_OPTIONS],
-        defaultValue: "auto",
-        visibleWhen: { param: engineKey, in: ["realesrgan"] },
-      });
-      expect(precision, `${kind} precision`).toMatchObject({
-        control: "select",
-        options: [...IMAGE_ENHANCE_PRECISION_OPTIONS],
-        defaultValue: "auto",
-        visibleWhen: { param: engineKey, in: ["realesrgan"] },
-      });
-      expect(`${engine?.hint} ${device?.hint} ${precision?.hint}`).not.toMatch(/ccsr|supir/i);
+      expect(params.some((param) => /local_model_ref$/i.test(param.key)), kind).toBe(false);
+      const options = params.flatMap((param) => param.options ?? []);
+      expect(options.join(" "), kind).not.toMatch(
+        /onnx|realesrgan|sd_inpaint|sdxl_inpaint|flux_fill/i,
+      );
     }
-
-    for (const key of ["enhance.engine", "enhance.device", "enhance.precision"]) {
-      expect(
-        NODE_SPECS.imageProcessing.params.find((param) => param.key === key),
-        `${key} must be operable on the product-facing card`,
-      ).toMatchObject({ inline: true, port: "enhance.in" });
-    }
+    expect(NODE_SPECS.promptOptimize.params.find((param) => param.key === "mode")?.options).toEqual([
+      "off",
+      "builtin",
+      "api",
+    ]);
   });
 
   it("groups the palette by production category, in flow order", () => {

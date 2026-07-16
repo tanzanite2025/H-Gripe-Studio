@@ -10,9 +10,15 @@ remaining work and upgrade directions, see
 point for future kernel work.
 This is the design for the colour-grading kernel that the image grading
 dialog and the future **video grading dialog** will share. It builds *on top
-of* the locked colour pipeline (`docs/design/colour-pipeline.md`) and does
+of* the colour pipeline (`docs/design/colour-pipeline.md`) and does
 **not** change the image editor's true-mask u8 proxy compositor
 (`docs/design/ps-editor-architecture.md`).
+
+The landed kernel predates the professional RAW decision. Its current
+gamma-encoded sRGB/ProPhoto and linear-Rec.709 spaces remain implementation
+facts during migration, but they are not the final still-image colour contract.
+The target is one unbounded f32 `LinearProPhoto` scene surface governed by
+`../plans/active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md`.
 
 ## Goals and non-goals
 
@@ -36,8 +42,9 @@ grading (many stacked corrections per frame, no cumulative banding).
   runs fused into one pass, spatial ops as their own src→dst pass) and
   replays the cached pipeline per frame. The CPU path stays the reference
   implementation and fallback; the GPU output is preview-grade, validated
-  against CPU with f32 tolerances in `crates/hgripe-grade/tests/gpu.rs`
-  (curves are baked to 1024-sample LUTs), not bit-identical — the
+  against CPU with f32 tolerances in `crates/hgripe-grade/tests/gpu.rs`.
+  Operations without an exact WGSL implementation fall back to CPU. GPU
+  output is preview-grade, not bit-identical — the
   bit-identical constraint below binds the CPU paths only.
 
 ## Placement and dependency policy (decided constraints)
@@ -46,21 +53,41 @@ grading (many stacked corrections per frame, no cumulative banding).
   `crates/hgripe-api`, depended on by `hgripe-desktop`. Not a module inside
   `src-tauri/src/studio` — the kernel must be compilable, testable, and
   fuzzable on its own, and its public API is the only coupling surface.
-- **Pure Rust, no Python.** Grading is a per-frame hot path; a subprocess's
-  process/serialisation overhead would be disqualifying. (Moot since Phase 7,
-  #314 — there is no Python runtime in the repo at all.)
-- **Minimal, locked dependencies.** The kernel core (blend math, adjustment
-  math, LUT application) is dependency-free `f32` array code. Allowed
+- **Pure Rust, in-process.** Grading is a per-frame hot path; a subprocess's
+  process/serialisation overhead would be disqualifying.
+- **Minimal, locked dependencies.** The kernel core (blend and adjustment
+  math) is dependency-free `f32` array code. Allowed
   dependencies, all already in the tree and covered by the vendoring policy
   (`docs/design/rust-dependency-vendoring.md`):
   - `moxcms` (vendored fork) — only if the kernel ever does ICC transforms
     itself; the intent is that it does **not** (see *Colour contract*).
   - `rayon` — optional feature for row-parallel compositing.
   - `serde`/`serde_json` — the op-graph serialisation.
-  No new colour crates. `.cube` LUT parsing is ~100 lines and is written
-  in-crate, not pulled from crates.io.
+  No new colour crates.
 
-## Colour contract (division of labour with the existing pipeline)
+## Professional RAW Migration Contract
+
+- `studio/color` continues to own ICC, CICP, DCP, camera, display, and export
+  transforms. The grade kernel receives samples plus an explicit numerical
+  space tag; it does not parse profiles.
+- Add `LinearProPhoto` as the canonical still-image scene space. Negative values
+  and values above `1.0` remain valid through the operation graph.
+- Operations must not clamp merely because the current `GradeSurface` comment
+  describes a nominal `0..=1` range.
+- Rec.709 luma weights, white-balance matrices, vectorscope axes, and other
+  primaries-dependent math must become space-aware before the RAW surface uses
+  them.
+- The f32 scene surface must not quantize back to u16 between development,
+  adjustment layers, and compositing. Encoding is an explicit display/export
+  boundary.
+- The CPU reference and shared-golden discipline remain authoritative. WGPU
+  kernels implement the same stages and tolerances; they do not define a second
+  colour result.
+
+## Landed Legacy Colour Contract
+
+The following block records the currently implemented u16 ingress/egress. It is
+kept for migration and regression context, not as the professional RAW target.
 
 The existing `studio/color` module stays the *only* place ICC conversions
 are constructed. The kernel never sees ICC:
@@ -91,6 +118,10 @@ WorkingImage → to_srgb_rgba8 / write_working_output   — unchanged egress
 ## Kernel model
 
 ### Surface
+
+The structure below is the landed surface. The RAW migration keeps f32 RGBA but
+changes the canonical still-image tag to `LinearProPhoto`, permits unbounded
+scene values end to end, and removes the mandatory u16 round trip.
 
 ```rust
 pub struct GradeSurface {
@@ -131,7 +162,6 @@ pub enum GradeOp {
     ColorRanges { /* per-range HSL deltas over 9 named ranges + monochrome; the
                      unified selective-colour / B&W / hue-sat tool */ },
     Saturation { amount: f32 },                 // linear-light, Rec.709 luma weights
-    Lut3d { title: String, size: u32, data: Vec<f32> },  // parsed .cube
 }
 ```
 
@@ -148,7 +178,6 @@ not a different architecture.
 - Pure `f32` arithmetic, no fast-math, no platform intrinsics in the
   reference path. An optional SIMD/rayon path must produce bit-identical
   results to the reference path (asserted in tests) or it does not ship.
-- LUT sampling is tetrahedral (same choice as the ICC engine), defined once.
 
 ## Golden vectors: one spec, two runners
 
@@ -180,7 +209,7 @@ The video grading dialog feeds frames from the existing media-engine seam
 - f32 end-to-end means a 10-bit video source (0..1023 → f32) grades without
   the 8-bit quantisation that would band on the first node stack.
 - The op set is a superset of PS adjustments *and* the Resolve-style video
-  primitives (lift/gamma/gain wheels, LUTs) so one dialog vocabulary serves
+  primitives (including lift/gamma/gain wheels) so one dialog vocabulary serves
   both stills and footage.
 
 ## Phasing
@@ -192,8 +221,7 @@ The video grading dialog feeds frames from the existing media-engine seam
   blend set with golden vectors; TS runner stub executes the same vectors.
 - **G2 — core adjustments.** Exposure, levels, curves, saturation, white
   balance — each with linear/encoded declaration and vectors.
-- **G3 — video-facing ops.** Lift/gamma/gain, HSL ranges, `.cube` 3D LUT
-  parse + tetrahedral apply.
+- **G3 — video-facing ops.** Lift/gamma/gain and HSL ranges.
 - **G4 — dialog integration.** Image grading dialog first (proves the
   ingress/egress round-trip on `WorkingImage`), then the video dialog on the
   frame path. Non-separable blend modes ride along here or after.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  adjustmentLut,
+  adjustmentToneMapper,
   applyOp,
   buildLayerThumb,
   buildProxyMask,
@@ -404,38 +404,33 @@ describe("maskMorphology preview primitives", () => {
   });
 });
 
-describe("adjustmentLut", () => {
+describe("adjustmentToneMapper", () => {
   it("levels remaps the input range onto the output range with gamma", () => {
-    const lut = adjustmentLut({ type: "levels", in_black: 64, in_white: 192 });
-    expect(lut[0]).toBe(0);
-    expect(lut[64]).toBe(0);
-    expect(lut[128]).toBe(128); // midpoint of the input span
-    expect(lut[192]).toBe(255);
-    expect(lut[255]).toBe(255);
-    const bright = adjustmentLut({ type: "levels", gamma: 2 });
-    expect(bright[64]).toBeGreaterThan(64); // gamma > 1 lifts midtones
-    const identity = adjustmentLut({ type: "levels" });
-    expect(identity[100]).toBe(100);
+    const map = adjustmentToneMapper({ type: "levels", in_black: 64, in_white: 192 });
+    expect(map(0)).toBe(0);
+    expect(map(64)).toBe(0);
+    expect(map(128)).toBe(128);
+    expect(map(192)).toBe(255);
+    expect(map(255)).toBe(255);
+    expect(adjustmentToneMapper({ type: "levels", gamma: 2 })(64)).toBeGreaterThan(64);
+    expect(adjustmentToneMapper({ type: "levels" })(100)).toBe(100);
   });
 
   it("curve interpolates piecewise-linearly between sorted control points", () => {
-    const lut = adjustmentLut({ type: "curve", points: [[0, 0], [128, 192], [255, 255]] });
-    expect(lut[0]).toBe(0);
-    expect(lut[64]).toBe(96); // halfway up the first segment
-    expect(lut[128]).toBe(192);
-    expect(lut[255]).toBe(255);
-    const identity = adjustmentLut({ type: "curve" }); // <2 points ⇒ identity
-    expect(identity[77]).toBe(77);
+    const map = adjustmentToneMapper({ type: "curve", points: [[0, 0], [128, 192], [255, 255]] });
+    expect(map(0)).toBe(0);
+    expect(map(64)).toBe(96);
+    expect(map(128)).toBe(192);
+    expect(map(255)).toBe(255);
+    expect(adjustmentToneMapper({ type: "curve" })(77)).toBe(77);
   });
 
   it("brightness_contrast scales about the midpoint then shifts", () => {
-    const lut = adjustmentLut({ type: "brightness_contrast", contrast: 100 });
-    expect(lut[64]).toBe(1); // (64-127.5)*2+127.5 = 0.5 → rounds to 1
-    expect(lut[192]).toBe(255); // clamped
-    const brighter = adjustmentLut({ type: "brightness_contrast", brightness: 20 });
-    expect(brighter[100]).toBe(151); // +51
-    const identity = adjustmentLut({ type: "brightness_contrast" });
-    expect(identity[100]).toBe(100);
+    const map = adjustmentToneMapper({ type: "brightness_contrast", contrast: 100 });
+    expect(map(64)).toBe(1);
+    expect(map(192)).toBe(255);
+    expect(adjustmentToneMapper({ type: "brightness_contrast", brightness: 20 })(100)).toBe(151);
+    expect(adjustmentToneMapper({ type: "brightness_contrast" })(100)).toBe(100);
   });
 
   it("buildProxyMask applies visible adjustment layers to the composite below", () => {

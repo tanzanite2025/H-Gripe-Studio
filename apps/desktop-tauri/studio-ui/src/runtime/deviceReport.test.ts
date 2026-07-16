@@ -4,7 +4,6 @@ import {
   describeDeviceReport,
   deviceReportFromEngineReport,
   deviceReportFromNodeOutputs,
-  deviceReportFromPluginReport,
   deviceReportFromViewportBackend,
 } from "./deviceReport";
 
@@ -26,10 +25,10 @@ describe("deviceReportFromEngineReport", () => {
     });
   });
 
-  it("maps an accelerated engine on cuda with precision", () => {
+  it("maps an accelerated native image kernel on cuda with precision", () => {
     const report = deviceReportFromEngineReport({
-      engine: "realesrgan",
-      engine_requested: "realesrgan",
+      engine: "native_image_kernel",
+      engine_requested: "native_image_kernel",
       device: "cuda",
       device_requested: "auto",
       precision: "fp16",
@@ -37,7 +36,7 @@ describe("deviceReportFromEngineReport", () => {
     expect(report).toEqual({
       requested: "auto",
       used: "cuda",
-      backend: "realesrgan fp16",
+      backend: "native_image_kernel fp16",
       accelerated: true,
       fallbackReason: undefined,
     });
@@ -46,20 +45,20 @@ describe("deviceReportFromEngineReport", () => {
   it("keeps an explicit cpu request from ever reporting cuda (fallback visible)", () => {
     const report = deviceReportFromEngineReport({
       engine: "cpu",
-      engine_requested: "realesrgan",
-      engine_fallback_reason: "missing optional dependency: torch",
+      engine_requested: "native_image_kernel",
+      engine_fallback_reason: "GPU kernel unavailable",
       device: null,
       device_requested: "cpu",
     });
     expect(report?.requested).toBe("cpu");
     expect(report?.used).toBe("cpu");
     expect(report?.accelerated).toBe(false);
-    expect(report?.fallbackReason).toBe("missing optional dependency: torch");
+    expect(report?.fallbackReason).toBe("GPU kernel unavailable");
   });
 
   it("maps the provider path and the rules baseline", () => {
     expect(
-      deviceReportFromEngineReport({ engine: "provider", engine_requested: "sd_inpaint" })?.used,
+      deviceReportFromEngineReport({ engine: "provider", engine_requested: "provider" })?.used,
     ).toBe("provider");
     expect(deviceReportFromEngineReport({ engine: "rules", engine_requested: "rules" })?.used).toBe(
       "cpu",
@@ -70,23 +69,23 @@ describe("deviceReportFromEngineReport", () => {
     expect(deviceReportFromEngineReport({})).toBeNull();
   });
 
-  it("reports unknown (not accelerated) when an ML engine has no device field", () => {
+  it("reports unknown (not accelerated) when a native kernel has no device field", () => {
     const report = deviceReportFromEngineReport({
-      engine: "onnx_matting",
-      engine_requested: "onnx_matting",
+      engine: "native_image_kernel",
+      engine_requested: "native_image_kernel",
       device: null,
     });
     expect(report?.used).toBe("unknown");
     expect(report?.accelerated).toBe(false);
   });
 
-  it("preserves a legacy DirectML request while reporting the actual CPU fallback", () => {
+  it("preserves a DirectML request while reporting the actual CPU fallback", () => {
     const report = deviceReportFromEngineReport({
-      engine: "onnx_matting",
-      engine_requested: "onnx_matting",
+      engine: "native_image_kernel",
+      engine_requested: "native_image_kernel",
       device: "cpu",
       device_requested: "directml",
-      engine_fallback_reason: "DirectML execution provider not built in",
+      engine_fallback_reason: "DirectML kernel not built in",
     });
     expect(report?.requested).toBe("directml");
     expect(report?.used).toBe("cpu");
@@ -164,10 +163,10 @@ describe("describeDeviceReport", () => {
       describeDeviceReport({
         requested: "auto",
         used: "cuda",
-        backend: "realesrgan fp16",
+        backend: "native image kernel",
         accelerated: true,
       }),
-    ).toBe("device auto -> cuda (realesrgan fp16)");
+    ).toBe("device auto -> cuda (native image kernel)");
     expect(
       describeDeviceReport({
         requested: "cuda",
@@ -208,15 +207,15 @@ describe("deviceReportFromNodeOutputs", () => {
     const report = deviceReportFromNodeOutputs({
       enhanced_image: "/out/x.png",
       enhance_report: {
-        engine: "realesrgan",
-        engine_requested: "realesrgan",
+        engine: "native_image_kernel",
+        engine_requested: "native_image_kernel",
         device: "cuda",
         device_requested: "auto",
         precision: "fp16",
       },
     });
     expect(report?.used).toBe("cuda");
-    expect(report?.backend).toBe("realesrgan fp16");
+    expect(report?.backend).toBe("native_image_kernel fp16");
   });
 
   it("returns null when no output carries telemetry", () => {
@@ -224,59 +223,19 @@ describe("deviceReportFromNodeOutputs", () => {
     expect(deviceReportFromNodeOutputs({ repaint_report: { status: "unchanged" } })).toBeNull();
   });
 
-  it("reads subjectMask matte_report telemetry with its provider fallback visible", () => {
+  it("reads videoAssemble hardware telemetry", () => {
     const report = deviceReportFromNodeOutputs({
-      mask: "/out/mask.png",
-      matte_report: {
-        mode: "auto_subject",
-        provider: "birefnet",
-        engine: "onnxruntime",
-        device: "cpu",
-        device_requested: "auto",
-        engine_fallback_reason:
-          "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)",
+      video: "/out/clip.mp4",
+      assemble_report: {
+        engine: "ffmpeg",
+        device: "ffmpeg_hw",
+        device_requested: "gpu",
       },
     });
-    expect(report?.requested).toBe("auto");
-    expect(report?.used).toBe("cpu");
-    expect(report?.backend).toBe("onnxruntime");
-    expect(report?.accelerated).toBe(false);
-    expect(report?.fallbackReason).toBe(
-      "onnxruntime CPU execution provider (no CUDA/DirectML provider built in)",
-    );
-  });
-
-  it("normalises a plugin boundary report, keeping a silent downgrade visible", () => {
-    const honest = deviceReportFromPluginReport({
-      device_requested: "cuda",
-      device: "cuda",
-      precision_requested: "fp16",
-      precision: "fp16",
-      backend: "torch-plugin",
-    });
-    expect(honest.used).toBe("cuda");
-    expect(honest.accelerated).toBe(true);
-    expect(honest.backend).toBe("torch-plugin fp16");
-    expect(honest.fallbackReason).toBeUndefined();
-
-    const silentDowngrade = deviceReportFromPluginReport({
-      device_requested: "cuda",
-      device: "cpu",
-      precision_requested: "fp16",
-      precision: "fp32",
-    });
-    expect(silentDowngrade.used).toBe("cpu");
-    expect(silentDowngrade.accelerated).toBe(false);
-    expect(silentDowngrade.fallbackReason).toBe(
-      "plugin ran on cpu for a cuda request; precision fp16 -> fp32 (no reason reported)",
-    );
-
-    const reported = deviceReportFromPluginReport({
-      device_requested: "cuda",
-      device: "cpu",
-      fallback_reason: "CUDA out of memory",
-    });
-    expect(reported.fallbackReason).toBe("CUDA out of memory");
+    expect(report?.requested).toBe("gpu");
+    expect(report?.used).toBe("ffmpeg_hw");
+    expect(report?.backend).toBe("ffmpeg");
+    expect(report?.accelerated).toBe(true);
   });
 
   it("reads videoAssemble assemble_report as the software FFmpeg baseline", () => {

@@ -28,26 +28,19 @@
  */
 use crate::cicp::create_rec709_parametric;
 use crate::math::m_clamp;
-use crate::mlaf::{mlaf, neg_mlaf};
 use crate::transform::PointeeSizeExpressible;
-use crate::writer::FloatToFixedU8Fixed8;
 use crate::{CmsError, ColorProfile, DataColorSpace, Rgb, TransferCharacteristics};
 use num_traits::AsPrimitive;
-use pxfm::{dirty_powf, f_pow, f_powf};
+use pxfm::f_powf;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ToneReprCurve {
-    Lut(Vec<u16>),
     Parametric(Vec<f32>),
 }
 
 impl ToneReprCurve {
     pub fn inverse(&self) -> Result<ToneReprCurve, CmsError> {
         match self {
-            ToneReprCurve::Lut(lut) => {
-                let inverse_length = lut.len().max(256);
-                Ok(ToneReprCurve::Lut(invert_lut(lut, inverse_length)))
-            }
             ToneReprCurve::Parametric(parametric) => ParametricCurve::new(parametric)
                 .and_then(|x| x.invert())
                 .map(|x| ToneReprCurve::Parametric([x.g, x.a, x.b, x.c, x.d, x.e, x.f].to_vec()))
@@ -60,19 +53,6 @@ impl ToneReprCurve {
         &self,
     ) -> Result<Box<dyn ToneCurveEvaluator + Send + Sync>, CmsError> {
         match self {
-            ToneReprCurve::Lut(lut) => {
-                if lut.is_empty() {
-                    return Ok(Box::new(ToneCurveEvaluatorLinear {}));
-                }
-                if lut.len() == 1 {
-                    let gamma = u8_fixed_8number_to_float(lut[0]);
-                    return Ok(Box::new(ToneCurveEvaluatorPureGamma { gamma }));
-                }
-                let converted_curve = lut.iter().map(|&x| x as f32 / 65535.0).collect::<Vec<_>>();
-                Ok(Box::new(ToneCurveLutEvaluator {
-                    lut: converted_curve,
-                }))
-            }
             ToneReprCurve::Parametric(parametric) => {
                 let parametric_curve =
                     ParametricCurve::new(parametric).ok_or(CmsError::BuildTransferFunction)?;
@@ -100,23 +80,6 @@ impl ToneReprCurve {
         &self,
     ) -> Result<Box<dyn ToneCurveEvaluator + Send + Sync>, CmsError> {
         match self {
-            ToneReprCurve::Lut(lut) => {
-                if lut.is_empty() {
-                    return Ok(Box::new(ToneCurveEvaluatorLinear {}));
-                }
-                if lut.len() == 1 {
-                    let gamma = 1. / u8_fixed_8number_to_float(lut[0]);
-                    return Ok(Box::new(ToneCurveEvaluatorPureGamma { gamma }));
-                }
-                let inverted_lut = invert_lut(lut, 16384);
-                let converted_curve = inverted_lut
-                    .iter()
-                    .map(|&x| x as f32 / 65535.0)
-                    .collect::<Vec<_>>();
-                Ok(Box::new(ToneCurveLutEvaluator {
-                    lut: converted_curve,
-                }))
-            }
             ToneReprCurve::Parametric(parametric) => {
                 let parametric_curve = ParametricCurve::new(parametric)
                     .and_then(|x| x.invert())
@@ -177,46 +140,9 @@ impl ToneCurveEvaluator for ToneCurveCicpGammaEvaluator {
     }
 }
 
-struct ToneCurveLutEvaluator {
-    lut: Vec<f32>,
-}
-
-impl ToneCurveEvaluator for ToneCurveLutEvaluator {
-    fn evaluate_value(&self, value: f32) -> f32 {
-        lut_interp_linear_float(value, &self.lut)
-    }
-
-    fn evaluate_tristimulus(&self, rgb: Rgb<f32>) -> Rgb<f32> {
-        Rgb::new(
-            lut_interp_linear_float(rgb.r, &self.lut),
-            lut_interp_linear_float(rgb.g, &self.lut),
-            lut_interp_linear_float(rgb.b, &self.lut),
-        )
-    }
-}
-
-pub(crate) fn build_trc_table(num_entries: i32, eotf: impl Fn(f64) -> f64) -> Vec<u16> {
-    let mut table = vec![0u16; num_entries as usize];
-
-    for (i, table_value) in table.iter_mut().enumerate() {
-        let x: f64 = i as f64 / (num_entries - 1) as f64;
-        let y: f64 = eotf(x);
-        let mut output: f64;
-        output = y * 65535.0 + 0.5;
-        if output > 65535.0 {
-            output = 65535.0
-        }
-        if output < 0.0 {
-            output = 0.0
-        }
-        *table_value = output.floor() as u16;
-    }
-    table
-}
-
 /// Creates Tone Reproduction curve from gamma
 pub fn curve_from_gamma(gamma: f32) -> ToneReprCurve {
-    ToneReprCurve::Lut(vec![gamma.to_u8_fixed8()])
+    ToneReprCurve::Parametric(vec![gamma])
 }
 
 #[derive(Debug)]
@@ -284,14 +210,6 @@ impl ParametricCurve {
             }),
             _ => None,
         }
-    }
-
-    #[cfg(feature = "lut")]
-    fn is_linear(&self) -> bool {
-        (self.g - 1.0).abs() < 1e-5
-            && (self.a - 1.0).abs() < 1e-5
-            && self.b.abs() < 1e-5
-            && self.c.abs() < 1e-5
     }
 
     pub fn eval(&self, x: f32) -> f32 {
@@ -363,127 +281,6 @@ impl ParametricCurve {
     }
 }
 
-#[inline]
-pub(crate) fn u8_fixed_8number_to_float(x: u16) -> f32 {
-    // 0x0000 = 0.
-    // 0x0100 = 1.
-    // 0xffff = 255  + 255/256
-    (x as i32 as f64 / 256.0) as f32
-}
-
-fn passthrough_table<T: PointeeSizeExpressible, const N: usize, const BIT_DEPTH: usize>()
--> Box<[f32; N]> {
-    let mut gamma_table = Box::new([0f32; N]);
-    let max_value = if T::FINITE {
-        (1 << BIT_DEPTH) - 1
-    } else {
-        T::NOT_FINITE_LINEAR_TABLE_SIZE - 1
-    };
-    let cap_values = if T::FINITE {
-        (1u32 << BIT_DEPTH) as usize
-    } else {
-        T::NOT_FINITE_LINEAR_TABLE_SIZE
-    };
-    assert!(cap_values <= N, "Invalid lut table construction");
-    let scale_value = 1f64 / max_value as f64;
-    for (i, g) in gamma_table.iter_mut().enumerate().take(cap_values) {
-        *g = (i as f64 * scale_value) as f32;
-    }
-
-    gamma_table
-}
-
-fn linear_forward_table<T: PointeeSizeExpressible, const N: usize, const BIT_DEPTH: usize>(
-    gamma: u16,
-) -> Box<[f32; N]> {
-    let mut gamma_table = Box::new([0f32; N]);
-    let gamma_float: f32 = u8_fixed_8number_to_float(gamma);
-    let max_value = if T::FINITE {
-        (1 << BIT_DEPTH) - 1
-    } else {
-        T::NOT_FINITE_LINEAR_TABLE_SIZE - 1
-    };
-    let cap_values = if T::FINITE {
-        (1u32 << BIT_DEPTH) as usize
-    } else {
-        T::NOT_FINITE_LINEAR_TABLE_SIZE
-    };
-    assert!(cap_values <= N, "Invalid lut table construction");
-    let scale_value = 1f64 / max_value as f64;
-    for (i, g) in gamma_table.iter_mut().enumerate().take(cap_values) {
-        *g = f_pow(i as f64 * scale_value, gamma_float as f64) as f32;
-    }
-
-    gamma_table
-}
-
-#[inline(always)]
-pub(crate) fn lut_interp_linear_float(x: f32, table: &[f32]) -> f32 {
-    let value = x.min(1.).max(0.) * (table.len() - 1) as f32;
-
-    let upper: i32 = value.ceil() as i32;
-    let lower: i32 = value.floor() as i32;
-
-    let diff = upper as f32 - value;
-    let tu = table[upper as usize];
-    mlaf(neg_mlaf(tu, tu, diff), table[lower as usize], diff)
-}
-
-/// Lut interpolation float where values is already clamped
-#[inline(always)]
-#[allow(dead_code)]
-pub(crate) fn lut_interp_linear_float_clamped(x: f32, table: &[f32]) -> f32 {
-    let value = x * (table.len() - 1) as f32;
-
-    let upper: i32 = value.ceil() as i32;
-    let lower: i32 = value.floor() as i32;
-
-    let diff = upper as f32 - value;
-    let tu = table[upper as usize];
-    mlaf(neg_mlaf(tu, tu, diff), table[lower as usize], diff)
-}
-
-#[inline]
-pub(crate) fn lut_interp_linear(input_value: f64, table: &[u16]) -> f32 {
-    let mut input_value = input_value;
-    if table.is_empty() {
-        return input_value as f32;
-    }
-
-    input_value *= (table.len() - 1) as f64;
-
-    let upper: i32 = input_value.ceil() as i32;
-    let lower: i32 = input_value.floor() as i32;
-    let w0 = table[(upper as usize).min(table.len() - 1)] as f64;
-    let w1 = 1. - (upper as f64 - input_value);
-    let w2 = table[(lower as usize).min(table.len() - 1)] as f64;
-    let w3 = upper as f64 - input_value;
-    let value: f32 = mlaf(w2 * w3, w0, w1) as f32;
-    value * (1.0 / 65535.0)
-}
-
-fn linear_lut_interpolate<T: PointeeSizeExpressible, const N: usize, const BIT_DEPTH: usize>(
-    table: &[u16],
-) -> Box<[f32; N]> {
-    let mut gamma_table = Box::new([0f32; N]);
-    let max_value = if T::FINITE {
-        (1 << BIT_DEPTH) - 1
-    } else {
-        T::NOT_FINITE_LINEAR_TABLE_SIZE - 1
-    };
-    let cap_values = if T::FINITE {
-        (1u32 << BIT_DEPTH) as usize
-    } else {
-        T::NOT_FINITE_LINEAR_TABLE_SIZE
-    };
-    assert!(cap_values <= N, "Invalid lut table construction");
-    let scale_value = 1f64 / max_value as f64;
-    for (i, g) in gamma_table.iter_mut().enumerate().take(cap_values) {
-        *g = lut_interp_linear(i as f64 * scale_value, table);
-    }
-    gamma_table
-}
-
 fn linear_curve_parametric<T: PointeeSizeExpressible, const N: usize, const BIT_DEPTH: usize>(
     params: &[f32],
 ) -> Option<Box<[f32; N]>> {
@@ -505,257 +302,6 @@ fn linear_curve_parametric<T: PointeeSizeExpressible, const N: usize, const BIT_
         *g = m_clamp(params.eval(x), 0.0, 1.0);
     }
     Some(gamma_table)
-}
-
-fn linear_curve_parametric_s<const N: usize>(params: &[f32]) -> Option<Box<[f32; N]>> {
-    let params = ParametricCurve::new(params)?;
-    let mut gamma_table = Box::new([0f32; N]);
-    let scale_value = 1f32 / (N - 1) as f32;
-    for (i, g) in gamma_table.iter_mut().enumerate().take(N) {
-        let x = i as f32 * scale_value;
-        *g = m_clamp(params.eval(x), 0.0, 1.0);
-    }
-    Some(gamma_table)
-}
-
-pub(crate) fn make_gamma_linear_table<
-    T: Default + Copy + 'static + PointeeSizeExpressible,
-    const BUCKET: usize,
-    const N: usize,
->(
-    bit_depth: usize,
-) -> Box<[T; BUCKET]>
-where
-    f32: AsPrimitive<T>,
-{
-    let mut table = Box::new([T::default(); BUCKET]);
-    let max_range = if T::FINITE {
-        (1f64 / ((N - 1) as f64 / (1 << bit_depth) as f64)) as f32
-    } else {
-        (1f64 / ((N - 1) as f64)) as f32
-    };
-    for (v, output) in table.iter_mut().take(N).enumerate() {
-        if T::FINITE {
-            *output = (v as f32 * max_range).round().as_();
-        } else {
-            *output = (v as f32 * max_range).as_();
-        }
-    }
-    table
-}
-
-#[inline]
-fn lut_interp_linear_gamma_impl<
-    T: Default + Copy + 'static + PointeeSizeExpressible,
-    const N: usize,
-    const BIT_DEPTH: usize,
->(
-    input_value: u32,
-    table: &[u16],
-) -> T
-where
-    u32: AsPrimitive<T>,
-{
-    // Start scaling input_value to the length of the array: GAMMA_CAP*(length-1).
-    // We'll divide out the GAMMA_CAP next
-    let mut value: u32 = input_value * (table.len() - 1) as u32;
-    let cap_value = N - 1;
-    // equivalent to ceil(value/GAMMA_CAP)
-    let upper: u32 = value.div_ceil(cap_value as u32);
-    // equivalent to floor(value/GAMMA_CAP)
-    let lower: u32 = value / cap_value as u32;
-    // interp is the distance from upper to value scaled to 0..GAMMA_CAP
-    let interp: u32 = value % cap_value as u32;
-    let lw_value = table[lower as usize];
-    let hw_value = table[upper as usize];
-    // the table values range from 0..65535
-    value = mlaf(
-        hw_value as u32 * interp,
-        lw_value as u32,
-        (N - 1) as u32 - interp,
-    ); // 0..(65535*GAMMA_CAP)
-
-    // round and scale
-    let max_colors = if T::FINITE { (1 << BIT_DEPTH) - 1 } else { 1 };
-    value += (cap_value * 65535 / max_colors / 2) as u32; // scale to 0...max_colors
-    value /= (cap_value * 65535 / max_colors) as u32;
-    value.as_()
-}
-
-#[inline]
-fn lut_interp_linear_gamma_impl_f32<
-    T: Default + Copy + 'static + PointeeSizeExpressible,
-    const N: usize,
-    const BIT_DEPTH: usize,
->(
-    input_value: u32,
-    table: &[u16],
-) -> T
-where
-    f32: AsPrimitive<T>,
-{
-    // Start scaling input_value to the length of the array: GAMMA_CAP*(length-1).
-    // We'll divide out the GAMMA_CAP next
-    let guess: u32 = input_value * (table.len() - 1) as u32;
-    let cap_value = N - 1;
-    // equivalent to ceil(value/GAMMA_CAP)
-    let upper: u32 = guess.div_ceil(cap_value as u32);
-    // equivalent to floor(value/GAMMA_CAP)
-    let lower: u32 = guess / cap_value as u32;
-    // interp is the distance from upper to value scaled to 0..GAMMA_CAP
-    let interp: u32 = guess % cap_value as u32;
-    let lw_value = table[lower as usize];
-    let hw_value = table[upper as usize];
-    // the table values range from 0..65535
-    let mut value = mlaf(
-        hw_value as f32 * interp as f32,
-        lw_value as f32,
-        (N - 1) as f32 - interp as f32,
-    ); // 0..(65535*GAMMA_CAP)
-
-    // round and scale
-    let max_colors = if T::FINITE { (1 << BIT_DEPTH) - 1 } else { 1 };
-    value /= (cap_value * 65535 / max_colors) as f32;
-    value.as_()
-}
-
-#[doc(hidden)]
-pub trait GammaLutInterpolate {
-    fn gamma_lut_interp<
-        T: Default + Copy + 'static + PointeeSizeExpressible,
-        const N: usize,
-        const BIT_DEPTH: usize,
-    >(
-        input_value: u32,
-        table: &[u16],
-    ) -> T
-    where
-        u32: AsPrimitive<T>,
-        f32: AsPrimitive<T>;
-}
-
-macro_rules! gamma_lut_interp_fixed {
-    ($i_type: ident) => {
-        impl GammaLutInterpolate for $i_type {
-            #[inline]
-            fn gamma_lut_interp<
-                T: Default + Copy + 'static + PointeeSizeExpressible,
-                const N: usize,
-                const BIT_DEPTH: usize,
-            >(
-                input_value: u32,
-                table: &[u16],
-            ) -> T
-            where
-                u32: AsPrimitive<T>,
-            {
-                lut_interp_linear_gamma_impl::<T, N, BIT_DEPTH>(input_value, table)
-            }
-        }
-    };
-}
-
-gamma_lut_interp_fixed!(u8);
-gamma_lut_interp_fixed!(u16);
-
-macro_rules! gammu_lut_interp_float {
-    ($f_type: ident) => {
-        impl GammaLutInterpolate for $f_type {
-            #[inline]
-            fn gamma_lut_interp<
-                T: Default + Copy + 'static + PointeeSizeExpressible,
-                const N: usize,
-                const BIT_DEPTH: usize,
-            >(
-                input_value: u32,
-                table: &[u16],
-            ) -> T
-            where
-                f32: AsPrimitive<T>,
-                u32: AsPrimitive<T>,
-            {
-                lut_interp_linear_gamma_impl_f32::<T, N, BIT_DEPTH>(input_value, table)
-            }
-        }
-    };
-}
-
-gammu_lut_interp_float!(f32);
-gammu_lut_interp_float!(f64);
-
-pub(crate) fn make_gamma_lut<
-    T: Default + Copy + 'static + PointeeSizeExpressible + GammaLutInterpolate,
-    const BUCKET: usize,
-    const N: usize,
-    const BIT_DEPTH: usize,
->(
-    table: &[u16],
-) -> Box<[T; BUCKET]>
-where
-    u32: AsPrimitive<T>,
-    f32: AsPrimitive<T>,
-{
-    let mut new_table = Box::new([T::default(); BUCKET]);
-    for (v, output) in new_table.iter_mut().take(N).enumerate() {
-        *output = T::gamma_lut_interp::<T, N, BIT_DEPTH>(v as u32, table);
-    }
-    new_table
-}
-
-#[inline]
-pub(crate) fn lut_interp_linear16(input_value: u16, table: &[u16]) -> u16 {
-    // Start scaling input_value to the length of the array: 65535*(length-1).
-    // We'll divide out the 65535 next
-    let mut value: u32 = input_value as u32 * (table.len() as u32 - 1);
-    let upper: u16 = value.div_ceil(65535) as u16; // equivalent to ceil(value/65535)
-    let lower: u16 = (value / 65535) as u16; // equivalent to floor(value/65535)
-    // interp is the distance from upper to value scaled to 0..65535
-    let interp: u32 = value % 65535; // 0..65535*65535
-    value = (table[upper as usize] as u32 * interp
-        + table[lower as usize] as u32 * (65535 - interp))
-        / 65535;
-    value as u16
-}
-
-#[inline]
-pub(crate) fn lut_interp_linear16_boxed<const N: usize>(input_value: u16, table: &[u16; N]) -> u16 {
-    // Start scaling input_value to the length of the array: 65535*(length-1).
-    // We'll divide out the 65535 next
-    let mut value: u32 = input_value as u32 * (table.len() as u32 - 1);
-    let upper: u16 = value.div_ceil(65535) as u16; // equivalent to ceil(value/65535)
-    let lower: u16 = (value / 65535) as u16; // equivalent to floor(value/65535)
-    // interp is the distance from upper to value scaled to 0..65535
-    let interp: u32 = value % 65535; // 0..65535*65535
-    value = (table[upper as usize] as u32 * interp
-        + table[lower as usize] as u32 * (65535 - interp))
-        / 65535;
-    value as u16
-}
-
-fn make_gamma_pow_table<
-    T: Default + Copy + 'static + PointeeSizeExpressible,
-    const BUCKET: usize,
-    const N: usize,
->(
-    gamma: f32,
-    bit_depth: usize,
-) -> Box<[T; BUCKET]>
-where
-    f32: AsPrimitive<T>,
-{
-    let mut table = Box::new([T::default(); BUCKET]);
-    let scale = 1f32 / (N - 1) as f32;
-    let cap = ((1 << bit_depth) - 1) as f32;
-    if T::FINITE {
-        for (v, output) in table.iter_mut().take(N).enumerate() {
-            *output = (cap * f_powf(v as f32 * scale, gamma)).round().as_();
-        }
-    } else {
-        for (v, output) in table.iter_mut().take(N).enumerate() {
-            *output = (cap * f_powf(v as f32 * scale, gamma)).as_();
-        }
-    }
-    table
 }
 
 fn make_gamma_parametric_table<
@@ -796,250 +342,7 @@ fn compare_parametric(src: &[f32], dst: &[f32]) -> bool {
     true
 }
 
-fn lut_inverse_interp16(value: u16, lut_table: &[u16]) -> u16 {
-    let mut l: i32 = 1; // 'int' Give spacing for negative values
-    let mut r: i32 = 0x10000;
-    let mut x: i32 = 0;
-    let mut res: i32;
-    let length = lut_table.len() as i32;
-
-    let mut num_zeroes: i32 = 0;
-    for &item in lut_table.iter() {
-        if item == 0 {
-            num_zeroes += 1
-        } else {
-            break;
-        }
-    }
-
-    if num_zeroes == 0 && value as i32 == 0 {
-        return 0u16;
-    }
-    let mut num_of_polys: i32 = 0;
-    for &item in lut_table.iter().rev() {
-        if item == 0xffff {
-            num_of_polys += 1
-        } else {
-            break;
-        }
-    }
-    // Does the curve belong to this case?
-    if num_zeroes > 1 || num_of_polys > 1 {
-        let a_0: i32;
-        let b_0: i32;
-        // Identify if value fall downto 0 or FFFF zone
-        if value as i32 == 0 {
-            return 0u16;
-        }
-        // if (Value == 0xFFFF) return 0xFFFF;
-        // else restrict to valid zone
-        if num_zeroes > 1 {
-            a_0 = (num_zeroes - 1) * 0xffff / (length - 1);
-            l = a_0 - 1
-        }
-        if num_of_polys > 1 {
-            b_0 = (length - 1 - num_of_polys) * 0xffff / (length - 1);
-            r = b_0 + 1
-        }
-    }
-    if r <= l {
-        // If this happens LutTable is not invertible
-        return 0u16;
-    }
-
-    while r > l {
-        x = (l + r) / 2;
-        res = lut_interp_linear16((x - 1) as u16, lut_table) as i32;
-        if res == value as i32 {
-            // Found exact match.
-            return (x - 1) as u16;
-        }
-        if res > value as i32 {
-            r = x - 1
-        } else {
-            l = x + 1
-        }
-    }
-
-    // Not found, should we interpolate?
-
-    // Get surrounding nodes
-    debug_assert!(x >= 1);
-
-    let val2: f64 = (length - 1) as f64 * ((x - 1) as f64 / 65535.0);
-    let cell0: i32 = val2.floor() as i32;
-    let cell1: i32 = val2.ceil() as i32;
-    if cell0 == cell1 {
-        return x as u16;
-    }
-
-    let y0: f64 = lut_table[cell0 as usize] as f64;
-    let x0: f64 = 65535.0 * cell0 as f64 / (length - 1) as f64;
-    let y1: f64 = lut_table[cell1 as usize] as f64;
-    let x1: f64 = 65535.0 * cell1 as f64 / (length - 1) as f64;
-    let a: f64 = (y1 - y0) / (x1 - x0);
-    let b: f64 = mlaf(y0, -a, x0);
-    if a.abs() < 0.01f64 {
-        return x as u16;
-    }
-    let f: f64 = (value as i32 as f64 - b) / a;
-    if f < 0.0 {
-        return 0u16;
-    }
-    if f >= 65535.0 {
-        return 0xffffu16;
-    }
-    (f + 0.5f64).floor() as u16
-}
-
-fn lut_inverse_interp16_boxed<const N: usize>(value: u16, lut_table: &[u16; N]) -> u16 {
-    let mut l: i32 = 1; // 'int' Give spacing for negative values
-    let mut r: i32 = 0x10000;
-    let mut x: i32 = 0;
-    let mut res: i32;
-    let length = lut_table.len() as i32;
-
-    let mut num_zeroes: i32 = 0;
-    for &item in lut_table.iter() {
-        if item == 0 {
-            num_zeroes += 1
-        } else {
-            break;
-        }
-    }
-
-    if num_zeroes == 0 && value as i32 == 0 {
-        return 0u16;
-    }
-    let mut num_of_polys: i32 = 0;
-    for &item in lut_table.iter().rev() {
-        if item == 0xffff {
-            num_of_polys += 1
-        } else {
-            break;
-        }
-    }
-    // Does the curve belong to this case?
-    if num_zeroes > 1 || num_of_polys > 1 {
-        let a_0: i32;
-        let b_0: i32;
-        // Identify if value fall downto 0 or FFFF zone
-        if value as i32 == 0 {
-            return 0u16;
-        }
-        // if (Value == 0xFFFF) return 0xFFFF;
-        // else restrict to valid zone
-        if num_zeroes > 1 {
-            a_0 = (num_zeroes - 1) * 0xffff / (length - 1);
-            l = a_0 - 1
-        }
-        if num_of_polys > 1 {
-            b_0 = (length - 1 - num_of_polys) * 0xffff / (length - 1);
-            r = b_0 + 1
-        }
-    }
-    if r <= l {
-        // If this happens LutTable is not invertible
-        return 0u16;
-    }
-
-    while r > l {
-        x = (l + r) / 2;
-        res = lut_interp_linear16_boxed((x - 1) as u16, lut_table) as i32;
-        if res == value as i32 {
-            // Found exact match.
-            return (x - 1) as u16;
-        }
-        if res > value as i32 {
-            r = x - 1
-        } else {
-            l = x + 1
-        }
-    }
-
-    // Not found, should we interpolate?
-
-    // Get surrounding nodes
-    debug_assert!(x >= 1);
-
-    let val2: f64 = (length - 1) as f64 * ((x - 1) as f64 / 65535.0);
-    let cell0: i32 = val2.floor() as i32;
-    let cell1: i32 = val2.ceil() as i32;
-    if cell0 == cell1 {
-        return x as u16;
-    }
-
-    let y0: f64 = lut_table[cell0 as usize] as f64;
-    let x0: f64 = 65535.0 * cell0 as f64 / (length - 1) as f64;
-    let y1: f64 = lut_table[cell1 as usize] as f64;
-    let x1: f64 = 65535.0 * cell1 as f64 / (length - 1) as f64;
-    let a: f64 = (y1 - y0) / (x1 - x0);
-    let b: f64 = mlaf(y0, -a, x0);
-    if a.abs() < 0.01f64 {
-        return x as u16;
-    }
-    let f: f64 = (value as i32 as f64 - b) / a;
-    if f < 0.0 {
-        return 0u16;
-    }
-    if f >= 65535.0 {
-        return 0xffffu16;
-    }
-    (f + 0.5f64).floor() as u16
-}
-
-fn invert_lut(table: &[u16], out_length: usize) -> Vec<u16> {
-    // For now, we invert the lut by creating a lut of size out_length
-    // and attempting to look up a value for each entry using lut_inverse_interp16
-    let mut output = vec![0u16; out_length];
-    let scale_value = 65535f64 / (out_length - 1) as f64;
-    for (i, out) in output.iter_mut().enumerate() {
-        let x: f64 = i as f64 * scale_value;
-        let input: u16 = (x + 0.5f64).floor() as u16;
-        *out = lut_inverse_interp16(input, table);
-    }
-    output
-}
-
-fn invert_lut_boxed<const N: usize>(table: &[u16; N], out_length: usize) -> Vec<u16> {
-    // For now, we invert the lut by creating a lut of size out_length
-    // and attempting to look up a value for each entry using lut_inverse_interp16
-    let mut output = vec![0u16; out_length];
-    let scale_value = 65535f64 / (out_length - 1) as f64;
-    for (i, out) in output.iter_mut().enumerate() {
-        let x: f64 = i as f64 * scale_value;
-        let input: u16 = (x + 0.5f64).floor() as u16;
-        *out = lut_inverse_interp16_boxed(input, table);
-    }
-    output
-}
-
 impl ToneReprCurve {
-    #[cfg(feature = "any_to_any")]
-    pub(crate) fn to_clut(&self) -> Result<Vec<f32>, CmsError> {
-        match self {
-            ToneReprCurve::Lut(lut) => {
-                if lut.is_empty() {
-                    let passthrough_table = passthrough_table::<f32, 16384, 1>();
-                    Ok(passthrough_table.to_vec())
-                } else {
-                    Ok(lut
-                        .iter()
-                        .map(|&x| x as f32 * (1. / 65535.))
-                        .collect::<Vec<_>>())
-                }
-            }
-            ToneReprCurve::Parametric(_) => {
-                let curve = self
-                    .build_linearize_table::<f32, 65535, 1>()
-                    .ok_or(CmsError::InvalidTrcCurve)?;
-                let max_value = f32::NOT_FINITE_LINEAR_TABLE_SIZE - 1;
-                let sliced = &curve[..max_value];
-                Ok(sliced.to_vec())
-            }
-        }
-    }
-
     pub(crate) fn build_linearize_table<
         T: PointeeSizeExpressible,
         const N: usize,
@@ -1049,16 +352,11 @@ impl ToneReprCurve {
     ) -> Option<Box<[f32; N]>> {
         match self {
             ToneReprCurve::Parametric(params) => linear_curve_parametric::<T, N, BIT_DEPTH>(params),
-            ToneReprCurve::Lut(data) => match data.len() {
-                0 => Some(passthrough_table::<T, N, BIT_DEPTH>()),
-                1 => Some(linear_forward_table::<T, N, BIT_DEPTH>(data[0])),
-                _ => Some(linear_lut_interpolate::<T, N, BIT_DEPTH>(data)),
-            },
         }
     }
 
     pub(crate) fn build_gamma_table<
-        T: Default + Copy + 'static + PointeeSizeExpressible + GammaLutInterpolate,
+        T: Default + Copy + 'static + PointeeSizeExpressible,
         const BUCKET: usize,
         const N: usize,
         const BIT_DEPTH: usize,
@@ -1095,39 +393,10 @@ impl ToneReprCurve {
                     }
                 }
 
-                let parametric_curve = ParametricCurve::new(params);
-                if let Some(v) = parametric_curve?
+                ParametricCurve::new(params)?
                     .invert()
                     .map(|x| make_gamma_parametric_table::<T, BUCKET, N, BIT_DEPTH>(x))
-                {
-                    return Some(v);
-                }
-
-                let mut gamma_table_uint = Box::new([0; N]);
-
-                let inverted_size: usize = N;
-                let gamma_table = linear_curve_parametric_s::<N>(params)?;
-                for (&src, dst) in gamma_table.iter().zip(gamma_table_uint.iter_mut()) {
-                    *dst = (src * 65535f32) as u16;
-                }
-                let inverted = invert_lut_boxed(&gamma_table_uint, inverted_size);
-                Some(make_gamma_lut::<T, BUCKET, N, BIT_DEPTH>(&inverted))
             }
-            ToneReprCurve::Lut(data) => match data.len() {
-                0 => Some(make_gamma_linear_table::<T, BUCKET, N>(BIT_DEPTH)),
-                1 => Some(make_gamma_pow_table::<T, BUCKET, N>(
-                    1. / u8_fixed_8number_to_float(data[0]),
-                    BIT_DEPTH,
-                )),
-                _ => {
-                    let mut inverted_size = data.len();
-                    if inverted_size < 256 {
-                        inverted_size = 256
-                    }
-                    let inverted = invert_lut(data, inverted_size);
-                    Some(make_gamma_lut::<T, BUCKET, N, BIT_DEPTH>(&inverted))
-                }
-            },
         }
     }
 }
@@ -1265,7 +534,7 @@ impl ColorProfile {
 
     /// Builds gamma table checking CICP for Transfer characteristics first.
     pub fn build_gamma_table<
-        T: Default + Copy + 'static + PointeeSizeExpressible + GammaLutInterpolate,
+        T: Default + Copy + 'static + PointeeSizeExpressible,
         const BUCKET: usize,
         const N: usize,
         const BIT_DEPTH: usize,
@@ -1322,16 +591,6 @@ impl ColorProfile {
         red_trc: &ToneReprCurve,
     ) -> Option<Box<dyn ToneCurveEvaluator + Send + Sync>> {
         match red_trc {
-            ToneReprCurve::Lut(lut) => {
-                if lut.is_empty() {
-                    return Some(Box::new(ToneCurveEvaluatorLinear {}));
-                }
-                if lut.len() == 1 {
-                    let gamma = 1. / u8_fixed_8number_to_float(lut[0]);
-                    return Some(Box::new(ToneCurveEvaluatorPureGamma { gamma }));
-                }
-                None
-            }
             ToneReprCurve::Parametric(params) => {
                 if params.len() == 5 {
                     let srgb_params = vec![2.4, 1. / 1.055, 0.055 / 1.055, 1. / 12.92, 0.04045];
@@ -1376,69 +635,7 @@ impl ColorProfile {
         if let (Some(red_trc), Some(green_trc), Some(blue_trc)) =
             (&self.red_trc, &self.green_trc, &self.blue_trc)
         {
-            if !matches!(
-                (red_trc, green_trc, blue_trc),
-                (
-                    ToneReprCurve::Lut(_),
-                    ToneReprCurve::Lut(_),
-                    ToneReprCurve::Lut(_),
-                ) | (
-                    ToneReprCurve::Parametric(_),
-                    ToneReprCurve::Parametric(_),
-                    ToneReprCurve::Parametric(_)
-                )
-            ) {
-                return false;
-            }
-            if let (ToneReprCurve::Lut(lut0), ToneReprCurve::Lut(lut1), ToneReprCurve::Lut(lut2)) =
-                (red_trc, green_trc, blue_trc)
-            {
-                if lut0 == lut1 || lut1 == lut2 {
-                    return true;
-                }
-            }
-            if let (
-                ToneReprCurve::Parametric(lut0),
-                ToneReprCurve::Parametric(lut1),
-                ToneReprCurve::Parametric(lut2),
-            ) = (red_trc, green_trc, blue_trc)
-            {
-                if lut0 == lut1 || lut1 == lut2 {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    #[cfg(feature = "lut")]
-    /// Checks if profile is matrix shaper, have same TRC and TRC is linear.
-    pub(crate) fn is_linear_matrix_shaper(&self) -> bool {
-        if !self.is_matrix_shaper() {
-            return false;
-        }
-        if !self.are_all_trc_the_same() {
-            return false;
-        }
-        if let Some(red_trc) = &self.red_trc {
-            return match red_trc {
-                ToneReprCurve::Lut(lut) => {
-                    if lut.is_empty() {
-                        return true;
-                    }
-                    use crate::matan::is_curve_linear16;
-                    if is_curve_linear16(lut) {
-                        return true;
-                    }
-                    false
-                }
-                ToneReprCurve::Parametric(params) => {
-                    if let Some(curve) = ParametricCurve::new(params) {
-                        return curve.is_linear();
-                    }
-                    false
-                }
-            };
+            return red_trc == green_trc || green_trc == blue_trc;
         }
         false
     }
@@ -1477,15 +674,6 @@ impl ColorProfile {
         evaluator_curve: &ToneReprCurve,
     ) -> Option<Option<Box<dyn ToneCurveEvaluator + Send + Sync>>> {
         match evaluator_curve {
-            ToneReprCurve::Lut(lut) => {
-                if lut.is_empty() {
-                    return Some(Some(Box::new(ToneCurveEvaluatorLinear {})));
-                }
-                if lut.len() == 1 {
-                    let gamma = u8_fixed_8number_to_float(lut[0]);
-                    return Some(Some(Box::new(ToneCurveEvaluatorPureGamma { gamma })));
-                }
-            }
             ToneReprCurve::Parametric(params) => {
                 if params.len() == 5 {
                     let srgb_params = vec![2.4, 1. / 1.055, 0.055 / 1.055, 1. / 12.92, 0.04045];
@@ -1533,12 +721,6 @@ pub(crate) struct ToneCurveParametricEvaluator {
     parametric: ParametricCurve,
 }
 
-pub(crate) struct ToneCurveEvaluatorPureGamma {
-    gamma: f32,
-}
-
-pub(crate) struct ToneCurveEvaluatorLinear {}
-
 #[cfg(feature = "extended_range")]
 impl ToneCurveEvaluator for ToneCurveCicpEvaluator {
     fn evaluate_tristimulus(&self, rgb: Rgb<f32>) -> Rgb<f32> {
@@ -1561,30 +743,6 @@ impl ToneCurveEvaluator for ToneCurveParametricEvaluator {
 
     fn evaluate_value(&self, value: f32) -> f32 {
         self.parametric.eval(value)
-    }
-}
-
-impl ToneCurveEvaluator for ToneCurveEvaluatorPureGamma {
-    fn evaluate_tristimulus(&self, rgb: Rgb<f32>) -> Rgb<f32> {
-        Rgb::new(
-            dirty_powf(rgb.r, self.gamma),
-            dirty_powf(rgb.g, self.gamma),
-            dirty_powf(rgb.b, self.gamma),
-        )
-    }
-
-    fn evaluate_value(&self, value: f32) -> f32 {
-        dirty_powf(value, self.gamma)
-    }
-}
-
-impl ToneCurveEvaluator for ToneCurveEvaluatorLinear {
-    fn evaluate_tristimulus(&self, rgb: Rgb<f32>) -> Rgb<f32> {
-        rgb
-    }
-
-    fn evaluate_value(&self, value: f32) -> f32 {
-        value
     }
 }
 

@@ -33,14 +33,8 @@ use crate::cicp::{
 use crate::dat::ColorDateTime;
 use crate::err::CmsError;
 use crate::matrix::{Matrix3f, Xyz};
-use crate::reader::s15_fixed16_number_to_float;
-use crate::safe_math::{SafeAdd, SafeMul};
-use crate::tag::{TAG_SIZE, Tag};
 use crate::trc::ToneReprCurve;
-use crate::{Chromaticity, Layout, Matrix3d, Vector3d, XyY, Xyzd, adapt_to_d50_d};
-use std::io::Read;
-
-const MAX_PROFILE_SIZE: usize = 1024 * 1024 * 10; // 10 MB max, for Fogra39 etc
+use crate::{Chromaticity, Layout, Matrix3d, XyY, Xyzd, adapt_to_d50_d};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,22 +173,6 @@ pub enum DataColorSpace {
     Gray,
     Hsv,
     Hls,
-    Cmyk,
-    Cmy,
-    Color2,
-    Color3,
-    Color4,
-    Color5,
-    Color6,
-    Color7,
-    Color8,
-    Color9,
-    Color10,
-    Color11,
-    Color12,
-    Color13,
-    Color14,
-    Color15,
 }
 
 impl DataColorSpace {
@@ -210,44 +188,12 @@ impl DataColorSpace {
             DataColorSpace::Gray => layout != Layout::Gray && layout != Layout::GrayAlpha,
             DataColorSpace::Hsv => layout != Layout::Rgb,
             DataColorSpace::Hls => layout != Layout::Rgb,
-            DataColorSpace::Cmyk => layout != Layout::Rgba,
-            DataColorSpace::Cmy => layout != Layout::Rgb,
-            DataColorSpace::Color2 => layout != Layout::GrayAlpha,
-            DataColorSpace::Color3 => layout != Layout::Rgb,
-            DataColorSpace::Color4 => layout != Layout::Rgba,
-            DataColorSpace::Color5 => layout != Layout::Inks5,
-            DataColorSpace::Color6 => layout != Layout::Inks6,
-            DataColorSpace::Color7 => layout != Layout::Inks7,
-            DataColorSpace::Color8 => layout != Layout::Inks8,
-            DataColorSpace::Color9 => layout != Layout::Inks9,
-            DataColorSpace::Color10 => layout != Layout::Inks10,
-            DataColorSpace::Color11 => layout != Layout::Inks11,
-            DataColorSpace::Color12 => layout != Layout::Inks12,
-            DataColorSpace::Color13 => layout != Layout::Inks13,
-            DataColorSpace::Color14 => layout != Layout::Inks14,
-            DataColorSpace::Color15 => layout != Layout::Inks15,
         };
         if unsupported {
             Err(CmsError::InvalidLayout)
         } else {
             Ok(())
         }
-    }
-
-    pub(crate) fn is_three_channels(self) -> bool {
-        matches!(
-            self,
-            DataColorSpace::Xyz
-                | DataColorSpace::Lab
-                | DataColorSpace::Luv
-                | DataColorSpace::YCbr
-                | DataColorSpace::Yxy
-                | DataColorSpace::Rgb
-                | DataColorSpace::Hsv
-                | DataColorSpace::Hls
-                | DataColorSpace::Cmy
-                | DataColorSpace::Color3
-        )
     }
 }
 
@@ -300,47 +246,6 @@ impl From<ProfileClass> for u32 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum LutStore {
-    Store8(Vec<u8>),
-    Store16(Vec<u16>),
-}
-
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub enum LutType {
-    Lut8,
-    Lut16,
-    LutMab,
-    LutMba,
-}
-
-impl TryFrom<u32> for LutType {
-    type Error = CmsError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        if value == u32::from_ne_bytes(*b"mft1").to_be() {
-            return Ok(LutType::Lut8);
-        } else if value == u32::from_ne_bytes(*b"mft2").to_be() {
-            return Ok(LutType::Lut16);
-        } else if value == u32::from_ne_bytes(*b"mAB ").to_be() {
-            return Ok(LutType::LutMab);
-        } else if value == u32::from_ne_bytes(*b"mBA ").to_be() {
-            return Ok(LutType::LutMba);
-        }
-        Err(CmsError::InvalidProfile)
-    }
-}
-
-impl From<LutType> for u32 {
-    fn from(val: LutType) -> Self {
-        match val {
-            LutType::Lut8 => u32::from_ne_bytes(*b"mft1").to_be(),
-            LutType::Lut16 => u32::from_ne_bytes(*b"mft2").to_be(),
-            LutType::LutMab => u32::from_ne_bytes(*b"mAB ").to_be(),
-            LutType::LutMba => u32::from_ne_bytes(*b"mBA ").to_be(),
-        }
-    }
-}
-
 impl TryFrom<u32> for DataColorSpace {
     type Error = CmsError;
     fn try_from(value: u32) -> Result<Self, Self::Error> {
@@ -362,38 +267,6 @@ impl TryFrom<u32> for DataColorSpace {
             return Ok(DataColorSpace::Hsv);
         } else if value == u32::from_ne_bytes(*b"HLS ").to_be() {
             return Ok(DataColorSpace::Hls);
-        } else if value == u32::from_ne_bytes(*b"CMYK").to_be() {
-            return Ok(DataColorSpace::Cmyk);
-        } else if value == u32::from_ne_bytes(*b"CMY ").to_be() {
-            return Ok(DataColorSpace::Cmy);
-        } else if value == u32::from_ne_bytes(*b"2CLR").to_be() {
-            return Ok(DataColorSpace::Color2);
-        } else if value == u32::from_ne_bytes(*b"3CLR").to_be() {
-            return Ok(DataColorSpace::Color3);
-        } else if value == u32::from_ne_bytes(*b"4CLR").to_be() {
-            return Ok(DataColorSpace::Color4);
-        } else if value == u32::from_ne_bytes(*b"5CLR").to_be() {
-            return Ok(DataColorSpace::Color5);
-        } else if value == u32::from_ne_bytes(*b"6CLR").to_be() {
-            return Ok(DataColorSpace::Color6);
-        } else if value == u32::from_ne_bytes(*b"7CLR").to_be() {
-            return Ok(DataColorSpace::Color7);
-        } else if value == u32::from_ne_bytes(*b"8CLR").to_be() {
-            return Ok(DataColorSpace::Color8);
-        } else if value == u32::from_ne_bytes(*b"9CLR").to_be() {
-            return Ok(DataColorSpace::Color9);
-        } else if value == u32::from_ne_bytes(*b"ACLR").to_be() {
-            return Ok(DataColorSpace::Color10);
-        } else if value == u32::from_ne_bytes(*b"BCLR").to_be() {
-            return Ok(DataColorSpace::Color11);
-        } else if value == u32::from_ne_bytes(*b"CCLR").to_be() {
-            return Ok(DataColorSpace::Color12);
-        } else if value == u32::from_ne_bytes(*b"DCLR").to_be() {
-            return Ok(DataColorSpace::Color13);
-        } else if value == u32::from_ne_bytes(*b"ECLR").to_be() {
-            return Ok(DataColorSpace::Color14);
-        } else if value == u32::from_ne_bytes(*b"FCLR").to_be() {
-            return Ok(DataColorSpace::Color15);
         }
         Err(CmsError::InvalidProfile)
     }
@@ -411,22 +284,6 @@ impl From<DataColorSpace> for u32 {
             DataColorSpace::Gray => u32::from_ne_bytes(*b"GRAY").to_be(),
             DataColorSpace::Hsv => u32::from_ne_bytes(*b"HSV ").to_be(),
             DataColorSpace::Hls => u32::from_ne_bytes(*b"HLS ").to_be(),
-            DataColorSpace::Cmyk => u32::from_ne_bytes(*b"CMYK").to_be(),
-            DataColorSpace::Cmy => u32::from_ne_bytes(*b"CMY ").to_be(),
-            DataColorSpace::Color2 => u32::from_ne_bytes(*b"2CLR").to_be(),
-            DataColorSpace::Color3 => u32::from_ne_bytes(*b"3CLR").to_be(),
-            DataColorSpace::Color4 => u32::from_ne_bytes(*b"4CLR").to_be(),
-            DataColorSpace::Color5 => u32::from_ne_bytes(*b"5CLR").to_be(),
-            DataColorSpace::Color6 => u32::from_ne_bytes(*b"6CLR").to_be(),
-            DataColorSpace::Color7 => u32::from_ne_bytes(*b"7CLR").to_be(),
-            DataColorSpace::Color8 => u32::from_ne_bytes(*b"8CLR").to_be(),
-            DataColorSpace::Color9 => u32::from_ne_bytes(*b"9CLR").to_be(),
-            DataColorSpace::Color10 => u32::from_ne_bytes(*b"ACLR").to_be(),
-            DataColorSpace::Color11 => u32::from_ne_bytes(*b"BCLR").to_be(),
-            DataColorSpace::Color12 => u32::from_ne_bytes(*b"CCLR").to_be(),
-            DataColorSpace::Color13 => u32::from_ne_bytes(*b"DCLR").to_be(),
-            DataColorSpace::Color14 => u32::from_ne_bytes(*b"ECLR").to_be(),
-            DataColorSpace::Color15 => u32::from_ne_bytes(*b"FCLR").to_be(),
         }
     }
 }
@@ -527,67 +384,6 @@ impl From<u32> for TechnologySignatures {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum LutWarehouse {
-    Lut(LutDataType),
-    Multidimensional(LutMultidimensionalType),
-}
-
-impl PartialEq for LutWarehouse {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (LutWarehouse::Lut(a), LutWarehouse::Lut(b)) => a == b,
-            (LutWarehouse::Multidimensional(a), LutWarehouse::Multidimensional(b)) => a == b,
-            _ => false, // Different variants are not equal
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LutDataType {
-    // used by lut8Type/lut16Type (mft2) only
-    pub num_input_channels: u8,
-    pub num_output_channels: u8,
-    pub num_clut_grid_points: u8,
-    pub matrix: Matrix3d,
-    pub num_input_table_entries: u16,
-    pub num_output_table_entries: u16,
-    pub input_table: LutStore,
-    pub clut_table: LutStore,
-    pub output_table: LutStore,
-    pub lut_type: LutType,
-}
-
-impl LutDataType {
-    pub(crate) fn has_same_kind(&self) -> bool {
-        matches!(
-            (&self.input_table, &self.clut_table, &self.output_table),
-            (
-                LutStore::Store8(_),
-                LutStore::Store8(_),
-                LutStore::Store8(_)
-            ) | (
-                LutStore::Store16(_),
-                LutStore::Store16(_),
-                LutStore::Store16(_)
-            )
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LutMultidimensionalType {
-    pub num_input_channels: u8,
-    pub num_output_channels: u8,
-    pub grid_points: [u8; 16],
-    pub clut: Option<LutStore>,
-    pub a_curves: Vec<ToneReprCurve>,
-    pub b_curves: Vec<ToneReprCurve>,
-    pub m_curves: Vec<ToneReprCurve>,
-    pub matrix: Matrix3d,
-    pub bias: Vector3d,
-}
-
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum RenderingIntent {
@@ -680,55 +476,6 @@ impl ProfileHeader {
             reserved: [0; 28],
             tag_count: 0,
         }
-    }
-
-    /// Creates profile from the buffer
-    pub(crate) fn new_from_slice(slice: &[u8]) -> Result<Self, CmsError> {
-        if slice.len() < size_of::<ProfileHeader>() {
-            return Err(CmsError::InvalidProfile);
-        }
-        let mut cursor = std::io::Cursor::new(slice);
-        let mut buffer = [0u8; size_of::<ProfileHeader>()];
-        cursor
-            .read_exact(&mut buffer)
-            .map_err(|_| CmsError::InvalidProfile)?;
-
-        let header = Self {
-            size: u32::from_be_bytes(buffer[0..4].try_into().unwrap()),
-            cmm_type: u32::from_be_bytes(buffer[4..8].try_into().unwrap()),
-            version: ProfileVersion::try_from(u32::from_be_bytes(
-                buffer[8..12].try_into().unwrap(),
-            ))?,
-            profile_class: ProfileClass::try_from(u32::from_be_bytes(
-                buffer[12..16].try_into().unwrap(),
-            ))?,
-            data_color_space: DataColorSpace::try_from(u32::from_be_bytes(
-                buffer[16..20].try_into().unwrap(),
-            ))?,
-            pcs: DataColorSpace::try_from(u32::from_be_bytes(buffer[20..24].try_into().unwrap()))?,
-            creation_date_time: ColorDateTime::new_from_slice(buffer[24..36].try_into().unwrap())?,
-            signature: ProfileSignature::try_from(u32::from_be_bytes(
-                buffer[36..40].try_into().unwrap(),
-            ))?,
-            platform: u32::from_be_bytes(buffer[40..44].try_into().unwrap()),
-            flags: u32::from_be_bytes(buffer[44..48].try_into().unwrap()),
-            device_manufacturer: u32::from_be_bytes(buffer[48..52].try_into().unwrap()),
-            device_model: u32::from_be_bytes(buffer[52..56].try_into().unwrap()),
-            device_attributes: buffer[56..64].try_into().unwrap(),
-            rendering_intent: RenderingIntent::try_from(u32::from_be_bytes(
-                buffer[64..68].try_into().unwrap(),
-            ))?,
-            illuminant: Xyz::new(
-                s15_fixed16_number_to_float(i32::from_be_bytes(buffer[68..72].try_into().unwrap())),
-                s15_fixed16_number_to_float(i32::from_be_bytes(buffer[72..76].try_into().unwrap())),
-                s15_fixed16_number_to_float(i32::from_be_bytes(buffer[76..80].try_into().unwrap())),
-            ),
-            creator: u32::from_be_bytes(buffer[80..84].try_into().unwrap()),
-            profile_id: buffer[84..100].try_into().unwrap(),
-            reserved: buffer[100..128].try_into().unwrap(),
-            tag_count: u32::from_be_bytes(buffer[128..132].try_into().unwrap()),
-        };
-        Ok(header)
     }
 }
 
@@ -927,13 +674,6 @@ pub struct ColorProfile {
     pub gray_trc: Option<ToneReprCurve>,
     pub cicp: Option<CicpProfile>,
     pub chromatic_adaptation: Option<Matrix3d>,
-    pub lut_a_to_b_perceptual: Option<LutWarehouse>,
-    pub lut_a_to_b_colorimetric: Option<LutWarehouse>,
-    pub lut_a_to_b_saturation: Option<LutWarehouse>,
-    pub lut_b_to_a_perceptual: Option<LutWarehouse>,
-    pub lut_b_to_a_colorimetric: Option<LutWarehouse>,
-    pub lut_b_to_a_saturation: Option<LutWarehouse>,
-    pub gamut: Option<LutWarehouse>,
     pub copyright: Option<ProfileText>,
     pub description: Option<ProfileText>,
     pub device_manufacturer: Option<ProfileText>,
@@ -949,231 +689,10 @@ pub struct ColorProfile {
     pub(crate) version_internal: ProfileVersion,
 }
 
-#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Hash)]
-pub struct ParsingOptions {
-    // Maximum allowed profile size in bytes
-    pub max_profile_size: usize,
-    // Maximum allowed CLUT size in bytes
-    pub max_allowed_clut_size: usize,
-    // Maximum allowed TRC size in elements count
-    pub max_allowed_trc_size: usize,
-}
-
-impl Default for ParsingOptions {
-    fn default() -> Self {
-        Self {
-            max_profile_size: MAX_PROFILE_SIZE,
-            max_allowed_clut_size: 10_000_000,
-            max_allowed_trc_size: 40_000,
-        }
-    }
-}
-
 impl ColorProfile {
     /// Returns profile version
     pub fn version(&self) -> ProfileVersion {
         self.version_internal
-    }
-
-    pub fn new_from_slice(slice: &[u8]) -> Result<Self, CmsError> {
-        Self::new_from_slice_with_options(slice, Default::default())
-    }
-
-    pub fn new_from_slice_with_options(
-        slice: &[u8],
-        options: ParsingOptions,
-    ) -> Result<Self, CmsError> {
-        let header = ProfileHeader::new_from_slice(slice)?;
-        let tags_count = header.tag_count as usize;
-        if slice.len() >= options.max_profile_size {
-            return Err(CmsError::InvalidProfile);
-        }
-        let tags_end = tags_count
-            .safe_mul(TAG_SIZE)?
-            .safe_add(size_of::<ProfileHeader>())?;
-        if slice.len() < tags_end {
-            return Err(CmsError::InvalidProfile);
-        }
-        let tags_slice = &slice[size_of::<ProfileHeader>()..tags_end];
-        let mut profile = ColorProfile {
-            rendering_intent: header.rendering_intent,
-            pcs: header.pcs,
-            profile_class: header.profile_class,
-            color_space: header.data_color_space,
-            white_point: header.illuminant.to_xyzd(),
-            version_internal: header.version,
-            creation_date_time: header.creation_date_time,
-            ..Default::default()
-        };
-        let color_space = profile.color_space;
-        for tag in tags_slice.chunks_exact(TAG_SIZE) {
-            let tag_value = u32::from_be_bytes([tag[0], tag[1], tag[2], tag[3]]);
-            let tag_entry = u32::from_be_bytes([tag[4], tag[5], tag[6], tag[7]]);
-            let tag_size = u32::from_be_bytes([tag[8], tag[9], tag[10], tag[11]]) as usize;
-            // Just ignore unknown tags
-            if let Ok(tag) = Tag::try_from(tag_value) {
-                match tag {
-                    Tag::RedXyz => {
-                        if color_space == DataColorSpace::Rgb {
-                            profile.red_colorant =
-                                Self::read_xyz_tag(slice, tag_entry as usize, tag_size)?;
-                        }
-                    }
-                    Tag::GreenXyz => {
-                        if color_space == DataColorSpace::Rgb {
-                            profile.green_colorant =
-                                Self::read_xyz_tag(slice, tag_entry as usize, tag_size)?;
-                        }
-                    }
-                    Tag::BlueXyz => {
-                        if color_space == DataColorSpace::Rgb {
-                            profile.blue_colorant =
-                                Self::read_xyz_tag(slice, tag_entry as usize, tag_size)?;
-                        }
-                    }
-                    Tag::RedToneReproduction => {
-                        if color_space == DataColorSpace::Rgb {
-                            profile.red_trc = Self::read_trc_tag_s(
-                                slice,
-                                tag_entry as usize,
-                                tag_size,
-                                &options,
-                            )?;
-                        }
-                    }
-                    Tag::GreenToneReproduction => {
-                        if color_space == DataColorSpace::Rgb {
-                            profile.green_trc = Self::read_trc_tag_s(
-                                slice,
-                                tag_entry as usize,
-                                tag_size,
-                                &options,
-                            )?;
-                        }
-                    }
-                    Tag::BlueToneReproduction => {
-                        if color_space == DataColorSpace::Rgb {
-                            profile.blue_trc = Self::read_trc_tag_s(
-                                slice,
-                                tag_entry as usize,
-                                tag_size,
-                                &options,
-                            )?;
-                        }
-                    }
-                    Tag::GreyToneReproduction => {
-                        if color_space == DataColorSpace::Gray {
-                            profile.gray_trc = Self::read_trc_tag_s(
-                                slice,
-                                tag_entry as usize,
-                                tag_size,
-                                &options,
-                            )?;
-                        }
-                    }
-                    Tag::MediaWhitePoint => {
-                        profile.media_white_point =
-                            Self::read_xyz_tag(slice, tag_entry as usize, tag_size).map(Some)?;
-                    }
-                    Tag::Luminance => {
-                        profile.luminance =
-                            Self::read_xyz_tag(slice, tag_entry as usize, tag_size).map(Some)?;
-                    }
-                    Tag::Measurement => {
-                        profile.measurement =
-                            Self::read_meas_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::CodeIndependentPoints => {
-                        // This tag may be present when the data colour space in the profile header is RGB, YCbCr, or XYZ, and the
-                        // profile class in the profile header is Input or Display. The tag shall not be present for other data colour spaces
-                        // or profile classes indicated in the profile header.
-                        if (profile.profile_class == ProfileClass::InputDevice
-                            || profile.profile_class == ProfileClass::DisplayDevice)
-                            && (profile.color_space == DataColorSpace::Rgb
-                                || profile.color_space == DataColorSpace::YCbr
-                                || profile.color_space == DataColorSpace::Xyz)
-                        {
-                            profile.cicp =
-                                Self::read_cicp_tag(slice, tag_entry as usize, tag_size)?;
-                        }
-                    }
-                    Tag::ChromaticAdaptation => {
-                        profile.chromatic_adaptation =
-                            Self::read_chad_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::BlackPoint => {
-                        profile.black_point =
-                            Self::read_xyz_tag(slice, tag_entry as usize, tag_size).map(Some)?
-                    }
-                    Tag::DeviceToPcsLutPerceptual => {
-                        profile.lut_a_to_b_perceptual =
-                            Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::DeviceToPcsLutColorimetric => {
-                        profile.lut_a_to_b_colorimetric =
-                            Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::DeviceToPcsLutSaturation => {
-                        profile.lut_a_to_b_saturation =
-                            Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::PcsToDeviceLutPerceptual => {
-                        profile.lut_b_to_a_perceptual =
-                            Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::PcsToDeviceLutColorimetric => {
-                        profile.lut_b_to_a_colorimetric =
-                            Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::PcsToDeviceLutSaturation => {
-                        profile.lut_b_to_a_saturation =
-                            Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::Gamut => {
-                        profile.gamut = Self::read_lut_tag(slice, tag_entry, tag_size, &options)?;
-                    }
-                    Tag::Copyright => {
-                        profile.copyright =
-                            Self::read_string_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::ProfileDescription => {
-                        profile.description =
-                            Self::read_string_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::ViewingConditionsDescription => {
-                        profile.viewing_conditions_description =
-                            Self::read_string_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::DeviceModel => {
-                        profile.device_model =
-                            Self::read_string_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::DeviceManufacturer => {
-                        profile.device_manufacturer =
-                            Self::read_string_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::CharTarget => {
-                        profile.char_target =
-                            Self::read_string_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::Chromaticity => {}
-                    Tag::ObserverConditions => {
-                        profile.viewing_conditions =
-                            Self::read_viewing_conditions(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::Technology => {
-                        profile.technology =
-                            Self::read_tech_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                    Tag::CalibrationDateTime => {
-                        profile.calibration_date =
-                            Self::read_date_time_tag(slice, tag_entry as usize, tag_size)?;
-                    }
-                }
-            }
-        }
-
-        Ok(profile)
     }
 }
 
@@ -1355,88 +874,11 @@ impl ColorProfile {
         let det = tetrahedral_vertices.determinant()?;
         Some((det / 6.0f64) as f32)
     }
-
-    #[allow(unused)]
-    pub(crate) fn has_device_to_pcs_lut(&self) -> bool {
-        self.lut_a_to_b_perceptual.is_some()
-            || self.lut_a_to_b_saturation.is_some()
-            || self.lut_a_to_b_colorimetric.is_some()
-    }
-
-    #[allow(unused)]
-    pub(crate) fn has_pcs_to_device_lut(&self) -> bool {
-        self.lut_b_to_a_perceptual.is_some()
-            || self.lut_b_to_a_saturation.is_some()
-            || self.lut_b_to_a_colorimetric.is_some()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_gray() {
-        if let Ok(gray_icc) = fs::read("./assets/Generic Gray Gamma 2.2 Profile.icc") {
-            let f_p = ColorProfile::new_from_slice(&gray_icc).unwrap();
-            assert!(f_p.gray_trc.is_some());
-        }
-    }
-
-    #[test]
-    fn test_perceptual() {
-        if let Ok(srgb_perceptual_icc) = fs::read("./assets/srgb_perceptual.icc") {
-            let f_p = ColorProfile::new_from_slice(&srgb_perceptual_icc).unwrap();
-            assert_eq!(f_p.pcs, DataColorSpace::Lab);
-            assert_eq!(f_p.color_space, DataColorSpace::Rgb);
-            assert_eq!(f_p.version(), ProfileVersion::V4_2);
-            assert!(f_p.lut_a_to_b_perceptual.is_some());
-            assert!(f_p.lut_b_to_a_perceptual.is_some());
-        }
-    }
-
-    #[test]
-    fn test_us_swop_coated() {
-        if let Ok(us_swop_coated) = fs::read("./assets/us_swop_coated.icc") {
-            let f_p = ColorProfile::new_from_slice(&us_swop_coated).unwrap();
-            assert_eq!(f_p.pcs, DataColorSpace::Lab);
-            assert_eq!(f_p.color_space, DataColorSpace::Cmyk);
-            assert_eq!(f_p.version(), ProfileVersion::V2_0);
-
-            assert!(f_p.lut_a_to_b_perceptual.is_some());
-            assert!(f_p.lut_b_to_a_perceptual.is_some());
-
-            assert!(f_p.lut_a_to_b_colorimetric.is_some());
-            assert!(f_p.lut_b_to_a_colorimetric.is_some());
-
-            assert!(f_p.gamut.is_some());
-
-            assert!(f_p.copyright.is_some());
-            assert!(f_p.description.is_some());
-        }
-    }
-
-    #[test]
-    fn test_matrix_shaper() {
-        if let Ok(matrix_shaper) = fs::read("./assets/Display P3.icc") {
-            let f_p = ColorProfile::new_from_slice(&matrix_shaper).unwrap();
-            assert_eq!(f_p.pcs, DataColorSpace::Xyz);
-            assert_eq!(f_p.color_space, DataColorSpace::Rgb);
-            assert_eq!(f_p.version(), ProfileVersion::V4_0);
-
-            assert!(f_p.red_trc.is_some());
-            assert!(f_p.blue_trc.is_some());
-            assert!(f_p.green_trc.is_some());
-
-            assert_ne!(f_p.red_colorant, Xyzd::default());
-            assert_ne!(f_p.blue_colorant, Xyzd::default());
-            assert_ne!(f_p.green_colorant, Xyzd::default());
-
-            assert!(f_p.copyright.is_some());
-            assert!(f_p.description.is_some());
-        }
-    }
 
     /// Verify rgb_to_xyz_matrix returns colorant_matrix directly per ICC.1:2022-05 F.3.
     ///
@@ -1444,24 +886,6 @@ mod tests {
     /// Source: https://skia.googlesource.com/skcms/+/refs/heads/main/profiles/misc/SM245B.icc
     #[test]
     fn test_rgb_to_xyz_matrix_equals_colorant_matrix() {
-        // Test with SM245B.icc (D65 colorants, no CHAD tag)
-        if let Ok(icc_data) = fs::read("./assets/SM245B.icc") {
-            if let Ok(profile) = ColorProfile::new_from_slice(&icc_data) {
-                let rgb_to_xyz = profile.rgb_to_xyz_matrix();
-                let colorants = profile.colorant_matrix();
-
-                for i in 0..3 {
-                    for j in 0..3 {
-                        assert!(
-                            (rgb_to_xyz.v[i][j] - colorants.v[i][j]).abs() < 1e-10,
-                            "rgb_to_xyz_matrix should equal colorant_matrix at [{i}][{j}]"
-                        );
-                    }
-                }
-            }
-        }
-
-        // Also verify with sRGB
         let srgb = ColorProfile::new_srgb();
         let rgb_to_xyz = srgb.rgb_to_xyz_matrix();
         let colorants = srgb.colorant_matrix();
@@ -1568,94 +992,5 @@ mod tests {
             RenderingIntent::try_from(0xFFFFFFFF).unwrap(),
             RenderingIntent::Perceptual
         );
-    }
-
-    /// Parse a profile with a non-conforming rendering intent value.
-    /// Synthesized from SM245B.icc with bytes 64-67 set to 0x01000000
-    /// (byte-swapped, as found in old Linotype "Lino" profiles).
-    /// The invalid value should default to Perceptual per our policy.
-    #[test]
-    fn test_invalid_rendering_intent_defaults_to_perceptual() {
-        let icc_data =
-            fs::read("./assets/swapped_intent.icc").expect("swapped_intent.icc test asset");
-        let profile = ColorProfile::new_from_slice(&icc_data)
-            .expect("Profile with invalid rendering intent should parse");
-        assert_eq!(profile.rendering_intent, RenderingIntent::Perceptual);
-        // Verify the rest of the profile parsed correctly
-        assert_eq!(profile.color_space, DataColorSpace::Rgb);
-        assert!(profile.red_trc.is_some());
-        assert!(profile.green_trc.is_some());
-        assert!(profile.blue_trc.is_some());
-        let dst = ColorProfile::new_srgb();
-        let transform = profile
-            .create_transform_8bit(Layout::Rgba, &dst, Layout::Rgba, Default::default())
-            .expect("Should create transform from profile with defaulted intent");
-        let src = [128u8, 128, 128, 255];
-        let mut out = [0u8; 4];
-        transform.transform(&src, &mut out).unwrap();
-        assert_eq!(out[3], 255, "Alpha should be preserved");
-    }
-
-    /// v4 profile with correct mluc description tag should parse as
-    /// Localizable (regression: ensure desc-tolerance doesn't break mluc).
-    #[test]
-    fn test_v4_mluc_description_parses_as_localizable() {
-        let icc_data = fs::read("./assets/Display P3.icc").expect("Display P3.icc test asset");
-        let profile =
-            ColorProfile::new_from_slice(&icc_data).expect("Display P3 profile should parse");
-        assert_eq!(profile.version(), ProfileVersion::V4_0);
-        let desc = profile
-            .description
-            .clone()
-            .expect("description should be present");
-        match desc {
-            super::ProfileText::Localizable(records) => {
-                assert!(!records.is_empty(), "mluc should have at least one record");
-                assert!(
-                    records[0].value.contains("Display P3"),
-                    "mluc should contain 'Display P3', got: {}",
-                    records[0].value
-                );
-            }
-            other => panic!("v4 mluc should parse as Localizable, got {:?}", other),
-        }
-    }
-
-    /// v4 profile with non-conforming truncated desc tag should parse.
-    /// Synthesized from Display P3.icc with the mluc tag replaced by a
-    /// minimal desc tag (ASCII only, no Unicode/ScriptCode sections).
-    #[test]
-    fn test_v4_truncated_desc_tag() {
-        let icc_data =
-            fs::read("./assets/truncated_desc_v4.icc").expect("truncated_desc_v4.icc test asset");
-        let profile = ColorProfile::new_from_slice(&icc_data)
-            .expect("v4 profile with truncated desc should parse");
-        assert_eq!(profile.version(), ProfileVersion::V4_0);
-        assert_eq!(profile.color_space, DataColorSpace::Rgb);
-        let desc = profile
-            .description
-            .clone()
-            .expect("description should be present");
-        match desc {
-            ProfileText::Description(d) => {
-                assert!(
-                    d.ascii_string.contains("Display P3"),
-                    "desc should contain 'Display P3', got: {}",
-                    d.ascii_string
-                );
-            }
-            other => panic!(
-                "v4 truncated desc should parse as Description, got {:?}",
-                other
-            ),
-        }
-        let dst = ColorProfile::new_srgb();
-        let transform = profile
-            .create_transform_8bit(Layout::Rgba, &dst, Layout::Rgba, Default::default())
-            .expect("Should create transform from v4 profile with truncated desc");
-        let src = [128u8, 128, 128, 255];
-        let mut out = [0u8; 4];
-        transform.transform(&src, &mut out).unwrap();
-        assert_eq!(out[3], 255, "Alpha should be preserved");
     }
 }

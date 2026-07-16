@@ -107,12 +107,7 @@ pub(super) fn execute_studio_crop(
     // The base box, before the optional aspect-ratio adjustment.
     let mut bbox = if mode == "auto_subject" {
         let auto = AutoMode::from_mode("auto_subject").unwrap_or(AutoMode::Subject);
-        let segmenter = segmenter_for_mode(
-            auto,
-            &[],
-            Default::default(),
-            super::onnx_pool::OnnxDeviceRequest::Cpu,
-        );
+        let segmenter = segmenter_for_mode(auto, &[]);
         let srgb = image.to_srgb_rgba8();
         let result = segmenter.segment(&SegmentRequest {
             image: &srgb,
@@ -188,8 +183,8 @@ pub(super) fn execute_studio_crop(
     // the buffer. In that case skip the PNG encode+write and publish a
     // *deferred* buffer instead (materialised to `out_path` only if it is later
     // evicted, so any thumbnail / disk fallback still resolves). Otherwise write
-    // the file and publish a file-backed buffer as before — preview, the
-    // Python-bridge, export and API uploads all read the file. The skip is
+    // the file and publish a file-backed buffer as before — preview, export,
+    // and API uploads all read the file. The skip is
     // suppressed if a file already exists at the path, so a stale output can
     // never linger behind the buffer.
     if skip_write_ports.contains("image") && !out_path.exists() {
@@ -202,7 +197,7 @@ pub(super) fn execute_studio_crop(
         studio_image::write_working_output(&out_path, &cropped)?;
         // Hand the decoded crop to the next compute card in memory so it skips
         // the PNG re-decode; the file on disk stays the source of truth for
-        // everyone else (preview, Python-bridge cards, export).
+        // every file-backed consumer (preview, API upload, and export).
         image_buffer::publish_working(&out_path, &cropped, studio_image::png_output_meta());
     }
 

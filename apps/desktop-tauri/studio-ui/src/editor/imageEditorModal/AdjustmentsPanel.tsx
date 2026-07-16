@@ -17,7 +17,6 @@ const ENTRIES: { key: MsgKey; glyph: string; type?: AdjustmentType; image_only?:
   { key: "mask.adjColorBalance", glyph: "CB", name: "色彩平衡" },
   { key: "mask.adjPhotoFilter", glyph: "PF", name: "照片滤镜" },
   { key: "mask.adjChannelMixer", glyph: "CM", type: "channel_mixer", image_only: true, name: "通道混和器" },
-  { key: "mask.adjColorLookup", glyph: "CL", name: "颜色查找" },
   { key: "mask.adjPosterize", glyph: "PS", name: "色调分离" },
   { key: "mask.adjThreshold", glyph: "TH", name: "阈值" },
   { key: "mask.adjColorRanges", glyph: "CR", type: "color_ranges", image_only: true, name: "颜色范围" },

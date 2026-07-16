@@ -57,13 +57,11 @@ describe("nodeSpecs zh coverage", () => {
     expect(zh.outputs.length).toBe(NODE_SPECS.promptOptimize.outputs.length);
   });
 
-  it("does not advertise removed Image Enhance engines or claim fp16 is available in Chinese", () => {
+  it("does not advertise retired Image Enhance engines in Chinese", () => {
     for (const kind of ["imageProcessing", "imageEnhance"] as const) {
       const zh = localizeSpec(NODE_SPECS[kind], "zh");
       const copy = [zh.description, ...zh.params.map((param) => param.hint ?? "")].join(" ");
-      expect(copy, kind).not.toMatch(/ccsr|supir/i);
-      expect(copy, kind).toMatch(/fp32/i);
-      expect(copy, kind).toMatch(/不支持 fp16/i);
+      expect(copy, kind).not.toMatch(/ccsr|supir|realesrgan|fp16|fp32/i);
     }
   });
 });

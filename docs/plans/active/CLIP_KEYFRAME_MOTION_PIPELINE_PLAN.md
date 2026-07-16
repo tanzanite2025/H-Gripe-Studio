@@ -2,10 +2,9 @@
 
 目标：为时间线 clip 属性（变换 / 裁剪 / 不透明度，后续扩展）建立**性能优先、无历史包袱**的关键帧动画管线——从面板打点，到预览合成，到导出编码，全程一套求值语义、一条 GPU 合成路径。
 
-关联文档：
-- `completed/UNIFIED_PRODUCTION_DRAWER_PLAN.md`（时间线/导出的既有边界）
-- `completed/WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md` + `completed/WGPU_SURFACE_SWAP_PLAN.md`（viewport host 呈现边界）
-- `active/GPU_DEVICE_STRATEGY_PLAN.md`（设备报告词汇）
+现行关联文档：
+
+- [`GPU_DEVICE_STRATEGY_PLAN.md`](GPU_DEVICE_STRATEGY_PLAN.md)（设备报告与 Windows GPU 边界）
 
 > Status: implementation landed, not archived yet. Phases 1-5 landed across
 > #612, #616, #617, and #618: Rust/TS keyframe evaluation, export property

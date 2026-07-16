@@ -26,11 +26,11 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::math::{FusedMultiplyAdd, FusedMultiplyNegAdd};
-use crate::mlaf::{mlaf, neg_mlaf};
+use crate::math::FusedMultiplyAdd;
+use crate::mlaf::mlaf;
 use crate::reader::s15_fixed16_number_to_double;
 use num_traits::{AsPrimitive, MulAdd};
-use std::ops::{Add, Div, Mul, Neg, Shr, Sub};
+use std::ops::{Add, Div, Mul, Shr, Sub};
 
 /// Vector math helper
 #[repr(transparent)]
@@ -221,18 +221,6 @@ impl<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T>>
     }
 }
 
-impl<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T> + Neg<Output = T>>
-    FusedMultiplyNegAdd<Vector3<T>> for Vector3<T>
-{
-    #[inline(always)]
-    fn neg_mla(&self, b: Vector3<T>, c: Vector3<T>) -> Vector3<T> {
-        let x0 = neg_mlaf(self.v[0], b.v[0], c.v[0]);
-        let x1 = neg_mlaf(self.v[1], b.v[1], c.v[1]);
-        let x2 = neg_mlaf(self.v[2], b.v[2], c.v[2]);
-        Vector3 { v: [x0, x1, x2] }
-    }
-}
-
 impl<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T>>
     FusedMultiplyAdd<Vector4<T>> for Vector4<T>
 {
@@ -242,21 +230,6 @@ impl<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T>>
         let x1 = mlaf(self.v[1], b.v[1], c.v[1]);
         let x2 = mlaf(self.v[2], b.v[2], c.v[2]);
         let x3 = mlaf(self.v[3], b.v[3], c.v[3]);
-        Vector4 {
-            v: [x0, x1, x2, x3],
-        }
-    }
-}
-
-impl<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T> + Neg<Output = T>>
-    FusedMultiplyNegAdd<Vector4<T>> for Vector4<T>
-{
-    #[inline(always)]
-    fn neg_mla(&self, b: Vector4<T>, c: Vector4<T>) -> Vector4<T> {
-        let x0 = neg_mlaf(self.v[0], b.v[0], c.v[0]);
-        let x1 = neg_mlaf(self.v[1], b.v[1], c.v[1]);
-        let x2 = neg_mlaf(self.v[2], b.v[2], c.v[2]);
-        let x3 = neg_mlaf(self.v[3], b.v[3], c.v[3]);
         Vector4 {
             v: [x0, x1, x2, x3],
         }

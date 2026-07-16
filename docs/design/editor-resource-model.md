@@ -1,168 +1,46 @@
-# Editor resource & threading model
+# Editor Resource Model
 
-The forward-looking contract for **how the editor allocates compute** as the
-manual editor ("small-PS popup") and the manual **video clip editor** grow many
-features. It does not redefine individual edit backends; it defines *where each
-kind of work runs, on which thread, and under what concurrency limit*, so new
-tools can be added without blocking the UI or fighting over the GPU.
+The editor separates work by the resource it actually consumes.
 
-This started as a **planning document**; the staged rollout below is now
-**fully landed** (steps 1-5 + the native ffmpeg backend). The model itself is
-still the forward-looking contract for adding new editor tools — see the
-per-step ✅ notes for what shipped and the PRs that shipped it.
+## Lanes
 
-> **Phase 7 update (#314):** the Python runtime was deleted after this rollout
-> landed. The torch worker (`torch_worker.rs`) and the PyAV `FrameSource`
-> fallback were removed with it — ONNX (`ort` warm pool) and native ffmpeg are
-> the only model/video mechanisms today. Python-worker mentions below are
-> historical.
-
-## Origin state (the constraints that shaped this plan)
-
-> Snapshot of the codebase *before* this rollout, kept for context. Every
-> numbered constraint here has since been addressed by the [staged
-> rollout](#staged-rollout); the live status lives there and in
-> [`../implementation-status.md`](../implementation-status.md).
-
-1. **The webview has a single UI thread.** Editor canvases (mask brush, magic
-   wand, crop box, the planned rotate / colour tools) run on it. Mask / crop
-   edits are recorded as **vector ops in params** and rasterised by the backend
-   on confirm, so the front-end does almost no heavy compute. *(Still true, by
-   design.)*
-2. **~~Exactly one run is allowed at a time.~~** `useStudioRunController` held an
-   `inFlight` ref shared by `run()` and `runUpToNode()`, so a confirm-to-result
-   and a full-graph Run blocked each other. **Fixed in step 1**: preview runs on
-   its own single-slot, latest-wins lane, decoupled from the run lock.
-3. **~~The Rust backend runs nodes strictly serially.~~** `studio/exec.rs` walked
-   the topological order with a sequential `.await` per node, serialising the
-   GPU by accident. **Fixed in step 2**: an explicit lane scheduler with a GPU
-   `Semaphore(1)` + CPU pool makes the serialisation policy, not accident.
-4. **~~Each subprocess call reloads its model.~~** ONNX already had a native-Rust
-   `ort` path; several cards shelled out to a Python CLI per call and reloaded
-   the model each time (the dominant latency cost). **Fixed in steps 3-4**: an
-   in-process ONNX warm pool (`onnx_pool.rs`) and a long-lived torch worker
-   (`torch_worker.rs`) keep models resident across calls.
-5. **~~Video is poster-frame only.~~** `video_probe_cli.py` (PyAV) extracted a
-   single frame; there was no playback / scrubbing / seek. **Fixed in step 5**:
-   a media engine (decoder seam + LRU frame cache + dedicated playback thread)
-   with an in-process **native ffmpeg** decoder (vendored libav,
-   `native-ffmpeg` feature); the interim PyAV worker backend was deleted in
-   Phase 7. Export/encode has since landed too (Video Assemble / Trim).
-
-## The host is Rust (not Python)
-
-The orchestrator — task queue, GPU semaphore, CPU thread pool, run-event
-streaming to the webview — **is and should remain the Rust (Tauri) process**. It
-has real threads (`tokio` / `rayon`), no GIL, and already owns the run lifecycle.
-A separate process is *not* needed for orchestration.
-
-The "keep models warm" concern is about the **worker that holds a model**, which
-splits by engine:
-
-| Engine | Warm pool lives in | Mechanism |
+| Lane | Examples | Concurrency policy |
 | --- | --- | --- |
-| ONNX (matting, SAM 2, …) | **Rust, in-process** | cache `ort::Session` in Tauri managed state — **no subprocess, no IPC** |
-| video decode / encode | **Rust, native** | ffmpeg bindings + dedicated threads |
+| CPU light | graph routing, value coercion, metadata | ungated |
+| CPU bound | image cards, mask rasterization, PSD work | bounded by available parallelism |
+| GPU | WGPU grading and viewport kernels | shared configurable semaphore |
+| Video encode | native FFmpeg trim/assemble | single slot |
+| Network | API broker calls | provider/task limits |
 
-(The torch engines' long-lived Python worker row that used to sit here was
-deleted with the Python runtime in Phase 7 — there is no Python worker of any
-kind anymore.)
+The node registry is the source of truth for baseline lane assignment.
+Parameter values do not promote deterministic image cards into an inference
+lane.
 
-## Four lanes
+## Long-Lived Resources
 
-Work is classified into four lanes by cost and latency budget. Every editor
-feature (image *and* video) declares which lane it uses.
+- The decoded image buffer caches native surfaces between compatible cards.
+- Thumbnail, poster, and frame caches are bounded process resources.
+- The WGPU grader and viewport device are initialized lazily and report their
+  actual adapter/fallback.
+- Native FFmpeg libraries are process-loaded from the maintained Windows
+  payload.
+- API requests use the broker's cancellation, retry, cache, and history state.
 
-### 1. Interactive (< ~16-100 ms) — UI thread / webview canvas
-Brush strokes, dragging the crop box, rotate handle, slider drag, **video
-timeline scrubbing UI**. Runs entirely in the webview (Canvas2D / WebGL).
-**Never touches the backend.** Large-image live filters that are too heavy for
-the main thread go to an **OffscreenCanvas + Web Worker**, still front-end.
+There is no inference session pool. The current desktop does not load model
+weights or an inference runtime.
 
-### 2. Preview (debounced, ~100 ms-1 s, latest-wins + cancellable)
-A best-effort preview of an op on a **downscaled proxy image** (or a single
-**video frame** for scrub). One in-flight job; a newer request **cancels** the
-previous (debounce + abort). Must be **decoupled from the `inFlight` run lock**
-so previews never block — or get blocked by — a full Run.
+## Scheduling Rules
 
-### 3. Render / Compute (heavy, full-resolution) — GPU candidate queue + warm pool
-Committed edits (the run-up-to-node that produces the bound result node), model
-inference, and **video export / encode**. The Studio scheduler pre-resolves
-parameter-visible ONNX requests and gates only an accelerated provider candidate;
-the current CPU runtime therefore keeps every ONNX candidate in the CPU lane.
-CPU-only geometry (crop / rotate / flip) may run on a `rayon` pool in parallel.
+1. A node acquires only its declared lane permit.
+2. CPU-light and network nodes do not take the GPU permit.
+3. Video export cannot fan out and starve interactive work.
+4. GPU reports describe what actually ran; a probe is not execution evidence.
+5. Missing acceleration falls back only where the operation has a documented,
+   equivalent deterministic implementation.
+6. Retired local engine requests are errors, not fallback requests.
 
-### 4. Media playback — Rust decode threads + frame cache
-Real-time video playback for the clip editor: dedicated decode thread(s), a
-frame ring-buffer / cache, frame-accurate seek. **Independent of the GPU compute
-queue** so playback never stalls on an inference job (and vice-versa).
+## Windows GPU Direction
 
-## Concurrency policy
-
-- **GPU candidate jobs are advisory.** `StudioScheduler` runs the current
-  provider resolver from node params before inputs, model availability, and
-  session fallback are known. An accelerated preflight candidate may take the
-  GPU lane, but that is not evidence that the later session actually used it.
-- **ONNX accelerated inference has an independent process-wide single-slot
-  gate** inside the shared session handle. It also covers direct commands and
-  hidden editor paths, and is not resized by the scheduler's configurable GPU
-  limit. The two limits must be aligned before the first CUDA or DirectML
-  runtime ships.
-- **CPU geometry + decode may parallelise** on a bounded thread pool.
-- **Preview is single-slot, latest-wins**; **render is a FIFO queue**;
-  **playback owns its own threads**; **interactive never queues**.
-- **Cancellation is first-class per lane**: preview cancels on a newer request;
-  render keeps the existing per-run `CancellationToken`; playback stops on seek.
-
-## Where future tools land
-
-| Tool | Lanes | Weight |
-| --- | --- | --- |
-| crop / rotate / flip | interactive preview (canvas transform) + render (fast raster) | light, CPU |
-| colour / curves / levels | interactive/preview (WebGL on proxy) + render (full-res) | medium, per-pixel |
-| mask / matting / inpaint / enhance | preview (proxy, optional) + render (GPU queue + warm pool) | heavy, model |
-| video trim / cut | interactive (timeline) + playback (decode) + render (encode on export) | heavy, media |
-| video frame scrub | preview (single-frame, latest-wins) | medium, decode |
-
-## Staged rollout — ✅ complete
-
-All five stages have landed; the native ffmpeg backend (a follow-up to step 5)
-too. This section is now a changelog of the rollout.
-
-1. ✅ **Front-end foundation** (PR #145) — preview decoupled from the global
-   `inFlight` lock onto its own single-slot, latest-wins + cancel lane; a `lane`
-   discriminator on the op model so every tool declares its cost up front. First
-   consumer: live mask-morphology (grow/shrink/feather/smooth) proxy preview.
-2. ✅ **Rust orchestration skeleton** (PR #146) — the purely-serial `.await`
-   loop in `exec.rs` is replaced by a lane scheduler carrying *(category,
-   concurrency limit)* + a GPU `Semaphore(1)`; results stay deterministic.
-3. ✅ **ONNX warm pool** (PR #147, provider-aware follow-up) -
-   `studio/onnx_pool.rs` caches `ort::Session` by canonical model path, runtime
-   flavor, actual provider, and device id. Subject models, SAM2, ViTMatte,
-   Watchdog, and PCT-Net reuse it; SAM2 resolves encoder/decoder as one provider
-   group. A process-wide single-slot accelerator gate also covers direct-command
-   paths. Graph scheduling sends visible requests through a conservative
-   pre-execution provider resolution; the CPU-only runtime keeps them in the CPU
-   lane. Shared-session resolution and per-stage reports remain the source of
-   truth for the provider that actually ran.
-4. ✅→❌ **torch long-lived Python worker** (PR #148) — `studio/torch_worker.rs`
-   kept a torch worker alive for `image_enhance` (realesrgan) and
-   `detail_repaint` (sd_inpaint). **Deleted in Phase 7 (#314)** together with
-   the torch engines it served.
-5. ✅ **Video media engine** (PR #149) — `studio/video_engine.rs`: decoder seam
-   (`FrameSource`) + LRU `frame_cache.rs` + a dedicated latest-wins playback
-   thread; `video_scrub` command for timeline dragging. Decode is off the UI
-   thread and the GPU compute queue.
-6. ✅ **Native ffmpeg backend** (PR #150) — a second `FrameSource`
-   (`studio/ffmpeg_native.rs`) decoding in-process with **vendored** LGPL-shared
-   libav (`third_party/ffmpeg`, git-lfs). `native-ffmpeg` is now a default Cargo
-   feature and native ffmpeg is the only decoder; the PyAV fallback wrapper was
-   removed in Phase 7. Trim / **export / encode** have since landed (Video Trim /
-   Video Assemble), along with timeline audio mixdown/AAC mux.
-
-## Non-goals (for now)
-
-- Multi-GPU / distributed execution.
-- Reimplementing the deleted torch models in pure Rust (candle / burn) — still
-  out of scope; any future ML backend should arrive via the native `ort` path.
-- Streaming network video; this targets local files.
+WGPU and FFmpeg device reporting must cover NVIDIA, AMD, and Intel Windows
+hosts. CUDA or vendor-specific integration is added only with a concrete
+shipping consumer, packaging, fallback behavior, and real-hardware tests.

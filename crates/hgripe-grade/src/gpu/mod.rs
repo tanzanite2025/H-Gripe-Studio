@@ -62,6 +62,9 @@ pub enum GpuError {
     NoAdapter,
     /// The generated WGSL failed validation / compilation on this device.
     ShaderCompilation(String),
+    /// The document contains an operation without an exact GPU implementation.
+    /// Callers should run the complete document on the CPU reference path.
+    UnsupportedOperation(&'static str),
     /// The surface exceeds the device's storage-buffer limits.
     SurfaceTooLarge { bytes: u64, max: u64 },
     /// Mapping the readback buffer for the graded result failed.
@@ -75,6 +78,9 @@ impl std::fmt::Display for GpuError {
         match self {
             GpuError::NoAdapter => write!(f, "no suitable GPU adapter"),
             GpuError::ShaderCompilation(e) => write!(f, "shader compilation failed: {e}"),
+            GpuError::UnsupportedOperation(op) => {
+                write!(f, "GPU grading does not support {op}; use the CPU path")
+            }
             GpuError::SurfaceTooLarge { bytes, max } => write!(
                 f,
                 "surface too large for GPU buffers ({bytes} bytes > device limit {max})"
@@ -254,8 +260,8 @@ impl GpuGrader {
                 return Ok(());
             }
         }
+        let plan = build_plan(doc, surface.w, surface.h, surface.space)?;
         let error_scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let plan = build_plan(doc, surface.w, surface.h, surface.space);
         if std::env::var("HGRIPE_GPU_DUMP_WGSL").is_ok() {
             eprintln!("{}", plan.shader);
         }

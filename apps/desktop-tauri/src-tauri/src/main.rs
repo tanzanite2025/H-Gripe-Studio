@@ -63,19 +63,7 @@ fn main() {
         .manage(StudioRunCancels::default())
         .manage(StudioScheduler::default())
         .setup(|app| {
-            // Capture the bundled resource directory so nodes can resolve
-            // resources shipped via `bundle.resources` when running from a
-            // packaged install.
             use tauri::Manager;
-            let resource_dir = app.path().resource_dir().ok();
-            // The auto-subject model is bundled under the resource dir; the
-            // handle-free `Compute` segmenter needs it captured here to resolve
-            // the weight in a packaged install.
-            studio::set_subject_model_resource_dir(resource_dir.clone());
-            // ONNX Runtime is a packaged Windows x64 resource. Capture its root
-            // here, but load it lazily on the first capability probe/session so
-            // a missing optional runtime cannot block application startup.
-            studio::set_onnx_runtime_resource_dir(resource_dir);
             if let Some(window) = app.get_webview_window("main") {
                 window.show()?;
                 window.set_focus()?;
@@ -90,7 +78,6 @@ fn main() {
             commands::window_controls::window_close,
             commands::window_controls::window_start_drag,
             commands::config::get_profiles,
-            commands::config::probe_model_weights,
             commands::history::list_history,
             commands::history::history_detail,
             commands::history::history_cleanup_preview,
@@ -122,7 +109,6 @@ fn main() {
             studio::read_selection_assist_pixels,
             studio::materialize_layer_via_copy,
             studio::merge_layer_masks,
-            studio::sam2_prompt_mask,
             studio::split_layer_mask,
             studio::list_studio_media_index,
             studio::clear_studio_media_index,
@@ -174,10 +160,7 @@ fn main() {
             psd::probe_engines,
             studio::device_registry_snapshot,
             studio::set_gpu_max_jobs,
-            psd::get_model_paths,
-            psd::set_model_paths,
             studio::grade_preview,
-            studio::grade_export_cube,
             #[cfg(feature = "native-ffmpeg")]
             studio::video_frame_grade_preview,
             commands::audio::audio_waveform_peaks,
@@ -185,7 +168,6 @@ fn main() {
             commands::video::video_scrub,
             studio::timeline_export,
             psd::prepare_repaint_regions,
-            psd::local_repaint_regions,
             psd::composite_repaint
         ])
         .run(tauri::generate_context!())

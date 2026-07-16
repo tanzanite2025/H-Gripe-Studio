@@ -1,5 +1,8 @@
 # Prompt Assistant System Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete. All nine implementation-path steps landed (PRs #521–#526):
 > the assistant launcher (now a draggable always-on-top floating button with the
 > eyes icon, #527–#529), the draggable docked panel, local + API-profile + local

@@ -1,6 +1,6 @@
 // Single-click tools: the wand family and red eye (kind "click"), the view
 // samplers — eyedropper and colour sampler — (kind "sample"), and the
-// SAM 2 point prompt (kind "point").
+// Built-in include/exclude point prompt (kind "point").
 import type React from "react";
 import type { PointerEnv, Pt } from "./types";
 
@@ -32,7 +32,7 @@ export function sampleDown(env: PointerEnv, pt: Pt): void {
   } else env.sampleUnderlay(pt);
 }
 
-/** SAM 2 point prompt: left button includes (positive), right button
+/** Built-in point prompt: left button includes (positive), right button
  * excludes (negative). Right-click's context menu is suppressed by the
  * stage. */
 export function pointDown(env: PointerEnv, e: React.PointerEvent, pt: Pt): void {

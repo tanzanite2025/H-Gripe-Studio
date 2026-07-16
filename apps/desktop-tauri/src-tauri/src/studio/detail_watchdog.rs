@@ -1,8 +1,6 @@
-//! The `detailWatchdog` node executor. Its native rule layer always scans for
-//! local breakdowns (blur, halos, colour mismatch, missing resolution). The
-//! opt-in `onnx_defect` engine adds learned hands/text/logo findings in-process
-//! and degrades to the complete rule report when its weight/runtime cannot run.
-//! The image remains unchanged; reports and issue overlays are flat outputs.
+//! The `detailWatchdog` node executor. Its deterministic native rule layer
+//! scans for blur, halos, colour mismatch and missing resolution. The image
+//! remains unchanged; reports and issue overlays are flat outputs.
 
 use std::collections::BTreeMap;
 
@@ -43,11 +41,9 @@ pub(super) fn execute_studio_detail_watchdog(
     let output_dir = resolve_output_dir(node)?;
     let watch_targets = optional(studio_value_to_string(node.params.get("watch_targets")));
     let mode = optional(studio_value_to_string(node.params.get("mode")));
-    // `engine` selects the opt-in ML detector (default `rules`). The native
-    // runner keeps the always-on rule report when the detector is unavailable.
+    // Legacy engine values are forwarded so retired local engines fail clearly.
     let engine = optional(studio_value_to_string(node.params.get("engine")));
-    // `device` selects the ONNX execution provider for the learned detector
-    // (default `auto`); ignored by the always-on CPU rule layer.
+    // Retained in report compatibility; ignored by the CPU rule layer.
     let device = optional(studio_value_to_string(node.params.get("device")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
 
@@ -123,59 +119,37 @@ mod tests {
             "image_size": [128, 96],
             "target_size": null,
             "global_sharpness": 142.5,
-            "source_mode": "CMYK",
+            "source_mode": "RGB",
             "exif_transposed": true,
             "max_decode_pixels": 96_000_000,
             "mask_consumed": false
         });
         let report: WatchdogReport = serde_json::from_value(value).unwrap();
-        assert_eq!(report.source_mode, "CMYK");
+        assert_eq!(report.source_mode, "RGB");
         assert!(report.exif_transposed);
         assert_eq!(report.max_decode_pixels, 96_000_000);
         assert!(!report.mask_consumed);
     }
 
     #[test]
-    fn watchdog_report_parses_engine_seam_fields() {
-        // The ML detector seam telemetry must deserialize: a requested ML engine
-        // that fell back to the rule layer records why, and an engine that ran
-        // lists its detectors + weight name.
-        let fell_back: WatchdogReport = serde_json::from_value(json!({
+    fn watchdog_report_parses_builtin_engine_fields() {
+        let report: WatchdogReport = serde_json::from_value(json!({
             "mode": "balanced",
             "engine": "rules",
-            "engine_requested": "onnx_defect",
-            "engine_fallback_reason": "missing optional dependency: onnxruntime",
-            "detectors": [],
-            "backend_model": null
-        }))
-        .unwrap();
-        assert_eq!(fell_back.engine, "rules");
-        assert_eq!(fell_back.engine_requested, "onnx_defect");
-        assert_eq!(
-            fell_back.engine_fallback_reason.as_deref(),
-            Some("missing optional dependency: onnxruntime")
-        );
-        assert!(fell_back.detectors.is_empty());
-        assert!(fell_back.backend_model.is_none());
-
-        let ran: WatchdogReport = serde_json::from_value(json!({
-            "engine": "onnx_defect",
-            "engine_requested": "onnx_defect",
+            "engine_requested": "rules",
             "engine_fallback_reason": null,
-            "detectors": ["onnx_defect"],
-            "backend_model": "watchdog_defect.onnx",
-            "device": "cpu",
+            "detectors": [],
+            "backend_model": null,
+            "device": null,
             "device_requested": "auto"
         }))
         .unwrap();
-        assert_eq!(ran.engine, "onnx_defect");
-        assert!(ran.engine_fallback_reason.is_none());
-        assert_eq!(ran.detectors, vec!["onnx_defect".to_string()]);
-        assert_eq!(ran.backend_model.as_deref(), Some("watchdog_defect.onnx"));
-        // device telemetry: `auto` was requested, the session bound the CPU
-        // provider (the common no-accelerator box), reported truthfully.
-        assert_eq!(ran.device.as_deref(), Some("cpu"));
-        assert_eq!(ran.device_requested, "auto");
+        assert_eq!(report.engine, "rules");
+        assert_eq!(report.engine_requested, "rules");
+        assert!(report.engine_fallback_reason.is_none());
+        assert!(report.detectors.is_empty());
+        assert!(report.backend_model.is_none());
+        assert!(report.device.is_none());
     }
 
     #[test]
@@ -198,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_entry_preserves_outputs_when_engine_is_unknown() {
+    fn graph_entry_rejects_retired_engine() {
         let dir = std::env::temp_dir().join("hgripe_watchdog_graph_fallback");
         std::fs::create_dir_all(&dir).unwrap();
         let image_path = dir.join("candidate.png");
@@ -223,16 +197,7 @@ mod tests {
             json!(image_path.to_string_lossy().to_string()),
         );
 
-        let outputs = execute_studio_detail_watchdog(&graph_node, &inputs).unwrap();
-        assert_eq!(outputs["fixed_image"], inputs["image"]);
-        assert_eq!(outputs["watchdog_report"]["engine"], "rules");
-        assert_eq!(
-            outputs["watchdog_report"]["engine_requested"],
-            "removed_backend"
-        );
-        assert!(outputs["watchdog_report"]["engine_fallback_reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("unknown engine"));
+        let err = execute_studio_detail_watchdog(&graph_node, &inputs).unwrap_err();
+        assert!(err.contains("retired"), "{err}");
     }
 }

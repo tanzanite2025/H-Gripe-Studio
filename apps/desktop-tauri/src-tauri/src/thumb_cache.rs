@@ -10,7 +10,7 @@
 //!
 //! The cache is keyed by `path + target-size + the source's mtime/len`, so an
 //! edited or replaced source invalidates its own entry. Like [`super::studio`]'s
-//! ONNX warm pool it is a plain process-global `static` (the `generate_thumbnail`
+//! It is a plain process-global `static` (the `generate_thumbnail`
 //! command is handle-free) guarded by a `Mutex`, and it is bounded to a fixed
 //! entry count so long sessions cannot grow it without limit.
 

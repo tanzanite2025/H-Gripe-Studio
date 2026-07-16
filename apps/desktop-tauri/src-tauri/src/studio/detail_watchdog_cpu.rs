@@ -1,8 +1,7 @@
-//! In-process CPU quality watchdog fast path: a native-Rust replica of
-//! the deleted `detail_watchdog_cli.py` rule layer (`rules` engine), run inline
-//! in the `detailWatchdog` executor.
+//! In-process CPU quality watchdog for the deterministic `rules` engine, run
+//! inline in the `detailWatchdog` executor.
 //!
-//! It reproduces the CLI's Phase-1 detect-and-report heuristics step by step —
+//! It applies the Phase-1 detect-and-report heuristics step by step —
 //! global Laplacian-variance blur / below-placeholder size (`low_resolution`),
 //! the per-tile sharpness grid merged into boxes (`face_blur`), the bright
 //! alpha-rim fringe (`edge_halo`), the subject-vs-background mean colour drift
@@ -13,13 +12,10 @@
 //! overlay PNG is drawn the same way (3 px outline per flagged bbox).
 //!
 //! Loading goes through [`super::studio_image`], the shared hardened loader:
-//! the decompression-bomb guard, EXIF normalisation and CMYK / high-bit /
+//! the decompression-bomb guard, EXIF normalisation and high-bit /
 //! wide-gamut colour management are the same ones every other native card
 //! uses, mirroring the CLI's `_load_rgb_alpha` + `wide_gamut.managed_to_srgb`.
 //!
-//! The native [`super::detail_watchdog_onnx`] pass can add semantic findings on
-//! the same decoded pixels. Any missing/invalid weight, runtime, session, or
-//! output leaves the complete rule result intact and records a fallback reason.
 //! Sources the shared loader cannot decode return `Ok(None)` to the caller.
 
 use std::collections::BTreeSet;
@@ -35,8 +31,7 @@ use crate::psd::{reject_unsafe_output_name, DetectQualityResult, WatchdogReport}
 const EPS: f64 = 1e-6;
 
 const ALL_TARGETS: [&str; 5] = ["face", "hands", "text", "logo", "product_edges"];
-/// Watch targets the CPU rule layer cannot honestly detect on its own; the
-/// opt-in native ML detector graduates the ones its sidecar covers.
+/// Watch targets the deterministic rule layer cannot honestly detect.
 const UNSUPPORTED_TARGETS: [&str; 3] = ["hands", "text", "logo"];
 
 /// Per-mode detection thresholds (mirrors the CLI's `_MODES` table).
@@ -96,7 +91,7 @@ pub(crate) fn try_watch(
 ) -> Result<Option<DetectQualityResult>, String> {
     let image_path = p.image_path.trim();
     if image_path.is_empty() || !Path::new(image_path).is_file() {
-        // Let the Python path surface the canonical "candidate image not found".
+        // Let the native command handler surface the canonical missing-image error.
         return Ok(None);
     }
     let mode = p
@@ -195,51 +190,21 @@ pub(crate) fn try_watch(
             engine
         }
     };
-    let device_requested = super::onnx_pool::OnnxDeviceRequest::from_param(&p.device_requested)
-        .as_str()
-        .to_string();
-
-    let mut covered_targets = BTreeSet::new();
-    let mut engine = "rules".to_string();
-    let mut engine_fallback_reason = None;
-    let mut detectors = Vec::new();
-    let mut backend_model = None;
-    let mut device = None;
-    match engine_requested.as_str() {
-        "rules" => {}
-        "onnx_defect" => {
-            let inference = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                super::detail_watchdog_onnx::detect(&loaded.image, &watch_set, &device_requested)
-            }));
-            match inference {
-                Ok(Ok(result)) => {
-                    issues.extend(result.issues);
-                    covered_targets = result.covered_targets;
-                    engine = "onnx_defect".to_string();
-                    detectors.push("onnx_defect".to_string());
-                    backend_model = Some(result.backend_model);
-                    device = Some(result.device);
-                    engine_fallback_reason = result.device_fallback_reason;
-                }
-                Ok(Err(reason)) => engine_fallback_reason = Some(reason),
-                Err(_) => {
-                    engine_fallback_reason = Some(
-                        "native onnx_defect detector panicked; kept the rules result".to_string(),
-                    )
-                }
-            }
-        }
-        unknown => {
-            engine_fallback_reason = Some(format!("unknown engine {unknown:?}"));
-        }
+    if engine_requested != "rules" {
+        return Err(format!(
+            "Detail Watchdog local engine {engine_requested:?} is retired; use engine \"rules\""
+        ));
     }
+    let device_requested = p.device_requested.trim().to_ascii_lowercase();
+    let device_requested = if device_requested.is_empty() {
+        "auto".to_string()
+    } else {
+        device_requested
+    };
 
     let skipped: Vec<String> = watch_set
         .iter()
-        .filter(|target| {
-            UNSUPPORTED_TARGETS.contains(&target.as_str())
-                && !covered_targets.contains(target.as_str())
-        })
+        .filter(|target| UNSUPPORTED_TARGETS.contains(&target.as_str()))
         .cloned()
         .collect();
 
@@ -294,12 +259,12 @@ pub(crate) fn try_watch(
             // The optional mask is advisory in Phase 1; detection runs on the
             // image's own alpha rim, so the supplied matte is not consumed.
             mask_consumed: false,
-            engine,
+            engine: "rules".to_string(),
             engine_requested,
-            engine_fallback_reason,
-            detectors,
-            backend_model,
-            device,
+            engine_fallback_reason: None,
+            detectors: Vec::new(),
+            backend_model: None,
+            device: None,
             device_requested,
         },
     }))
@@ -756,60 +721,6 @@ mod tests {
     use super::*;
     use image::Rgba;
 
-    fn draw_test_text(image: &mut RgbaImage, text: &str, x: u32, y: u32, scale: u32) {
-        fn glyph(ch: char) -> [&'static str; 7] {
-            match ch {
-                'D' => [
-                    "11110", "10001", "10001", "10001", "10001", "10001", "11110",
-                ],
-                'E' => [
-                    "11111", "10000", "10000", "11110", "10000", "10000", "11111",
-                ],
-                'H' => [
-                    "10001", "10001", "10001", "11111", "10001", "10001", "10001",
-                ],
-                'L' => [
-                    "10000", "10000", "10000", "10000", "10000", "10000", "11111",
-                ],
-                'O' => [
-                    "01110", "10001", "10001", "10001", "10001", "10001", "01110",
-                ],
-                'R' => [
-                    "11110", "10001", "10001", "11110", "10100", "10010", "10001",
-                ],
-                'W' => [
-                    "10001", "10001", "10001", "10101", "10101", "10101", "01010",
-                ],
-                _ => ["00000"; 7],
-            }
-        }
-
-        let mut cursor = x;
-        for ch in text.chars() {
-            if ch == ' ' {
-                cursor += scale * 3;
-                continue;
-            }
-            for (row, bits) in glyph(ch).iter().enumerate() {
-                for (column, bit) in bits.bytes().enumerate() {
-                    if bit != b'1' {
-                        continue;
-                    }
-                    for dy in 0..scale {
-                        for dx in 0..scale {
-                            let px = cursor + column as u32 * scale + dx;
-                            let py = y + row as u32 * scale + dy;
-                            if px < image.width() && py < image.height() {
-                                image.put_pixel(px, py, Rgba([10, 10, 10, 255]));
-                            }
-                        }
-                    }
-                }
-            }
-            cursor += scale * 6;
-        }
-    }
-
     fn params(image: &str, out_dir: &str) -> CpuDetailWatchdogParams {
         CpuDetailWatchdogParams {
             image_path: image.to_string(),
@@ -860,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_engine_keeps_the_complete_rules_result() {
+    fn retired_engine_returns_explicit_error() {
         let dir = temp_dir("unknown_engine");
         let path = dir.join("candidate.png");
         RgbaImage::from_pixel(32, 32, Rgba([128, 128, 128, 255]))
@@ -869,101 +780,9 @@ mod tests {
         let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
         p.engine_requested = "removed_backend".to_string();
 
-        let result = try_watch(&p).unwrap().expect("rules fallback");
-        assert_eq!(result.watchdog_report.engine, "rules");
-        assert_eq!(result.watchdog_report.engine_requested, "removed_backend");
-        assert!(result
-            .watchdog_report
-            .engine_fallback_reason
-            .as_deref()
-            .unwrap_or_default()
-            .contains("unknown engine"));
-        assert_eq!(
-            result.watchdog_report.skipped_targets,
-            ["hands", "logo", "text"]
-        );
-        assert!(result
-            .quality_report
-            .issues
-            .iter()
-            .any(|issue| issue.issue_type == "low_resolution"));
-    }
-
-    #[test]
-    fn missing_onnx_weight_keeps_the_complete_rules_result() {
-        if super::super::resolve_watchdog_model_path().is_some() {
-            eprintln!("skipping missing-weight fallback: watchdog weight is present");
-            return;
-        }
-        let dir = temp_dir("missing_onnx");
-        let path = dir.join("candidate.png");
-        RgbaImage::from_pixel(32, 32, Rgba([128, 128, 128, 255]))
-            .save(&path)
-            .unwrap();
-        let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
-        p.engine_requested = "onnx_defect".to_string();
-
-        let result = try_watch(&p).unwrap().expect("rules fallback");
-        assert_eq!(result.watchdog_report.engine, "rules");
-        assert_eq!(result.watchdog_report.engine_requested, "onnx_defect");
-        assert!(result.watchdog_report.engine_fallback_reason.is_some());
-        assert!(result.watchdog_report.detectors.is_empty());
-        assert!(result.watchdog_report.backend_model.is_none());
-        assert!(result.watchdog_report.device.is_none());
-        assert!(result
-            .quality_report
-            .issues
-            .iter()
-            .any(|issue| issue.issue_type == "low_resolution"));
-    }
-
-    #[test]
-    fn onnx_defect_inference_when_weight_present() {
-        let Some(model) = super::super::resolve_watchdog_model_path() else {
-            eprintln!("skipping watchdog ONNX e2e: no weight resolvable");
-            return;
-        };
-        let dir = temp_dir("onnx_e2e");
-        let path = dir.join("candidate.png");
-        let mut image = RgbaImage::from_pixel(640, 240, Rgba([245, 245, 240, 255]));
-        draw_test_text(&mut image, "HELLO WORLD", 40, 35, 8);
-        draw_test_text(&mut image, "WORLD HELLO", 40, 135, 8);
-        image.save(&path).unwrap();
-        let mut p = params(path.to_str().unwrap(), dir.to_str().unwrap());
-        p.engine_requested = "onnx_defect".to_string();
-        p.watch_targets = Some("hands,text,logo".to_string());
-        p.device_requested = "cpu".to_string();
-
-        let result = try_watch(&p).unwrap().expect("native ONNX detector");
-        let report = result.watchdog_report;
-        assert_eq!(report.engine, "onnx_defect");
-        assert_eq!(report.detectors, ["onnx_defect"]);
-        assert_eq!(report.device.as_deref(), Some("cpu"));
-        assert!(report.engine_fallback_reason.is_none());
-        assert_eq!(
-            report.backend_model.as_deref(),
-            model
-                .file_name()
-                .map(|name| name.to_string_lossy())
-                .as_deref()
-        );
-        assert!(report.skipped_targets.len() < 3);
-        assert!(result
-            .quality_report
-            .issues
-            .iter()
-            .any(|issue| issue.issue_type == "garbled_text"));
-
-        p.device_requested = "gpu".to_string();
-        let gpu_request = try_watch(&p).unwrap().expect("CPU-provider ONNX detector");
-        assert_eq!(gpu_request.watchdog_report.engine, "onnx_defect");
-        assert_eq!(gpu_request.watchdog_report.device.as_deref(), Some("cpu"));
-        assert!(gpu_request
-            .watchdog_report
-            .engine_fallback_reason
-            .as_deref()
-            .unwrap()
-            .contains("GPU execution provider not built in"));
+        let err = try_watch(&p).unwrap_err();
+        assert!(err.contains("retired"), "{err}");
+        assert!(err.contains("rules"), "{err}");
     }
 
     /// A flat image is globally blurry: low_resolution flagged and the red-box
@@ -1075,8 +894,7 @@ mod tests {
         assert_eq!(mismatch.suggested_action, "color_match");
     }
 
-    /// Unknown mode / watch target are user errors, surfaced directly (the
-    /// Python CLI raises the same).
+    /// Unknown mode / watch target are user errors surfaced directly.
     #[test]
     fn unknown_mode_and_target_error() {
         let dir = temp_dir("bad");

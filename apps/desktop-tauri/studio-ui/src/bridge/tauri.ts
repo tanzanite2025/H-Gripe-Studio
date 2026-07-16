@@ -19,7 +19,6 @@ export * from "./edgeRefine";
 export * from "./enhance";
 export * from "./watchdog";
 export * from "./repaint";
-export * from "./engineProbe";
 export * from "./grade";
 export * from "./windowControls";
 export * from "./imageLayerCopy";

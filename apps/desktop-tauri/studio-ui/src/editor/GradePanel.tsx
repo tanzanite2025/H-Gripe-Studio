@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { gradeExportCube } from "../bridge/grade";
 import { generateThumbnail, videoProbe } from "../bridge/tauri";
 import {
   describeDeviceReport,
@@ -14,9 +13,9 @@ import { useT, type MsgKey } from "../i18n";
 import { previewProxyMaxDim } from "../runtime/previewQuality";
 import {
   applyDoc,
+  isGradeOpType,
   MAX_BLUR_SIGMA,
   MAX_RADIUS,
-  parseCube,
   type ColorRange,
   type GradeDoc,
   type GradeOp,
@@ -93,8 +92,6 @@ const OP_LABEL_KEYS: Partial<Record<GradeOp["type"], MsgKey>> = {
   film_grain: "grade.op_film_grain",
   blur: "grade.op_blur",
   vignette: "grade.op_vignette",
-  lut1d: "grade.op_lut1d",
-  lut3d: "grade.op_lut3d",
 };
 
 // Backend badge labels keyed by the shared DeviceReport `used` vocabulary;
@@ -155,14 +152,34 @@ function defaultWarpPoint(): WarpPoint {
   return { hue: 0, sat: 0.5, hue_shift: 0, sat_scale: 1, hue_radius: 30, sat_radius: 0.25 };
 }
 
-/** Parse a grade doc (JSON string) into the first layer's op stack. */
-function parseInitialOps(initialDoc?: string | null): GradeOp[] {
-  if (!initialDoc || !initialDoc.trim()) return [];
+export interface ParsedInitialDoc {
+  ops: GradeOp[];
+  error: string | null;
+}
+
+/** Parse a grade doc without silently accepting retired operation kinds. */
+export function parseInitialOps(initialDoc?: string | null): ParsedInitialDoc {
+  if (!initialDoc || !initialDoc.trim()) return { ops: [], error: null };
   try {
     const doc = JSON.parse(initialDoc) as GradeDoc;
-    return Array.isArray(doc.layers) && doc.layers.length > 0 ? (doc.layers[0].ops ?? []) : [];
+    if (!Array.isArray(doc.layers)) {
+      return { ops: [], error: "This grade document is invalid and was not loaded." };
+    }
+    const layers = doc.layers as Array<{ ops?: unknown }>;
+    const hasUnsupportedOp = layers.some(
+      (layer) =>
+        !Array.isArray(layer?.ops) ||
+        !layer.ops.every((op) => op && isGradeOpType((op as { type?: unknown }).type)),
+    );
+    if (hasUnsupportedOp) {
+      return { ops: [], error: "This grade document contains an unsupported retired operation." };
+    }
+    if (layers.length > 1) {
+      return { ops: [], error: "This editor cannot rewrite a multi-layer grade document." };
+    }
+    return { ops: layers.length === 1 ? (layers[0].ops as GradeOp[]) : [], error: null };
   } catch {
-    return [];
+    return { ops: [], error: "This grade document is invalid and was not loaded." };
   }
 }
 
@@ -217,7 +234,9 @@ export function GradePanel({
   applyLabelKey,
 }: GradePanelProps) {
   const t = useT();
-  const [ops, setOps] = useState<GradeOp[]>(() => parseInitialOps(initialDoc));
+  const parsedInitialDoc = useMemo(() => parseInitialOps(initialDoc), [initialDoc]);
+  const [ops, setOps] = useState<GradeOp[]>(() => parsedInitialDoc.ops);
+  const [initialDocError] = useState<string | null>(() => parsedInitialDoc.error);
   const [addKind, setAddKind] = useState<AddableOp>("exposure");
   const [underlay, setUnderlay] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -231,12 +250,10 @@ export function GradePanel({
   // source proxy, so wheel/drag ticks re-run only crop + kernel. Identity
   // outside Tauri, where the mirror fallback shows the full frame.
   const { view, stageProps } = useViewControls();
-  const cubeInputRef = useRef<HTMLInputElement | null>(null);
   // Temporal denoise (video targets only): a pipeline stage after the doc,
   // blending each graded frame against the previous graded frame host-side;
   // the host restarts the chain on a seek or source change.
   const [temporalDenoise, setTemporalDenoise] = useState(0);
-  const [exportNote, setExportNote] = useState<string | null>(null);
   // Scopes surface (WGPU plan: scopes on top of the viewport presentation).
   // Data comes from explicit pixel readback of the displayed frame on
   // desktop, or the mirror's graded surface in the browser preview; computed
@@ -360,33 +377,10 @@ export function GradePanel({
     });
   }, []);
 
-  const loadCube = useCallback(async (file: File) => {
-    try {
-      const op = parseCube(await file.text());
-      setOps((prev) => [...prev, op]);
-    } catch (err) {
-      setPreviewError(String(err));
-    }
-  }, []);
-
   const handleApply = () => {
+    if (initialDocError) return;
     onCommit({ gradeDoc: JSON.stringify(docFromOps(ops)) });
   };
-
-  const handleExportCube = useCallback(async () => {
-    setExportNote(null);
-    try {
-      const result = await gradeExportCube(docFromOps(ops));
-      if (!result) return; // browser preview: no backend to bake with
-      const skipped = result.skipped_spatial_ops + result.dropped_masks;
-      setExportNote(
-        `${t("grade.exportCubeDone")} ${result.path}` +
-          (skipped > 0 ? ` · ${skipped} ${t("grade.exportCubeSkipped")}` : ""),
-      );
-    } catch (err) {
-      setExportNote(String(err));
-    }
-  }, [ops, t]);
 
   const slider = (
     label: string,
@@ -619,15 +613,6 @@ export function GradePanel({
             </button>
           </>
         );
-      case "lut1d":
-      case "lut3d":
-        return (
-          <div className="field">
-            <small className="muted">
-              {t(op.type === "lut1d" ? "grade.lut1dInfo" : "grade.lut3dInfo")} · {op.size}
-            </small>
-          </div>
-        );
       default:
         // Ops authored elsewhere (e.g. curves) pass through unedited.
         return (
@@ -650,7 +635,7 @@ export function GradePanel({
           )}
         </div>
         <small className="muted">
-          {previewError ?? t("grade.previewHint")}
+          {initialDocError ?? previewError ?? t("grade.previewHint")}
           {backend ? (
             <span title={backend === "mirror" ? undefined : describeDeviceReport(backend)}>
               {" · "}
@@ -715,33 +700,16 @@ export function GradePanel({
           <button type="button" onClick={() => setOps((prev) => [...prev, defaultOp(addKind)])}>
             {t("grade.addOp")}
           </button>
-          <button type="button" title={t("grade.loadCubeTitle")} onClick={() => cubeInputRef.current?.click()}>
-            {t("grade.loadCube")}
-          </button>
-          <button type="button" title={t("grade.exportCubeTitle")} onClick={() => void handleExportCube()}>
-            {t("grade.exportCube")}
-          </button>
-          <input
-            ref={cubeInputRef}
-            type="file"
-            accept=".cube"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void loadCube(file);
-              e.target.value = "";
-            }}
-          />
         </div>
 
-        {exportNote ? (
-          <div className="field">
-            <small className="muted">{exportNote}</small>
-          </div>
-        ) : null}
-
         <div className="field grade-apply-row">
-          <button type="button" className="primary" onClick={handleApply} title={t("grade.applyTitle")}>
+          <button
+            type="button"
+            className="primary"
+            onClick={handleApply}
+            title={t("grade.applyTitle")}
+            disabled={initialDocError !== null}
+          >
             {t(applyLabelKey ?? "grade.apply")}
           </button>
         </div>

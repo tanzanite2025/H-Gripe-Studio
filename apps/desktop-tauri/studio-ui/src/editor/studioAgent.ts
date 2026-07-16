@@ -1,6 +1,6 @@
 // Agent boundary for Studio Actions (docs/plans/active/
 // MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md, step 8). An assistant / API /
-// local model may only *propose* sequences of approved Studio Actions; the
+// API-backed agent may only *propose* sequences of approved Studio Actions; the
 // runtime resolves targets, dry-runs every step, and holds the whole proposal
 // at a preview gate until the user confirms. The agent never clicks the UI,
 // never guesses the active layer, and never writes raw `edit_paths` JSON —

@@ -2,8 +2,8 @@
 
 Executor: **local** (in-process native Rust, never networks).
 Backend: `compose_psd` Tauri command → the native PSD writer
-(`psd/compose.rs` + `psd/write.rs` + `psd/smart.rs`, CPU-only). The Python
-bridge and vendored `psd_tools` were deleted in Phase 7 (#314).
+(`psd/compose.rs` + `psd/write.rs` + `psd/smart.rs`, CPU-only). There is no
+secondary scripting backend or runtime fallback.
 
 The **final assembler** of the PSD chain: it writes a generated image into a PSD
 template's placeholder — using true smart-object content replacement when the
@@ -52,19 +52,20 @@ pixel layer (`03_GENERATED`) at `z_order`, optionally hiding the placeholder.
 
 > Working space / bit depth / ICC handling is defined once in
 > [`docs/design/colour-pipeline.md`](../design/colour-pipeline.md) (the source
-> of truth). That pipeline (P1–P5) has **landed**: this card sits at the
-> model/preview boundary, so the 8-bit sRGB working space below is the
-> *decided contract*, not a gap. ProPhoto-tagged 16-bit manual products are
-> colour-managed to sRGB at ingress (wide-gamut ingress in the native decode path, #202).
+> of truth). That pipeline has **landed**: this card consumes API-produced and
+> preview-ready imagery at the 8-bit sRGB boundary below. This is the *decided
+> contract*, not a gap. ProPhoto-tagged 16-bit manual products are
+> colour-managed to sRGB at ingress.
 
-The generated image is normalised to an 8-bit RGBA working space and
-the original `source_mode` is recorded:
+The generated-image decoder returns an 8-bit RGBA working surface.
+`source_mode` describes that decoded carrier, not a persistent editing mode for
+the source file's original encoding:
 
-| Source mode | Handling |
+| Decoded/source form | Handling |
 | --- | --- |
 | `RGB` / `RGBA` / `L` / `LA` | Promoted to RGBA directly. |
 | `P` (palette) | Expanded to RGBA; transparency in `info` is treated as alpha. |
-| `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
+| CMYK/YCCK-encoded JPEG | Accepted through the shared image loader. Composition receives its normal RGBA surface; the source encoding does not add a CMYK/YCCK export mode. |
 | `I` / `I;16*` / `F` (high bit) | Data range tone-scaled down to 8-bit before RGB(A) conversion. |
 
 The optional mask is loaded as 8-bit `L` (high-bit mattes tone-scaled, not
@@ -102,6 +103,6 @@ The same fields (plus `created_at`, `template_path`, `source_image`,
 ## Tests
 
 - `src-tauri/src/psd/compose.rs` / `psd/write.rs` / `psd/smart.rs` — triplet +
-  report shape, mask alpha multiply, CMYK / high-bit / grayscale handling, the
+  report shape, mask alpha multiply, high-bit / grayscale handling, unsupported-source rejection, the
   input / mask decode guard, metadata merge, the missing-file / invalid-JSON
   errors, and golden round-trip tests of the written PSD (run: `cargo test`).

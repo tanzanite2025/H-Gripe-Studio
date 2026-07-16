@@ -54,7 +54,7 @@ describe("buildRunReport", () => {
     expect(lines[1]).toBe("card card: no rows to run; skips assemble, trim");
   });
 
-  it("reports backend refs and device/precision policies on executing nodes", () => {
+  it("reports API profile refs on executing nodes", () => {
     const authored = graph(
       [
         { id: "src", kind: "imageSource" },
@@ -62,8 +62,6 @@ describe("buildRunReport", () => {
           id: "card",
           kind: "imageProcessing",
           params: {
-            "enhance.local_model_ref": "realesrgan-x4",
-            "enhance.device": "cuda",
             "repair.api_profile_ref": "openai-main",
           },
         },
@@ -74,7 +72,6 @@ describe("buildRunReport", () => {
       ],
     );
     const lines = report(authored);
-    expect(lines).toContain('backend card::enhance: local model "realesrgan-x4" (device cuda)');
     expect(lines).toContain('backend card::repair: api profile "openai-main"');
   });
 

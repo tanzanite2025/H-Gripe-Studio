@@ -28,29 +28,8 @@
  */
 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
 mod avx;
-#[cfg(all(target_arch = "x86_64", feature = "avx512"))]
-mod avx512;
-mod bpc;
 mod gray2rgb;
 mod gray2rgb_extended;
-mod interpolator;
-#[cfg(feature = "any_to_any")]
-mod katana;
-mod lut3x3;
-mod lut3x4;
-mod lut4;
-mod lut_transforms;
-mod mab;
-mod mab4x3;
-mod mba3x4;
-#[cfg(feature = "any_to_any")]
-mod md_lut;
-#[cfg(feature = "any_to_any")]
-mod md_luts_factory;
-#[cfg(all(target_arch = "aarch64", feature = "neon"))]
-mod neon;
-mod prelude_lut_xyz_rgb;
-mod reduction;
 mod rgb2gray;
 mod rgb2gray_extended;
 mod rgb_xyz_factory;
@@ -59,19 +38,12 @@ mod rgbxyz_fixed;
 mod rgbxyz_float;
 #[cfg(all(any(target_arch = "x86", target_arch = "x86_64"), feature = "sse"))]
 mod sse;
-mod transform_lut3_to_3;
-mod transform_lut3_to_4;
-mod transform_lut4_to_3;
-mod xyz_lab;
 
 #[cfg(feature = "in_place")]
 pub(crate) use gray2rgb::make_gray_to_gray_in_place;
 pub(crate) use gray2rgb::{make_gray_to_unfused, make_gray_to_x};
 #[cfg(feature = "extended_range")]
 pub(crate) use gray2rgb_extended::{make_gray_to_one_trc_extended, make_gray_to_rgb_extended};
-#[cfg(feature = "lut")]
-pub(crate) use lut_transforms::make_lut_transform;
-pub(crate) use reduction::LutBarycentricReduction;
 pub(crate) use rgb_xyz_factory::{RgbXyzFactory, RgbXyzFactoryOpt};
 pub(crate) use rgb2gray::{ToneReproductionRgbToGray, make_rgb_to_gray};
 #[cfg(feature = "extended_range")]

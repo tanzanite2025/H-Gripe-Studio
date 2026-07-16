@@ -1,12 +1,11 @@
 import {
   compositeRepaint,
   getOutputDir,
-  localRepaintRegions,
   prepareRepaintRegions,
   runTaskJson,
 } from "../../bridge/tauri";
 import type { RepaintedCrop } from "../../bridge/tauri";
-import { type QualityReport, type RepaintReport } from "../../contracts/quality";
+import { type QualityReport } from "../../contracts/quality";
 import {
   optimizePromptLocally,
   promptOptimizeProviderSupported,
@@ -40,7 +39,7 @@ const DETAIL_REPAINT_RESERVED = new Set([
 
 export const API_EXECUTORS = {
   // Initial text node with optional prompt optimisation. A connected `text`
-  // input overrides the param. `off` passes through, `local` applies the
+  // input overrides the param. `off` passes through, `builtin` applies the
   // model-free preset transform, `api` rewrites via an LLM provider profile.
   promptOptimize: async (ctx) => {
     const raw =
@@ -49,7 +48,7 @@ export const API_EXECUTORS = {
         : String(ctx.params.text ?? "");
     const mode = String(ctx.params.mode ?? "off");
 
-    if (mode === "local") {
+    if (mode === "builtin" || mode === "local") {
       const preset = String(ctx.params.preset ?? "cleanup") as LocalPreset;
       return { text: optimizePromptLocally(raw, preset) };
     }
@@ -60,7 +59,7 @@ export const API_EXECUTORS = {
       if (!promptOptimizeProviderSupported(provider)) {
         throw new Error(
           `Provider "${provider}" can't optimize prompts (no text.generate support). ` +
-            `Pick an OpenAI-compatible chat profile, or switch mode to "local"/"off".`,
+            `Pick an OpenAI-compatible chat profile, or switch mode to "builtin"/"off".`,
         );
       }
       const params: Record<string, unknown> = {};
@@ -149,6 +148,13 @@ export const API_EXECUTORS = {
   detailRepaint: async (ctx) => {
     const image = (ctx.inputs.image as string | undefined) ?? null;
     if (!image) throw new Error("Detail Repaint needs a connected image input");
+    const retiredRef = String(ctx.params.local_model_ref ?? "").trim();
+    const requestedEngine = String(ctx.params.engine ?? "provider").trim() || "provider";
+    if (retiredRef || requestedEngine !== "provider") {
+      throw new Error(
+        `local repaint backend ${retiredRef || requestedEngine} is retired and unavailable; choose an API profile`,
+      );
+    }
 
     const outputDir = String(ctx.params.output_dir ?? "").trim() || (await getOutputDir());
     const prepared = await prepareRepaintRegions({
@@ -166,7 +172,6 @@ export const API_EXECUTORS = {
     const operation = String(ctx.params.operation ?? "image.edit");
     const credentialsRef = String(ctx.params.credentials_ref ?? "") || null;
     const promptBase = String(ctx.params.repaint_prompt_base ?? "").trim();
-    const engine = String(ctx.params.engine ?? "provider").trim() || "provider";
 
     const regionPrompt = (issue: string) =>
       promptBase
@@ -176,57 +181,6 @@ export const API_EXECUTORS = {
         : `Repaint and restore this ${issue || "flagged"} region with clean, realistic detail; keep the style, lighting and colours consistent with the surroundings.`;
 
     const repainted: RepaintedCrop[] = [];
-
-    // Opt-in local inpaint backend: when a non-`provider` engine is selected,
-    // run the local GPU pipeline over the manifest instead of the remote
-    // `image.edit` loop. A missing backend (deps/weights) returns an empty set
-    // with a reason, so we fall through to the provider path below.
-    let localUsed = false;
-    // Local-engine telemetry to fold into the report, so the UI can show which
-    // engine ran and why it fell back to the provider path (when it did).
-    let engineTelemetry:
-      | Pick<
-          RepaintReport,
-          | "engine"
-          | "engine_requested"
-          | "engine_fallback_reason"
-          | "backend_model"
-          | "device"
-          | "precision"
-          | "precision_requested"
-          | "controlnet_requested"
-        >
-      | null = null;
-    if (engine !== "provider") {
-      const promptMap: Record<string, string> = {};
-      for (const region of prepared.regions) {
-        const issue = region.type ?? "";
-        promptMap[issue] = regionPrompt(issue);
-      }
-      const local = await localRepaintRegions({
-        manifest: prepared,
-        engine,
-        prompt: regionPrompt(""),
-        promptMap: JSON.stringify(promptMap),
-        precision: String(ctx.params.precision ?? "auto").trim() || undefined,
-        controlnet: String(ctx.params.controlnet ?? "off").trim() || undefined,
-        outputDir: outputDir || undefined,
-      });
-      engineTelemetry = {
-        engine: local.engine,
-        engine_requested: local.engine_requested,
-        engine_fallback_reason: local.engine_fallback_reason ?? null,
-        backend_model: local.backend_model ?? null,
-        device: local.device ?? null,
-        precision: local.precision ?? null,
-        precision_requested: local.precision_requested,
-        controlnet_requested: local.controlnet_requested,
-      };
-      if (local.engine !== "provider" && local.repainted.length > 0) {
-        localUsed = true;
-        repainted.push(...local.repainted);
-      }
-    }
 
     // Forward every non-reserved, non-empty param into each region's task.
     const params: Record<string, unknown> = {};
@@ -239,7 +193,7 @@ export const API_EXECUTORS = {
     // mock / empty provider has no `image.edit` capability: leave every region
     // unrepainted so the composite step passes the image through unchanged.
     const providerCanEdit = provider.length > 0 && provider !== "mock";
-    if (!localUsed && providerCanEdit) {
+    if (providerCanEdit) {
       for (const region of prepared.regions) {
         const issue = region.type ?? "";
         const prompt = regionPrompt(issue);
@@ -275,11 +229,7 @@ export const API_EXECUTORS = {
     });
     return {
       fixed_image: composed.fixed_image,
-      // Carry the local-engine telemetry alongside the unchanged RepaintReport
-      // shape; absent for the plain provider path.
-      repaint_report: engineTelemetry
-        ? { ...composed.repaint_report, ...engineTelemetry }
-        : composed.repaint_report,
+      repaint_report: composed.repaint_report,
     };
   },
 } satisfies ExecutorRegistry;

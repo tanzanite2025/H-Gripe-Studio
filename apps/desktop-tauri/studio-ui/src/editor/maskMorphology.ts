@@ -912,14 +912,8 @@ function replayOps(mask: ProxyMask, ops: EditOp[], scale: number): ProxyMask {
   return mask;
 }
 
-/**
- * Build the 256-entry LUT an adjustment layer's tone map resolves to (M6).
- * Identity when the params are all at their defaults. Mirrors the Rust
- * `adjustment_lut` in `subject_mask.rs` exactly, so the proxy preview and
- * the run cannot drift.
- */
-export function adjustmentLut(adj: LayerAdjustment): Uint8Array {
-  const lut = new Uint8Array(256);
+/** Build an adjustment layer's direct tone-mapping function. */
+export function adjustmentToneMapper(adj: LayerAdjustment): (value: number) => number {
   if (adj.type === "levels") {
     const inBlack = clamp(adj.in_black ?? 0, 0, 255);
     const inWhite = clamp(adj.in_white ?? 255, 0, 255);
@@ -927,53 +921,39 @@ export function adjustmentLut(adj: LayerAdjustment): Uint8Array {
     const outBlack = clamp(adj.out_black ?? 0, 0, 255);
     const outWhite = clamp(adj.out_white ?? 255, 0, 255);
     const span = Math.max(inWhite - inBlack, 1e-6);
-    for (let v = 0; v < 256; v++) {
-      const t = Math.pow(clamp((v - inBlack) / span, 0, 1), 1 / gamma);
-      lut[v] = Math.round(clamp(outBlack + t * (outWhite - outBlack), 0, 255));
-    }
-  } else if (adj.type === "curve") {
+    return (value) => {
+      const t = Math.pow(clamp((value - inBlack) / span, 0, 1), 1 / gamma);
+      return Math.round(clamp(outBlack + t * (outWhite - outBlack), 0, 255));
+    };
+  }
+  if (adj.type === "curve") {
     const pts = [...(adj.points ?? [])]
       .filter((p) => Array.isArray(p) && p.length >= 2)
       .sort((a, b) => a[0] - b[0]);
-    for (let v = 0; v < 256; v++) {
-      if (pts.length < 2) {
-        lut[v] = v;
-        continue;
-      }
-      if (v <= pts[0][0]) {
-        lut[v] = Math.round(clamp(pts[0][1], 0, 255));
-        continue;
-      }
-      if (v >= pts[pts.length - 1][0]) {
-        lut[v] = Math.round(clamp(pts[pts.length - 1][1], 0, 255));
-        continue;
-      }
+    return (value) => {
+      if (pts.length < 2) return Math.round(clamp(value, 0, 255));
+      if (value <= pts[0][0]) return Math.round(clamp(pts[0][1], 0, 255));
+      if (value >= pts[pts.length - 1][0]) return Math.round(clamp(pts[pts.length - 1][1], 0, 255));
       let i = 1;
-      while (pts[i][0] < v) i++;
+      while (pts[i][0] < value) i++;
       const [x0, y0] = pts[i - 1];
       const [x1, y1] = pts[i];
-      const t = (v - x0) / Math.max(x1 - x0, 1e-6);
-      lut[v] = Math.round(clamp(y0 + t * (y1 - y0), 0, 255));
-    }
-  } else {
-    // brightness_contrast: scale about the midpoint, then shift.
-    const brightness = (clamp(adj.brightness ?? 0, -100, 100) / 100) * 255;
-    const slope = 1 + clamp(adj.contrast ?? 0, -100, 100) / 100;
-    for (let v = 0; v < 256; v++) {
-      lut[v] = Math.round(clamp((v - 127.5) * slope + 127.5 + brightness, 0, 255));
-    }
+      const t = (value - x0) / Math.max(x1 - x0, 1e-6);
+      return Math.round(clamp(y0 + t * (y1 - y0), 0, 255));
+    };
   }
-  return lut;
+  const brightness = (clamp(adj.brightness ?? 0, -100, 100) / 100) * 255;
+  const slope = 1 + clamp(adj.contrast ?? 0, -100, 100) / 100;
+  return (value) => Math.round(clamp((value - 127.5) * slope + 127.5 + brightness, 0, 255));
 }
 
-// Apply an adjustment layer's LUT to the composite in place, lerped by the
-// layer opacity (mirrors the Rust `apply_adjustment`).
+// Apply an adjustment layer's direct tone map, lerped by layer opacity.
 function applyAdjustment(dst: ProxyMask, adj: LayerAdjustment, opacity: number): void {
-  const lut = adjustmentLut(adj);
+  const mapValue = adjustmentToneMapper(adj);
   const a = clamp(opacity, 0, 1);
   for (let i = 0; i < dst.data.length; i++) {
     const d = dst.data[i];
-    dst.data[i] = Math.round(d + (lut[d] - d) * a);
+    dst.data[i] = Math.round(d + (mapValue(d) - d) * a);
   }
 }
 
@@ -1265,8 +1245,8 @@ export class ProxyLayerCache {
           (l.kind !== "adjustment" && l.mask ? `:${l.mask.disabled ? 1 : 0}:${JSON.stringify(l.mask.ops)}` : ""),
       )
       .join("|");
-    const luts = doc.layers.map((l) =>
-      l.visible && l.kind === "adjustment" && l.adjustment ? adjustmentLut(l.adjustment) : null,
+    const toneMappers = doc.layers.map((l) =>
+      l.visible && l.kind === "adjustment" && l.adjustment ? adjustmentToneMapper(l.adjustment) : null,
     );
 
     const tiles = tileRects(w, h);
@@ -1288,7 +1268,7 @@ export class ProxyLayerCache {
       mask = createProxyMask(w, h);
       dirty = tiles;
     }
-    for (const rect of dirty) this.compositeTile(mask, doc, surfaces, luts, rect);
+    for (const rect of dirty) this.compositeTile(mask, doc, surfaces, toneMappers, rect);
     this.stats.tilesComposited = dirty.length;
     this.composite = { key, surfaces, mask };
     // Hand out a copy: the cached composite is reused as the next build's
@@ -1324,7 +1304,7 @@ export class ProxyLayerCache {
     mask: ProxyMask,
     doc: ImageEditorDocument,
     surfaces: (ProxyMask | null)[],
-    luts: (Uint8Array | null)[],
+    toneMappers: (((value: number) => number) | null)[],
     rect: TileRect,
   ): void {
     const { w } = mask;
@@ -1334,14 +1314,14 @@ export class ProxyLayerCache {
     doc.layers.forEach((layer, i) => {
       if (!layer.visible) return;
       if (layer.kind === "adjustment") {
-        const lut = luts[i];
-        if (!lut) return;
+        const mapValue = toneMappers[i];
+        if (!mapValue) return;
         const a = clamp(layer.opacity, 0, 1);
         for (let y = rect.y0; y < rect.y1; y++) {
           const row = y * w;
           for (let x = rect.x0; x < rect.x1; x++) {
             const d = mask.data[row + x];
-            mask.data[row + x] = Math.round(d + (lut[d] - d) * a);
+            mask.data[row + x] = Math.round(d + (mapValue(d) - d) * a);
           }
         }
         return;

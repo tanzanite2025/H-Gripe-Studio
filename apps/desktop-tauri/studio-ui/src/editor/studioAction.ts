@@ -1,6 +1,6 @@
 // Studio Action runtime (docs/plans/active/
 // MASK_LAYER_TARGET_AND_STUDIO_ACTION_PLAN.md, steps 6–7). Actions are the
-// only surface an assistant/API/local model may call — never UI clicks and
+// only surface an assistant or API-backed agent may call — never UI clicks and
 // never raw `edit_paths` JSON. Every action resolves a first-class
 // `StudioTarget` before it runs and passes the transaction stages:
 //
@@ -205,21 +205,18 @@ export const selectionToLayerMaskAction: StudioAction<SelectionToMaskParams> = {
   },
 };
 
-export interface Sam2PromptMaskParams {
+export interface BuiltinPointSelectionParams {
   points: PointPrompt[];
-  variant?: "tiny" | "small" | "base_plus" | "large";
 }
 
 /**
- * `run_sam2_prompt_mask(layer_mask, points, variant)`: record the SAM 2 point
- * prompts and activate the mask target. The document-level `points` are read
- * by the backend's interactive segmenter on run; the resulting artifact lands
- * on the targeted mask, never on a new layer.
+ * Record ordinary include/exclude point prompts for the deterministic built-in
+ * subject selector. This only updates the document; it calls no backend.
  */
-export const sam2PromptMaskAction: StudioAction<Sam2PromptMaskParams> = {
-  id: "run_sam2_prompt_mask",
-  label: "SAM 2 prompt mask",
-  capabilities: ["mask.subject.point_prompt"],
+export const builtinPointSelectionAction: StudioAction<BuiltinPointSelectionParams> = {
+  id: "record_point_selection",
+  label: "Record point selection",
+  capabilities: [],
   requiredTarget: ["layer_mask"],
   dryRun(ctx, params) {
     if (ctx.target.kind !== "layer_mask") return refuse(this.id, ctx, "not a layer mask");
@@ -231,10 +228,9 @@ export const sam2PromptMaskAction: StudioAction<Sam2PromptMaskParams> = {
       ok: true,
       action: this.id,
       target: describeTarget(ctx.target),
-      costClass: "local_compute",
-      capability: "mask.subject.point_prompt",
-      creates: "selection-alpha artifact",
-      summary: `SAM 2 point-prompt (${params.points.length} points${params.variant ? `, ${params.variant}` : ""}) onto ${describeTarget(ctx.target)}`,
+      costClass: "free",
+      creates: "point prompts",
+      summary: `record ${params.points.length} built-in point prompt(s) onto ${describeTarget(ctx.target)}`,
     };
   },
   preview(ctx, params) {
@@ -251,7 +247,7 @@ export const sam2PromptMaskAction: StudioAction<Sam2PromptMaskParams> = {
       past: [...targeted.past, cloneImageEditorDocument(doc)],
       future: [],
     };
-    return { ok: true, state: next, summary: `SAM 2 prompts recorded for ${describeTarget(ctx.target)}` };
+    return { ok: true, state: next, summary: `point prompts recorded for ${describeTarget(ctx.target)}` };
   },
 };
 
@@ -296,7 +292,7 @@ export function builtinStudioActions(): StudioActionRegistry {
   const registry = createStudioActionRegistry();
   registry.register(createLayerMaskAction);
   registry.register(selectionToLayerMaskAction);
-  registry.register(sam2PromptMaskAction);
+  registry.register(builtinPointSelectionAction);
   registry.register(featherLayerMaskAction);
   return registry;
 }

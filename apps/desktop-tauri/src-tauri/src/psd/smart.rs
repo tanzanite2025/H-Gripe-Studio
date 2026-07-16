@@ -1,8 +1,6 @@
 //! Native smart-object content replacement: swap the embedded source file of
 //! an embedded (`kind = data`) smart object and refresh the layer's cached
-//! raster, mirroring the local psd_tools extension
-//! `SmartObjectLayer.replace_with_image` (the last compose capability moved
-//! off the Python bridge during the completed Rust PSD migration, Phase 5).
+//! raster while preserving the smart object's editable source and metadata.
 //!
 //! Like the pixel-layer writer, this splices the template bytes instead of
 //! re-serialising the document. Exactly three spots change:
@@ -18,8 +16,8 @@
 //!    bytes, size and file type replaced (Photoshop re-renders from this
 //!    source and keeps the object editable).
 //!
-//! External or aliased links and open-file descriptors return an error so the
-//! command can fall back to the legacy bridge.
+//! External or aliased links and open-file descriptors return an explicit
+//! unsupported-input error.
 
 use image::RgbaImage;
 
@@ -78,7 +76,9 @@ pub(super) fn smart_object_uuid(data: &[u8], record: &RecordSpan) -> Result<Stri
     let pos = bytes
         .windows(marker.len())
         .position(|window| window == marker)
-        .ok_or("smart object has no Idnt descriptor key; legacy bridge required")?;
+        .ok_or(
+            "smart object has no Idnt descriptor key; native replacement requires an embedded object identifier",
+        )?;
     let value_at = record.record_range.0 + pos + marker.len();
     let count = read_u32(data, value_at)? as usize;
     let mut units = Vec::with_capacity(count);
@@ -109,7 +109,7 @@ fn skip_key(data: &[u8], pos: usize) -> Result<usize, String> {
 }
 
 /// Skip one OSType value inside a descriptor. Unsupported types (references,
-/// object arrays) error so the caller can fall back to the legacy bridge.
+/// object arrays) return an explicit error.
 fn skip_ostype(data: &[u8], pos: usize) -> Result<usize, String> {
     let key = data.get(pos..pos + 4).ok_or("PSD descriptor truncated")?;
     let pos = pos + 4;
@@ -139,7 +139,7 @@ fn skip_ostype(data: &[u8], pos: usize) -> Result<usize, String> {
             Ok(pos + 8 + count * 8)
         }
         other => Err(format!(
-            "unsupported descriptor value type {:?}; legacy bridge required",
+            "unsupported descriptor value type {:?}; native smart-object replacement does not support this descriptor",
             String::from_utf8_lossy(other)
         )),
     }
@@ -226,7 +226,7 @@ fn find_linked_item(data: &[u8], spans: &PsdSpans, uuid: &str) -> Result<LinkedI
         pos = padded_end;
     }
     Err(format!(
-        "embedded smart object data for UUID {uuid} was not found; legacy bridge required"
+        "embedded smart object data for UUID {uuid} was not found; native replacement requires embedded data"
     ))
 }
 
@@ -260,7 +260,7 @@ fn find_item_in_block(
         if item_uuid.trim_end_matches('\0') == uuid {
             if kind != b"liFD" {
                 return Err(format!(
-                    "smart object {uuid} is not embedded (kind {}); legacy bridge required",
+                    "smart object {uuid} is not embedded (kind {}); native replacement supports embedded objects only",
                     String::from_utf8_lossy(kind)
                 ));
             }
@@ -472,9 +472,8 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/compose_generated.png"
     );
-    /// `final_preview.png` written by `compose_psd_cli.py` for the same job
-    /// (replace_content into `embedded-png`, contain fit).
-    const PYTHON_PREVIEW: &[u8] = include_bytes!(concat!(
+    /// Checked-in `final_preview.png` for the same replacement job.
+    const GOLDEN_PREVIEW: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/smart_preview_python.png"
     ));
@@ -510,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn golden_smart_object_replace_matches_python_cli() {
+    fn golden_smart_object_replace_matches_reference() {
         let (dir, result) = run("golden");
         assert_eq!(result.smart_object_mode, "replace_content");
         assert_eq!(result.placeholder_kind.as_deref(), Some("smartobject"));
@@ -555,7 +554,7 @@ mod tests {
         let other = find_linked_item(&written, &spans, "5a96c402-ab9c-1177-97ef-96ca454b82b7");
         assert!(other.is_err()); // external item: not an embedded (liFD) one
 
-        // Metadata mirrors the Python CLI's replace_content run.
+        // Metadata matches the smart-object replacement contract.
         let metadata: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join("final_metadata.json")).unwrap())
                 .unwrap();
@@ -568,17 +567,17 @@ mod tests {
             serde_json::json!({"left": 96, "top": 96, "width": 64, "height": 64})
         );
 
-        // Preview parity with the Python CLI inside the fitted region. (In
+        // Preview parity with the checked-in golden inside the fitted region. (In
         // the letterbox strips the native raster keeps the PNG's transparency
-        // — matching what Photoshop re-renders — while the legacy bridge
+        // — matching what Photoshop re-renders — while the historical golden
         // flattens them to opaque RGB, so the strips are excluded.)
         let native = image::load_from_memory(&fs::read(dir.join("final_preview.png")).unwrap())
             .unwrap()
             .to_rgb8();
-        let python = image::load_from_memory(PYTHON_PREVIEW).unwrap().to_rgb8();
-        assert_eq!(native.dimensions(), python.dimensions());
-        for y in 0..python.height() {
-            for x in 0..python.width() {
+        let golden = image::load_from_memory(GOLDEN_PREVIEW).unwrap().to_rgb8();
+        assert_eq!(native.dimensions(), golden.dimensions());
+        for y in 0..golden.height() {
+            for x in 0..golden.width() {
                 let in_strip =
                     (96..160).contains(&x) && ((96..104).contains(&y) || (152..160).contains(&y));
                 if in_strip {
@@ -588,11 +587,11 @@ mod tests {
                 // differently in psd_tools' integer compositor, so allow a
                 // ±1 per-channel tolerance.
                 let native = native.get_pixel(x, y).0;
-                let python = python.get_pixel(x, y).0;
+                let expected = golden.get_pixel(x, y).0;
                 for channel in 0..3 {
                     assert!(
-                        native[channel].abs_diff(python[channel]) <= 1,
-                        "preview differs at ({x}, {y}): {native:?} vs {python:?}"
+                        native[channel].abs_diff(expected[channel]) <= 1,
+                        "preview differs at ({x}, {y}): {native:?} vs {expected:?}"
                     );
                 }
             }
@@ -639,7 +638,7 @@ mod tests {
         })
         .map(|result| result.status)
         .unwrap_err();
-        assert!(err.contains("legacy bridge required"), "{err}");
+        assert!(err.contains("supports embedded objects only"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 

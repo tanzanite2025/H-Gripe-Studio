@@ -70,9 +70,8 @@ describe("lowerWorkflowGraph", () => {
           kind: "imageProcessing",
           position: pos,
           params: {
-            "enhance.engine": "realesrgan",
-            "enhance.device": "gpu",
-            "enhance.precision": "fp32",
+            "enhance.mode": "custom",
+            "enhance.scale": 3,
           },
         },
       ],
@@ -89,7 +88,7 @@ describe("lowerWorkflowGraph", () => {
       "imageSource",
     ]);
     const enhance = lowered.nodes.find((n) => n.kind === "imageEnhance")!;
-    expect(enhance.params).toEqual({ engine: "realesrgan", device: "gpu", precision: "fp32" });
+    expect(enhance.params).toEqual({ mode: "custom", scale: 3 });
     const repaint = lowered.nodes.find((n) => n.kind === "detailRepaint")!;
     const targets = lowered.edges
       .filter((e) => e.target === repaint.id)

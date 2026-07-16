@@ -28,9 +28,6 @@ fn test_surface(w: u32, h: u32) -> GradeSurface {
 
 fn test_doc(n_px: usize) -> GradeDoc {
     let mask: Vec<f32> = (0..n_px).map(|px| ((px as f32) * 0.37).fract()).collect();
-    let identity_lut: Vec<f32> = (0..8)
-        .flat_map(|i| [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32])
-        .collect();
     GradeDoc {
         layers: vec![
             GradeLayer {
@@ -111,10 +108,6 @@ fn test_doc(n_px: usize) -> GradeDoc {
                 mask: None,
                 qualifier: None,
                 ops: vec![
-                    GradeOp::Lut3d {
-                        size: 2,
-                        table: identity_lut,
-                    },
                     GradeOp::Saturation { amount: 0.4 },
                     GradeOp::HueVsHue {
                         points: vec![[0.0, 10.0], [180.0, -10.0]],

@@ -13,7 +13,7 @@ export type SelectionSource =
   | "object_select"
   | "quick_select"
   | "magic_wand"
-  | "sam2"
+  | "point"
   | "mask"
   | "path"
   | "manual";
@@ -166,7 +166,7 @@ export function selectionSourceFromToolId(toolId: string): SelectionSource {
     case "wand":
       return "magic_wand";
     case "point":
-      return "sam2";
+      return "point";
     default:
       return "manual";
   }

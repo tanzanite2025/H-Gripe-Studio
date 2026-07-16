@@ -45,7 +45,7 @@ describe("mask tool registry", () => {
     expect(matting?.kind).toBe("matte");
   });
 
-  it("exposes the SAM 2 point-prompt tool", () => {
+  it("exposes the built-in point-selection tool", () => {
     const point = imageEditorTool("point");
     expect(point?.status).toBe("ready");
     expect(point?.kind).toBe("point");

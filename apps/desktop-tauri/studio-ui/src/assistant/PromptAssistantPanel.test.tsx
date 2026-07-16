@@ -135,7 +135,7 @@ describe("PromptAssistantPanel", () => {
     const { container } = render(<PromptAssistantPanel {...panelProps()} />);
     const backend = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
     fireEvent.change(backend, { target: { value: "api:openai-main" } });
-    // The local preset row hides while an API profile is selected.
+    // The built-in preset row hides while an API profile is selected.
     expect(container.querySelectorAll(".assistant-backend select")).toHaveLength(1);
     sendMessage(container, "a fox");
     await waitFor(() => {
@@ -146,20 +146,30 @@ describe("PromptAssistantPanel", () => {
     expect(runTaskJsonMock).toHaveBeenCalledTimes(1);
   });
 
-  it("lists manager local models and drafts via the built-in rewriter", () => {
+  it("does not offer legacy local models from the registry", () => {
     seedRegistry();
     const { container } = render(<PromptAssistantPanel {...panelProps()} />);
     const backend = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
-    expect(
-      Array.from(backend.options).some((o) => o.value === "localModel:qwen-mini"),
-    ).toBe(true);
-    fireEvent.change(backend, { target: { value: "localModel:qwen-mini" } });
-    // Preset row stays for local model backends (built-in rewriter drafts).
-    expect(container.querySelectorAll(".assistant-backend select").length).toBe(2);
-    sendMessage(container, "a fox, a fox, forest");
+    expect(Array.from(backend.options).some((option) => option.value.includes("qwen-mini"))).toBe(false);
+  });
+
+  it("drops a persisted local-model session before allowing a new built-in turn", () => {
+    seedRegistry();
+    localStorage.setItem(
+      "hgripe.studio.promptAssistant.session.v1",
+      JSON.stringify({
+        messages: [],
+        preset: "cleanup",
+        backend: { kind: "local_model", ref: "qwen-mini" },
+      }),
+    );
+    const { container } = render(<PromptAssistantPanel {...panelProps()} />);
+    const backend = container.querySelector<HTMLSelectElement>(".assistant-backend select")!;
+    expect(backend.value).toBe("builtin");
+    sendMessage(container, "a fox");
     const msgs = container.querySelectorAll(".assistant-msg");
     expect(msgs).toHaveLength(2);
-    expect(msgs[1].textContent).toBe("a fox, forest");
+    expect(msgs[1].textContent).toBe("a fox");
     expect(runTaskJsonMock).not.toHaveBeenCalled();
   });
 

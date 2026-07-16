@@ -5,7 +5,7 @@
 // and in Rust by `cargo test -p hgripe-grade`. See docs/design/grade-kernel.md.
 //
 // Modules mirror the Rust crate layout: `types` (surface + shared maths),
-// `blend` (blend.rs), `trc` (trc.rs), `spline`/`hsl`/`lut`/`wb`/`spatial`
+// `blend` (blend.rs), `trc` (trc.rs), `spline`/`hsl`/`wb`/`spatial`
 // (ops/*.rs), `ops` (ops/mod.rs), `doc` (doc.rs + qualifier.rs +
 // composite.rs), `scopes` (scopes.rs).
 
@@ -18,9 +18,9 @@ export {
   type GradeLayer,
   type HslQualifier,
 } from "./doc";
-export { parseCube } from "./lut";
 export {
   applyOp,
+  isGradeOpType,
   isSpatialOp,
   type ColorRange,
   type CurveChannel,

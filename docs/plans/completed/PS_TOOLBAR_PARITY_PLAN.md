@@ -1,5 +1,8 @@
 # Photoshop Toolbar Parity Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: implemented. All steps of the implementation order below are done:
 > the registry is PS slot objects with planned variants, whole-mask operations
 > live in the right-panel Mask Ops group, shortcuts are slot-owned (the letter

@@ -20,6 +20,16 @@ pub(crate) enum DeviceRequest {
 }
 
 impl DeviceRequest {
+    pub(crate) fn from_param(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "cpu" => Self::Cpu,
+            "cuda" => Self::Cuda,
+            "directml" => Self::DirectMl,
+            "gpu" => Self::Gpu,
+            _ => Self::Auto,
+        }
+    }
+
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",

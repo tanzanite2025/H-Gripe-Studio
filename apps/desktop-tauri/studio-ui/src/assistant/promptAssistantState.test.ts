@@ -84,15 +84,16 @@ describe("persistence", () => {
     expect(loadAssistantSession()).toEqual(emptyAssistantSession());
   });
 
-  it("round-trips the local model backend ref", () => {
-    saveAssistantSession({
-      ...emptyAssistantSession(),
-      backend: { kind: "local_model", ref: "qwen-mini" },
-    });
-    expect(loadAssistantSession().backend).toEqual({
-      kind: "local_model",
-      ref: "qwen-mini",
-    });
+  it("drops a retired local-model session instead of silently changing its backend", () => {
+    localStorage.setItem(
+      "hgripe.studio.promptAssistant.session.v1",
+      JSON.stringify({
+        messages: [{ role: "user", text: "old prompt", at: 1 }],
+        preset: "anime",
+        backend: { kind: "local_model", ref: "old" },
+      }),
+    );
+    expect(loadAssistantSession()).toEqual(emptyAssistantSession());
   });
 
   it("round-trips the API backend ref and drops malformed backends", () => {
@@ -109,7 +110,7 @@ describe("persistence", () => {
       "hgripe.studio.promptAssistant.session.v1",
       JSON.stringify({ messages: [], preset: "cleanup", backend: { kind: "api_profile" } }),
     );
-    expect(loadAssistantSession().backend).toEqual({ kind: "local" });
+    expect(loadAssistantSession().backend).toEqual({ kind: "built_in" });
   });
 
   it("round-trips the open flag, defaulting to closed", () => {

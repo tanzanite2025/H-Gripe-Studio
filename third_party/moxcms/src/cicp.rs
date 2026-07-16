@@ -26,14 +26,10 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::gamma::{
-    bt1361_to_linear, hlg_to_linear, iec61966_to_linear, log100_sqrt10_to_linear, log100_to_linear,
-    pq_to_linear, smpte240_to_linear, smpte428_to_linear,
-};
 use crate::{
     Chromaticity, ColorProfile, Matrix3d, Matrix3f, XyYRepresentable,
     err::CmsError,
-    trc::{ToneReprCurve, build_trc_table, curve_from_gamma},
+    trc::{ToneReprCurve, curve_from_gamma},
 };
 use std::convert::TryFrom;
 
@@ -478,8 +474,6 @@ impl TryFrom<TransferCharacteristics> for ToneReprCurve {
     /// See [ICC.1:2010](https://www.color.org/specification/ICC1v43_2010-12.pdf)
     /// See [Rec. ITU-R BT.2100-2](https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.2100-2-201807-I!!PDF-E.pdf)
     fn try_from(value: TransferCharacteristics) -> Result<Self, Self::Error> {
-        const NUM_TRC_TABLE_ENTRIES: i32 = 1024;
-
         Ok(match value {
             TransferCharacteristics::Reserved => {
                 return Err(CmsError::UnsupportedTrc(value as u8));
@@ -525,41 +519,19 @@ impl TryFrom<TransferCharacteristics> for ToneReprCurve {
             }
             TransferCharacteristics::Bt470M => curve_from_gamma(2.2),
             TransferCharacteristics::Bt470Bg => curve_from_gamma(2.8),
-            TransferCharacteristics::Smpte240 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, smpte240_to_linear);
-                ToneReprCurve::Lut(table)
-            }
             TransferCharacteristics::Linear => curve_from_gamma(1.),
-            TransferCharacteristics::Log100 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, log100_to_linear);
-                ToneReprCurve::Lut(table)
-            }
-            TransferCharacteristics::Log100sqrt10 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, log100_sqrt10_to_linear);
-                ToneReprCurve::Lut(table)
-            }
-            TransferCharacteristics::Iec61966 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, iec61966_to_linear);
-                ToneReprCurve::Lut(table)
-            }
-            TransferCharacteristics::Bt1361 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, bt1361_to_linear);
-                ToneReprCurve::Lut(table)
-            }
             TransferCharacteristics::Srgb => {
                 ToneReprCurve::Parametric(vec![2.4, 1. / 1.055, 0.055 / 1.055, 1. / 12.92, 0.04045])
             }
-            TransferCharacteristics::Smpte2084 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, pq_to_linear);
-                ToneReprCurve::Lut(table)
-            }
-            TransferCharacteristics::Smpte428 => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, smpte428_to_linear);
-                ToneReprCurve::Lut(table)
-            }
-            TransferCharacteristics::Hlg => {
-                let table = build_trc_table(NUM_TRC_TABLE_ENTRIES, hlg_to_linear);
-                ToneReprCurve::Lut(table)
+            TransferCharacteristics::Smpte240
+            | TransferCharacteristics::Log100
+            | TransferCharacteristics::Log100sqrt10
+            | TransferCharacteristics::Iec61966
+            | TransferCharacteristics::Bt1361
+            | TransferCharacteristics::Smpte2084
+            | TransferCharacteristics::Smpte428
+            | TransferCharacteristics::Hlg => {
+                return Err(CmsError::UnsupportedTrc(value as u8));
             }
         })
     }

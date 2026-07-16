@@ -9,20 +9,17 @@
 // - `levels` maps parameter-for-parameter (both kernels use the same
 //   input-span / inverse-gamma / output-span formula on encoded values;
 //   only the 0..255 → 0..1 scale changes).
-// - `curve` (piecewise-linear, 0..255 control points) and
-//   `brightness_contrast` become a 256-entry `lut1d`: the grade kernel's
-//   1D LUT interpolates linearly between samples, so a 256-sample table
-//   reproduces the mask LUT exactly at every u8 level — unlike `curves`
-//   (monotone spline) or `contrast` (pivot scale without the brightness
-//   shift), which would change the shape.
+// - `curve` and `brightness_contrast` stay on the image executor because
+//   their piecewise-linear and shifted-midpoint maths do not have exact
+//   equivalents in the grade op vocabulary.
 //
 // The image-workspace colour adjustments (`color_ranges`, `channel_mixer`,
 // `replace_color`) have no u8 counterpart — they lower straight to their
 // grade ops (`color_ranges`, `rgb_mixer`, `replace_color`), converting UI
 // units (hex colours / degrees / percent) to op units.
 //
-// `imageAdjustments.test.ts` asserts each tone-map lowering agrees with
-// `adjustmentLut` within u8 rounding at all 256 levels.
+// `imageAdjustments.test.ts` pins the exact mappings that can use the grade
+// kernel; unsupported tone maps force the caller onto the image executor.
 
 import type { GradeOp } from "./gradeKernel";
 import { type LayerAdjustment } from "../contracts/imageEditorDocument";
@@ -37,19 +34,6 @@ function hexToRgb01(hex: string | undefined): [number, number, number] | null {
     parseInt(hex.slice(3, 5), 16) / 255,
     parseInt(hex.slice(5, 7), 16) / 255,
   ];
-}
-
-/** A 256-sample grayscale `lut1d` op from a per-level transfer function. */
-function lut1dOf(f: (v01: number) => number): GradeOp {
-  const size = 256;
-  const table: number[] = new Array(size * 3);
-  for (let i = 0; i < size; i++) {
-    const y = clamp(f(i / (size - 1)), 0, 1);
-    table[i * 3] = y;
-    table[i * 3 + 1] = y;
-    table[i * 3 + 2] = y;
-  }
-  return { type: "lut1d", size, table };
 }
 
 /**
@@ -70,23 +54,7 @@ export function adjustmentToGradeOps(adj: LayerAdjustment): GradeOp[] {
     ];
   }
   if (adj.type === "curve") {
-    const pts = [...(adj.points ?? [])]
-      .filter((p) => Array.isArray(p) && p.length >= 2)
-      .sort((a, b) => a[0] - b[0]);
-    if (pts.length < 2) return [];
-    return [
-      lut1dOf((v01) => {
-        const v = v01 * 255;
-        if (v <= pts[0][0]) return clamp(pts[0][1], 0, 255) / 255;
-        if (v >= pts[pts.length - 1][0]) return clamp(pts[pts.length - 1][1], 0, 255) / 255;
-        let i = 1;
-        while (pts[i][0] < v) i++;
-        const [x0, y0] = pts[i - 1];
-        const [x1, y1] = pts[i];
-        const t = (v - x0) / Math.max(x1 - x0, 1e-6);
-        return clamp(y0 + t * (y1 - y0), 0, 255) / 255;
-      }),
-    ];
+    return [];
   }
   if (adj.type === "color_ranges") {
     const ranges = (adj.ranges ?? [])
@@ -129,9 +97,10 @@ export function adjustmentToGradeOps(adj: LayerAdjustment): GradeOp[] {
       },
     ];
   }
-  // brightness_contrast: scale about the midpoint, then shift.
-  const brightness = clamp(adj.brightness ?? 0, -100, 100) / 100;
-  const slope = 1 + clamp(adj.contrast ?? 0, -100, 100) / 100;
-  if (brightness === 0 && slope === 1) return [];
-  return [lut1dOf((v01) => (v01 - 0.5) * slope + 0.5 + brightness)];
+  return [];
+}
+
+/** Whether the adjustment has an exact representation in the grade kernel. */
+export function canLowerAdjustmentToGrade(adj: LayerAdjustment): boolean {
+  return adj.type !== "curve" && adj.type !== "brightness_contrast";
 }

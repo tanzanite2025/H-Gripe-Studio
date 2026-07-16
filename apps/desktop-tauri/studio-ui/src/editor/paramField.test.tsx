@@ -10,7 +10,7 @@ const engineSpec: ParamSpec = {
   key: "engine",
   label: "Engine",
   control: "select",
-  options: ["rules", "onnx_defect"],
+  options: ["builtin", "unavailable"],
   defaultValue: "rules",
 };
 
@@ -27,15 +27,15 @@ describe("ParamField select option states", () => {
         onChange={() => {}}
         optionStates={{
           rules: { available: true, reason: "built-in CPU rule layer" },
-          onnx_defect: { available: false, reason: "missing optional dependency: onnxruntime" },
+          unavailable: { available: false, reason: "feature is not available" },
         }}
       />,
     );
     const options = Array.from(container.querySelectorAll("option"));
     const byValue = Object.fromEntries(options.map((o) => [o.value, o]));
-    expect(byValue.rules.disabled).toBe(false);
-    expect(byValue.onnx_defect.disabled).toBe(true);
-    expect(byValue.onnx_defect.title).toContain("onnxruntime");
+    expect(byValue.builtin.disabled).toBe(false);
+    expect(byValue.unavailable.disabled).toBe(true);
+    expect(byValue.unavailable.title).toContain("not available");
   });
 
   it("leaves every option enabled when no probe states are provided", () => {

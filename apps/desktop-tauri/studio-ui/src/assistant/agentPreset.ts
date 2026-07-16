@@ -140,7 +140,7 @@ const imageEditorPreset: AgentPreset = {
   allowedActionIds: [
     "set_active_target",
     "create_layer_mask",
-    "run_sam2_prompt_mask",
+    "record_point_selection",
     "commit_selection_alpha_artifact_to_layer_mask",
     "generate_selection_from_path",
     "commit_selection_to_layer_mask",
@@ -193,23 +193,19 @@ const timelineGradePreset: AgentPreset = {
 
 const modelApiPreset: AgentPreset = {
   id: "preset.model_api",
-  label: "Model / API",
+  label: "API Profiles",
   systemPolicy:
-    "Provider profiles, local model health, capability checks, and device reports. Never reads raw keys, writes secrets, edits layers, or deletes model files without confirmation.",
+    "API provider profiles and capability checks. Never reads raw keys, writes secrets, or edits layers.",
   allowedReadModels: [
     "api_profile_registry_no_secrets",
-    "local_model_registry",
     "capability_map",
     "backend_health_status",
-    "device_reports",
     "backend_validation_errors",
   ],
   allowedActionIds: [
     "open_model_api_manager",
     "test_api_profile",
-    "probe_local_model",
     "show_missing_capability_report",
-    "show_device_report",
   ],
   forbiddenActionIds: [
     "read_raw_api_keys",

@@ -86,7 +86,7 @@ function asText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
 
-/** Local-engine telemetry fields shared by the `*_report` node outputs. */
+/** Engine telemetry fields shared by deterministic, API, and media reports. */
 export interface EngineReportLike {
   engine?: string | null;
   engine_requested?: string | null;
@@ -102,7 +102,7 @@ export interface EngineReportLike {
 const BASELINE_ENGINES = new Set(["cpu", "rules", "provider"]);
 
 /**
- * Normalise a local-engine node report (`enhance_report`, `match_report`,
+ * Normalise a node report (`enhance_report`, `match_report`,
  * `edge_report`, `watchdog_report`, `repaint_report`) into a `DeviceReport`.
  * Returns null when the report carries no engine telemetry at all (e.g. a
  * plain provider-path RepaintReport).
@@ -134,59 +134,8 @@ export function deviceReportFromEngineReport(report: EngineReportLike): DeviceRe
   };
 }
 
-/**
- * Device report an external model plugin must emit at its boundary (the core
- * app owns no heavy model runtime; it only accepts reports). Mirrors the
- * plan's plugin contract: requested vs actual device and precision, plus a
- * fallback reason when the two differ.
- */
-export interface PluginDeviceReportLike {
-  device_requested?: string | null;
-  device?: string | null;
-  precision_requested?: string | null;
-  precision?: string | null;
-  fallback_reason?: string | null;
-  /** Plugin-owned backend detail (runtime/build id). */
-  backend?: string | null;
-}
-
 /** The `used` values that count as an accelerated backend. */
 const ACCELERATED: ReadonlySet<DeviceUsed> = new Set(["cuda", "wgpu", "directml", "ffmpeg_hw"]);
-
-/**
- * Normalise an external plugin's boundary report into a `DeviceReport`,
- * preserving device/precision truthfulness: a plugin may resolve its own
- * device, but a downgrade from the requested device or precision must stay
- * visible — when the plugin omits the reason, one is synthesised rather than
- * letting the downgrade pass silently.
- */
-export function deviceReportFromPluginReport(report: PluginDeviceReportLike): DeviceReport {
-  const requested = asRequest(report.device_requested);
-  const used = asUsed(report.device) ?? "unknown";
-  const accelerated = ACCELERATED.has(used);
-  const precision = asText(report.precision);
-  const precisionRequested = asText(report.precision_requested);
-  const notes: string[] = [];
-  if ((requested === "cuda" || requested === "directml" || requested === "gpu") && !accelerated) {
-    notes.push(`plugin ran on ${used} for a ${requested} request`);
-  }
-  if (precisionRequested && precision && precisionRequested !== precision) {
-    notes.push(`precision ${precisionRequested} -> ${precision}`);
-  }
-  const reported = asText(report.fallback_reason);
-  const fallbackReason =
-    reported ?? (notes.length > 0 ? `${notes.join("; ")} (no reason reported)` : undefined);
-  const backendParts = [asText(report.backend) ?? "plugin", precision].filter(
-    Boolean,
-  ) as string[];
-  return {
-    requested,
-    used,
-    backend: backendParts.join(" "),
-    accelerated,
-    fallbackReason,
-  };
-}
 
 /** Viewport frame backend info (`ViewportBackend` from `bridge/viewport.ts`). */
 export interface ViewportBackendLike {
@@ -248,7 +197,7 @@ export function deviceReportFromViewportBackend(backend: ViewportBackendLike): D
 
 /**
  * One-line human rendering shared by run logs and panels, e.g.
- * `device auto -> cuda (realesrgan fp16)` or
+ * `device auto -> cuda (accelerated fp16)` or
  * `device cuda -> cpu (fallback: CUDA provider unavailable)`.
  */
 export function describeDeviceReport(report: DeviceReport): string {
@@ -285,7 +234,7 @@ export function describeDeviceReport(report: DeviceReport): string {
   return line;
 }
 
-/** Node output keys that carry local-engine telemetry. */
+/** Node output keys that carry device telemetry. */
 const REPORT_OUTPUT_KEYS = [
   "enhance_report",
   "match_report",

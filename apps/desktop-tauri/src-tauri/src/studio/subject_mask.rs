@@ -1,14 +1,13 @@
-//! The `subjectMask` node executor: the first Studio card whose image
-//! processing runs in-process in native Rust (the `Compute` executor lane)
-//! rather than shelling out to a `python/bridge` CLI.
+//! The `subjectMask` node executor. Image processing runs in-process in native
+//! Rust on the `Compute` executor lane.
 //!
 //! Phase 1 is CPU-only and deterministic: it builds a subject matte from a base
 //! mask (a connected `previous_mask` / `placeholder_mask`, else empty) plus the
 //! manual edits carried in `edit_paths` (magic-wand flood fill, brush / eraser
 //! strokes), then applies morphology (`grow` / `shrink`, `fill_holes`) and a
 //! final feather. It emits the mask / alpha image / cutout triplet and an
-//! enriched `matte_report`. The auto-subject model modes are Phase 2 (still on
-//! the `Compute` lane, via `ort` / `candle`).
+//! enriched `matte_report`. Auto-subject modes use the deterministic built-in
+//! segmenter on the same `Compute` lane.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,20 +17,18 @@ use image::{imageops, GrayImage, Luma, RgbaImage};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::device_report::DeviceRequest;
 use super::graph::{
     bool_param, number_param, optional, studio_output_map, studio_value_to_string, StudioGraphNode,
 };
 use super::image_buffer;
-use super::onnx_pool::{OnnxDeviceRequest, OnnxProviderResolution};
 use super::persist::studio_reject_unsafe_basename;
 use super::pixel_ops;
 use super::studio_image;
 use super::subject_matte;
-use super::subject_matte::AlphaMatter;
-use super::subject_sam2::Sam2Variant;
 use super::subject_segment::{
-    select_segmenter_for_mode, AutoMode, BuiltinCpuSegmenter, PointPrompt, SegmentRequest,
-    SegmentResult, SegmenterSelection, SubjectSegmenter,
+    select_segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest, SegmentResult,
+    SegmenterSelection,
 };
 
 mod document;
@@ -101,7 +98,7 @@ struct Triplet {
     cutout_image: bool,
 }
 
-/// Telemetry for one learned-or-builtin stage. The top-level report mirrors the
+/// Telemetry for one built-in stage. The top-level report mirrors the
 /// auto-segmentation stage when present, otherwise the matting stage. Each
 /// operation also records its own instance, preventing provider/model/device
 /// fields from different stages being combined into a misleading summary.
@@ -124,170 +121,59 @@ fn join_fallback_reasons(reasons: impl IntoIterator<Item = Option<String>>) -> O
     (!reasons.is_empty()).then(|| reasons.join("; "))
 }
 
-fn learned_stage_telemetry(
-    provider: String,
-    model_path: Option<String>,
-    resolution: Option<&OnnxProviderResolution>,
-    device_request: OnnxDeviceRequest,
-    selection_reason: Option<String>,
-) -> StageTelemetry {
-    let resolution_reason = resolution.and_then(|value| value.fallback_reason.clone());
-    StageTelemetry {
-        provider,
-        engine: if resolution.is_some() {
-            "onnxruntime"
-        } else {
-            "cpu"
-        },
-        model_path,
-        device: resolution.map_or("cpu", |value| value.device),
-        device_requested: device_request.as_str(),
-        fallback_reason: join_fallback_reasons([selection_reason, resolution_reason]),
-    }
-}
-
 fn builtin_stage_telemetry(
     provider: &str,
-    device_request: OnnxDeviceRequest,
+    device_request: DeviceRequest,
     reasons: impl IntoIterator<Item = Option<String>>,
 ) -> StageTelemetry {
+    let device_reason =
+        (!matches!(device_request, DeviceRequest::Auto | DeviceRequest::Cpu)).then(|| {
+            "requested acceleration is unavailable; using deterministic built-in CPU path"
+                .to_string()
+        });
     StageTelemetry {
         provider: provider.to_string(),
         engine: "cpu",
         model_path: None,
         device: "cpu",
         device_requested: device_request.as_str(),
-        fallback_reason: join_fallback_reasons(reasons),
+        fallback_reason: join_fallback_reasons(reasons.into_iter().chain([device_reason])),
     }
 }
 
 fn run_auto_segment_with_fallback(
     selection: SegmenterSelection,
     request: &SegmentRequest<'_>,
-    device_request: OnnxDeviceRequest,
+    device_request: DeviceRequest,
 ) -> Result<(SegmentResult, StageTelemetry), String> {
     let SegmenterSelection {
         segmenter,
         fallback_reason: selection_reason,
     } = selection;
-    let selected_provider = segmenter.provider().to_string();
-    let selected_model_path = segmenter.model_path();
-    let selected_resolution = segmenter.onnx_resolution().cloned();
-
-    if selected_provider == "builtin-cpu" {
-        let result = segmenter.segment(request)?;
-        return Ok((
-            result,
-            builtin_stage_telemetry("builtin-cpu", device_request, [selection_reason]),
-        ));
-    }
-
-    match segmenter.segment(request) {
-        Ok(result) => Ok((
-            result,
-            learned_stage_telemetry(
-                selected_provider,
-                selected_model_path,
-                selected_resolution.as_ref(),
-                device_request,
-                selection_reason,
-            ),
-        )),
-        Err(err) => {
-            let fallback = BuiltinCpuSegmenter;
-            let result = fallback.segment(request).map_err(|fallback_err| {
-                format!(
-                    "{selected_provider} segmentation failed ({err}); builtin CPU fallback also failed ({fallback_err})"
-                )
-            })?;
-            let attempted_model = selected_model_path
-                .as_deref()
-                .map(|path| format!(" using {path}"))
-                .unwrap_or_default();
-            Ok((
-                result,
-                builtin_stage_telemetry(
-                    "builtin-cpu",
-                    device_request,
-                    [
-                        selection_reason,
-                        selected_resolution
-                            .as_ref()
-                            .and_then(|value| value.fallback_reason.clone()),
-                        Some(format!(
-                            "{selected_provider}{attempted_model} segmentation failed: {err}; using deterministic builtin CPU segmenter"
-                        )),
-                    ],
-                ),
-            ))
-        }
-    }
+    let provider = segmenter.provider().to_string();
+    let result = segmenter.segment(request)?;
+    Ok((
+        result,
+        builtin_stage_telemetry(&provider, device_request, [selection_reason]),
+    ))
 }
 
 fn run_alpha_matte_with_fallback(
     selection: subject_matte::MatterSelection,
     image: &RgbaImage,
     trimap: &GrayImage,
-    device_request: OnnxDeviceRequest,
+    device_request: DeviceRequest,
 ) -> Result<(GrayImage, StageTelemetry), String> {
     let subject_matte::MatterSelection {
         matter,
         fallback_reason: selection_reason,
     } = selection;
-    let selected_provider = matter.provider().to_string();
-    let selected_model_path = matter
-        .model_path()
-        .map(|path| path.to_string_lossy().to_string());
-    let selected_resolution = matter.onnx_resolution().cloned();
-
-    if selected_provider == "builtin-cpu-matte" {
-        let mask = matter.matte(image, trimap)?;
-        return Ok((
-            mask,
-            builtin_stage_telemetry("builtin-cpu-matte", device_request, [selection_reason]),
-        ));
-    }
-
-    match matter.matte(image, trimap) {
-        Ok(mask) => Ok((
-            mask,
-            learned_stage_telemetry(
-                selected_provider,
-                selected_model_path,
-                selected_resolution.as_ref(),
-                device_request,
-                selection_reason,
-            ),
-        )),
-        Err(err) => {
-            let fallback = subject_matte::BuiltinCpuMatter;
-            let mask = fallback.matte(image, trimap).map_err(|fallback_err| {
-                format!(
-                    "{selected_provider} matting failed ({err}); builtin CPU fallback also failed ({fallback_err})"
-                )
-            })?;
-            let attempted_model = selected_model_path
-                .as_deref()
-                .map(|path| format!(" using {path}"))
-                .unwrap_or_default();
-            Ok((
-                mask,
-                builtin_stage_telemetry(
-                    "builtin-cpu-matte",
-                    device_request,
-                    [
-                        selection_reason,
-                        selected_resolution
-                            .as_ref()
-                            .and_then(|value| value.fallback_reason.clone()),
-                        Some(format!(
-                            "{selected_provider}{attempted_model} matting failed: {err}; using deterministic builtin CPU matter"
-                        )),
-                    ],
-                ),
-            ))
-        }
-    }
+    let provider = matter.provider().to_string();
+    let mask = matter.matte(image, trimap)?;
+    Ok((
+        mask,
+        builtin_stage_telemetry(&provider, device_request, [selection_reason]),
+    ))
 }
 
 pub(super) fn execute_studio_subject_mask(
@@ -332,10 +218,10 @@ pub(super) fn execute_studio_subject_mask(
     let mut provider = "rust-native".to_string();
     let mut engine: Option<&'static str> = None;
     let mut engine_fallback_reason: Option<String> = None;
-    // The node's `device` param: the requested execution device for the ONNX
-    // lane (`auto` when unset). Recorded whenever segmentation or matting owns
+    // Legacy device requests remain reportable even though these deterministic
+    // stages now run on CPU only. Recorded whenever segmentation or matting owns
     // the stable top-level summary, so a request is never silently dropped.
-    let device_request = OnnxDeviceRequest::from_param(&param_or(node, "device", "auto"));
+    let device_request = DeviceRequest::from_param(&param_or(node, "device", "auto"));
     let mut engine_device: Option<&'static str> = None;
     let mut model_path: Option<String> = None;
 
@@ -353,7 +239,6 @@ pub(super) fn execute_studio_subject_mask(
             Some(auto) => {
                 let prompt = optional(studio_value_to_string(inputs.get("prompt")));
                 let points = parse_point_prompts(inputs.get("edit_paths"));
-                let sam2_variant = Sam2Variant::from_param(&param_or(node, "sam2_variant", "tiny"));
                 let request = SegmentRequest {
                     image: &image,
                     mode: auto,
@@ -361,8 +246,7 @@ pub(super) fn execute_studio_subject_mask(
                     prompt: prompt.as_deref(),
                     points: &points,
                 };
-                let selection =
-                    select_segmenter_for_mode(auto, &points, sam2_variant, device_request);
+                let selection = select_segmenter_for_mode(auto, &points);
                 let (result, telemetry) =
                     run_auto_segment_with_fallback(selection, &request, device_request)?;
                 provider = telemetry.provider.clone();
@@ -417,8 +301,8 @@ pub(super) fn execute_studio_subject_mask(
     // Continuous alpha matting: resolve the binary edge into soft alpha (hair /
     // glass / translucency) via a trimap. Off by default so Phase 1 stays
     // binary + deterministic; behind the flag (or whenever the Image Editor
-    // "Matting" brush painted an unknown band) it runs ViTMatte when its weight
-    // resolves, else the deterministic builtin guided-filter fallback.
+    // "Matting" brush painted an unknown band) it runs the deterministic
+    // built-in guided filter.
     // The trimap that drove matting, kept so the downstream Refine node can
     // protect the *unknown* band (genuine hair / fur / glass soft alpha) from
     // its erode / feather edge clean-up instead of treating it as fringe.
@@ -433,7 +317,7 @@ pub(super) fn execute_studio_subject_mask(
         for (points, radius) in &matte_strokes {
             stamp_stroke(&mut trimap, points, *radius, subject_matte::TRIMAP_UNKNOWN);
         }
-        let selection = subject_matte::matter(device_request);
+        let selection = subject_matte::matter();
         let (matte, telemetry) =
             run_alpha_matte_with_fallback(selection, &image, &trimap, device_request)?;
         mask = matte;
@@ -687,8 +571,8 @@ fn apply_edit_paths(
         if layer.get("visible").and_then(Value::as_bool) == Some(false) {
             continue;
         }
-        // Adjustment layers (M6) carry no edit stack: they tone-map the
-        // composite below them per a 256-entry LUT, lerped by opacity.
+        // Adjustment layers carry no edit stack: they tone-map the
+        // composite below them directly, lerped by opacity.
         if layer.get("kind").and_then(Value::as_str) == Some("adjustment") {
             if let Some(adjustment) = layer.get("adjustment") {
                 let opacity = layer
@@ -879,9 +763,8 @@ mod replay_cache {
     }
 }
 
-/// Apply an adjustment layer's tone map to the composite in place (M6):
-/// build the 256-entry LUT for its params and lerp each pixel toward the
-/// mapped value by the layer `opacity`.
+/// Apply an adjustment layer's tone map directly and lerp each pixel toward
+/// the mapped value by the layer `opacity`.
 fn apply_adjustment(
     mask: &mut GrayImage,
     adjustment: &Value,
@@ -891,12 +774,12 @@ fn apply_adjustment(
     let Some(kind) = adjustment.get("type").and_then(Value::as_str) else {
         return;
     };
-    let Some(lut) = adjustment_lut(kind, adjustment) else {
+    let Some(tone_map) = AdjustmentToneMap::from_value(kind, adjustment) else {
         return;
     };
     for p in mask.pixels_mut() {
         let v = f64::from(p.0[0]);
-        let mapped = f64::from(lut[p.0[0] as usize]);
+        let mapped = f64::from(tone_map.map(v));
         p.0[0] = (v + (mapped - v) * opacity).round().clamp(0.0, 255.0) as u8;
     }
     operations.push(json!({
@@ -906,79 +789,104 @@ fn apply_adjustment(
     }));
 }
 
-/// Build the 256-entry LUT an adjustment layer's params resolve to. Mirrors
-/// `adjustmentLut` in `maskMorphology.ts` exactly, so the proxy preview and
-/// the run cannot drift. Unknown kinds return `None` (ignored).
-fn adjustment_lut(kind: &str, adjustment: &Value) -> Option<[u8; 256]> {
-    let field = |key: &str, default: f64| {
-        adjustment
-            .get(key)
-            .and_then(Value::as_f64)
-            .unwrap_or(default)
-    };
-    let mut lut = [0u8; 256];
-    match kind {
-        "levels" => {
-            let in_black = field("in_black", 0.0).clamp(0.0, 255.0);
-            let in_white = field("in_white", 255.0).clamp(0.0, 255.0);
-            let gamma = field("gamma", 1.0).max(1e-6);
-            let out_black = field("out_black", 0.0).clamp(0.0, 255.0);
-            let out_white = field("out_white", 255.0).clamp(0.0, 255.0);
-            let span = (in_white - in_black).max(1e-6);
-            for (v, out) in lut.iter_mut().enumerate() {
-                let t = ((v as f64 - in_black) / span)
+enum AdjustmentToneMap {
+    Levels {
+        in_black: f64,
+        span: f64,
+        gamma: f64,
+        out_black: f64,
+        out_white: f64,
+    },
+    Curve(Vec<(f64, f64)>),
+    BrightnessContrast {
+        brightness: f64,
+        slope: f64,
+    },
+}
+
+impl AdjustmentToneMap {
+    fn from_value(kind: &str, adjustment: &Value) -> Option<Self> {
+        let field = |key: &str, default: f64| {
+            adjustment
+                .get(key)
+                .and_then(Value::as_f64)
+                .unwrap_or(default)
+        };
+        match kind {
+            "levels" => {
+                let in_black = field("in_black", 0.0).clamp(0.0, 255.0);
+                let in_white = field("in_white", 255.0).clamp(0.0, 255.0);
+                let gamma = field("gamma", 1.0).max(1e-6);
+                let out_black = field("out_black", 0.0).clamp(0.0, 255.0);
+                let out_white = field("out_white", 255.0).clamp(0.0, 255.0);
+                let span = (in_white - in_black).max(1e-6);
+                Some(Self::Levels {
+                    in_black,
+                    span,
+                    gamma,
+                    out_black,
+                    out_white,
+                })
+            }
+            "curve" => {
+                let mut points: Vec<(f64, f64)> = adjustment
+                    .get("points")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|point| {
+                        let point = point.as_array()?;
+                        Some((point.first()?.as_f64()?, point.get(1)?.as_f64()?))
+                    })
+                    .collect();
+                points.sort_by(|a, b| a.0.total_cmp(&b.0));
+                Some(Self::Curve(points))
+            }
+            "brightness_contrast" => {
+                let brightness = field("brightness", 0.0).clamp(-100.0, 100.0) / 100.0 * 255.0;
+                let slope = 1.0 + field("contrast", 0.0).clamp(-100.0, 100.0) / 100.0;
+                Some(Self::BrightnessContrast { brightness, slope })
+            }
+            _ => None,
+        }
+    }
+
+    fn map(&self, value: f64) -> u8 {
+        let mapped = match self {
+            Self::Levels {
+                in_black,
+                span,
+                gamma,
+                out_black,
+                out_white,
+            } => {
+                let t = ((value - in_black) / span)
                     .clamp(0.0, 1.0)
                     .powf(1.0 / gamma);
-                *out = (out_black + t * (out_white - out_black))
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                out_black + t * (out_white - out_black)
             }
-        }
-        "curve" => {
-            let mut pts: Vec<(f64, f64)> = adjustment
-                .get("points")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|p| {
-                    let p = p.as_array()?;
-                    Some((p.first()?.as_f64()?, p.get(1)?.as_f64()?))
-                })
-                .collect();
-            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
-            for (v, out) in lut.iter_mut().enumerate() {
-                let v = v as f64;
-                *out = if pts.len() < 2 {
-                    v as u8
-                } else if v <= pts[0].0 {
-                    pts[0].1.round().clamp(0.0, 255.0) as u8
-                } else if v >= pts[pts.len() - 1].0 {
-                    pts[pts.len() - 1].1.round().clamp(0.0, 255.0) as u8
-                } else {
-                    let i = pts
-                        .iter()
-                        .position(|p| p.0 >= v)
-                        .unwrap_or(pts.len() - 1)
-                        .max(1);
-                    let (x0, y0) = pts[i - 1];
-                    let (x1, y1) = pts[i];
-                    let t = (v - x0) / (x1 - x0).max(1e-6);
-                    (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8
-                };
+            Self::Curve(points) if points.len() < 2 => value,
+            Self::Curve(points) if value <= points[0].0 => points[0].1,
+            Self::Curve(points) if value >= points[points.len() - 1].0 => {
+                points[points.len() - 1].1
             }
-        }
-        "brightness_contrast" => {
-            let brightness = field("brightness", 0.0).clamp(-100.0, 100.0) / 100.0 * 255.0;
-            let slope = 1.0 + field("contrast", 0.0).clamp(-100.0, 100.0) / 100.0;
-            for (v, out) in lut.iter_mut().enumerate() {
-                *out = ((v as f64 - 127.5) * slope + 127.5 + brightness)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+            Self::Curve(points) => {
+                let index = points
+                    .iter()
+                    .position(|point| point.0 >= value)
+                    .unwrap_or(points.len() - 1)
+                    .max(1);
+                let (x0, y0) = points[index - 1];
+                let (x1, y1) = points[index];
+                let t = (value - x0) / (x1 - x0).max(1e-6);
+                y0 + t * (y1 - y0)
             }
-        }
-        _ => return None,
+            Self::BrightnessContrast { brightness, slope } => {
+                (value - 127.5) * slope + 127.5 + brightness
+            }
+        };
+        mapped.round().clamp(0.0, 255.0) as u8
     }
-    Some(lut)
 }
 
 /// One blended sample per the layer blend mode (grayscale 0..255; mirrors the
@@ -1327,8 +1235,7 @@ fn apply_queued_operation(
             );
         }
         Some("object_select") => {
-            // Object selection (M16): the segmenter (SAM 2 when its weights
-            // resolve, else the builtin fallback) masks the object inside
+            // Object selection (M16): the deterministic segmenter masks the object inside
             // the `region` box; the result unions into the mask. This editor
             // helper remains explicitly CPU-only and reports its own provider;
             // it must not inherit the node's device request silently.
@@ -1745,6 +1652,7 @@ fn apply_queued_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::studio::subject_segment::BuiltinCpuSegmenter;
     use image::Rgba;
     use std::collections::HashSet;
 
@@ -1791,38 +1699,6 @@ mod tests {
         GrayImage::from_pixel(width, height, Luma([value]))
     }
 
-    struct FailingSegmenter;
-
-    impl SubjectSegmenter for FailingSegmenter {
-        fn provider(&self) -> &str {
-            "broken-onnx-segmenter"
-        }
-
-        fn model_path(&self) -> Option<String> {
-            Some("C:/models/broken-segmenter.onnx".to_string())
-        }
-
-        fn segment(&self, _request: &SegmentRequest<'_>) -> Result<SegmentResult, String> {
-            Err("synthetic segmentation output contract failure".to_string())
-        }
-    }
-
-    struct FailingMatter;
-
-    impl subject_matte::AlphaMatter for FailingMatter {
-        fn provider(&self) -> &str {
-            "broken-vitmatte"
-        }
-
-        fn model_path(&self) -> Option<&Path> {
-            Some(Path::new("C:/models/broken-vitmatte.onnx"))
-        }
-
-        fn matte(&self, _image: &RgbaImage, _trimap: &GrayImage) -> Result<GrayImage, String> {
-            Err("synthetic ViTMatte output contract failure".to_string())
-        }
-    }
-
     #[test]
     fn rejects_missing_image_input() {
         let err =
@@ -1851,93 +1727,20 @@ mod tests {
         let selection = SegmenterSelection {
             segmenter: Box::new(BuiltinCpuSegmenter),
             fallback_reason: Some(
-                "could not load u2netp session: synthetic runtime failure; using deterministic builtin CPU segmenter"
+                "retired local segmenter was configured; using deterministic builtin CPU segmenter"
                     .to_string(),
             ),
         };
 
         let (_, telemetry) =
-            run_auto_segment_with_fallback(selection, &request, OnnxDeviceRequest::Gpu).unwrap();
+            run_auto_segment_with_fallback(selection, &request, DeviceRequest::Gpu).unwrap();
         assert_eq!(telemetry.provider, "builtin-cpu");
         assert_eq!(telemetry.engine, "cpu");
         assert_eq!(telemetry.device, "cpu");
         assert_eq!(telemetry.device_requested, "gpu");
         assert!(telemetry.model_path.is_none());
         let reason = telemetry.fallback_reason.unwrap();
-        assert!(reason.contains("synthetic runtime failure"), "{reason}");
-    }
-
-    #[test]
-    fn segmenter_contract_failure_runs_builtin_cpu_and_preserves_context() {
-        let mut image = RgbaImage::from_pixel(12, 12, Rgba([120, 120, 120, 255]));
-        for y in 4..8 {
-            for x in 4..8 {
-                image.put_pixel(x, y, Rgba([220, 20, 20, 255]));
-            }
-        }
-        let request = SegmentRequest {
-            image: &image,
-            mode: AutoMode::Subject,
-            placeholder: None,
-            prompt: None,
-            points: &[],
-        };
-        let selection = SegmenterSelection {
-            segmenter: Box::new(FailingSegmenter),
-            fallback_reason: Some("higher-priority SAM2 session failed".to_string()),
-        };
-
-        let (result, telemetry) =
-            run_auto_segment_with_fallback(selection, &request, OnnxDeviceRequest::DirectMl)
-                .unwrap();
-        assert_eq!(result.mask.get_pixel(5, 5).0[0], MASK_ON);
-        assert_eq!(telemetry.provider, "builtin-cpu");
-        assert_eq!(telemetry.device, "cpu");
-        assert_eq!(telemetry.device_requested, "directml");
-        assert!(telemetry.model_path.is_none());
-        let reason = telemetry.fallback_reason.unwrap();
-        assert!(
-            reason.contains("higher-priority SAM2 session failed"),
-            "{reason}"
-        );
-        assert!(reason.contains("broken-segmenter.onnx"), "{reason}");
-        assert!(reason.contains("output contract failure"), "{reason}");
-    }
-
-    #[test]
-    fn vitmatte_contract_failure_runs_builtin_cpu_and_preserves_context() {
-        let image = RgbaImage::from_pixel(24, 24, Rgba([120, 120, 120, 255]));
-        let mask = {
-            let mut value = GrayImage::from_pixel(24, 24, Luma([MASK_OFF]));
-            for y in 8..16 {
-                for x in 8..16 {
-                    value.put_pixel(x, y, Luma([MASK_ON]));
-                }
-            }
-            value
-        };
-        let trimap = subject_matte::trimap_from_mask(&mask, 3);
-        let selection = subject_matte::MatterSelection {
-            matter: Box::new(FailingMatter),
-            fallback_reason: Some("earlier ViTMatte session attempt failed".to_string()),
-        };
-
-        let (alpha, telemetry) =
-            run_alpha_matte_with_fallback(selection, &image, &trimap, OnnxDeviceRequest::Cuda)
-                .unwrap();
-        assert_eq!(alpha.dimensions(), image.dimensions());
-        assert_eq!(telemetry.provider, "builtin-cpu-matte");
-        assert_eq!(telemetry.engine, "cpu");
-        assert_eq!(telemetry.device, "cpu");
-        assert_eq!(telemetry.device_requested, "cuda");
-        assert!(telemetry.model_path.is_none());
-        let reason = telemetry.fallback_reason.unwrap();
-        assert!(
-            reason.contains("earlier ViTMatte session attempt failed"),
-            "{reason}"
-        );
-        assert!(reason.contains("broken-vitmatte.onnx"), "{reason}");
-        assert!(reason.contains("output contract failure"), "{reason}");
+        assert!(reason.contains("retired local segmenter"), "{reason}");
     }
 
     #[test]
@@ -2266,10 +2069,7 @@ mod tests {
         assert_eq!(log.len(), 1);
         assert_eq!(log[0]["status"], "applied");
         assert!(log[0]["provider"].as_str().is_some());
-        assert!(matches!(
-            log[0]["engine"].as_str(),
-            Some("onnxruntime" | "cpu")
-        ));
+        assert_eq!(log[0]["engine"], "cpu");
         assert_eq!(log[0]["device"], "cpu");
         assert_eq!(log[0]["device_requested"], "cpu");
         assert!(log[0]["device_fallback_reason"].is_null());
@@ -2298,10 +2098,7 @@ mod tests {
         assert_eq!(log.len(), 1);
         assert_eq!(log[0]["status"], "applied");
         assert!(log[0]["provider"].as_str().is_some());
-        assert!(matches!(
-            log[0]["engine"].as_str(),
-            Some("onnxruntime" | "cpu")
-        ));
+        assert_eq!(log[0]["engine"], "cpu");
         assert_eq!(log[0]["device"], "cpu");
         assert_eq!(log[0]["device_requested"], "cpu");
         assert!(log[0]["device_fallback_reason"].is_null());
@@ -3091,29 +2888,32 @@ mod tests {
     }
 
     #[test]
-    fn adjustment_lut_matches_the_proxy_formulas() {
-        // Mirrors the vitest cases over `adjustmentLut` in
+    fn adjustment_tone_map_matches_the_proxy_formulas() {
+        // Mirrors the vitest cases over `adjustmentToneMapper` in
         // `maskMorphology.test.ts` — the two implementations must agree.
-        let levels = adjustment_lut("levels", &json!({ "in_black": 64, "in_white": 192 })).unwrap();
-        assert_eq!(levels[64], 0);
-        assert_eq!(levels[128], 128);
-        assert_eq!(levels[192], 255);
+        let levels =
+            AdjustmentToneMap::from_value("levels", &json!({ "in_black": 64, "in_white": 192 }))
+                .unwrap();
+        assert_eq!(levels.map(64.0), 0);
+        assert_eq!(levels.map(128.0), 128);
+        assert_eq!(levels.map(192.0), 255);
 
-        let curve = adjustment_lut(
+        let curve = AdjustmentToneMap::from_value(
             "curve",
             &json!({ "points": [[0, 0], [128, 192], [255, 255]] }),
         )
         .unwrap();
-        assert_eq!(curve[64], 96);
-        assert_eq!(curve[128], 192);
-        let identity = adjustment_lut("curve", &json!({})).unwrap();
-        assert_eq!(identity[77], 77);
+        assert_eq!(curve.map(64.0), 96);
+        assert_eq!(curve.map(128.0), 192);
+        let identity = AdjustmentToneMap::from_value("curve", &json!({})).unwrap();
+        assert_eq!(identity.map(77.0), 77);
 
-        let bc = adjustment_lut("brightness_contrast", &json!({ "contrast": 100 })).unwrap();
-        assert_eq!(bc[64], 1);
-        assert_eq!(bc[192], 255);
+        let bc = AdjustmentToneMap::from_value("brightness_contrast", &json!({ "contrast": 100 }))
+            .unwrap();
+        assert_eq!(bc.map(64.0), 1);
+        assert_eq!(bc.map(192.0), 255);
 
-        assert!(adjustment_lut("posterize", &json!({})).is_none());
+        assert!(AdjustmentToneMap::from_value("posterize", &json!({})).is_none());
     }
 
     #[test]
@@ -3318,15 +3118,10 @@ mod tests {
 
         let out = run(&node, &inputs);
         let report = out.get("matte_report").unwrap();
-        // An auto mode reports the segmenter that produced the base matte: the
-        // builtin fallback, or a model backend (u2netp / birefnet) when a weight
-        // resolves. All are valid; the point is it is no longer manual
-        // `rust-native`.
+        // An auto mode reports the deterministic segmenter that produced the
+        // base matte rather than the manual `rust-native` path.
         let provider = report.get("provider").and_then(Value::as_str).unwrap();
-        assert!(
-            matches!(provider, "builtin-cpu" | "u2netp" | "birefnet"),
-            "unexpected auto provider {provider}"
-        );
+        assert_eq!(provider, "builtin-cpu");
         assert_eq!(
             report.get("mode").and_then(Value::as_str),
             Some("auto_subject")
@@ -3338,22 +3133,15 @@ mod tests {
         assert_eq!(subjects.len(), 1);
         let coverage = report.get("mask_coverage").and_then(Value::as_f64).unwrap();
         assert!(coverage > 0.0 && coverage <= 1.0, "coverage={coverage}");
-        // An auto mode always carries engine telemetry (shared DeviceReport
-        // vocabulary) with a visible reason when it did not accelerate.
+        // An auto mode always carries deterministic CPU engine telemetry.
         let engine = report.get("engine").and_then(Value::as_str).unwrap();
-        assert!(
-            matches!(engine, "cpu" | "onnxruntime"),
-            "unexpected engine {engine}"
-        );
+        assert_eq!(engine, "cpu");
         assert_eq!(report.get("device").and_then(Value::as_str), Some("cpu"));
         assert_eq!(
             report.get("device_requested").and_then(Value::as_str),
             Some("auto")
         );
-        assert!(report
-            .get("engine_fallback_reason")
-            .and_then(Value::as_str)
-            .is_some());
+        assert!(report.get("engine_fallback_reason").is_none());
 
         let auto_op = report
             .get("operations")
@@ -3372,8 +3160,7 @@ mod tests {
         assert!(auto_op.get("model_path").is_some());
         assert!(auto_op
             .get("device_fallback_reason")
-            .and_then(Value::as_str)
-            .is_some());
+            .is_some_and(Value::is_null));
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3465,14 +3252,11 @@ mod tests {
                 .iter()
                 .find(|op| op.get("type").and_then(Value::as_str) == Some("alpha_matting"))
                 .unwrap();
-            assert!(matches!(
+            assert_eq!(
                 alpha_op.get("provider").and_then(Value::as_str),
-                Some("vitmatte" | "builtin-cpu-matte")
-            ));
-            assert!(matches!(
-                alpha_op.get("engine").and_then(Value::as_str),
-                Some("onnxruntime" | "cpu")
-            ));
+                Some("builtin-cpu-matte")
+            );
+            assert_eq!(alpha_op.get("engine").and_then(Value::as_str), Some("cpu"));
             assert_eq!(alpha_op.get("device").and_then(Value::as_str), Some("cpu"));
             assert_eq!(
                 alpha_op.get("device_requested").and_then(Value::as_str),
@@ -3485,8 +3269,7 @@ mod tests {
                 .is_some());
 
             // With no auto-segmentation stage, the top-level summary is the
-            // complete alpha-matting tuple, never rust-native mixed with a
-            // ViTMatte/builtin engine or model.
+            // complete alpha-matting tuple, never mixed with another stage.
             assert_eq!(report.get("provider"), alpha_op.get("provider"));
             assert_eq!(report.get("engine"), alpha_op.get("engine"));
             assert_eq!(report.get("device"), alpha_op.get("device"));
@@ -3713,8 +3496,10 @@ mod tests {
             auto_op.get("device_requested")
         );
         assert_eq!(
-            report.get("engine_fallback_reason"),
-            auto_op.get("device_fallback_reason")
+            report.get("engine_fallback_reason").and_then(Value::as_str),
+            auto_op
+                .get("device_fallback_reason")
+                .and_then(Value::as_str)
         );
         match auto_op.get("model_path") {
             Some(Value::Null) | None => assert!(report.get("model_path").is_none()),

@@ -1,6 +1,5 @@
 //! Shared image-loading hardening for native-Rust Studio cards (the `Compute`
-//! executor lane). This is the Rust counterpart of the Python bridge's
-//! `_load_rgba` / `_load_mask` helpers: it rejects a decompression bomb *before*
+//! executor lane). It rejects a decompression bomb *before*
 //! allocating the decoded buffer, normalises the colour space / bit depth to a
 //! plain 8-bit surface, applies EXIF orientation, and reports the provenance
 //! (`source_mode`, `exif_transposed`) so a card's report can mirror the enriched
@@ -9,6 +8,7 @@
 //! Every later Rust card should load its pixels through here so the decode
 //! guard and colour-space behaviour stay identical across cards.
 
+use std::io::{Read, Seek};
 use std::path::Path;
 
 use image::metadata::Orientation;
@@ -20,15 +20,15 @@ use image::{
 use super::image_buffer;
 use super::working_image::{self, WorkingImage, WorkingSpace};
 
-/// Default decode budget, aligned with the Python PSD chain
-/// (`--max-decode-pixels`). A source whose declared `width * height` exceeds
-/// this is rejected before any pixel buffer is allocated.
+/// Default decode budget shared by the native PSD and image pipelines. A
+/// source whose declared `width * height` exceeds this is rejected before any
+/// pixel buffer is allocated.
 pub(crate) const DEFAULT_MAX_DECODE_PIXELS: u64 = 96_000_000;
 
 /// Provenance recorded while loading, surfaced into a card's report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadMeta {
-    /// The source colour mode label (e.g. `RGB`, `RGBA`, `CMYK`, `L`).
+    /// The source colour mode label (e.g. `RGB`, `RGBA`, `L`).
     pub(crate) source_mode: String,
     /// Whether a non-identity EXIF orientation was normalised away.
     pub(crate) exif_transposed: bool,
@@ -53,8 +53,7 @@ pub(crate) struct LoadedWorking {
 /// The source colour type and its embedded ICC profile (if any), read from the
 /// decoder header without decoding the pixels. The enhance fast path uses this
 /// to pick a colour-space-aware decode strategy and to carry the profile onto
-/// the output (mirroring the Python path's "preserve ICC when the colour model
-/// is unchanged").
+/// the output when the colour model is unchanged.
 #[derive(Debug, Clone)]
 pub(crate) struct SourceProbe {
     pub(crate) color: ExtendedColorType,
@@ -62,40 +61,157 @@ pub(crate) struct SourceProbe {
 }
 
 /// Read the source colour type + ICC profile from the header only (no pixel
-/// decode). Used by the in-process enhance fast path to pick its decode /
-/// colour-management strategy and, for a CMYK / float input it still cannot
-/// reproduce faithfully, to route back to the Python pipeline.
+/// decode). Used by the in-process enhance fast path to pick its decode and
+/// colour-management strategy.
 pub(crate) fn probe_source(path: &Path) -> Result<SourceProbe, String> {
     let reader = ImageReader::open(path)
         .map_err(|err| format!("failed to open {}: {err}", path.display()))?
         .with_guessed_format()
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let format = reader.format();
+    reject_four_component_jpeg_path(path, format)?;
     let mut decoder = reader
         .into_decoder()
         .map_err(|err| format!("failed to decode {}: {err}", path.display()))?;
-    let mut color = decoder.original_color_type();
+    let color = decoder.original_color_type();
+    reject_four_channel_source(path, color)?;
     let icc = decoder
         .icc_profile()
         .ok()
         .flatten()
         .or_else(|| tiff_icc_fallback(path, format));
 
-    // The `image` crate reports Adobe CMYK and YCCK JPEGs as `Rgb8` — it
-    // converts them to RGB on decode and drops the embedded ICC. Sniff the JPEG
-    // ourselves and reclassify those as CMYK so the enhance path routes them to
-    // `cmyk_decode` (raw inks + ICC, colour-managed to sRGB) instead of the
-    // lossy generic RGB decode. `decode_cmyk` still returns `None` for the CMYK
-    // shapes it won't take faithfully, deferring those to Python.
-    if format == Some(ImageFormat::Jpeg) && color != ExtendedColorType::Cmyk8 {
-        if let Ok(bytes) = std::fs::read(path) {
-            if super::cmyk_decode::is_cmyk_family_jpeg(&bytes) {
-                color = ExtendedColorType::Cmyk8;
-            }
-        }
+    Ok(SourceProbe { color, icc })
+}
+
+fn reject_four_channel_source(path: &Path, color: ExtendedColorType) -> Result<(), String> {
+    if matches!(color, ExtendedColorType::Cmyk8) {
+        return Err(format!(
+            "four-channel source images are not supported: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn reject_four_component_jpeg_path(path: &Path, format: Option<ImageFormat>) -> Result<(), String> {
+    if format != Some(ImageFormat::Jpeg) {
+        return Ok(());
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+    if jpeg_has_four_components(std::io::BufReader::new(file))
+        .map_err(|err| format!("failed to inspect {}: {err}", path.display()))?
+    {
+        return Err(format!(
+            "four-component JPEG images are not supported: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn reject_four_component_jpeg_bytes(
+    bytes: &[u8],
+    format: Option<ImageFormat>,
+) -> Result<(), String> {
+    if format == Some(ImageFormat::Jpeg)
+        && jpeg_has_four_components(std::io::Cursor::new(bytes))
+            .map_err(|err| format!("failed to inspect image: {err}"))?
+    {
+        return Err("four-component JPEG images are not supported".to_string());
+    }
+    Ok(())
+}
+
+/// Read just enough JPEG marker data to find the first start-of-frame segment.
+/// Four-component JPEGs are rejected before `image` can convert and report them
+/// as ordinary RGB. Marker payloads are skipped with `Seek`, so large files are
+/// not copied into memory and no image samples are decoded.
+fn jpeg_has_four_components<R: Read + Seek>(mut reader: R) -> std::io::Result<bool> {
+    let mut soi = [0u8; 2];
+    if !read_exact_or_eof(&mut reader, &mut soi)? || soi != [0xFF, 0xD8] {
+        return Ok(false);
     }
 
-    Ok(SourceProbe { color, icc })
+    loop {
+        let marker = loop {
+            let Some(byte) = read_byte(&mut reader)? else {
+                return Ok(false);
+            };
+            if byte != 0xFF {
+                continue;
+            }
+            let marker = loop {
+                let Some(next) = read_byte(&mut reader)? else {
+                    return Ok(false);
+                };
+                if next != 0xFF {
+                    break next;
+                }
+            };
+            if marker != 0x00 {
+                break marker;
+            }
+        };
+
+        if marker == 0xD9 || marker == 0xDA {
+            return Ok(false);
+        }
+        if marker == 0xD8 || marker == 0x01 || (0xD0..=0xD7).contains(&marker) {
+            continue;
+        }
+
+        let mut length = [0u8; 2];
+        if !read_exact_or_eof(&mut reader, &mut length)? {
+            return Ok(false);
+        }
+        let payload_len = usize::from(u16::from_be_bytes(length)).saturating_sub(2);
+        if payload_len == 0 {
+            return Ok(false);
+        }
+
+        if is_start_of_frame(marker) {
+            if payload_len < 6 {
+                return Ok(false);
+            }
+            let mut frame_header = [0u8; 6];
+            if !read_exact_or_eof(&mut reader, &mut frame_header)? {
+                return Ok(false);
+            }
+            if frame_header[5] == 4 {
+                return Ok(true);
+            }
+            reader.seek(std::io::SeekFrom::Current((payload_len - 6) as i64))?;
+            continue;
+        }
+
+        reader.seek(std::io::SeekFrom::Current(payload_len as i64))?;
+    }
+}
+
+fn is_start_of_frame(marker: u8) -> bool {
+    matches!(
+        marker,
+        0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF
+    )
+}
+
+fn read_byte(reader: &mut impl Read) -> std::io::Result<Option<u8>> {
+    let mut byte = [0u8; 1];
+    if read_exact_or_eof(reader, &mut byte)? {
+        Ok(Some(byte[0]))
+    } else {
+        Ok(None)
+    }
+}
+
+fn read_exact_or_eof(reader: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<bool> {
+    match reader.read_exact(buffer) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(err) => Err(err),
+    }
 }
 
 /// Human-readable label for the *source* colour type, so a report can say what
@@ -108,7 +224,6 @@ pub(crate) fn source_mode_label(color: ExtendedColorType) -> String {
         ExtendedColorType::La8 | ExtendedColorType::La16 => "LA",
         ExtendedColorType::Bgr8 => "RGB",
         ExtendedColorType::Bgra8 => "RGBA",
-        ExtendedColorType::Cmyk8 => "CMYK",
         ExtendedColorType::Rgb4 | ExtendedColorType::Rgba4 => "RGBA",
         other => return format!("{other:?}"),
     }
@@ -167,12 +282,9 @@ pub(crate) fn load_rgba(path: &Path, max_pixels: u64) -> Result<LoadedRgba, Stri
 
 /// Decode a source into the canonical 16-bit [`WorkingImage`] carrier (the
 /// cold, un-cached path — [`load_rgba`] handles the in-process cache before
-/// calling here). Each surface is tagged with its *actual* space: profiled
-/// (wide-gamut) CMYK is colour-managed straight into 16-bit `ProPhoto`, while
-/// plain images and unprofiled/naive CMYK stay `Srgb` (a pure 8→16-bit widen).
-/// [`load_rgba`]'s [`WorkingImage::to_srgb_rgba8`] egress converts `ProPhoto`
-/// down to sRGB but leaves `Srgb` an exact bit-narrow, so only sources that
-/// truly carry wide-gamut information change at the card boundary.
+/// calling here). Plain screen-media inputs stay `Srgb` as a pure 8→16-bit
+/// widen; a ProPhoto surface written by this application is recognised by its
+/// profile and restored at full precision.
 pub(crate) fn load_working(path: &Path, max_pixels: u64) -> Result<LoadedWorking, String> {
     // A manual card upstream may have published its 16-bit canonical surface to
     // the in-process [`image_buffer`] cache; a fresh hit returns the wide-gamut
@@ -180,19 +292,6 @@ pub(crate) fn load_working(path: &Path, max_pixels: u64) -> Result<LoadedWorking
     // falls back to the identical disk decode below.
     if let Some(hit) = image_buffer::lookup_working(path, max_pixels) {
         return Ok(hit);
-    }
-    // CMYK-family sources (Adobe CMYK / YCCK JPEG, CMYK TIFF): the `image` crate
-    // would decode them to RGB and silently discard the embedded ICC, so every
-    // native card that loaded through here (crop, subject mask, ...) got
-    // colour-shifted pixels. Decode the raw inks + profile ourselves and
-    // colour-manage into the canonical surface (ProPhoto for profiled CMYK, sRGB
-    // for naive). `decode_cmyk` returns `None` for non-CMYK sources and the CMYK
-    // shapes it won't take faithfully (an unmarked CMYK JPEG); both, and any
-    // decode error, fall through to the generic decode below (unchanged).
-    if let Ok(Some(raw)) = super::cmyk_decode::decode_cmyk(path, max_pixels) {
-        if let Some(loaded) = cmyk_to_working(&raw) {
-            return Ok(loaded);
-        }
     }
     let (image, meta, icc) = load_dynamic(path, max_pixels)?;
     // A 16-bit surface tagged with the exact ProPhoto profile our own manual
@@ -253,9 +352,13 @@ pub(crate) fn decode_display_from_memory(bytes: &[u8]) -> Result<DynamicImage, S
         .with_guessed_format()
         .map_err(|err| format!("failed to read image: {err}"))?;
     let format = reader.format();
+    reject_four_component_jpeg_bytes(bytes, format)?;
     let mut decoder = reader
         .into_decoder()
         .map_err(|err| format!("failed to decode image: {err}"))?;
+    if matches!(decoder.original_color_type(), ExtendedColorType::Cmyk8) {
+        return Err("four-channel source images are not supported".to_string());
+    }
     let icc = decoder.icc_profile().ok().flatten().or_else(|| {
         (format == Some(ImageFormat::Tiff))
             .then(|| tiff_icc_from_reader(std::io::Cursor::new(bytes)))
@@ -375,45 +478,6 @@ pub(crate) fn write_working_tiff(path: &Path, image: &WorkingImage) -> Result<()
     }
 }
 
-/// Build an opaque 16-bit [`WorkingImage`] from raw CMYK samples (CMYK carries
-/// no alpha, so the alpha track is fully opaque). Returns `None` on an empty or
-/// malformed buffer so the caller falls back to the generic decode.
-///
-/// **Profiled** CMYK is colour-managed straight into 16-bit `ProPhoto`, keeping
-/// inks that fall outside sRGB. **Unprofiled** CMYK has no colorimetric meaning
-/// beyond the naive formula, so it stays `Srgb` (8→16-bit widen) and reaches the
-/// cards byte-for-byte — the pinned cross-language naive contract is untouched.
-fn cmyk_to_working(raw: &super::cmyk_decode::RawCmyk) -> Option<LoadedWorking> {
-    if raw.width == 0 || raw.height == 0 {
-        return None;
-    }
-    let expected = raw.width as usize * raw.height as usize * 3;
-    let meta = LoadMeta {
-        source_mode: "CMYK".to_string(),
-        exif_transposed: false,
-    };
-    if let Some(rgb16) = super::cmyk_transform::cmyk_to_prophoto16(raw) {
-        if rgb16.len() == expected {
-            return Some(LoadedWorking {
-                image: WorkingImage::from_prophoto_rgb16(raw.width, raw.height, &rgb16, None),
-                meta,
-            });
-        }
-    }
-    let rgb = super::cmyk_transform::cmyk_to_rgb8(raw);
-    if rgb.len() != expected {
-        return None;
-    }
-    let mut out = RgbaImage::new(raw.width, raw.height);
-    for (px, chunk) in out.pixels_mut().zip(rgb.chunks_exact(3)) {
-        *px = image::Rgba([chunk[0], chunk[1], chunk[2], 255]);
-    }
-    Some(LoadedWorking {
-        image: WorkingImage::from_rgba8(&out, WorkingSpace::Srgb, None),
-        meta,
-    })
-}
-
 /// Open + decode an image to an 8-bit single-channel mask, guarding the decode
 /// size first. High-bit-depth mattes are tone-scaled (not clipped) by the
 /// `image` crate's luma conversion. (Mask provenance is not surfaced in Phase 1,
@@ -488,6 +552,7 @@ pub(crate) fn load_dynamic(
         .with_guessed_format()
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let format = reader.format();
+    reject_four_component_jpeg_path(path, format)?;
     let mut decoder = reader
         .into_decoder()
         .map_err(|err| format!("failed to decode {}: {err}", path.display()))?;
@@ -495,7 +560,9 @@ pub(crate) fn load_dynamic(
     let (width, height) = decoder.dimensions();
     guard_dimensions(path, width, height, max_pixels)?;
 
-    let source_mode = source_mode_label(decoder.original_color_type());
+    let source_color = decoder.original_color_type();
+    reject_four_channel_source(path, source_color)?;
+    let source_mode = source_mode_label(source_color);
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let exif_transposed = orientation != Orientation::NoTransforms;
     // Read the embedded ICC off the header before `from_decoder` consumes the
@@ -751,75 +818,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    // The `image` crate decodes Adobe CMYK and YCCK JPEGs to RGB (dropping the
-    // ICC) and reports them as `Rgb8`; the probe must reclassify both as CMYK so
-    // the enhance path takes them through `cmyk_decode` instead. A regression
-    // here silently routes CMYK JPEGs back through the lossy generic decode.
-    #[test]
-    fn probes_adobe_cmyk_jpeg_as_cmyk() {
-        let path = unique_tmp("adobe_cmyk.jpg");
-        std::fs::write(
-            &path,
-            include_bytes!("../../tests/fixtures/cmyk_adobe_app14.jpg"),
-        )
-        .unwrap();
-        let probe = probe_source(&path).unwrap();
-        assert_eq!(probe.color, ExtendedColorType::Cmyk8);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn probes_ycck_jpeg_as_cmyk() {
-        let path = unique_tmp("ycck.jpg");
-        std::fs::write(
-            &path,
-            include_bytes!("../../tests/fixtures/cmyk_ycck_app14.jpg"),
-        )
-        .unwrap();
-        let probe = probe_source(&path).unwrap();
-        assert_eq!(probe.color, ExtendedColorType::Cmyk8);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    // A native card (crop, subject mask, ...) loading a CMYK JPEG must get
-    // colour-managed sRGB, not the `image` crate's lossy CMYK->RGB with the ICC
-    // dropped. The tile centres must land on the sRGB Pillow produces (naive
-    // path; the fixture carries no ICC), the source mode must read `CMYK`, and
-    // the alpha track must be fully opaque.
-    #[test]
-    fn load_rgba_colour_manages_cmyk_jpeg() {
-        let path = unique_tmp("enhance_cmyk.jpg");
-        std::fs::write(
-            &path,
-            include_bytes!("../../tests/fixtures/cmyk_adobe_app14.jpg"),
-        )
-        .unwrap();
-
-        let loaded = load_rgba(&path, DEFAULT_MAX_DECODE_PIXELS).unwrap();
-        assert_eq!(loaded.image.dimensions(), (32, 32));
-        assert_eq!(loaded.meta.source_mode, "CMYK");
-
-        let expected: [((u32, u32), [u8; 3]); 4] = [
-            ((8, 8), [255, 255, 255]),
-            ((24, 8), [0, 255, 255]),
-            ((8, 24), [0, 0, 0]),
-            ((24, 24), [119, 179, 209]),
-        ];
-        for ((x, y), want) in expected {
-            let px = loaded.image.get_pixel(x, y).0;
-            assert_eq!(px[3], 255, "alpha must be opaque at ({x},{y})");
-            for ch in 0..3 {
-                assert!(
-                    (i32::from(px[ch]) - i32::from(want[ch])).abs() <= 6,
-                    "tile ({x},{y}) ch {ch}: rust {} vs PIL {}",
-                    px[ch],
-                    want[ch]
-                );
-            }
-        }
-        let _ = std::fs::remove_file(&path);
-    }
-
     // A plain RGB source carries no wide-gamut information, so it stays in the
     // `Srgb` working space (a pure `* 257` widen). Egress is then an exact
     // bit-narrow, so `to_srgb_rgba8` must be byte-identical to what `load_rgba`
@@ -847,29 +845,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    // An *unprofiled* CMYK source (this fixture carries no ICC) has no wide-gamut
-    // information, so it stays in the `Srgb` carrier via the naive formula and
-    // reaches the cards byte-for-byte; the provenance still reads `CMYK`.
-    #[test]
-    fn load_working_colour_manages_cmyk_to_16bit_srgb() {
-        let path = unique_tmp("working_cmyk.jpg");
-        std::fs::write(
-            &path,
-            include_bytes!("../../tests/fixtures/cmyk_adobe_app14.jpg"),
-        )
-        .unwrap();
-
-        let work = load_working(&path, DEFAULT_MAX_DECODE_PIXELS).unwrap();
-        assert_eq!((work.image.width, work.image.height), (32, 32));
-        assert_eq!(work.image.space, WorkingSpace::Srgb);
-        assert_eq!(work.meta.source_mode, "CMYK");
-
-        let egress = work.image.to_srgb_rgba8();
-        let loaded = load_rgba(&path, DEFAULT_MAX_DECODE_PIXELS).unwrap();
-        assert_eq!(egress, loaded.image);
-        let _ = std::fs::remove_file(&path);
-    }
-
     #[test]
     fn probes_plain_rgb_jpeg_as_rgb() {
         let path = unique_tmp("rgb.jpg");
@@ -883,5 +858,76 @@ mod tests {
         let probe = probe_source(&path).unwrap();
         assert_eq!(probe.color, ExtendedColorType::Rgb8);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn memory_loader_accepts_plain_rgb_jpeg() {
+        let source = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            4,
+            3,
+            image::Rgb([200, 120, 60]),
+        ));
+        let mut bytes = Vec::new();
+        source
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Jpeg)
+            .unwrap();
+
+        let decoded = decode_display_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (4, 3));
+    }
+
+    fn jpeg_frame_header(components: u8) -> Vec<u8> {
+        let frame_length = 8 + 3 * u16::from(components);
+        let mut bytes = vec![
+            0xFF,
+            0xD8, // SOI
+            0xFF,
+            0xE1,
+            0x00,
+            0x06,
+            0xAA,
+            0xFF,
+            0xC0,
+            0xBB, // skipped APP payload
+            0xFF,
+            0xC2,
+            (frame_length >> 8) as u8,
+            frame_length as u8,
+            0x08,
+            0x00,
+            0x01,
+            0x00,
+            0x01,
+            components,
+        ];
+        for id in 1..=components {
+            bytes.extend_from_slice(&[id, 0x11, 0x00]);
+        }
+        bytes.extend_from_slice(&[0xFF, 0xD9]);
+        bytes
+    }
+
+    #[test]
+    fn jpeg_marker_probe_reads_component_count_without_decoding() {
+        assert!(jpeg_has_four_components(std::io::Cursor::new(jpeg_frame_header(4))).unwrap());
+        assert!(!jpeg_has_four_components(std::io::Cursor::new(jpeg_frame_header(3))).unwrap());
+    }
+
+    #[test]
+    fn file_loader_rejects_four_component_jpeg_before_decode() {
+        let path = unique_tmp("four_component.jpg");
+        std::fs::write(&path, jpeg_frame_header(4)).unwrap();
+
+        let err = load_dynamic(&path, DEFAULT_MAX_DECODE_PIXELS).unwrap_err();
+        assert!(err.contains("four-component JPEG"), "{err}");
+        let err = probe_source(&path).unwrap_err();
+        assert!(err.contains("four-component JPEG"), "{err}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn memory_loader_rejects_four_component_jpeg_before_decode() {
+        let err = decode_display_from_memory(&jpeg_frame_header(4)).unwrap_err();
+        assert!(err.contains("four-component JPEG"), "{err}");
     }
 }

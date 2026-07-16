@@ -1,8 +1,6 @@
 //! Studio graph editor backend, split into focused submodules:
-//! - [`color`]: colour management along the pixel's journey — CMYK ingress
-//!   (`cmyk_decode`), colour-managed transforms (`cmyk_transform`), and the
-//!   16-bit working surface / sRGB egress (`working_image`). All moxcms
-//!   transforms are constructed inside this submodule.
+//! - [`color`]: RGB colour management, linear-light helpers, and the 16-bit
+//!   working surface / sRGB egress (`working_image`).
 //! - [`graph`]: the workflow graph schema + shared value-coercion helpers.
 //! - [`exec`]: the topological execution engine and lane dispatch.
 //! - [`run_events`]: run-event emission, structured node error details, and
@@ -26,10 +24,8 @@
 //! - [`psd_analyze`]: the `psdContextAnalyze` node executor (PSD context bridge).
 //! - [`color_match`]: the `matchLightColor` node executor (light/colour match).
 //! - [`edge_refine`]: the `refineMaskEdge` node executor (mask edge refine).
-//! - [`image_enhance`]: the `imageEnhance` node executor (native `cpu` plus
-//!   optional ORT `realesrgan`).
-//! - [`image_enhance_cpu`]: shared ingress/output and complete native CPU
-//!   fallback; [`image_enhance_onnx`] owns the strict tiled x4v3 adapter.
+//! - [`image_enhance`]: the `imageEnhance` node executor (native CPU).
+//! - [`image_enhance_cpu`]: shared ingress/output and native CPU implementation.
 //! - [`detail_watchdog`]: the `detailWatchdog` node executor (CPU quality scan).
 //! - [`psd_export`]: the `psdExport` node executor (PSD composition bridge).
 //! - [`studio_image`]: decode-guard + colour-space loaders shared by native
@@ -41,10 +37,7 @@
 //! - [`media_index`]: persistent index/cache of node results so an unchanged
 //!   node is served from the previous run's media instead of re-executing.
 //! - [`subject_mask`]: the `subjectMask` node executor (native-Rust matte).
-//! - [`subject_matte`]: continuous alpha matting (ViTMatte / trimap, Compute lane).
-//! - [`subject_sam2`]: SAM 2 interactive point-prompt segmenter (Compute lane).
-//! - [`sam2_prompt`]: the `sam2_prompt_mask` command (Studio Action compute
-//!   block: image + point prompts -> mask artifact, outside a graph run).
+//! - [`subject_matte`]: deterministic trimap-guided alpha matting.
 //! - [`reflection_regions`]: heuristic reflection candidate detection for
 //!   `smartLayerSplit` (Phase 3).
 //! - [`shadow_regions`]: heuristic cast-shadow candidate detection for
@@ -69,7 +62,6 @@ mod clip_props_raster;
 mod color;
 mod color_match;
 pub(crate) mod color_match_cpu;
-mod color_match_onnx;
 mod crop;
 #[cfg(all(windows, feature = "native-ffmpeg", feature = "viewport-surface"))]
 pub(crate) mod d3d11_wgpu;
@@ -77,7 +69,6 @@ mod detail_repaint;
 pub(crate) mod detail_repaint_cpu;
 mod detail_watchdog;
 pub(crate) mod detail_watchdog_cpu;
-mod detail_watchdog_onnx;
 mod device_registry;
 mod device_report;
 mod edge_refine;
@@ -95,12 +86,10 @@ pub(crate) mod image_buffer;
 pub(crate) mod image_document;
 mod image_enhance;
 pub(crate) mod image_enhance_cpu;
-mod image_enhance_onnx;
 mod layer_merge;
 mod layer_split;
 mod media_index;
 mod node_registry;
-mod onnx_pool;
 mod persist;
 mod pixel_ops;
 mod prompt_optimize;
@@ -109,14 +98,11 @@ mod psd_export;
 mod reflection_regions;
 mod run_cancel;
 mod run_events;
-mod sam2_prompt;
 mod schedule;
 mod shadow_regions;
 pub(crate) mod studio_image;
 mod subject_mask;
 mod subject_matte;
-mod subject_model;
-mod subject_sam2;
 mod subject_segment;
 mod text_regions;
 mod timeline_export;
@@ -130,7 +116,7 @@ mod write_skip;
 // The colour layers keep their original `crate::studio::<layer>` paths so the
 // many call sites (and their docs) stay stable while the files live together
 // under `color/`.
-pub(crate) use color::{cmyk_decode, cmyk_transform, linear, working_image};
+pub(crate) use color::{linear, working_image};
 
 // Glob re-exports so the original `crate::studio::*` command paths keep
 // resolving from `main.rs`'s `generate_handler!`. A plain `use exec::cmd` only
@@ -147,22 +133,13 @@ pub(crate) use clip_props::{ClipPropsEvaluator, ResolvedClipProps};
 #[cfg(test)]
 pub(crate) use clip_props_raster::apply_clip_props_srgb_proxy;
 pub(crate) use clip_props_raster::{apply_clip_props_srgb_proxy_preferred, ClipPropsBackend};
-pub(crate) use color_match_onnx::resolve_color_model_path;
-pub(crate) use detail_watchdog_onnx::resolve_watchdog_model_path;
 pub(crate) use device_registry::*;
 pub(crate) use exec::*;
 pub(crate) use grade::*;
 pub(crate) use history::*;
 pub(crate) use image_document::*;
-pub(crate) use image_enhance_onnx::resolve_realesrgan_model_path;
 pub(crate) use layer_merge::*;
 pub(crate) use media_index::*;
-pub(crate) use onnx_pool::{
-    onnx_runtime_status, set_runtime_resource_dir as set_onnx_runtime_resource_dir,
-};
 pub(crate) use persist::*;
-pub(crate) use sam2_prompt::*;
 pub(crate) use schedule::*;
-pub(crate) use subject_matte::resolve_vitmatte_model_path;
-pub(crate) use subject_model::set_resource_dir as set_subject_model_resource_dir;
 pub(crate) use timeline_export::*;

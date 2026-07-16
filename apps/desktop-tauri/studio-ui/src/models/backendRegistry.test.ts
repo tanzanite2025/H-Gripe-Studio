@@ -4,19 +4,14 @@ import {
   apiProfilesFor,
   backendsFor,
   duplicateApiProfile,
-  duplicateLocalModel,
   emptyRegistry,
   importLegacyProfiles,
-  localModelsFor,
   parseRegistry,
   removeApiProfile,
-  removeLocalModel,
   resolveBackendRef,
   uniqueRef,
   upsertApiProfile,
-  upsertLocalModel,
   type ApiProfileEntry,
-  type LocalModelEntry,
 } from "./backendRegistry";
 
 function apiProfile(overrides: Partial<ApiProfileEntry> = {}): ApiProfileEntry {
@@ -30,22 +25,6 @@ function apiProfile(overrides: Partial<ApiProfileEntry> = {}): ApiProfileEntry {
     known_models: ["gpt-image-1"],
     capabilities: ["image.generate", "image.edit"],
     health: "untested",
-    ...overrides,
-  };
-}
-
-function localModel(overrides: Partial<LocalModelEntry> = {}): LocalModelEntry {
-  return {
-    ref: "sam2-base",
-    display_name: "SAM2 base",
-    capabilities: ["mask.subject"],
-    engine: "onnx",
-    weights_path: "C:/models/sam2.onnx",
-    device_policy: "auto",
-    precision_policy: "auto",
-    health: "untested",
-    fallback_policy: "built_in",
-    health_detail: null,
     ...overrides,
   };
 }
@@ -70,19 +49,6 @@ describe("backendRegistry CRUD", () => {
     expect(reg.apiProfiles.map((p) => p.ref)).toEqual(["openai-main-copy"]);
   });
 
-  it("upserts, duplicates and removes local models", () => {
-    let reg = upsertLocalModel(emptyRegistry(), localModel());
-    reg = upsertLocalModel(reg, localModel({ engine: "ort" }));
-    expect(reg.localModels).toHaveLength(1);
-    expect(reg.localModels[0].engine).toBe("ort");
-
-    reg = duplicateLocalModel(reg, "sam2-base");
-    expect(reg.localModels).toHaveLength(2);
-
-    reg = removeLocalModel(reg, "sam2-base");
-    expect(reg.localModels.map((m) => m.ref)).toEqual(["sam2-base-copy"]);
-  });
-
   it("generates collision-free refs", () => {
     const taken = [{ ref: "api-profile" }, { ref: "api-profile-2" }];
     expect(uniqueRef("API Profile", taken)).toBe("api-profile-3");
@@ -91,28 +57,23 @@ describe("backendRegistry CRUD", () => {
 });
 
 describe("capability-filtered selectors", () => {
-  const reg = upsertLocalModel(
-    upsertApiProfile(
-      upsertApiProfile(emptyRegistry(), apiProfile()),
-      apiProfile({ ref: "text-only", capabilities: ["text.generate"] }),
-    ),
-    localModel(),
+  const reg = upsertApiProfile(
+    upsertApiProfile(emptyRegistry(), apiProfile()),
+    apiProfile({ ref: "text-only", capabilities: ["text.generate"] }),
   );
 
-  it("filters API profiles and local models by capability", () => {
+  it("filters API profiles by capability", () => {
     expect(apiProfilesFor(reg, "image.generate").map((p) => p.ref)).toEqual(["openai-main"]);
     expect(apiProfilesFor(reg, "mask.subject")).toEqual([]);
-    expect(localModelsFor(reg, "mask.subject").map((m) => m.ref)).toEqual(["sam2-base"]);
   });
 
-  it("lists managed backends for one capability, API profiles first", () => {
+  it("lists only API profiles as managed backend choices", () => {
     const withApiMask = upsertApiProfile(
       reg,
       apiProfile({ ref: "mask-api", capabilities: ["mask.subject"] }),
     );
     expect(backendsFor(withApiMask, "mask.subject").map((o) => o.ref)).toEqual([
       { kind: "api_profile", ref: "mask-api" },
-      { kind: "local_model", ref: "sam2-base" },
     ]);
   });
 
@@ -120,21 +81,17 @@ describe("capability-filtered selectors", () => {
     expect(resolveBackendRef(reg, { kind: "api_profile", ref: "openai-main" })?.ref).toBe(
       "openai-main",
     );
-    expect(resolveBackendRef(reg, { kind: "local_model", ref: "sam2-base" })?.ref).toBe(
-      "sam2-base",
-    );
     expect(resolveBackendRef(reg, { kind: "api_profile", ref: "gone" })).toBeNull();
-    expect(resolveBackendRef(reg, { kind: "built_in", ref: "rules" })).toBeNull();
   });
 });
 
 describe("persistence parsing", () => {
   it("round-trips a registry through JSON", () => {
-    const reg = upsertLocalModel(upsertApiProfile(emptyRegistry(), apiProfile()), localModel());
+    const reg = upsertApiProfile(emptyRegistry(), apiProfile());
     expect(parseRegistry(JSON.parse(JSON.stringify(reg)))).toEqual(reg);
   });
 
-  it("drops malformed entries and unknown capabilities", () => {
+  it("drops malformed entries, unknown capabilities, and retired local models", () => {
     const parsed = parseRegistry({
       apiProfiles: [
         { ref: "ok", capabilities: ["image.generate", "not.a.capability"], health: "nonsense" },
@@ -146,8 +103,7 @@ describe("persistence parsing", () => {
     expect(parsed.apiProfiles).toHaveLength(1);
     expect(parsed.apiProfiles[0].capabilities).toEqual(["image.generate"]);
     expect(parsed.apiProfiles[0].health).toBe("untested");
-    expect(parsed.localModels).toHaveLength(1);
-    expect(parsed.localModels[0].device_policy).toBe("auto");
+    expect(Object.keys(parsed)).toEqual(["apiProfiles"]);
   });
 
   it("returns an empty registry for garbage payloads", () => {

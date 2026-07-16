@@ -32,12 +32,12 @@ const CATEGORY_LABEL: Record<PaletteCategory, MsgKey> = {
   output: "palette.catOutput",
 };
 
-// Local vs API badge shown on palette items so the two kinds of card are
-// visually separated. Pure `graph` nodes carry no badge.
-const EXECUTOR_BADGE: Partial<Record<NodeSpec["executor"], string>> = {
-  local: "Local",
-  api: "API",
-  hybrid: "Local/API",
+// Product-facing execution badge. Native deterministic work is described as
+// built-in so it cannot be mistaken for a selectable local-model backend.
+export const EXECUTOR_BADGE: Partial<Record<NodeSpec["executor"], MsgKey>> = {
+  local: "palette.executorBuiltin",
+  api: "palette.executorApi",
+  hybrid: "palette.executorBuiltinApi",
 };
 
 // MIME-ish key carried on drag so the canvas knows which node kind to create.
@@ -232,7 +232,9 @@ export function Palette({
               </button>
               {open && (
                 <div className="palette-group-body">
-                  {specs.map((spec) => (
+                  {specs.map((spec) => {
+                    const badgeKey = EXECUTOR_BADGE[spec.executor];
+                    return (
                     <button
                       key={spec.kind}
                       className="palette-item"
@@ -245,13 +247,14 @@ export function Palette({
                       title={`${spec.title} - ${spec.description}`}
                     >
                       <span className="palette-item-title">{spec.title}</span>
-                      {EXECUTOR_BADGE[spec.executor] && (
+                      {badgeKey && (
                         <span className={`palette-badge palette-badge-${spec.executor}`}>
-                          {EXECUTOR_BADGE[spec.executor]}
+                          {t(badgeKey)}
                         </span>
                       )}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

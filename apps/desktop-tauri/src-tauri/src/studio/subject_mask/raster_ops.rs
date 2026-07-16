@@ -6,8 +6,7 @@ use serde_json::Value;
 
 use super::document::json_f32;
 use super::{MASK_OFF, MASK_ON, SELECTED_THRESHOLD};
-use crate::studio::onnx_pool::OnnxDeviceRequest;
-use crate::studio::subject_sam2::Sam2Variant;
+use crate::studio::device_report::DeviceRequest;
 use crate::studio::subject_segment::{
     select_segmenter_for_mode, AutoMode, PointPrompt, SegmentRequest,
 };
@@ -697,13 +696,7 @@ pub(super) fn object_select_region(
         y: y1 + (y2 - y1) / 2,
         positive: true,
     }];
-    let device_request = OnnxDeviceRequest::Cpu;
-    let selection = select_segmenter_for_mode(
-        AutoMode::Subject,
-        &points,
-        Sam2Variant::default(),
-        device_request,
-    );
+    let selection = select_segmenter_for_mode(AutoMode::Subject, &points);
     let request = SegmentRequest {
         image,
         mode: AutoMode::Subject,
@@ -712,7 +705,7 @@ pub(super) fn object_select_region(
         points: &points,
     };
     let (result, telemetry) =
-        super::run_auto_segment_with_fallback(selection, &request, device_request)?;
+        super::run_auto_segment_with_fallback(selection, &request, DeviceRequest::Cpu)?;
     for (m, s) in mask.pixels_mut().zip(result.mask.pixels()) {
         m.0[0] = m.0[0].max(s.0[0]);
     }
@@ -775,13 +768,7 @@ pub(super) fn remove_region(
             placeholder.put_pixel(x, y, Luma([MASK_ON]));
         }
     }
-    let device_request = OnnxDeviceRequest::Cpu;
-    let selection = select_segmenter_for_mode(
-        AutoMode::Subject,
-        &prompts,
-        Sam2Variant::default(),
-        device_request,
-    );
+    let selection = select_segmenter_for_mode(AutoMode::Subject, &prompts);
     let request = SegmentRequest {
         image,
         mode: AutoMode::Subject,
@@ -790,7 +777,7 @@ pub(super) fn remove_region(
         points: &prompts,
     };
     let (result, telemetry) =
-        super::run_auto_segment_with_fallback(selection, &request, device_request)?;
+        super::run_auto_segment_with_fallback(selection, &request, DeviceRequest::Cpu)?;
     for (m, s) in mask.pixels_mut().zip(result.mask.pixels()) {
         m.0[0] = m.0[0].min(MASK_ON - s.0[0]);
     }

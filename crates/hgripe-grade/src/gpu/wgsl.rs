@@ -4,30 +4,24 @@
 // edit recompiles (milliseconds), but replaying the same doc over many
 // frames (the video path) reuses the compiled plan via the runner's cache.
 //
-// The maths mirrors the CPU reference path op for op. Two deliberate
-// approximations keep the shader simple: every spline-backed curve
-// (curves, hue-vs-*, lum/sat-vs-sat) is baked to a `CURVE_RES`-sample LUT
-// sampled linearly, and f32 transcendentals (pow/exp) may differ from the
-// CPU libm in the last ulps. The GPU path is therefore preview-grade —
+// The maths mirrors the CPU reference path op for op. Spline-backed curve
+// operations do not have an exact WGSL implementation and are rejected so
+// callers can run the complete document on the CPU reference path. Supported
+// operations may still differ in the last ulps for f32 transcendentals
+// (pow/exp). The GPU path is therefore preview-grade —
 // validated against the CPU path with tolerances in `tests/gpu.rs`, not
 // bit-identical (the design doc's bit-identical constraint binds CPU
 // parallelism; the GPU backend is a separate, tolerance-tested backend).
 
+use super::GpuError;
 use crate::blend::BlendMode;
 use crate::doc::{GradeDoc, GradeLayer};
-use crate::ops::{
-    gaussian_weights, planckian_gains, rgb_to_hsl, ColorRange, CurveChannel, GradeOp,
-    MonotoneSpline, MAX_RADIUS,
-};
+use crate::ops::{gaussian_weights, planckian_gains, rgb_to_hsl, ColorRange, GradeOp, MAX_RADIUS};
 use crate::qualifier::HslQualifier;
 use crate::surface::GradeSpace;
 
-/// Samples per baked curve LUT.
-const CURVE_RES: usize = 1024;
-
 /// The compiled form of a doc: WGSL source, the pass schedule, and the
-/// f32 table blob (masks, baked curve LUTs, 1D/3D LUT tables) bound as a
-/// read-only storage buffer.
+/// f32 mask data bound as a read-only storage buffer.
 pub(super) struct GpuPlan {
     pub shader: String,
     pub steps: Vec<Step>,
@@ -66,7 +60,19 @@ impl Work {
 }
 
 /// Build the shader + schedule for `doc` over a `w`×`h` surface in `space`.
-pub(super) fn build_plan(doc: &GradeDoc, w: u32, h: u32, space: GradeSpace) -> GpuPlan {
+pub(super) fn build_plan(
+    doc: &GradeDoc,
+    w: u32,
+    h: u32,
+    space: GradeSpace,
+) -> Result<GpuPlan, GpuError> {
+    for layer in doc.layers.iter().filter(|layer| layer.visible) {
+        for op in &layer.ops {
+            if let Some(name) = unsupported_op_name(op) {
+                return Err(GpuError::UnsupportedOperation(name));
+            }
+        }
+    }
     let mut b = Builder::new(w, h, space);
     for layer in &doc.layers {
         if !layer.visible {
@@ -74,10 +80,21 @@ pub(super) fn build_plan(doc: &GradeDoc, w: u32, h: u32, space: GradeSpace) -> G
         }
         b.layer(layer);
     }
-    GpuPlan {
+    Ok(GpuPlan {
         shader: b.finish(),
         steps: b.steps,
         tables: b.tables,
+    })
+}
+
+fn unsupported_op_name(op: &GradeOp) -> Option<&'static str> {
+    match op {
+        GradeOp::Curves { .. } => Some("curves"),
+        GradeOp::HueVsHue { .. } => Some("hue_vs_hue"),
+        GradeOp::HueVsSat { .. } => Some("hue_vs_sat"),
+        GradeOp::LumVsSat { .. } => Some("lum_vs_sat"),
+        GradeOp::SatVsSat { .. } => Some("sat_vs_sat"),
+        _ => None,
     }
 }
 
@@ -438,25 +455,6 @@ impl Builder {
                     ig = lit(inv_gamma),
                 )
             }
-            GradeOp::Curves { channel, points } => {
-                let spline = MonotoneSpline::new(points);
-                let lut: Vec<f32> = (0..CURVE_RES)
-                    .map(|k| spline.eval(k as f32 / (CURVE_RES - 1) as f32))
-                    .collect();
-                let off = self.push_table(&lut);
-                let sample = |ch: &str| format!("curve_lut({off}u, clamp01({ch}))");
-                match channel {
-                    CurveChannel::Master => format!(
-                        "rgb = vec3f({}, {}, {});",
-                        sample("rgb.x"),
-                        sample("rgb.y"),
-                        sample("rgb.z")
-                    ),
-                    CurveChannel::Red => format!("rgb.x = {};", sample("rgb.x")),
-                    CurveChannel::Green => format!("rgb.y = {};", sample("rgb.y")),
-                    CurveChannel::Blue => format!("rgb.z = {};", sample("rgb.z")),
-                }
-            }
             GradeOp::Saturation { amount } => self.linear(&format!(
                 "let luma = dot(lin, vec3f(0.2126, 0.7152, 0.0722));\n\
                  lin = luma + (lin - luma) * {};",
@@ -493,35 +491,12 @@ impl Builder {
                 s = lit(1.0 + saturation),
                 l = lit(1.0 + lightness),
             ),
-            GradeOp::HueVsHue { points } => {
-                self.hue_curve(points, 0.0, |lut| {
-                    format!(
-                        "let hsl = rgb_to_hsl(clamp(rgb, vec3f(0.0), vec3f(1.0)));\n\
-                         rgb = hsl_to_rgb(rem_euclid(hsl.x + {lut}, 360.0), hsl.y, hsl.z);"
-                    )
-                })
-            }
-            GradeOp::HueVsSat { points } => {
-                self.hue_curve(points, 1.0, |lut| {
-                    format!(
-                        "let hsl = rgb_to_hsl(clamp(rgb, vec3f(0.0), vec3f(1.0)));\n\
-                         rgb = hsl_to_rgb(hsl.x, clamp01(hsl.y * {lut}), hsl.z);"
-                    )
-                })
-            }
-            GradeOp::LumVsSat { points } => {
-                let mul = self.multiplier_curve(points, "hsl.z");
-                format!(
-                    "let hsl = rgb_to_hsl(clamp(rgb, vec3f(0.0), vec3f(1.0)));\n\
-                     rgb = hsl_to_rgb(hsl.x, clamp01(hsl.y * {mul}), hsl.z);"
-                )
-            }
-            GradeOp::SatVsSat { points } => {
-                let mul = self.multiplier_curve(points, "hsl.y");
-                format!(
-                    "let hsl = rgb_to_hsl(clamp(rgb, vec3f(0.0), vec3f(1.0)));\n\
-                     rgb = hsl_to_rgb(hsl.x, clamp01(hsl.y * {mul}), hsl.z);"
-                )
+            GradeOp::Curves { .. }
+            | GradeOp::HueVsHue { .. }
+            | GradeOp::HueVsSat { .. }
+            | GradeOp::LumVsSat { .. }
+            | GradeOp::SatVsSat { .. } => {
+                unreachable!("unsupported curve operation passed GPU plan validation")
             }
             GradeOp::LogWheels {
                 shadows,
@@ -752,21 +727,6 @@ impl Builder {
                     )
                 }
             }
-            GradeOp::Lut1d { size, table } => {
-                assert!(*size >= 2 && table.len() == (*size as usize) * 3, "LUT");
-                let off = self.push_table(table);
-                format!(
-                    "rgb = vec3f(lut1d({off}u, {size}u, 0u, clamp01(rgb.x)), lut1d({off}u, {size}u, 1u, clamp01(rgb.y)), lut1d({off}u, {size}u, 2u, clamp01(rgb.z)));"
-                )
-            }
-            GradeOp::Lut3d { size, table } => {
-                assert!(
-                    *size >= 2 && table.len() == (*size as usize).pow(3) * 3,
-                    "LUT"
-                );
-                let off = self.push_table(table);
-                format!("rgb = lut3d({off}u, {size}u, clamp(rgb, vec3f(0.0), vec3f(1.0)));")
-            }
             GradeOp::Sharpen { .. }
             | GradeOp::Denoise { .. }
             | GradeOp::FilmGrain { .. }
@@ -789,50 +749,6 @@ impl Builder {
              {inner}\n\
              rgb = vec3f(trc_encode(lin.x), trc_encode(lin.y), trc_encode(lin.z));"
         )
-    }
-
-    // Bake a periodic hue-domain spline to a wrapped LUT and emit `f(lut)`
-    // where `lut` samples it at `hsl.x` (mirrors `PeriodicSpline`).
-    fn hue_curve(
-        &mut self,
-        points: &[[f32; 2]],
-        neutral: f32,
-        f: impl Fn(String) -> String,
-    ) -> String {
-        if points.is_empty() {
-            // Identity for hue shift 0; multiplier 1 leaves sat unchanged —
-            // but the CPU path still does the HSL round trip, so mirror it.
-            return f(lit(neutral));
-        }
-        let mut wrapped: Vec<[f32; 2]> = Vec::with_capacity(points.len() * 3);
-        let mut base: Vec<[f32; 2]> = points
-            .iter()
-            .map(|p| [p[0].rem_euclid(360.0), p[1]])
-            .collect();
-        base.sort_by(|a, b| a[0].total_cmp(&b[0]));
-        for shift in [-360.0, 0.0, 360.0] {
-            wrapped.extend(base.iter().map(|p| [p[0] + shift, p[1]]));
-        }
-        let spline = MonotoneSpline::new(&wrapped);
-        let lut: Vec<f32> = (0..CURVE_RES)
-            .map(|k| spline.eval(k as f32 * 360.0 / CURVE_RES as f32))
-            .collect();
-        let off = self.push_table(&lut);
-        f(format!("hue_lut({off}u, hsl.x)"))
-    }
-
-    // Bake a 0..=1-domain multiplier spline to a LUT sampled at `arg`
-    // (mirrors `MultiplierSpline`).
-    fn multiplier_curve(&mut self, points: &[[f32; 2]], arg: &str) -> String {
-        if points.is_empty() {
-            return lit(1.0);
-        }
-        let spline = MonotoneSpline::new(points);
-        let lut: Vec<f32> = (0..CURVE_RES)
-            .map(|k| spline.eval(k as f32 / (CURVE_RES - 1) as f32))
-            .collect();
-        let off = self.push_table(&lut);
-        format!("curve_lut({off}u, clamp01({arg}))")
     }
 }
 
@@ -1017,67 +933,6 @@ fn helpers(space: GradeSpace) -> String {
          return ls - ls * t / (1.0 + t);\n\
          }}\n\
          return v;\n}}\n\
-         fn curve_lut(off: u32, x: f32) -> f32 {{\n\
-         let pos = x * f32({res_m1}u);\n\
-         let i0 = min(u32(pos), {res_m2}u);\n\
-         let f = pos - f32(i0);\n\
-         let a = tables[off + i0];\n\
-         let b = tables[off + i0 + 1u];\n\
-         return a + (b - a) * f;\n}}\n\
-         fn hue_lut(off: u32, h: f32) -> f32 {{\n\
-         let pos = rem_euclid(h, 360.0) / 360.0 * f32({res}u);\n\
-         let i0 = min(u32(pos), {res_m1}u);\n\
-         let f = pos - f32(i0);\n\
-         let a = tables[off + i0];\n\
-         let b = tables[off + ((i0 + 1u) % {res}u)];\n\
-         return a + (b - a) * f;\n}}\n\
-         fn lut1d(off: u32, size: u32, channel: u32, v: f32) -> f32 {{\n\
-         let pos = v * f32(size - 1u);\n\
-         let i0 = min(u32(pos), size - 2u);\n\
-         let f = pos - f32(i0);\n\
-         let a = tables[off + i0 * 3u + channel];\n\
-         let b = tables[off + (i0 + 1u) * 3u + channel];\n\
-         return a + (b - a) * f;\n}}\n\
-         fn lut3d_entry(off: u32, size: u32, r: u32, g: u32, b: u32) -> vec3f {{\n\
-         let i = off + ((b * size + g) * size + r) * 3u;\n\
-         return vec3f(tables[i], tables[i + 1u], tables[i + 2u]);\n}}\n\
-         fn lut3d(off: u32, size: u32, rgb: vec3f) -> vec3f {{\n\
-         let n = f32(size - 1u);\n\
-         let pos = rgb * n;\n\
-         let i0 = min(vec3u(pos), vec3u(size - 2u));\n\
-         let f = pos - vec3f(i0);\n\
-         let fr = f.x; let fg = f.y; let fb = f.z;\n\
-         var w1 = 0.0; var w2 = 0.0; var w3 = 0.0;\n\
-         var e1 = vec3f(0.0); var e2 = vec3f(0.0); var e3 = vec3f(0.0);\n\
-         if (fr > fg) {{\n\
-         if (fg > fb) {{\n\
-         w1 = fr; e1 = lut3d_entry(off, size, i0.x + 1u, i0.y, i0.z);\n\
-         w2 = fg; e2 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z);\n\
-         w3 = fb; e3 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z + 1u);\n\
-         }} else if (fr > fb) {{\n\
-         w1 = fr; e1 = lut3d_entry(off, size, i0.x + 1u, i0.y, i0.z);\n\
-         w2 = fb; e2 = lut3d_entry(off, size, i0.x + 1u, i0.y, i0.z + 1u);\n\
-         w3 = fg; e3 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z + 1u);\n\
-         }} else {{\n\
-         w1 = fb; e1 = lut3d_entry(off, size, i0.x, i0.y, i0.z + 1u);\n\
-         w2 = fr; e2 = lut3d_entry(off, size, i0.x + 1u, i0.y, i0.z + 1u);\n\
-         w3 = fg; e3 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z + 1u);\n\
-         }}\n\
-         }} else if (fb > fg) {{\n\
-         w1 = fb; e1 = lut3d_entry(off, size, i0.x, i0.y, i0.z + 1u);\n\
-         w2 = fg; e2 = lut3d_entry(off, size, i0.x, i0.y + 1u, i0.z + 1u);\n\
-         w3 = fr; e3 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z + 1u);\n\
-         }} else if (fb > fr) {{\n\
-         w1 = fg; e1 = lut3d_entry(off, size, i0.x, i0.y + 1u, i0.z);\n\
-         w2 = fb; e2 = lut3d_entry(off, size, i0.x, i0.y + 1u, i0.z + 1u);\n\
-         w3 = fr; e3 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z + 1u);\n\
-         }} else {{\n\
-         w1 = fg; e1 = lut3d_entry(off, size, i0.x, i0.y + 1u, i0.z);\n\
-         w2 = fr; e2 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z);\n\
-         w3 = fb; e3 = lut3d_entry(off, size, i0.x + 1u, i0.y + 1u, i0.z + 1u);\n\
-         }}\n\
-         let e0 = lut3d_entry(off, size, i0.x, i0.y, i0.z);\n\
-         return e0 + w1 * (e1 - e0) + w2 * (e2 - e1) + w3 * (e3 - e2);\n}}\n\
          fn tap(x: i32, y: i32, dx: i32, dy: i32) -> u32 {{\n\
          let ty = clamp(y + dy, 0, i32(H) - 1);\n\
          let tx = clamp(x + dx, 0, i32(W) - 1);\n\
@@ -1138,8 +993,68 @@ fn helpers(space: GradeSpace) -> String {
          var d = sqrt(cb);\n\
          if (cb <= 0.25) {{ d = ((16.0 * cb - 12.0) * cb + 4.0) * cb; }}\n\
          return cb + (2.0 * cs - 1.0) * (d - cb);\n}}\n",
-        res = CURVE_RES,
-        res_m1 = CURVE_RES - 1,
-        res_m2 = CURVE_RES - 2,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc_with(op: GradeOp) -> GradeDoc {
+        GradeDoc {
+            layers: vec![GradeLayer {
+                blend: BlendMode::Normal,
+                opacity: 1.0,
+                visible: true,
+                mask: None,
+                qualifier: None,
+                ops: vec![op],
+            }],
+        }
+    }
+
+    #[test]
+    fn curve_operations_are_rejected_before_shader_codegen() {
+        let cases = [
+            (
+                "curves",
+                GradeOp::Curves {
+                    channel: crate::ops::CurveChannel::Master,
+                    points: vec![[0.0, 0.0], [1.0, 1.0]],
+                },
+            ),
+            (
+                "hue_vs_hue",
+                GradeOp::HueVsHue {
+                    points: vec![[0.0, 0.0]],
+                },
+            ),
+            (
+                "hue_vs_sat",
+                GradeOp::HueVsSat {
+                    points: vec![[0.0, 1.0]],
+                },
+            ),
+            (
+                "lum_vs_sat",
+                GradeOp::LumVsSat {
+                    points: vec![[0.0, 1.0]],
+                },
+            ),
+            (
+                "sat_vs_sat",
+                GradeOp::SatVsSat {
+                    points: vec![[0.0, 1.0]],
+                },
+            ),
+        ];
+
+        for (expected, op) in cases {
+            match build_plan(&doc_with(op), 1, 1, GradeSpace::Srgb) {
+                Err(GpuError::UnsupportedOperation(actual)) => assert_eq!(actual, expected),
+                Err(other) => panic!("{expected}: unexpected error: {other}"),
+                Ok(_) => panic!("{expected}: generated a GPU plan"),
+            }
+        }
+    }
 }

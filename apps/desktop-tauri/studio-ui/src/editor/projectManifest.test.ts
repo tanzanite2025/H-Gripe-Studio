@@ -92,6 +92,29 @@ describe("project manifest", () => {
     expect(parsed?.canvases[1].imageSourceEditorDrafts.n1).toEqual(imageDraft());
   });
 
+  it("preserves unknown grade operations for the editor guard instead of dropping the draft", () => {
+    const retiredDraft = imageDraft();
+    retiredDraft.layers = [
+      {
+        ...retiredDraft.layers[0],
+        name: "Legacy grade",
+        layer: {
+          kind: "adjustment",
+          ops: [{ type: "retired_grade_op", payload: [] }],
+        },
+      },
+    ] as unknown as ImageDocument["layers"];
+    const m = manifest();
+    m.canvases[1].imageSourceEditorDrafts = { n1: retiredDraft };
+
+    const parsed = parseProjectManifest(serializeProjectManifest(m));
+
+    expect(parsed?.canvases[1].imageSourceEditorDrafts.n1).toEqual(retiredDraft);
+    expect(
+      (parsed?.canvases[1].imageSourceEditorDrafts.n1.layers[0].layer as { ops: unknown[] }).ops[0],
+    ).toEqual({ type: "retired_grade_op", payload: [] });
+  });
+
   it("returns null for absent, corrupt, or wrong-version payloads", () => {
     expect(parseProjectManifest(null)).toBeNull();
     expect(parseProjectManifest("")).toBeNull();

@@ -58,9 +58,6 @@ keys and provider profiles remain local API configuration files handled by
   and release target.
 - Rust toolchain `stable-x86_64-pc-windows-msvc`.
 - Visual Studio Build Tools 2022 with the C++ workload + Windows SDK.
-- Microsoft Visual C++ 2015-2022 Redistributable (x64). Visual Studio Build
-  Tools supplies it on development machines; packaged installs need the x64
-  runtime because the official ONNX Runtime DLL links against it.
 - WebView2 runtime (preinstalled on current Windows; otherwise install the
   Evergreen runtime).
 - Git LFS, with repository payloads materialised after clone:
@@ -69,27 +66,6 @@ keys and provider profiles remain local API configuration files handled by
   git lfs install
   git lfs pull
   ```
-
-### ONNX Runtime
-
-The desktop app uses the repository-managed ONNX Runtime at
-`third_party/onnxruntime/win-x64/bin/onnxruntime.dll`. The current runtime
-enables the Windows x64 CPU baseline; no system ORT installation is required.
-Normal builds, tests, CI, and Tauri packaging do not download it. If the DLL is
-an LFS pointer or missing, run `git lfs pull` before building.
-
-Model weights are separate runtime artifacts and follow their own resource or
-environment-variable resolution. `scripts/fetch-onnxruntime.ps1` is only for a
-maintainer intentionally refreshing the locked official runtime; it is not a
-setup step and must not be added to a build hook. See
-`third_party/onnxruntime/VENDOR.md` for hashes and the upgrade procedure.
-
-CPU-only describes the current baseline, not the long-term provider boundary.
-The device/provider contract remains available for later Windows NVIDIA/CUDA
-and AMD or Intel/DirectML integration; ROCm is not a Windows target. Those
-stages must add provider-shared and provider-specific DLLs, registration,
-packaging, and real-GPU tests together. The current CPU bundle does not include
-unused provider DLLs.
 
 ## Build & run
 

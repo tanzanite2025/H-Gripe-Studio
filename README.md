@@ -18,8 +18,9 @@ local workspace.
 > **ComfyUI has been removed.** H-Gripe began as a ComfyUI source branch, but the
 > ComfyUI engine, frontend, and "Advanced Canvas" escape hatch are no longer part
 > of the product — H-Gripe's own Rust/Tauri desktop app and node graph are the
-> only surface. The Python bridge runtime has also been removed: every card
-> runs in-process in Rust.
+> only surface. The Python bridge runtime has also been removed: deterministic
+> local cards execute in-process in Rust, while generative and model-backed work
+> is dispatched through configured API profiles.
 
 ## Architecture
 
@@ -38,37 +39,49 @@ H-Gripe Studio (Tauri desktop)
   `run_studio_graph`): `openai_compatible`, `custom_http`, `replicate`, and a
   `mock` provider, with retry / caching / cancellation and local history.
 - **PSD production** runs through Tauri commands and native Rust compute cards.
-  A CPU-safe baseline is always available; opt-in local model/GPU engines run
-  only when their weights are present.
+  Deterministic image operations run locally; generative and model-backed work
+  runs through configured API profiles.
 - The node editor is renderer-agnostic (a typed `WorkflowGraph` model + DAG
   runtime); see [`apps/desktop-tauri/studio-ui/README.md`](apps/desktop-tauri/studio-ui/README.md)
   and [`apps/desktop-tauri/README.md`](apps/desktop-tauri/README.md).
 
 ## PSD production cards
 
-The PSD chain is a set of focused local cards with frozen contracts under
-[`docs/cards/`](docs/cards/). Every card runs in-process in native Rust.
+The PSD chain combines deterministic native Rust cards with API-backed cards
+whose provider calls are orchestrated by the Rust graph runner. Their contracts
+are documented under [`docs/cards/`](docs/cards/).
 
 | Card | What it does |
 | --- | --- |
 | [PSD Context Analyze](docs/cards/psd-context-analyze.md) | Extract a `VisualContext` (lighting, bounds, masks) from a PSD. |
 | [Match Light & Color](docs/cards/match-light-color.md) | Match a generated image's light / colour to the scene. |
-| [Subject Mask / Matte Editor](docs/cards/subject-mask-matte.md) | Identify the subject and produce / hand-edit a mask, cutout and alpha. Manual magic-wand + brush, auto modes via an in-process model cascade (BiRefNet / U2-Netp, point-prompt SAM 2, `builtin-cpu` fallback), and continuous-alpha matting via ViTMatte or a guided-filter fallback. |
+| [Subject Mask / Matte Editor](docs/cards/subject-mask-matte.md) | Identify the subject and produce / hand-edit a mask, cutout and alpha with deterministic selection, brush, morphology and guided-filter matting tools. |
 | [Refine Mask Edge](docs/cards/refine-mask-edge.md) | Clean / feather a subject matte. |
 | [Image Enhance](docs/cards/image-enhance.md) | Global sharpen / tone enhancement. |
 | [Detail Watchdog](docs/cards/detail-watchdog.md) | Detect-only quality analysis (blur / halo / colour mismatch) → `QualityReport`. |
 | [Detail Repaint](docs/cards/detail-repaint.md) | Two-stage localized repaint of flagged regions (prepare → provider `image.edit` → composite). |
 | [PSD Export](docs/cards/psd-export.md) | Compose the generated image into the template placeholder (smart-object replacement) and export the `.psd` + preview + metadata triplet. |
 
-These cards are **input-hardened**: candidate decodes normalise CMYK via
-embedded ICC when present, apply EXIF orientation, tone-scale high-bit sources at
-model/API boundaries, and refuse oversized inputs before decoding
+These cards are **input-hardened**: candidate decodes apply EXIF orientation,
+tone-scale high-bit sources at display and API boundaries, accept
+decoder-supported source encodings into the standard RGB/RGBA carriers, and
+refuse oversized inputs before decoding
 (`--max-decode-pixels`). See the per-card docs and
 [`docs/design/executor-split-and-psd-chain-hardening.md`](docs/design/executor-split-and-psd-chain-hardening.md).
-The colour working space, bit depth, ICC handling, and the manual-vs-model split
-are defined once in [`docs/design/colour-pipeline.md`](docs/design/colour-pipeline.md):
-the manual path now preserves a 16-bit ProPhoto canonical surface for
-wide-gamut sources, while model/API ingress uses a colour-managed sRGB egress.
+CMYK/YCCK document conversion, editing modes, and print/export controls are not
+product features. That UI boundary must not narrow source-image import support
+or be used as a reason to remove decode compatibility.
+Editor exports remain standard RGB/RGBA assets for downstream applications.
+Profile-capable formats must identify their RGB working space so Photoshop and
+other tools can perform any required CMYK conversion and printing externally.
+The colour working space, bit depth, ICC handling, and deterministic-native vs
+API boundary are defined once in
+[`docs/design/colour-pipeline.md`](docs/design/colour-pipeline.md). The decided
+professional-RAW target is one unbounded f32 scene-linear ProPhoto working
+surface, with source profiles interpreted at ingress and explicit
+display/export transforms. The current u16 sRGB/ProPhoto implementation is a
+transitional baseline, not the final colour architecture. Delivery is tracked
+in [`PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md`](docs/plans/active/PROFESSIONAL_RAW_DEVELOPMENT_PLAN.md).
 For a consolidated view of what is implemented today versus still planned, see
 [`docs/implementation-status.md`](docs/implementation-status.md).
 

@@ -9,7 +9,7 @@ shortcut.
 Build subject selection as an independent reusable flow:
 
 ```text
-source image/frame + user prompt region + model settings + refine params
+source image/frame + user prompt region + selection mode/API profile + refine params
   -> subject mask / alpha mask
 ```
 
@@ -42,17 +42,18 @@ workflow such as Ctrl+J after the selection looks correct.
 - Do not add a layer mask automatically.
 - Do not make the toolbar icon call a no-op command.
 - Do not reuse marquee/crop/selected-layer-move state for the prompt region.
-- Do not mix model-provider configuration into the first UI pass.
+- Do not mix API-profile configuration into the first UI pass.
 - Do not bind the flow to only the image editor.
 
 ## Reusable Dialog Boundary
 
 Subject Selection should behave like a plug-in inserted into a host surface. Its
-state, cache, model request, preview rendering, and failure handling must be
-owned by the Subject Selection flow. If the subject-selection engine crashes,
-times out, returns invalid data, or clears its preview state, that failure must
-not mutate or corrupt image-editor layers, marquee selections, crop state, mask
-preview state, selected-layer move state, node state, or video state.
+state, cache, selection request, preview rendering, and failure handling must be
+owned by the Subject Selection flow. If a deterministic operation fails or an
+API request times out, returns invalid data, or clears its preview state, that
+failure must not mutate or corrupt image-editor layers, marquee selections,
+crop state, mask preview state, selected-layer move state, node state, or video
+state.
 
 The Subject Selection dialog owns:
 
@@ -60,16 +61,16 @@ The Subject Selection dialog owns:
   prompt points
 - preview mask state
 - parameter draft state
-- model request state
+- selection request state
 - confirm/cancel state
-- conversion from model output to a caller-neutral result
+- conversion from deterministic or API output to a caller-neutral result
 
 The dialog receives:
 
 - source image/frame pixels or a resolvable source reference
 - initial viewport/frame metadata
 - optional initial prompt region
-- optional model configuration
+- optional selection mode and API profile reference
 - optional initial refine parameters
 
 The dialog returns:
@@ -93,7 +94,7 @@ Image editor:
 Node card:
 
 - opens the same dialog from a dedicated Subject Selection node/card
-- keeps model-source choices separate from this first dialog integration
+- keeps deterministic/API execution choices separate from this first dialog integration
 - receives the result into node fields/outputs
 
 Video/clip surface:
@@ -155,25 +156,24 @@ The Subject Selection flow must never directly dispatch image-editor actions,
 node-graph mutations, timeline mutations, or color-grade mutations. It may only
 call a selected `SubjectSelectionBackfillAdapter`.
 
-## Model Provider Boundary
+## Execution Boundary
 
-Provider choice is a separate concern from the first dialog flow.
+API-profile choice is a separate concern from the first dialog flow.
 
-Future provider modes:
+Supported execution modes are:
 
-- internal model
-- local model
-- API model
+- deterministic native selection
+- a configured API profile that declares subject-selection capability
 
-For node cards, the card can eventually expose a compact provider choice such as
-"internal" and "local/API", but this should not be mixed into the initial
-image-editor toolbar work.
+There is no internal-model, local-weight, or inference-runtime mode. A node card
+may eventually expose a compact `Built-in` / `API profile` choice, but API
+configuration must not be mixed into the initial image-editor toolbar work.
 
 ## Refinement Parameters
 
 Initial useful parameters:
 
-- confidence/threshold: how strong model confidence must be to become selected
+- confidence/threshold: how strong a selection score must be to become selected
 - expand/contract: move the final boundary outward or inward
 - smooth: reduce jagged edges and small contour noise
 - feather: soften the final selection edge
@@ -184,9 +184,10 @@ when the user confirms.
 
 ## Architecture Rule
 
-The prompt region is not the final selection. It is a model prompt telling the
-subject-selection engine where to look. Therefore it must be implemented as an
-independent subject-prompt interaction, not as normal marquee selection state.
+The prompt region is not the final selection. It is an input hint telling the
+selected deterministic operation or API capability where to look. Therefore it
+must be implemented as an independent subject-prompt interaction, not as normal
+marquee selection state.
 
 Only the confirmed result may be converted into the host surface's native
 selection/mask representation.

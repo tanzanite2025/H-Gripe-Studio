@@ -1,9 +1,4 @@
 import { port, type NodeSpec } from "./types";
-import {
-  IMAGE_ENHANCE_DEVICE_OPTIONS,
-  IMAGE_ENHANCE_ENGINE_OPTIONS,
-  IMAGE_ENHANCE_PRECISION_OPTIONS,
-} from "../../contracts/imageEnhance";
 
 export const IMAGE_NODE_SPECS = {
   // Integrated production card gathering the image operations into one panel
@@ -48,48 +43,8 @@ export const IMAGE_NODE_SPECS = {
         key: "enhance.mode",
         label: "Enhance: mode",
         control: "select",
-        options: ["conservative", "texture_rebuild", "print_ready", "custom"],
+        options: ["conservative", "texture_rebuild", "custom"],
         defaultValue: "conservative",
-      },
-      {
-        key: "enhance.local_model_ref",
-        label: "Enhance: local model",
-        control: "text",
-        defaultValue: "",
-        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
-        advanced: true,
-      },
-      {
-        key: "enhance.engine",
-        label: "Enhance: engine",
-        control: "select",
-        options: [...IMAGE_ENHANCE_ENGINE_OPTIONS],
-        defaultValue: "cpu",
-        inline: true,
-        port: "enhance.in",
-        hint: "cpu is always available; native Real-ESRGAN currently runs on CPU in FP32 and falls back to cpu when its model is missing",
-      },
-      {
-        key: "enhance.device",
-        label: "Enhance: device",
-        control: "select",
-        options: [...IMAGE_ENHANCE_DEVICE_OPTIONS],
-        defaultValue: "auto",
-        inline: true,
-        port: "enhance.in",
-        hint: "compute request for native Real-ESRGAN: auto | gpu | cpu. The current path is CPU-only; CUDA and DirectML are planned",
-        visibleWhen: { param: "enhance.engine", in: ["realesrgan"] },
-      },
-      {
-        key: "enhance.precision",
-        label: "Enhance: precision",
-        control: "select",
-        options: [...IMAGE_ENHANCE_PRECISION_OPTIONS],
-        defaultValue: "auto",
-        inline: true,
-        port: "enhance.in",
-        hint: "compute precision for native Real-ESRGAN: auto currently resolves to fp32; fp16 is not available",
-        visibleWhen: { param: "enhance.engine", in: ["realesrgan"] },
       },
       {
         key: "grade.format",
@@ -113,29 +68,11 @@ export const IMAGE_NODE_SPECS = {
         defaultValue: "free",
       },
       {
-        key: "repair.engine",
-        label: "Repair: engine",
-        control: "select",
-        options: ["provider", "sd_inpaint", "sdxl_inpaint", "flux_fill"],
-        defaultValue: "provider",
-        hint: "provider = remote image.edit; local engines fall back to the provider when weights are missing",
-      },
-      {
         key: "repair.api_profile_ref",
         label: "Repair: API profile",
         control: "text",
         defaultValue: "",
         hint: "managed backend ref from the Models / APIs manager (set by the backend selector)",
-        visibleWhen: { param: "repair.engine", in: ["provider"] },
-        advanced: true,
-      },
-      {
-        key: "repair.local_model_ref",
-        label: "Repair: local model",
-        control: "text",
-        defaultValue: "",
-        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
-        visibleWhen: { param: "repair.engine", in: ["sd_inpaint", "sdxl_inpaint", "flux_fill"] },
         advanced: true,
       },
     ],
@@ -147,7 +84,7 @@ export const IMAGE_NODE_SPECS = {
     palette: "internal",
     title: "Subject Mask / Matte",
     description:
-      "Select the subject and produce a mask / cutout / alpha triplet. Phase 1 runs in-process in native Rust (no python bridge): magic-wand flood select + brush/eraser strokes (carried in edit_paths), morphology (grow/shrink, fill holes) and a final feather. Emits the mask, alpha image, cutout, and an enriched matte report. Auto-subject model modes (SAM/RMBG/BiRefNet) are Phase 2.",
+      "Select the subject and produce a mask / cutout / alpha triplet with deterministic built-in tools: point selection, magic-wand flood select, brush/eraser strokes, morphology, hole filling and feathering. Emits the mask, alpha image, cutout, trimap and matte report.",
     category: "process",
     inputs: [
       port("image", "image", "image"),
@@ -181,33 +118,7 @@ export const IMAGE_NODE_SPECS = {
         ],
         defaultValue: "hybrid",
         inline: true,
-        hint: "Phase 1 runs the manual_* / hybrid modes; the auto_* model modes are Phase 2",
-      },
-      {
-        key: "local_model_ref",
-        label: "Local model",
-        control: "text",
-        defaultValue: "",
-        hint: "managed local model ref from the Models / APIs manager (set by the backend selector)",
-        advanced: true,
-      },
-      {
-        key: "sam2_variant",
-        label: "SAM 2 variant",
-        control: "select",
-        options: ["tiny", "small", "base_plus", "large"],
-        defaultValue: "tiny",
-        inline: true,
-        hint: "SAM 2 model size for point prompts — bigger is slower but cleaner; a missing weight falls back to tiny (scripts/fetch-sam2 downloads variants)",
-      },
-      {
-        key: "device",
-        label: "Device",
-        control: "select",
-        options: ["auto", "gpu", "cpu"],
-        defaultValue: "auto",
-        inline: true,
-        hint: "compute request for auto segmentation and ViTMatte: auto | gpu | cpu. The current ONNX Runtime path is CPU-only; CUDA and DirectML providers are planned",
+        hint: "manual modes use authored strokes; auto modes use the deterministic built-in segmenter",
       },
       {
         key: "wand_tolerance",
@@ -251,7 +162,7 @@ export const IMAGE_NODE_SPECS = {
         label: "Alpha matting",
         control: "checkbox",
         defaultValue: false,
-        hint: "resolve the binary edge into continuous alpha (hair / glass) via a trimap — ViTMatte when its weight is present, else a deterministic feather fallback",
+        hint: "resolve the binary edge into continuous alpha (hair / glass) with deterministic trimap feathering",
       },
       {
         key: "matting_band_px",
@@ -287,7 +198,7 @@ export const IMAGE_NODE_SPECS = {
     palette: "internal",
     title: "Smart Layer Split",
     description:
-      "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. A connected video is resolved to the still nearest the frame time first (desktop runtime only; the video input wins when both are connected). The desktop runtime segments the subject in-process (model backend when a weight resolves, else the deterministic builtin CPU segmenter) and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
+      "Split the connected image into a LayeredImageAsset: a locked original layer plus background/subject candidates. A connected video is resolved to the still nearest the frame time first (desktop runtime only; the video input wins when both are connected). The desktop runtime uses the deterministic built-in segmenter and writes per-layer mask + RGBA PNGs; the browser preview keeps placeholder masks. Downstream nodes, the Review Editor, Grade and Timeline consume the layered_asset / layer ports.",
     category: "process",
     inputs: [port("image", "image", "image"), port("video", "video", "video")],
     outputs: [
@@ -442,7 +353,7 @@ export const IMAGE_NODE_SPECS = {
     palette: "internal",
     title: "Grade",
     description:
-      "Colour-grade an image with the hgripe-grade kernel (docs/design/grade-kernel.md) — an op stack (exposure, white balance, contrast, saturation, RGB mixer, colour warper, sharpen/denoise with adjustable radius, film grain, 1D/3D LUTs) authored in the grading dialog and stored as grade_doc. The dialog previews live through the kernel (GPU when the app is built with grade-gpu and an adapter is present, else the row-parallel CPU reference path); the run path grades the full-resolution 16-bit working surface in its own colour space, so a wide-gamut source stays 16-bit + ICC. Emits the graded image and a grade report.",
+      "Colour-grade an image with the hgripe-grade kernel (docs/design/grade-kernel.md): an op stack for exposure, white balance, contrast, saturation, RGB mixing, colour warping, sharpening, denoise, grain and vignette. The dialog previews live through the kernel; the run path grades the full-resolution 16-bit working surface in its own colour space. Emits the graded image and a grade report.",
     category: "process",
     inputs: [port("image", "image", "image")],
     outputs: [port("image", "image", "image"), port("grade_report", "grade report", "any")],

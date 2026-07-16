@@ -1,6 +1,6 @@
 // PS-style tone-curve editor: a square 0..255 grid with draggable control
-// points over the piecewise-linear curve the adjustment LUT resolves to
-// (`adjustmentLut` in maskMorphology.ts). Click the grid to add a point, drag
+// points over the piecewise-linear tone map used by the image executor.
+// Click the grid to add a point, drag
 // a point far outside to remove it. Changes commit on pointer-up so one drag
 // is one undo step.
 

@@ -1,11 +1,9 @@
 // Software-level Prompt Assistant state (PROMPT_ASSISTANT_SYSTEM_PLAN): the
 // conversation lives outside the workflow graph — pure helpers + localStorage
-// persistence, kept out of the component for testing. Backends: the local
-// rule-based rewriter shared with the `promptOptimize` card's `local` mode,
-// a `prompt.rewrite` API profile, or a managed local text model from the
-// global model manager (the session stores only the managed ref — never
-// provider URLs or keys). Managed local models draft through the built-in
-// rewriter until the local text engine lands.
+// persistence, kept out of the component for testing. Backends are the
+// deterministic built-in rewriter or a managed `prompt.rewrite` API profile.
+// Sessions that reference a retired backend are discarded instead of being
+// silently redirected to another executor.
 
 import { runTaskJson } from "../bridge/run";
 import type { ApiProfileEntry } from "../models/backendRegistry";
@@ -23,9 +21,8 @@ export interface PromptAssistantMessage {
 
 /** Which rewriter answers the conversation. Only the managed ref is stored. */
 export type AssistantBackend =
-  | { kind: "local" }
-  | { kind: "api_profile"; ref: string }
-  | { kind: "local_model"; ref: string };
+  | { kind: "built_in" }
+  | { kind: "api_profile"; ref: string };
 
 export interface PromptAssistantSession {
   messages: PromptAssistantMessage[];
@@ -48,22 +45,19 @@ export function isLocalPreset(v: unknown): v is LocalPreset {
   return typeof v === "string" && (PRESETS as string[]).includes(v);
 }
 
-function sanitizeBackend(raw: unknown): AssistantBackend {
+function sanitizeBackend(raw: unknown): AssistantBackend | null {
   if (raw && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
-    if (
-      (o.kind === "api_profile" || o.kind === "local_model") &&
-      typeof o.ref === "string" &&
-      o.ref
-    ) {
-      return { kind: o.kind, ref: o.ref };
-    }
+    if (o.kind === "api_profile" && typeof o.ref === "string" && o.ref)
+      return { kind: "api_profile", ref: o.ref };
+    if (o.kind === "built_in" || o.kind === "local") return { kind: "built_in" };
+    if (o.kind === "local_model") return null;
   }
-  return { kind: "local" };
+  return { kind: "built_in" };
 }
 
 export function emptyAssistantSession(): PromptAssistantSession {
-  return { messages: [], preset: "cleanup", backend: { kind: "local" } };
+  return { messages: [], preset: "cleanup", backend: { kind: "built_in" } };
 }
 
 /** Rewrite the user's idea into a prompt draft with the local rewriter. */
@@ -99,6 +93,7 @@ export function sendAssistantMessage(
   input: string,
   now: number = Date.now(),
 ): PromptAssistantSession {
+  if (session.backend.kind !== "built_in") return session;
   const text = input.trim();
   if (!text) return session;
   return appendTurn(
@@ -162,7 +157,8 @@ export function loadAssistantSession(): PromptAssistantSession {
         )
       : [];
     const preset = isLocalPreset(parsed.preset) ? parsed.preset : "cleanup";
-    return { messages, preset, backend: sanitizeBackend(parsed.backend) };
+    const backend = sanitizeBackend(parsed.backend);
+    return backend ? { messages, preset, backend } : emptyAssistantSession();
   } catch {
     return emptyAssistantSession();
   }

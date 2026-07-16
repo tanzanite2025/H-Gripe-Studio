@@ -212,7 +212,7 @@ describe("imageEditorState reducer-style helpers", () => {
     expect(s.current.matte_strokes).toHaveLength(0);
   });
 
-  it("records positive and negative SAM 2 point prompts and counts them", () => {
+  it("records positive and negative built-in point prompts and counts them", () => {
     let s = initEditState();
     s = addPoint(s, { x: 120, y: 80, label: 1 });
     s = addPoint(s, { x: 200, y: 150, label: 0 });

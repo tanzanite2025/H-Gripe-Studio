@@ -1,5 +1,10 @@
 # WGPU Surface Swap Plan (Native Texture Presentation Endgame)
 
+> Historical note (2026-07-16): this completed plan is retained only as an
+> implementation record. Treat the remaining text as history, not current
+> product or platform guidance. The current product target is Windows only;
+> macOS/Linux language below is retired.
+
 > Status: implemented. This is item 1 of the "remaining work" list in
 > `WGPU_HEAVY_VIEWPORT_MIGRATION_PLAN.md`: replace the PNG hop with a real
 > WGPU surface/texture swap on desktop. All viewport consumers now present

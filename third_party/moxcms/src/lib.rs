@@ -36,10 +36,7 @@
     clippy::print_in_format_impl
 )]
 #![allow(stable_features)]
-#![cfg_attr(
-    not(any(feature = "avx", feature = "sse", feature = "avx512", feature = "neon",)),
-    forbid(unsafe_code)
-)]
+#![cfg_attr(not(any(feature = "avx", feature = "sse")), forbid(unsafe_code))]
 mod chad;
 mod cicp;
 mod conversions;
@@ -58,13 +55,11 @@ mod luv;
 mod math;
 mod matrix;
 mod mlaf;
-mod nd_array;
 mod oklab;
 mod oklch;
 mod profile;
 mod reader;
 mod rgb;
-mod safe_math;
 mod tag;
 mod transform;
 mod trc;
@@ -73,10 +68,6 @@ mod yrg;
 // Simple math analysis module
 mod chromaticity;
 mod dt_ucs;
-mod helpers;
-mod interceptors;
-mod lut_hint;
-mod matan;
 mod srlab2;
 mod xyy;
 
@@ -87,12 +78,9 @@ pub use chad::{
 pub use chromaticity::Chromaticity;
 pub use cicp::{CicpColorPrimaries, ColorPrimaries, MatrixCoefficients, TransferCharacteristics};
 pub use dat::ColorDateTime;
-pub use defaults::{
-    HLG_LUT_TABLE, PQ_LUT_TABLE, WHITE_POINT_D50, WHITE_POINT_D60, WHITE_POINT_D65,
-    WHITE_POINT_DCI_P3,
-};
+pub use defaults::{WHITE_POINT_D50, WHITE_POINT_D60, WHITE_POINT_D65, WHITE_POINT_DCI_P3};
 pub use dt_ucs::{DtUchHcb, DtUchHsb, DtUchJch};
-pub use err::{CmsError, MalformedSize};
+pub use err::CmsError;
 pub use gamut::filmlike_clip;
 pub use ictcp::ICtCp;
 pub use jzazbz::Jzazbz;
@@ -104,24 +92,20 @@ pub use matrix::{
     BT2020_MATRIX, DISPLAY_P3_MATRIX, Matrix3, Matrix3d, Matrix3f, Matrix4f, SRGB_MATRIX, Vector3,
     Vector3d, Vector3f, Vector3i, Vector3u, Vector4, Vector4d, Vector4f, Vector4i, Xyz, Xyzd,
 };
-pub use nd_array::{Cube, Hypercube};
 pub use oklab::Oklab;
 pub use oklch::Oklch;
 pub use profile::{
-    CicpProfile, ColorProfile, DataColorSpace, DescriptionString, LocalizableString, LutDataType,
-    LutMultidimensionalType, LutStore, LutType, LutWarehouse, Measurement, MeasurementGeometry,
-    ParsingOptions, ProfileClass, ProfileSignature, ProfileText, ProfileVersion, RenderingIntent,
-    StandardIlluminant, StandardObserver, TechnologySignatures, ViewingConditions,
+    CicpProfile, ColorProfile, DataColorSpace, DescriptionString, LocalizableString, Measurement,
+    MeasurementGeometry, ProfileClass, ProfileSignature, ProfileText, ProfileVersion,
+    RenderingIntent, StandardIlluminant, StandardObserver, TechnologySignatures, ViewingConditions,
 };
 pub use rgb::{FusedExp, FusedExp2, FusedExp10, FusedLog, FusedLog2, FusedLog10, FusedPow, Rgb};
 pub use srlab2::Srlab2;
 pub use transform::{
-    BarycentricWeightScale, InPlaceStage, InPlaceTransformExecutor, InterpolationMethod, Layout,
-    PointeeSizeExpressible, Stage, Transform8BitExecutor, Transform16BitExecutor,
-    TransformExecutor, TransformF32Executor, TransformF64Executor, TransformOptions,
+    InPlaceStage, InPlaceTransformExecutor, Layout, PointeeSizeExpressible, Stage,
+    Transform8BitExecutor, Transform16BitExecutor, TransformExecutor, TransformF32Executor,
+    TransformF64Executor, TransformOptions,
 };
-pub use trc::{
-    GammaLutInterpolate, ParametricCurve, ToneCurveEvaluator, ToneReprCurve, curve_from_gamma,
-};
+pub use trc::{ParametricCurve, ToneCurveEvaluator, ToneReprCurve, curve_from_gamma};
 pub use xyy::{XyY, XyYRepresentable};
 pub use yrg::{Ych, Yrg, cie_y_1931_to_cie_y_2006};

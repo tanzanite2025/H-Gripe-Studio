@@ -1,5 +1,8 @@
 # Image to Layered PSD Pipeline Plan
 
+> Historical note (2026-07-16): local inference and downloadable-engine UI described below were retired. The current product keeps deterministic native operations and sends model-backed work through API profiles. Treat the remaining text as implementation history, not current guidance.
+
+
 > Status: complete for the short-term path. Phase 0–4（协议、主体/背景、多实例、
 > 文字/logo/阴影/反光、PSD 导出子集）与 Phase 5（视频静帧提取 + 时间线右键
 > "拆分为图层"入口，PR #519）均已落地。对象跟踪 / 跨帧 mask 与"长期方向"

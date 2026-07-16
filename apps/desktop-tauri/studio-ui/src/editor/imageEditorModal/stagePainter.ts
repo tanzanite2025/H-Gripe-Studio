@@ -292,9 +292,9 @@ export function paintPenAnchors(ctx: CanvasRenderingContext2D, anchors: [number,
   });
 }
 
-/** SAM 2 point prompts: numbered crosshair markers. Positive (include) points
+/** Built-in point prompts: numbered crosshair markers. Positive (include) points
  *  are green and draw a `+`; negative (exclude) points are red and draw a `−`,
- *  mirroring SAM 2's point_labels. */
+ *  use label 1 and negative (exclude) points use label 0. */
 export function paintSamPoints(
   ctx: CanvasRenderingContext2D,
   points: { x: number; y: number; label: number }[],

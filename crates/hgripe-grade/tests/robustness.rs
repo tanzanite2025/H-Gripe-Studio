@@ -26,9 +26,6 @@ fn hostile_surface(space: GradeSpace) -> GradeSurface {
 }
 
 fn all_ops() -> Vec<GradeOp> {
-    let identity_lut: Vec<f32> = (0..8)
-        .flat_map(|i| [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32])
-        .collect();
     vec![
         GradeOp::Exposure { ev: 20.0 },
         GradeOp::Exposure { ev: -20.0 },
@@ -74,10 +71,6 @@ fn all_ops() -> Vec<GradeOp> {
             hue: -450.0,
             saturation: -1.0,
             lightness: 1.0,
-        },
-        GradeOp::Lut3d {
-            size: 2,
-            table: identity_lut,
         },
         // Degenerate hue curves: empty, single point, off-range hues.
         GradeOp::HueVsHue { points: vec![] },
@@ -216,15 +209,6 @@ fn all_ops() -> Vec<GradeOp> {
             to: [-1.0, 2.0, f32::NAN],
             fuzziness: 0.0,
             amount: -1e6,
-        },
-        // Degenerate 1D LUTs: minimal size, inverted/out-of-range entries.
-        GradeOp::Lut1d {
-            size: 2,
-            table: vec![1.0, -2.0, 10.0, 0.0, 5.0, -10.0],
-        },
-        GradeOp::Lut1d {
-            size: 3,
-            table: vec![0.0; 9],
         },
         // Degenerate spatial amounts: non-finite, negative, extreme.
         GradeOp::Sharpen {

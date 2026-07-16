@@ -390,8 +390,8 @@ function formatDuration(sec: number): string {
 }
 
 // Generic video media card body: a poster frame + `name 路 W脳H 路 m:ss 路 fps` info
-// row. Rust has no video decoder, so a backend probe (PyAV) decodes one frame to
-// a PNG; the poster is then shown through the same image-thumbnail pipeline. The
+// row. The native media backend decodes one frame to a PNG with vendored FFmpeg;
+// the poster is then shown through the same image-thumbnail pipeline. The
 // original `path` carries downstream unchanged. See docs/cards/generic-media-card.md.
 function VideoSourceCard({ path, posterTimestamp }: { path: string; posterTimestamp: number }) {
   const t = useT();

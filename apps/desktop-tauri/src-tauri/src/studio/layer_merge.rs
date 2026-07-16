@@ -61,9 +61,12 @@ fn merge_layer_masks_impl(
 
     let mut masks: Vec<GrayImage> = Vec::with_capacity(mask_paths.len());
     for path in mask_paths {
-        let mask = image::open(Path::new(path.trim()))
-            .map_err(|err| format!("failed to read mask {path}: {err}"))?
-            .to_luma8();
+        let loaded = studio_image::load_rgba(
+            Path::new(path.trim()),
+            studio_image::DEFAULT_MAX_DECODE_PIXELS,
+        )
+        .map_err(|err| format!("failed to read mask {path}: {err}"))?;
+        let mask = image::imageops::grayscale(&loaded.image);
         if mask.dimensions() != (width, height) {
             return Err(format!(
                 "mask {path} is {}x{} but the canvas is {width}x{height}",
@@ -126,9 +129,12 @@ fn split_layer_mask_impl(
     )?;
     let working = loaded.image;
     let (width, height) = (working.width, working.height);
-    let mask = image::open(Path::new(mask_path.trim()))
-        .map_err(|err| format!("failed to read mask {mask_path}: {err}"))?
-        .to_luma8();
+    let loaded = studio_image::load_rgba(
+        Path::new(mask_path.trim()),
+        studio_image::DEFAULT_MAX_DECODE_PIXELS,
+    )
+    .map_err(|err| format!("failed to read mask {mask_path}: {err}"))?;
+    let mask = image::imageops::grayscale(&loaded.image);
     if mask.dimensions() != (width, height) {
         return Err(format!(
             "mask {mask_path} is {}x{} but the canvas is {width}x{height}",

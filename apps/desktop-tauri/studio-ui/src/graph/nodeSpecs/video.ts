@@ -76,7 +76,7 @@ export const VIDEO_NODE_SPECS = {
     palette: "internal",
     title: "Video Assemble",
     description:
-      "Encode an ordered frame-image sequence into a video file through the media engine's FFmpeg backend (PyAV). Connect a frames list (or set the frames param, one path per line), pick fps and codec, and get an .mp4 on disk plus the encode report.",
+      "Encode an ordered frame-image sequence into a video file through the media engine's vendored native FFmpeg backend. Connect a frames list (or set the frames param, one path per line), pick fps and codec, and get an .mp4 on disk plus the encode report.",
     category: "output",
     inputs: [port("frames", "frames", "any")],
     outputs: [
@@ -146,7 +146,7 @@ export const VIDEO_NODE_SPECS = {
     palette: "internal",
     title: "Video Trim",
     description:
-      "Cut a time range out of a video file through the media engine's FFmpeg backend (PyAV). Connect a video (or set the video param), pick start/end seconds, and get a frame-accurate re-encoded clip on disk plus the trim report. Audio is not carried over.",
+      "Cut a time range out of a video file through the media engine's vendored native FFmpeg backend. Connect a video (or set the video param), pick start/end seconds, and get a frame-accurate re-encoded clip on disk plus the trim report. Audio is not carried over.",
     category: "output",
     inputs: [port("video", "video", "video")],
     outputs: [

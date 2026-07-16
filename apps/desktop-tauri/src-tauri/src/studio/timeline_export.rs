@@ -2,8 +2,9 @@
 //! step 9): encode an ordered frame sequence produced from the timeline render
 //! plan into a video file. The UI builds the render plan (still clips expanded
 //! to per-frame image paths at the chosen fps) and this command reuses the
-//! `videoAssemble` executor for the actual FFmpeg encode — native in-process
-//! FFmpeg on default builds, the PyAV worker otherwise. Video-clip frames
+//! `videoAssemble` executor for the actual FFmpeg encode through the vendored,
+//! in-process libav backend. Builds without `native-ffmpeg` return an explicit
+//! unsupported-build error. Video-clip frames
 //! arrive as (video path, clip-local time) pairs and are decoded through the
 //! media engine's `FrameSource` before the grade/encode passes. Audio clips
 //! are mixed down (trim / gain / fades, summed at their timeline offsets) and

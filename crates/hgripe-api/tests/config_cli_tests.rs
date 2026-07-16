@@ -10,10 +10,10 @@ fn config_cli_lists_shows_and_validates_provider_profiles() {
         &profiles_file,
         serde_json::to_string_pretty(&json!({
             "profiles": {
-                "local-profile": {
+                "test-profile": {
                     "provider": "openai_compatible",
-                    "base_url": "http://127.0.0.1:1234/v1",
-                    "model": "local-model",
+                    "base_url": "https://api.example.test/v1",
+                    "model": "test-model",
                     "no_auth": true,
                     "params": {
                         "temperature": 0.2
@@ -35,13 +35,13 @@ fn config_cli_lists_shows_and_validates_provider_profiles() {
     assert!(list_output.status.success());
     let list_json: serde_json::Value =
         serde_json::from_slice(&list_output.stdout).expect("list output should be JSON");
-    assert_eq!(list_json["profiles"][0]["profile_ref"], "local-profile");
-    assert_eq!(list_json["profiles"][0]["model"], "local-model");
+    assert_eq!(list_json["profiles"][0]["profile_ref"], "test-profile");
+    assert_eq!(list_json["profiles"][0]["model"], "test-model");
 
     let show_output = Command::new(env!("CARGO_BIN_EXE_hgripe-api-config"))
         .arg("profiles")
         .arg("show")
-        .arg("local-profile")
+        .arg("test-profile")
         .arg("--profiles-file")
         .arg(&profiles_file)
         .output()
@@ -49,7 +49,7 @@ fn config_cli_lists_shows_and_validates_provider_profiles() {
     assert!(show_output.status.success());
     let show_json: serde_json::Value =
         serde_json::from_slice(&show_output.stdout).expect("show output should be JSON");
-    assert_eq!(show_json["profile_ref"], "local-profile");
+    assert_eq!(show_json["profile_ref"], "test-profile");
     assert_eq!(show_json["profile"]["no_auth"], true);
 
     let validate_output = Command::new(env!("CARGO_BIN_EXE_hgripe-api-config"))

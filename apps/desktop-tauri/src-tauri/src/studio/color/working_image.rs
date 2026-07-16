@@ -6,14 +6,12 @@
 //! [`docs/design/colour-pipeline.md`](../../../../../docs/design/colour-pipeline.md).
 //!
 //! **Phase 2b/3 (current):** the shared loader ([`crate::studio::studio_image::load_working`])
-//! tags each decoded surface with its *actual* space. Sources that genuinely
-//! carry wide-gamut information — CMYK with an embedded ICC profile — are
-//! colour-managed straight into 16-bit `ProPhoto`; everything else (plain sRGB
-//! images, and unprofiled/naive CMYK whose values are already sRGB-range) stays
-//! `Srgb` as a pure 8→16-bit widen. The cards still consume 8-bit sRGB, so
+//! tags each decoded surface with its *actual* space. Plain screen-media inputs
+//! stay `Srgb` as a pure 8→16-bit widen; ProPhoto surfaces written by the app
+//! retain their tagged wide-gamut values. The cards still consume 8-bit sRGB, so
 //! [`WorkingImage::to_srgb_rgba8`] is the model/output egress (P3): it
 //! colour-manages `ProPhoto → sRGB` when needed and is an exact bit-narrow for
-//! `Srgb` (so plain images and naive CMYK stay byte-for-byte, never round-tripped
+//! `Srgb` (so plain images stay byte-for-byte, never round-tripped
 //! through ProPhoto). The wide-gamut `ProPhoto` surface + its `icc` are what the
 //! manual-path 16-bit file output (P4) will consume directly. `icc` is not yet
 //! read in production, hence the retained module-level `dead_code` allowance.
@@ -22,7 +20,7 @@
 use std::sync::OnceLock;
 
 use image::{Rgba, RgbaImage};
-use moxcms::{ColorProfile, Layout, TransformExecutor, TransformOptions};
+use moxcms::{ColorProfile, Layout, TransformOptions};
 
 /// The encoded ProPhoto (ROMM RGB) profile that travels with wide-gamut manual
 /// outputs: embedded on a 16-bit ProPhoto file write and matched byte-for-byte
@@ -46,16 +44,15 @@ pub(crate) fn is_prophoto_icc(icc: &[u8]) -> bool {
 }
 
 /// The colour space a [`WorkingImage`]'s samples are encoded in. The loader
-/// tags each surface with its actual space: profiled (wide-gamut) CMYK becomes
-/// [`WorkingSpace::ProPhoto`], while plain images and naive CMYK stay
-/// [`WorkingSpace::Srgb`]. Egress ([`WorkingImage::to_srgb_rgba8`]) branches on
-/// this. See `docs/design/colour-pipeline.md`.
+/// tags each surface with its actual RGB space. Egress
+/// ([`WorkingImage::to_srgb_rgba8`]) branches on this. See
+/// `docs/design/colour-pipeline.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkingSpace {
     /// sRGB primaries + transfer. Egress is an exact bit-narrow.
     Srgb,
-    /// ProPhoto RGB (ROMM): wide enough to contain the CMYK gamut at 16-bit.
-    /// Egress colour-manages down to sRGB.
+    /// ProPhoto RGB (ROMM) wide-gamut working values. Egress colour-manages
+    /// down to sRGB for screen/API consumers.
     ProPhoto,
 }
 
@@ -94,10 +91,8 @@ pub(crate) fn narrow(v: u16) -> u8 {
 
 /// Colour-manage a packed **sRGB** 8-bit RGB buffer (`pixels * 3` bytes) into a
 /// packed **ProPhoto** 16-bit RGB buffer (`pixels * 3` samples) via moxcms.
-/// sRGB is a strict subset of ProPhoto, so this is loss-free (every value lands
-/// in gamut); the 16-bit target leaves headroom for the wider CMYK gamut that
-/// shares this space. Returns `None` on any transform failure so callers can
-/// fall back to a plain widen.
+/// sRGB is a strict subset of ProPhoto, so every value lands in gamut. Returns
+/// `None` on any transform failure so callers can fall back to a plain widen.
 pub(crate) fn srgb8_rgb_to_prophoto16(rgb8: &[u8], pixels: usize) -> Option<Vec<u16>> {
     if rgb8.len() != pixels * 3 {
         return None;
@@ -178,7 +173,7 @@ impl WorkingImage {
 
     /// Build an opaque ProPhoto working surface from a packed ProPhoto **16-bit
     /// RGB** buffer (`width * height * 3` samples). Alpha is set fully opaque;
-    /// the space is [`WorkingSpace::ProPhoto`]. Used by the CMYK→ProPhoto path.
+    /// the space is [`WorkingSpace::ProPhoto`].
     pub(crate) fn from_prophoto_rgb16(
         width: u32,
         height: u32,
@@ -206,7 +201,7 @@ impl WorkingImage {
     /// Colour-managed egress to the 8-bit **sRGB** RGBA surface the cards consume.
     ///
     /// - [`WorkingSpace::Srgb`]: an exact bit-narrow ([`to_rgba8`](Self::to_rgba8)),
-    ///   so plain images and naive CMYK reach the cards byte-for-byte, never
+    ///   so plain images reach the cards byte-for-byte, never
     ///   round-tripped through a wider space.
     /// - [`WorkingSpace::ProPhoto`]: `ProPhoto → sRGB` via moxcms for the colour
     ///   channels, with alpha carried straight (never colour-managed). Falls back
@@ -338,10 +333,9 @@ mod tests {
     fn prophoto16_egress_is_golden_per_stage() {
         // Stage-isolated golden for the ProPhoto -> sRGB egress alone: fixed
         // ProPhoto 16-bit inputs pinned to their sRGB bytes, with no ICC profile
-        // and no upstream CMYK/transform involved. When the end-to-end profiled
-        // CMYK test goes red this pins whether the *egress* is at fault, so a
-        // regression is localised to a stage instead of being read off a single
-        // end-to-end threshold. Runs on every platform (moxcms built-in profiles,
+        // and no upstream container transform involved. This pins the egress
+        // independently so a regression is localised to one stage. Runs on
+        // every platform (moxcms built-in profiles,
         // no OS profile needed). Tolerance is ±2 to absorb moxcms patch-level
         // rounding while still catching any structural drift.
         let cases: [([u16; 3], [u8; 3]); 8] = [
@@ -372,7 +366,7 @@ mod tests {
     #[test]
     fn srgb_space_egress_is_exact_bit_narrow() {
         // An Srgb-tagged surface must reach the cards byte-for-byte (identical to
-        // the plain narrow) - no ProPhoto round-trip for plain images / naive CMYK.
+        // the plain narrow) - no ProPhoto round-trip for plain images.
         let src = sample_rgba8();
         let work = WorkingImage::from_rgba8(&src, WorkingSpace::Srgb, None);
         let egress = work.to_srgb_rgba8();

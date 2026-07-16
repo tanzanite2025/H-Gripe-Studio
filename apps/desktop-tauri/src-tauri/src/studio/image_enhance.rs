@@ -1,7 +1,5 @@
-//! The `imageEnhance` node executor. The always-available `cpu` engine and the
-//! optional native-ORT `realesrgan` engine share one in-process decode/output
-//! path and expose the enhanced image, applied scale factor, and report as flat
-//! output ports.
+//! The `imageEnhance` node executor. The deterministic CPU path exposes the
+//! enhanced image, applied scale factor, and report as flat output ports.
 
 use std::collections::BTreeMap;
 
@@ -37,18 +35,15 @@ pub(super) fn execute_studio_image_enhance(
     let mode = optional(studio_value_to_string(node.params.get("mode")));
     let target_width = number_param(node, "target_width", 0.0) as i64;
     let target_height = number_param(node, "target_height", 0.0) as i64;
-    let target_dpi = number_param(node, "target_dpi", 300.0) as i64;
     let max_pixels = number_param(node, "max_pixels", 48_000_000.0) as i64;
     let scale = number_param(node, "scale", 2.0);
     let denoise_strength = number_param(node, "denoise_strength", 0.3);
     let texture_strength = number_param(node, "texture_strength", 0.25);
     let preserve_text_logo = bool_param(node, "preserve_text_logo", true);
     let engine = optional(studio_value_to_string(node.params.get("engine")));
-    // `device` selects the compute device for the learned upscaler (default
-    // `auto`); ignored by the CPU resize path.
+    // Retained in report compatibility; ignored by the CPU resize path.
     let device = optional(studio_value_to_string(node.params.get("device")));
-    // The supported model is FP32. Legacy `fp16` requests stay readable and
-    // report their downgrade; the built-in CPU resize path ignores precision.
+    // Retained in report compatibility; ignored by the CPU resize path.
     let precision = optional(studio_value_to_string(node.params.get("precision")));
     let output_name = optional(studio_value_to_string(node.params.get("output_name")));
 
@@ -60,7 +55,6 @@ pub(super) fn execute_studio_image_enhance(
         target_bounds,
         target_width,
         target_height,
-        target_dpi,
         max_pixels,
         scale,
         denoise_strength,
@@ -117,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_executor_keeps_outputs_when_a_removed_engine_is_loaded() {
+    fn graph_executor_rejects_a_retired_engine() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -135,15 +129,8 @@ mod tests {
             .insert("output_dir".to_string(), json!(dir.to_string_lossy()));
         let mut inputs = BTreeMap::new();
         inputs.insert("image".to_string(), json!(source.to_string_lossy()));
-        let outputs = execute_studio_image_enhance(&node, &inputs).unwrap();
-        let report = outputs["enhance_report"].as_object().unwrap();
-        assert_eq!(report["engine"], "cpu");
-        assert_eq!(report["engine_requested"], "supir");
-        assert!(report["engine_fallback_reason"]
-            .as_str()
-            .unwrap()
-            .contains("removed with the Python/Torch runtime"));
-        assert!(std::path::Path::new(outputs["enhanced_image"].as_str().unwrap()).is_file());
+        let err = execute_studio_image_enhance(&node, &inputs).unwrap_err();
+        assert!(err.contains("retired"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -7,6 +7,7 @@
 import { type WorkflowGraph } from "../graph/model";
 import { DEFAULT_CANVAS_VIEWPORT, type CanvasViewport } from "./canvasDocument";
 import type { ImageDocument } from "./imageDocument";
+import { isPersistedImageDocumentEnvelope } from "./imageDocumentEditGuard";
 
 const PROJECT_MANIFEST_VERSION = 2 as const;
 
@@ -68,9 +69,10 @@ function parseImageSourceEditorDrafts(raw: unknown): Record<string, ImageDocumen
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: Record<string, ImageDocument> = {};
   for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!id || !value || typeof value !== "object") continue;
-    const doc = value as ImageDocument;
-    if (doc.version === 1 && Array.isArray(doc.layers)) out[id] = doc;
+    // Keep unsupported operation payloads intact. The editor entry point
+    // blocks unsafe rewrites; dropping the draft here would make a later
+    // autosave turn a compatibility problem into permanent data loss.
+    if (id && isPersistedImageDocumentEnvelope(value)) out[id] = value;
   }
   return out;
 }

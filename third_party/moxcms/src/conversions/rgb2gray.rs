@@ -93,7 +93,6 @@ where
                 bit_depth,
                 gamma_lut,
             })),
-            _ => Err(CmsError::UnsupportedProfileConnection),
         },
         Layout::Rgba => match dst_layout {
             Layout::Rgb => Err(CmsError::UnsupportedProfileConnection),
@@ -120,11 +119,9 @@ where
                 bit_depth,
                 gamma_lut,
             })),
-            _ => Err(CmsError::UnsupportedProfileConnection),
         },
         Layout::Gray => Err(CmsError::UnsupportedProfileConnection),
         Layout::GrayAlpha => Err(CmsError::UnsupportedProfileConnection),
-        _ => Err(CmsError::UnsupportedProfileConnection),
     }
 }
 

@@ -296,90 +296,6 @@ macro_rules! create_rgb_xyz_dependant_q2_13_executor_fp {
     };
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_fixed_point_paths"))]
-macro_rules! create_rgb_xyz_dependant_q1_30_executor {
-    ($dep_name: ident, $dependant: ident, $resolution: ident, $shaper: ident) => {
-        pub(crate) fn $dep_name<
-            T: Clone + Send + Sync + AsPrimitive<usize> + Default + PointeeSizeExpressible,
-            const LINEAR_CAP: usize,
-            const PRECISION: i32,
-        >(
-            src_layout: Layout,
-            dst_layout: Layout,
-            profile: $shaper<T, LINEAR_CAP>,
-            gamma_lut: usize,
-            bit_depth: usize,
-        ) -> Result<Arc<dyn TransformExecutor<T> + Send + Sync>, CmsError>
-        where
-            u32: AsPrimitive<T>,
-        {
-            let q1_30_profile = profile.to_q1_30_n::<$resolution, PRECISION>(gamma_lut, bit_depth);
-            if (src_layout == Layout::Rgba) && (dst_layout == Layout::Rgba) {
-                return Ok(Arc::new($dependant::<
-                    T,
-                    { Layout::Rgba as u8 },
-                    { Layout::Rgba as u8 },
-                > {
-                    profile: q1_30_profile,
-                    gamma_lut,
-                    bit_depth,
-                }));
-            } else if (src_layout == Layout::Rgb) && (dst_layout == Layout::Rgba) {
-                return Ok(Arc::new($dependant::<
-                    T,
-                    { Layout::Rgb as u8 },
-                    { Layout::Rgba as u8 },
-                > {
-                    profile: q1_30_profile,
-                    gamma_lut,
-                    bit_depth,
-                }));
-            } else if (src_layout == Layout::Rgba) && (dst_layout == Layout::Rgb) {
-                return Ok(Arc::new($dependant::<
-                    T,
-                    { Layout::Rgba as u8 },
-                    { Layout::Rgb as u8 },
-                > {
-                    profile: q1_30_profile,
-                    gamma_lut,
-                    bit_depth,
-                }));
-            } else if (src_layout == Layout::Rgb) && (dst_layout == Layout::Rgb) {
-                return Ok(Arc::new($dependant::<
-                    T,
-                    { Layout::Rgb as u8 },
-                    { Layout::Rgb as u8 },
-                > {
-                    profile: q1_30_profile,
-                    gamma_lut,
-                    bit_depth,
-                }));
-            }
-            Err(CmsError::UnsupportedProfileConnection)
-        }
-    };
-}
-
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_fixed_point_paths"))]
-use crate::conversions::neon::{TransformShaperQ1_30NeonOpt, TransformShaperQ2_13NeonOpt};
-
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_fixed_point_paths"))]
-create_rgb_xyz_dependant_q2_13_executor_fp!(
-    make_rgb_xyz_q2_13_opt,
-    TransformShaperQ2_13NeonOpt,
-    i16,
-    TransformMatrixShaperOptimized
-);
-
-#[cfg(all(target_arch = "aarch64", feature = "neon_shaper_fixed_point_paths"))]
-create_rgb_xyz_dependant_q1_30_executor!(
-    make_rgb_xyz_q1_30_opt,
-    TransformShaperQ1_30NeonOpt,
-    i32,
-    TransformMatrixShaperOptimized
-);
-
-#[cfg(not(all(target_arch = "aarch64", feature = "neon_shaper_fixed_point_paths")))]
 create_rgb_xyz_dependant_q2_13_executor!(
     make_rgb_xyz_q2_13_opt,
     TransformMatrixShaperQ2_13Optimized,
@@ -413,17 +329,6 @@ use crate::transform::PointeeSizeExpressible;
 create_rgb_xyz_dependant_q2_13_executor_fp!(
     make_rgb_xyz_q2_13_transform_avx2_opt,
     TransformShaperRgbQ2_13OptAvx,
-    i32,
-    TransformMatrixShaperOptimized
-);
-
-#[cfg(all(target_arch = "x86_64", feature = "avx512_shaper_fixed_point_paths"))]
-use crate::conversions::avx512::TransformShaperRgbQ2_13OptAvx512;
-
-#[cfg(all(target_arch = "x86_64", feature = "avx512_shaper_fixed_point_paths"))]
-create_rgb_xyz_dependant_q2_13_executor!(
-    make_rgb_xyz_q2_13_transform_avx512_opt,
-    TransformShaperRgbQ2_13OptAvx512,
     i32,
     TransformMatrixShaperOptimized
 );

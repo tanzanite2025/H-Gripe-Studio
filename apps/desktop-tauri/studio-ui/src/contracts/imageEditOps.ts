@@ -95,7 +95,7 @@ export interface EditPaths {
   points: PointPrompt[];
 }
 
-/** A SAM 2 point prompt in image-pixel space. */
+/** A built-in include/exclude point prompt in image-pixel space. */
 export interface PointPrompt {
   x: number;
   y: number;

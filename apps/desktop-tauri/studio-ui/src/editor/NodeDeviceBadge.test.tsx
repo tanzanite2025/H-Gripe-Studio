@@ -13,10 +13,10 @@ describe("NodeDeviceBadge", () => {
   it("shows the used device with the full report as tooltip", () => {
     const { getByTitle } = render(
       <NodeDeviceBadge
-        report={{ requested: "auto", used: "cuda", backend: "realesrgan fp16", accelerated: true }}
+        report={{ requested: "auto", used: "cuda", backend: "native image kernel", accelerated: true }}
       />,
     );
-    const badge = getByTitle("device auto -> cuda (realesrgan fp16)");
+    const badge = getByTitle("device auto -> cuda (native image kernel)");
     expect(badge.textContent).toBe("cuda");
   });
 

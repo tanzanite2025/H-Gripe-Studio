@@ -2,7 +2,7 @@
 precision highp float;
 
 uniform sampler2D u_image0;
-uniform sampler2D u_curve0;  // RGB master curve (256x1 LUT)
+uniform sampler2D u_curve0;  // RGB master curve (256x1 curve map)
 uniform sampler2D u_curve1;  // Red channel curve
 uniform sampler2D u_curve2;  // Green channel curve
 uniform sampler2D u_curve3;  // Blue channel curve
@@ -17,7 +17,7 @@ layout(location = 0) out vec4 fragColor0;
 //   result = (1-f) * samples[floor] + f * samples[ceil]
 //
 // Uses texelFetch (NEAREST) to avoid GPU half-texel offset issues
-// that occur with texture() + GL_LINEAR on small 256x1 LUTs.
+// that occur with texture() + GL_LINEAR on small 256x1 curve maps.
 float applyCurve(sampler2D curve, float value) {
     value = clamp(value, 0.0, 1.0);
 

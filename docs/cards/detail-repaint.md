@@ -2,9 +2,9 @@
 
 Executor: **API** (orchestrates a provider `image.edit` between two local pixel
 steps). Pixel backend: `prepare_repaint_regions` / `composite_repaint` Tauri
-commands → `studio/detail_repaint_cpu.rs` (native Rust, CPU-only). The Python
-bridge (and its opt-in local diffusers inpaint engines) was deleted in Phase 7
-(#314); the provider `image.edit` path is the only repaint backend.
+commands → `studio/detail_repaint_cpu.rs` (native Rust, CPU-only). All local
+pixel preparation and compositing is native; provider `image.edit` is the only
+repaint backend.
 
 The Phase-2 follow-up to the detect-only **Detail Watchdog**: Watchdog reports
 *where* an image breaks down (a `QualityReport`); Detail Repaint takes those
@@ -86,15 +86,15 @@ Lanczos introduces on downsample); growing uses Lanczos.
 
 ## Colour space & bit depth
 
-The candidate decode is normalised to an 8-bit RGBA working space so crops and
-the paste-back carry honest colour; the source's original mode is recorded as
-`source_mode`:
+The candidate decoder returns an 8-bit RGBA working surface so crops and the
+paste-back carry honest colour. `source_mode` describes that decoded carrier;
+it is not a persistent editing mode for the source file's original encoding:
 
-| Source mode | Handling |
+| Decoded/source form | Handling |
 | --- | --- |
 | `RGB` / `RGBA` / `L` / `LA` | Used directly; alpha (when present) is preserved. |
 | `P` (palette) | Expanded to RGBA; transparency in `info` is treated as alpha. |
-| `CMYK` | Converted to sRGB via the embedded ICC profile when present, else a naive convert. |
+| CMYK/YCCK-encoded JPEG | Accepted through the shared image loader. Detail Repaint receives its normal RGBA surface; the source encoding does not add a document-conversion control to the editor. |
 | `I` / `I;16*` / `F` (high bit) | Data range normalised down to 8-bit before RGB conversion. |
 
 ## Boundary behaviour
@@ -139,7 +139,7 @@ the paste-back carry honest colour; the source's original mode is recorded as
   paste-back, the **Poisson seam blend** (offset diffusion, gradient
   preservation, alpha isolation, tiny-region feather fallback, unknown-mode
   rejection), **alpha isolation** (RGB-only blend, original alpha preserved),
-  **box-filter downsampling**, no-repaint passthrough, decode guard, CMYK source
-  mode, EXIF reporting, invalid JSON, missing image (run: `cargo test`).
+  **box-filter downsampling**, no-repaint passthrough, decode guard, unsupported
+  source rejection, EXIF reporting, invalid JSON, missing image (run: `cargo test`).
 - `src-tauri/src/studio/exec.rs` — `PrepareRepaintResult` / `RepaintReport`
   deserialization of the v1 hardening fields (plus legacy JSON defaults).

@@ -1,9 +1,8 @@
 // GPU-vs-CPU tolerance validation (feature `gpu`). The CPU path is the
 // reference implementation; the GPU backend replays the same GradeDoc via
-// generated WGSL compute passes and must match within f32 tolerance —
-// per-op transcendental differences and the baked-curve-LUT approximation
-// are expected, bit-identity is not (that constraint binds the CPU
-// parallel path only; see docs/design/grade-kernel.md).
+// generated WGSL compute passes and must match within f32 tolerance.
+// Per-op transcendental differences are expected; bit-identity is not (that
+// constraint binds the CPU parallel path only; see docs/design/grade-kernel.md).
 //
 // Every test skips (with a note) when no GPU adapter is available, so the
 // suite stays green on headless CI while still exercising the full backend
@@ -187,56 +186,60 @@ fn per_pixel_ops_match_cpu() {
 }
 
 #[test]
-fn curve_ops_match_cpu_within_lut_tolerance() {
+fn curve_ops_report_unsupported_for_cpu_fallback() {
     let Some(mut g) = grader() else { return };
-    let surface = gradient(64, 48, GradeSpace::Srgb);
-    // The GPU bakes every spline to a 1024-sample LUT, so allow the
-    // preview-grade approximation error on top of f32 noise.
-    let cases: Vec<(&str, GradeOp, f32)> = vec![
+    let surface = gradient(8, 8, GradeSpace::Srgb);
+    let cases = [
         (
-            "curves_master",
+            "curves",
             GradeOp::Curves {
                 channel: hgripe_grade::CurveChannel::Master,
                 points: vec![[0.0, 0.05], [0.4, 0.3], [0.7, 0.85], [1.0, 0.95]],
             },
-            2e-3,
-        ),
-        (
-            "curves_red",
-            GradeOp::Curves {
-                channel: hgripe_grade::CurveChannel::Red,
-                points: vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]],
-            },
-            2e-3,
         ),
         (
             "hue_vs_hue",
             GradeOp::HueVsHue {
                 points: vec![[0.0, 15.0], [120.0, -20.0], [240.0, 5.0]],
             },
-            5e-3,
         ),
         (
             "hue_vs_sat",
             GradeOp::HueVsSat {
                 points: vec![[0.0, 1.3], [180.0, 0.6]],
             },
-            5e-3,
         ),
         (
             "lum_vs_sat",
             GradeOp::LumVsSat {
                 points: vec![[0.0, 0.5], [0.5, 1.2], [1.0, 0.8]],
             },
-            2e-3,
         ),
         (
             "sat_vs_sat",
             GradeOp::SatVsSat {
                 points: vec![[0.0, 1.0], [0.5, 1.4], [1.0, 0.9]],
             },
-            2e-3,
         ),
+    ];
+    for (name, op) in cases {
+        let doc = GradeDoc {
+            layers: vec![layer(vec![op])],
+        };
+        let mut actual = surface.clone();
+        match g.grader.apply(&doc, &mut actual) {
+            Err(GpuError::UnsupportedOperation(actual_name)) => assert_eq!(actual_name, name),
+            Err(other) => panic!("{name}: expected unsupported operation, got {other}"),
+            Ok(()) => panic!("{name}: unsupported curve operation ran on the GPU"),
+        }
+    }
+}
+
+#[test]
+fn advanced_color_ops_match_cpu() {
+    let Some(mut g) = grader() else { return };
+    let surface = gradient(64, 48, GradeSpace::Srgb);
+    let cases: Vec<(&str, GradeOp, f32)> = vec![
         (
             "color_warper",
             GradeOp::ColorWarper {
@@ -313,59 +316,6 @@ fn curve_ops_match_cpu_within_lut_tolerance() {
         ),
     ];
     for (name, op, tol) in cases {
-        let doc = GradeDoc {
-            layers: vec![layer(vec![op])],
-        };
-        check(&mut g.grader, &doc, &surface, tol, name);
-    }
-}
-
-#[test]
-fn lut_ops_match_cpu() {
-    let Some(mut g) = grader() else { return };
-    let surface = gradient(48, 32, GradeSpace::Srgb);
-    // A warm-ish 1D LUT.
-    let size1 = 17u32;
-    let table1: Vec<f32> = (0..size1)
-        .flat_map(|i| {
-            let t = i as f32 / (size1 - 1) as f32;
-            [t.powf(0.9), t, t.powf(1.1)]
-        })
-        .collect();
-    // A gentle 3D LUT (identity plus a channel-coupled tint).
-    let size3 = 9u32;
-    let mut table3 = Vec::with_capacity((size3 as usize).pow(3) * 3);
-    for b in 0..size3 {
-        for gch in 0..size3 {
-            for r in 0..size3 {
-                let n = (size3 - 1) as f32;
-                let (rf, gf, bf) = (r as f32 / n, gch as f32 / n, b as f32 / n);
-                table3.extend([
-                    (rf * 0.95 + gf * 0.05).clamp(0.0, 1.0),
-                    gf,
-                    (bf * 0.9 + rf * 0.1).clamp(0.0, 1.0),
-                ]);
-            }
-        }
-    }
-    for (name, op, tol) in [
-        (
-            "lut1d",
-            GradeOp::Lut1d {
-                size: size1,
-                table: table1,
-            },
-            1e-4f32,
-        ),
-        (
-            "lut3d",
-            GradeOp::Lut3d {
-                size: size3,
-                table: table3,
-            },
-            1e-4,
-        ),
-    ] {
         let doc = GradeDoc {
             layers: vec![layer(vec![op])],
         };

@@ -14,8 +14,8 @@ use super::reject_unsafe_output_name;
 
 /// One issue region prepared for repaint: the padded crop + same-size inpaint
 /// mask the orchestrator sends to the provider, plus the geometry the composite
-/// step needs to paste the result back. Fields are `snake_case` to match the
-/// `detail_repaint_cli.py` manifest; extra fields are tolerated.
+/// step needs to paste the result back. Fields use the persisted `snake_case`
+/// manifest contract; extra fields are tolerated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct PreparedRepaintRegion {
     #[serde(default)]
@@ -163,129 +163,5 @@ pub(crate) fn composite_repaint(
             "composite_repaint could not decode {}: unsupported source for the native repaint path",
             params.image_path
         )
-    })
-}
-
-/// One repainted crop produced by the local inpaint backend: the region
-/// `index` and the path to the regenerated crop PNG, ready to feed straight
-/// into [`composite_repaint`]'s `repainted` list.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct LocalRepaintedCrop {
-    #[serde(default)]
-    pub(crate) index: u32,
-    #[serde(default)]
-    pub(crate) path: String,
-}
-
-/// Result of the **Detail Repaint** local `repaint` step: the regenerated crops
-/// plus the engine telemetry the UI uses to explain a fallback to the remote
-/// provider. An empty `repainted` list (with a `engine_fallback_reason`) means
-/// the orchestrator should run its remote `image.edit` loop instead.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct LocalRepaintResult {
-    #[serde(default)]
-    pub(crate) repainted: Vec<LocalRepaintedCrop>,
-    #[serde(default)]
-    pub(crate) skipped: Vec<serde_json::Value>,
-    /// Engine that actually ran (`provider` when no local backend was used).
-    #[serde(default)]
-    pub(crate) engine: String,
-    /// Engine the node asked for (differs from `engine` on fallback).
-    #[serde(default)]
-    pub(crate) engine_requested: String,
-    /// Why the local backend was not used (provider selected, missing deps/weight).
-    #[serde(default)]
-    pub(crate) engine_fallback_reason: Option<String>,
-    /// Weight name when a local backend ran, else null.
-    #[serde(default)]
-    pub(crate) backend_model: Option<String>,
-    /// Compute device the local backend bound (`cpu`/`cuda`); `null` on the
-    /// remote `provider` path, which runs no local session.
-    #[serde(default)]
-    pub(crate) device: Option<String>,
-    /// Compute precision the local backend bound (`fp16`/`fp32`); `null` on the
-    /// remote `provider` path, which runs no local session.
-    #[serde(default)]
-    pub(crate) precision: Option<String>,
-    /// Compute precision the node asked for (`auto`/`fp32`/`fp16`); an explicit
-    /// `fp16` degrades to `fp32` on a CPU run.
-    #[serde(default)]
-    pub(crate) precision_requested: String,
-    /// Structural conditioning the node asked for (`off`/`canny`); a backend
-    /// that cannot honour it degrades to the provider with a recorded reason.
-    #[serde(default)]
-    pub(crate) controlnet_requested: String,
-    #[serde(default)]
-    pub(crate) requested_count: u32,
-    #[serde(default)]
-    pub(crate) repainted_count: u32,
-}
-
-/// The **local** inpaint seam for the **Detail Repaint** node. The Python
-/// torch backends were removed with the Python bridge, so every engine now
-/// resolves to the remote `provider` path: this returns an empty `repainted`
-/// list (with a recorded fallback reason when a local engine was requested),
-/// so the orchestrator runs its remote `image.edit` loop instead.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn local_repaint_regions(
-    dir: Option<String>,
-    manifest: String,
-    engine: Option<String>,
-    prompt: Option<String>,
-    prompt_map: Option<String>,
-    negative_prompt: Option<String>,
-    strength: Option<f64>,
-    guidance_scale: Option<f64>,
-    steps: Option<i64>,
-    seed: Option<i64>,
-    precision: Option<String>,
-    controlnet: Option<String>,
-    output_dir: Option<String>,
-    output_name: Option<String>,
-) -> Result<LocalRepaintResult, String> {
-    let _ = (
-        dir,
-        prompt,
-        prompt_map,
-        negative_prompt,
-        strength,
-        guidance_scale,
-        steps,
-        seed,
-        output_dir,
-    );
-    reject_unsafe_output_name(output_name.as_deref().unwrap_or(""))?;
-
-    let engine_requested = engine
-        .as_deref()
-        .map(str::trim)
-        .filter(|e| !e.is_empty())
-        .unwrap_or("provider")
-        .to_string();
-    let requested_count = serde_json::from_str::<PrepareRepaintResult>(manifest.trim())
-        .map(|m| m.regions.len() as u32)
-        .unwrap_or(0);
-    let engine_fallback_reason = if engine_requested == "provider" {
-        None
-    } else {
-        Some(format!(
-            "local engine '{engine_requested}' is no longer available (the Python torch backends were removed); using the remote provider"
-        ))
-    };
-
-    Ok(LocalRepaintResult {
-        repainted: Vec::new(),
-        skipped: Vec::new(),
-        engine: "provider".to_string(),
-        engine_requested,
-        engine_fallback_reason,
-        backend_model: None,
-        device: None,
-        precision: None,
-        precision_requested: precision.as_deref().unwrap_or("auto").to_string(),
-        controlnet_requested: controlnet.as_deref().unwrap_or("off").to_string(),
-        requested_count,
-        repainted_count: 0,
     })
 }

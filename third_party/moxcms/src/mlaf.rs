@@ -27,14 +27,11 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use num_traits::MulAdd;
-use std::ops::{Add, Mul, Neg};
+use std::ops::{Add, Mul};
 
-#[cfg(any(
-    all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        target_feature = "fma"
-    ),
-    all(target_arch = "aarch64", target_feature = "neon")
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "fma"
 ))]
 #[inline(always)]
 pub(crate) fn mlaf<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T>>(
@@ -46,12 +43,9 @@ pub(crate) fn mlaf<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T,
 }
 
 #[inline(always)]
-#[cfg(not(any(
-    all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        target_feature = "fma"
-    ),
-    all(target_arch = "aarch64", target_feature = "neon")
+#[cfg(not(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "fma"
 )))]
 pub(crate) fn mlaf<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T>>(
     acc: T,
@@ -59,17 +53,6 @@ pub(crate) fn mlaf<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T,
     b: T,
 ) -> T {
     acc + a * b
-}
-
-#[inline(always)]
-pub(crate) fn neg_mlaf<
-    T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T, Output = T> + Neg<Output = T>,
->(
-    acc: T,
-    a: T,
-    b: T,
-) -> T {
-    mlaf(acc, a, -b)
 }
 
 #[inline(always)]
