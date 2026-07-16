@@ -222,7 +222,7 @@ must satisfy.
 version 1 and a bounds-checked classic-TIFF/DNG probe. It supports both byte
 orders, traverses bounded IFD/SubIFD graphs, validates metadata and payload
 references without reading sample values, and uses a generated 6x6 RGGB DNG
-fixture. Its offline suite has 31 valid/malformed-input and JSON contract tests.
+fixture. Its offline suite has 41 valid/malformed-input and JSON contract tests.
 The desktop crate does not depend on it, and no RAW extension or decoder
 dependency was added. `../../design/raw-probe-contract.md` is the detailed
 authority for this landed boundary.
@@ -269,8 +269,9 @@ still produce non-gating owned baselines for diagnosis.
 
 Actual R0-B2 completion still requires the licensed local real-camera corpus,
 independent canonical sensor/reference records, a `corpus_ready` preflight, and
-a clean release owned baseline. No real camera corpus or external candidate
-source is present in the repository yet.
+a clean release owned baseline. One local ignored CC0 DNG currently supplies an
+incremental metadata smoke only; no complete corpus, reference set, or external
+candidate source is present in the repository.
 
 Build disposable Windows x64 runners outside product runtime registration. They
 probe the owned Rust path and external candidates against a representative

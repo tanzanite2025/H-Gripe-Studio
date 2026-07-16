@@ -360,9 +360,10 @@ metadata, rights, and personal metadata.
 
 R0-B1 is implemented and tested with generated little- and big-endian DNG
 fixtures, malformed manifests, Windows path escapes, concurrent evidence
-writers, child timeout/output limits, and gate tampering cases. No real camera
-corpus is present, no proprietary container is parsed, and no sensor samples
-are unpacked.
+writers, child timeout/output limits, and gate tampering cases. One local ignored
+CC0 Leica M8 DNG now exercises incremental intake and the owned metadata probe;
+the complete real-camera corpus and independent references are not present. No
+proprietary container is parsed and no sensor samples are unpacked.
 
 R0-B2a is also implemented: manifest/evidence schema 3 carries the structured
 sensor reference above, validation rejects non-canonical dimensions, counts,

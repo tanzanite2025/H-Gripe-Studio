@@ -2,8 +2,11 @@
 mod dng_fixture;
 
 use dng_fixture::{
-    minimal_dng, ByteOrder, ACTIVE_AREA, BLACK_LEVEL, CFA_PATTERN_RGGB, DEFAULT_CROP_ORIGIN,
-    DEFAULT_CROP_SIZE, SENSOR_HEIGHT, SENSOR_SAMPLES, SENSOR_WIDTH, WHITE_LEVEL,
+    minimal_dng, minimal_dng_with_linearization_table,
+    minimal_dng_with_preview_linearization_table, minimal_dng_without_cfa_plane_color,
+    minimal_legacy_dng, minimal_legacy_linearized_dng, ByteOrder, ACTIVE_AREA, BLACK_LEVEL,
+    CFA_PATTERN_RGGB, DEFAULT_CROP_ORIGIN, DEFAULT_CROP_SIZE, SENSOR_HEIGHT, SENSOR_SAMPLES,
+    SENSOR_WIDTH, WHITE_LEVEL,
 };
 use hgripe_raw::{
     probe_dng, RawByteOrder, RawContainer, RawDataLayout, RawDimensions, RawGridSize,
@@ -15,6 +18,7 @@ use std::collections::BTreeSet;
 use std::panic::catch_unwind;
 
 const TAG_IMAGE_WIDTH: u16 = 256;
+const TAG_BITS_PER_SAMPLE: u16 = 258;
 const TAG_COMPRESSION: u16 = 259;
 const TAG_PHOTOMETRIC_INTERPRETATION: u16 = 262;
 const TAG_MAKE: u16 = 271;
@@ -25,13 +29,18 @@ const TAG_STRIP_BYTE_COUNTS: u16 = 279;
 const TAG_SUB_IFDS: u16 = 330;
 const TAG_CFA_PATTERN: u16 = 33422;
 const TAG_DNG_VERSION: u16 = 50706;
+const TAG_CFA_PLANE_COLOR: u16 = 50710;
+const TAG_LINEARIZATION_TABLE: u16 = 50712;
+const TAG_WHITE_LEVEL: u16 = 50717;
 const TAG_COLOR_MATRIX_1: u16 = 50721;
 const TAG_AS_SHOT_NEUTRAL: u16 = 50728;
 const TAG_CALIBRATION_ILLUMINANT_1: u16 = 50778;
 const TAG_RAW_DATA_UNIQUE_ID: u16 = 50781;
 const TAG_ACTIVE_AREA: u16 = 50829;
 
+const TYPE_BYTE: u16 = 1;
 const TYPE_LONG: u16 = 4;
+const TYPE_UNDEFINED: u16 = 7;
 const PHOTOMETRIC_CFA: u16 = 32803;
 
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +57,162 @@ struct LocatedEntry {
 fn probes_equivalent_little_and_big_endian_minimal_dngs() {
     assert_minimal_report(ByteOrder::Little, RawByteOrder::LittleEndian);
     assert_minimal_report(ByteOrder::Big, RawByteOrder::BigEndian);
+}
+
+#[test]
+fn uses_default_rgb_cfa_plane_colors_when_tag_is_absent() {
+    for byte_order in [ByteOrder::Little, ByteOrder::Big] {
+        let report = probe_dng(&minimal_dng_without_cfa_plane_color(byte_order)).unwrap();
+        assert_eq!(report.cfa.unwrap().plane_colors, vec![0, 1, 2]);
+    }
+}
+
+#[test]
+fn explicit_cfa_plane_colors_override_the_default() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let plane_colors = locate_entry(&bytes, byte_order, raw_ifd, TAG_CFA_PLANE_COLOR);
+    bytes[plane_colors.value_offset..plane_colors.value_offset + 3].copy_from_slice(&[3, 4, 5]);
+
+    let report = probe_dng(&bytes).unwrap();
+    assert_eq!(report.cfa.unwrap().plane_colors, vec![3, 4, 5]);
+}
+
+#[test]
+fn malformed_cfa_plane_colors_do_not_fall_back_to_the_default() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let plane_colors = locate_entry(&bytes, byte_order, raw_ifd, TAG_CFA_PLANE_COLOR);
+    write_u16(
+        &mut bytes,
+        byte_order,
+        plane_colors.entry_offset + 2,
+        TYPE_UNDEFINED,
+    );
+
+    assert_invalid_tag(&bytes, TAG_CFA_PLANE_COLOR, "field type 7 is not allowed");
+}
+
+#[test]
+fn default_cfa_plane_colors_still_reject_unknown_pattern_indices() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng_without_cfa_plane_color(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let pattern = locate_entry(&bytes, byte_order, raw_ifd, TAG_CFA_PATTERN);
+    bytes[pattern.value_offset] = 3;
+
+    assert_invalid_tag(&bytes, TAG_CFA_PATTERN, "out-of-range colour-plane index");
+}
+
+#[test]
+fn linearization_table_defines_a_wider_white_level_domain() {
+    for byte_order in [ByteOrder::Little, ByteOrder::Big] {
+        let baseline = probe_dng(&minimal_legacy_dng(byte_order)).unwrap();
+        let report = probe_dng(&minimal_legacy_linearized_dng(byte_order)).unwrap();
+        assert_eq!(report.dng.as_ref().unwrap().version, [1, 0, 0, 0]);
+        assert_eq!(report.dng.as_ref().unwrap().backward_version, None);
+        assert_eq!(report.cfa.as_ref().unwrap().plane_colors, vec![0, 1, 2]);
+        assert_eq!(report.bits_per_sample, vec![8]);
+        assert_eq!(report.white_level, vec![rational(16_383, 1)]);
+        assert!(report
+            .deferred_metadata
+            .iter()
+            .any(|value| value.tag == TAG_LINEARIZATION_TABLE && value.count == 256));
+        assert_eq!(
+            report.metrics.estimated_unpacked_bytes,
+            u64::from(SENSOR_WIDTH) * u64::from(SENSOR_HEIGHT)
+        );
+        assert_eq!(
+            report.metrics.metadata_bytes_materialized,
+            baseline.metrics.metadata_bytes_materialized
+        );
+    }
+}
+
+#[test]
+fn bounded_short_linearization_table_does_not_require_a_power_of_two_count() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng_with_linearization_table(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let table = locate_entry(&bytes, byte_order, raw_ifd, TAG_LINEARIZATION_TABLE);
+    let strips = locate_entry(&bytes, byte_order, raw_ifd, TAG_STRIP_OFFSETS);
+    let strip_counts = locate_entry(&bytes, byte_order, raw_ifd, TAG_STRIP_BYTE_COUNTS);
+    let payload_offset =
+        usize::try_from(read_u32(&bytes, byte_order, strips.value_offset)).unwrap();
+    let payload_length =
+        usize::try_from(read_u32(&bytes, byte_order, strip_counts.value_offset)).unwrap();
+    for value in &mut bytes[payload_offset..payload_offset + payload_length] {
+        *value = (*value).min(254);
+    }
+    write_u32(&mut bytes, byte_order, table.entry_offset + 4, 255);
+
+    let report = probe_dng(&bytes).unwrap();
+    assert!(report
+        .deferred_metadata
+        .iter()
+        .any(|value| value.tag == TAG_LINEARIZATION_TABLE && value.count == 255));
+}
+
+#[test]
+fn preview_linearization_table_does_not_widen_raw_white_level_domain() {
+    let byte_order = ByteOrder::Little;
+    let bytes = minimal_dng_with_preview_linearization_table(byte_order);
+    let ifd0 = first_ifd_offset(&bytes, byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    assert!(ifd_has_tag(
+        &bytes,
+        byte_order,
+        ifd0,
+        TAG_LINEARIZATION_TABLE
+    ));
+    assert!(!ifd_has_tag(
+        &bytes,
+        byte_order,
+        raw_ifd,
+        TAG_LINEARIZATION_TABLE
+    ));
+    assert_invalid_tag(&bytes, TAG_WHITE_LEVEL, "exceeds declared bit depth");
+}
+
+#[test]
+fn wide_white_level_without_linearization_table_is_rejected() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let bits = locate_entry(&bytes, byte_order, raw_ifd, TAG_BITS_PER_SAMPLE);
+    let white = locate_entry(&bytes, byte_order, raw_ifd, TAG_WHITE_LEVEL);
+    write_u16(&mut bytes, byte_order, bits.value_offset, 8);
+    write_u16(&mut bytes, byte_order, white.value_offset, 16_383);
+
+    assert_invalid_tag(&bytes, TAG_WHITE_LEVEL, "exceeds declared bit depth");
+}
+
+#[test]
+fn empty_linearization_table_is_rejected_before_level_validation() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng_with_linearization_table(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let table = locate_entry(&bytes, byte_order, raw_ifd, TAG_LINEARIZATION_TABLE);
+    write_u32(&mut bytes, byte_order, table.entry_offset + 4, 0);
+
+    assert_invalid_tag(&bytes, TAG_LINEARIZATION_TABLE, "value count is zero");
+}
+
+#[test]
+fn wrong_linearization_table_type_is_rejected_before_level_validation() {
+    let byte_order = ByteOrder::Little;
+    let mut bytes = minimal_dng_with_linearization_table(byte_order);
+    let raw_ifd = raw_ifd_offset(&bytes, byte_order);
+    let table = locate_entry(&bytes, byte_order, raw_ifd, TAG_LINEARIZATION_TABLE);
+    write_u16(&mut bytes, byte_order, table.entry_offset + 2, TYPE_BYTE);
+
+    assert_invalid_tag(
+        &bytes,
+        TAG_LINEARIZATION_TABLE,
+        "field type 1 is not allowed",
+    );
 }
 
 #[test]

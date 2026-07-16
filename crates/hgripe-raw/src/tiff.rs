@@ -751,6 +751,7 @@ fn build_report(parser: &mut TiffParser<'_>) -> Result<RawProbeReport, RawProbeE
             "supported bit depth is 1 through 32",
         ));
     }
+    let has_linearization_table = validate_linearization_table(parser, raw_ifd_index)?;
     let compression_code =
         required_u16(parser, raw_ifd_index, TAG_COMPRESSION, &[FieldType::Short])?;
     let compression = tiff_compression(compression_code);
@@ -801,6 +802,7 @@ fn build_report(parser: &mut TiffParser<'_>) -> Result<RawProbeReport, RawProbeE
         samples_per_pixel,
         black_level.as_ref(),
         &white_level,
+        has_linearization_table,
     )?;
 
     let as_shot_neutral = optional_rationals(
@@ -1453,7 +1455,8 @@ fn cfa_pattern(
         ));
     }
     let plane_colors =
-        required_unsigned(parser, ifd_index, TAG_CFA_PLANE_COLOR, &[FieldType::Byte])?;
+        optional_unsigned(parser, ifd_index, TAG_CFA_PLANE_COLOR, &[FieldType::Byte])?
+            .unwrap_or_else(|| vec![0, 1, 2]);
     if plane_colors.is_empty() || plane_colors.len() > 16 {
         return Err(invalid_tag(
             parser.ifds[ifd_index].offset,
@@ -1572,6 +1575,7 @@ fn validate_levels(
     samples_per_pixel: u16,
     black: Option<&RawLevelGrid>,
     white: &[RawRational],
+    has_linearization_table: bool,
 ) -> Result<(), RawProbeError> {
     for (index, value) in white.iter().copied().enumerate() {
         if !rational_cmp(value, RawRational { num: 0, den: 1 }).is_gt() {
@@ -1581,30 +1585,32 @@ fn validate_levels(
                 "white level is not positive",
             ));
         }
-        let bit_depth = if white.len() == 1 {
-            *bits.iter().min().expect("validated non-empty bit depths")
-        } else {
-            bits[if bits.len() == 1 {
-                0
+        if !has_linearization_table {
+            let stored_bit_depth = if white.len() == 1 {
+                *bits.iter().min().expect("validated non-empty bit depths")
             } else {
-                index.min(bits.len() - 1)
-            }]
-        };
-        let maximum = (1_u64 << u32::from(bit_depth)) - 1;
-        if rational_cmp(
-            value,
-            RawRational {
-                num: i64::try_from(maximum).unwrap_or(i64::MAX),
-                den: 1,
-            },
-        )
-        .is_gt()
-        {
-            return Err(invalid_tag(
-                ifd_offset,
-                TAG_WHITE_LEVEL,
-                "white level exceeds declared bit depth",
-            ));
+                bits[if bits.len() == 1 {
+                    0
+                } else {
+                    index.min(bits.len() - 1)
+                }]
+            };
+            let maximum = (1_u64 << u32::from(stored_bit_depth)) - 1;
+            if rational_cmp(
+                value,
+                RawRational {
+                    num: i64::try_from(maximum).unwrap_or(i64::MAX),
+                    den: 1,
+                },
+            )
+            .is_gt()
+            {
+                return Err(invalid_tag(
+                    ifd_offset,
+                    TAG_WHITE_LEVEL,
+                    "white level exceeds declared bit depth",
+                ));
+            }
         }
     }
     if let Some(black) = black {
@@ -1621,6 +1627,18 @@ fn validate_levels(
         }
     }
     Ok(())
+}
+
+fn validate_linearization_table(
+    parser: &TiffParser<'_>,
+    ifd_index: usize,
+) -> Result<bool, RawProbeError> {
+    let ifd = &parser.ifds[ifd_index];
+    let Some(entry) = ifd.entries.get(&TAG_LINEARIZATION_TABLE) else {
+        return Ok(false);
+    };
+    require_type(ifd, entry, &[FieldType::Short])?;
+    Ok(true)
 }
 
 fn color_matrices(

@@ -60,6 +60,16 @@ balance, camera matrices, calibration/profile identity, and strip/tile or JPEG
 preview references. Large linearization and black-level-delta tables are
 reported only as validated metadata references.
 
+For CFA images, an absent `CFAPlaneColor` uses the DNG-defined RGB default
+`[0, 1, 2]`. A present tag remains type/count checked, and CFA pattern indices
+must resolve within the resulting colour-plane list.
+
+An optional `LinearizationTable` remains deferred metadata. Its raw-IFD scope,
+non-zero bounded range, and `SHORT` type are validated before level validation
+can stop applying the stored-bit-depth ceiling. White level must remain positive
+and black levels must remain below it; it is not capped to the table's largest
+entry. The stored-code unpacked-size estimate is unchanged by linearization.
+
 For a DNG whose IFD0 is a reduced-resolution preview and whose raw image is a
 SubIFD, DNG identity, camera identity, orientation, as-shot white balance,
 camera/profile matrices, illuminants, and embedded unique ID come from shared

@@ -4,6 +4,13 @@ pub enum ByteOrder {
     Big,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LinearizationTablePlacement {
+    None,
+    Raw,
+    Preview,
+}
+
 pub const SENSOR_WIDTH: u32 = 6;
 pub const SENSOR_HEIGHT: u32 = 6;
 pub const ACTIVE_AREA: [u32; 4] = [1, 1, 5, 5];
@@ -54,6 +61,7 @@ const TAG_DNG_BACKWARD_VERSION: u16 = 50707;
 const TAG_UNIQUE_CAMERA_MODEL: u16 = 50708;
 const TAG_CFA_PLANE_COLOR: u16 = 50710;
 const TAG_CFA_LAYOUT: u16 = 50711;
+const TAG_LINEARIZATION_TABLE: u16 = 50712;
 const TAG_BLACK_LEVEL_REPEAT_DIM: u16 = 50713;
 const TAG_BLACK_LEVEL: u16 = 50714;
 const TAG_WHITE_LEVEL: u16 = 50717;
@@ -130,8 +138,68 @@ impl IfdEntry {
 /// TIFF encoder. The little- and big-endian variants carry identical metadata,
 /// thumbnail pixels, and 16-bit sensor samples.
 pub fn minimal_dng(byte_order: ByteOrder) -> Vec<u8> {
+    build_minimal_dng(byte_order, true, LinearizationTablePlacement::None, false)
+}
+
+#[allow(dead_code)]
+pub fn minimal_dng_without_cfa_plane_color(byte_order: ByteOrder) -> Vec<u8> {
+    build_minimal_dng(byte_order, false, LinearizationTablePlacement::None, false)
+}
+
+#[allow(dead_code)]
+pub fn minimal_dng_with_linearization_table(byte_order: ByteOrder) -> Vec<u8> {
+    build_minimal_dng(byte_order, true, LinearizationTablePlacement::Raw, false)
+}
+
+#[allow(dead_code)]
+pub fn minimal_dng_with_preview_linearization_table(byte_order: ByteOrder) -> Vec<u8> {
+    build_minimal_dng(
+        byte_order,
+        true,
+        LinearizationTablePlacement::Preview,
+        false,
+    )
+}
+
+#[allow(dead_code)]
+pub fn minimal_legacy_dng(byte_order: ByteOrder) -> Vec<u8> {
+    build_minimal_dng(byte_order, false, LinearizationTablePlacement::None, true)
+}
+
+#[allow(dead_code)]
+pub fn minimal_legacy_linearized_dng(byte_order: ByteOrder) -> Vec<u8> {
+    build_minimal_dng(byte_order, false, LinearizationTablePlacement::Raw, true)
+}
+
+fn build_minimal_dng(
+    byte_order: ByteOrder,
+    include_cfa_plane_color: bool,
+    linearization_table: LinearizationTablePlacement,
+    legacy_dng_1_0: bool,
+) -> Vec<u8> {
+    let linearized_samples = linearization_table != LinearizationTablePlacement::None;
+    let sensor_payload = sensor_payload(byte_order, linearized_samples);
     let mut ifd0 = thumbnail_ifd(byte_order);
-    let mut raw_ifd = raw_ifd(byte_order);
+    let mut raw_ifd = raw_ifd(
+        byte_order,
+        u32::try_from(sensor_payload.len()).expect("sensor payload length fits u32"),
+        linearized_samples,
+        linearization_table == LinearizationTablePlacement::Raw,
+    );
+    if linearization_table == LinearizationTablePlacement::Preview {
+        ifd0.push(linearization_table_entry(byte_order));
+    }
+    if legacy_dng_1_0 {
+        ifd0.retain(|entry| entry.tag != TAG_DNG_BACKWARD_VERSION);
+        let version = ifd0
+            .iter_mut()
+            .find(|entry| entry.tag == TAG_DNG_VERSION)
+            .expect("fixture DNG version exists");
+        version.data = vec![1, 0, 0, 0];
+    }
+    if !include_cfa_plane_color {
+        raw_ifd.retain(|entry| entry.tag != TAG_CFA_PLANE_COLOR);
+    }
     sort_and_validate(&mut ifd0);
     sort_and_validate(&mut raw_ifd);
 
@@ -155,8 +223,8 @@ pub fn minimal_dng(byte_order: ByteOrder) -> Vec<u8> {
 
     cursor = align_two(cursor);
     let sensor_offset = cursor;
-    let sensor_byte_len = u32::try_from(SENSOR_SAMPLES.len() * size_of::<u16>())
-        .expect("sensor payload length fits u32");
+    let sensor_byte_len =
+        u32::try_from(sensor_payload.len()).expect("sensor payload length fits u32");
     cursor = cursor
         .checked_add(sensor_byte_len)
         .expect("fixture sensor end does not overflow");
@@ -182,9 +250,7 @@ pub fn minimal_dng(byte_order: ByteOrder) -> Vec<u8> {
     pad_to(&mut bytes, thumbnail_offset);
     bytes.extend_from_slice(&THUMBNAIL_RGB);
     pad_to(&mut bytes, sensor_offset);
-    for sample in SENSOR_SAMPLES {
-        push_u16(&mut bytes, byte_order, sample);
-    }
+    bytes.extend_from_slice(&sensor_payload);
 
     assert_eq!(bytes.len(), usize::try_from(cursor).unwrap());
     bytes
@@ -221,15 +287,24 @@ fn thumbnail_ifd(byte_order: ByteOrder) -> Vec<IfdEntry> {
     ]
 }
 
-fn raw_ifd(byte_order: ByteOrder) -> Vec<IfdEntry> {
+fn raw_ifd(
+    byte_order: ByteOrder,
+    raw_byte_len: u32,
+    linearized_samples: bool,
+    include_linearization_table: bool,
+) -> Vec<IfdEntry> {
     let masked_areas = [0, 0, 1, SENSOR_WIDTH, 1, 0, 5, 1];
-    let raw_byte_len = u32::try_from(SENSOR_SAMPLES.len() * size_of::<u16>()).unwrap();
-
-    vec![
+    let bits_per_sample = if linearized_samples { 8 } else { 16 };
+    let white_level = if linearized_samples {
+        16_383
+    } else {
+        WHITE_LEVEL
+    };
+    let mut entries = vec![
         long_entry(byte_order, TAG_NEW_SUBFILE_TYPE, 0),
         long_entry(byte_order, TAG_IMAGE_WIDTH, SENSOR_WIDTH),
         long_entry(byte_order, TAG_IMAGE_LENGTH, SENSOR_HEIGHT),
-        short_entry(byte_order, TAG_BITS_PER_SAMPLE, 16),
+        short_entry(byte_order, TAG_BITS_PER_SAMPLE, bits_per_sample),
         short_entry(byte_order, TAG_COMPRESSION, COMPRESSION_NONE),
         short_entry(byte_order, TAG_PHOTOMETRIC_INTERPRETATION, PHOTOMETRIC_CFA),
         long_entry(byte_order, TAG_STRIP_OFFSETS, 0),
@@ -244,12 +319,37 @@ fn raw_ifd(byte_order: ByteOrder) -> Vec<IfdEntry> {
         short_entry(byte_order, TAG_CFA_LAYOUT, 1),
         short_vec_entry(byte_order, TAG_BLACK_LEVEL_REPEAT_DIM, &[1, 1]),
         short_entry(byte_order, TAG_BLACK_LEVEL, BLACK_LEVEL),
-        short_entry(byte_order, TAG_WHITE_LEVEL, WHITE_LEVEL),
+        short_entry(byte_order, TAG_WHITE_LEVEL, white_level),
         long_vec_entry(byte_order, TAG_DEFAULT_CROP_ORIGIN, &DEFAULT_CROP_ORIGIN),
         long_vec_entry(byte_order, TAG_DEFAULT_CROP_SIZE, &DEFAULT_CROP_SIZE),
         long_vec_entry(byte_order, TAG_ACTIVE_AREA, &ACTIVE_AREA),
         long_vec_entry(byte_order, TAG_MASKED_AREAS, &masked_areas),
-    ]
+    ];
+    if include_linearization_table {
+        entries.push(linearization_table_entry(byte_order));
+    }
+    entries
+}
+
+fn linearization_table_entry(byte_order: ByteOrder) -> IfdEntry {
+    let table = (0_u16..=u16::from(u8::MAX))
+        .map(|value| value * 64)
+        .collect::<Vec<_>>();
+    short_vec_entry(byte_order, TAG_LINEARIZATION_TABLE, &table)
+}
+
+fn sensor_payload(byte_order: ByteOrder, linearized: bool) -> Vec<u8> {
+    if linearized {
+        return SENSOR_SAMPLES
+            .into_iter()
+            .map(|sample| u8::try_from(sample / 16).expect("fixture sample fits u8"))
+            .collect();
+    }
+    let mut bytes = Vec::with_capacity(SENSOR_SAMPLES.len() * size_of::<u16>());
+    for sample in SENSOR_SAMPLES {
+        push_u16(&mut bytes, byte_order, sample);
+    }
+    bytes
 }
 
 fn byte_vec_entry(tag: u16, values: &[u8]) -> IfdEntry {

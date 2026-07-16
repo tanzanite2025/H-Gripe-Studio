@@ -40,8 +40,14 @@ standalone, unintegrated crate:
 - its owned classic-TIFF/DNG parser supports both byte orders, bounded
   IFD/SubIFD traversal, checked ranges, exact rational metadata, CFA/level/crop
   validation, and raw/preview references without decoding payloads;
-- a generated 6x6 RGGB DNG fixture and 31 valid/malformed-input tests pass
+- a generated 6x6 RGGB DNG fixture and 41 valid/malformed-input tests pass
   offline; CI runs the crate explicitly;
+- a local ignored CC0 Leica M8 DNG smoke exposed two legacy-DNG compatibility
+  gaps: absent `CFAPlaneColor` now uses the standard RGB default, and a valid
+  deferred `LinearizationTable` now places WhiteLevel outside the stored-bit
+  ceiling without changing stored-code size estimates. The release metadata
+  probe succeeds; the sample and evidence remain untracked and this is not a
+  sensor-decode claim;
 - the desktop crate has no dependency on `hgripe-raw`, so this is not product
   RAW import support.
 
@@ -64,7 +70,8 @@ R0-B1 evidence infrastructure has also landed without product integration:
   retained output-file handle; direct protocol self-certification cannot
   satisfy the gate, while actual independence still requires manual audit;
 - generated DNG, blind-protocol, Windows containment, integrity, and CLI tests
-  pass, but no real camera corpus or external candidate decoder is present.
+  pass, but the required local corpus/reference set remains incomplete and no
+  external candidate decoder is present.
 - R0-B2b adds read-only `verify-corpus` readiness reports and an explicit-input
   `fingerprint` draft command. It binds source/reference files through final
   Windows handles and hashes without decoding or guessing rights/privacy/family.
